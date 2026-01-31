@@ -103,3 +103,20 @@ class GraphitiClient:
             True if client is initialized and ready.
         """
         return cls._initialized
+
+    @classmethod
+    async def health_check(cls) -> bool:
+        """Check if the Graphiti/Neo4j connection is healthy.
+
+        Returns:
+            True if connection is healthy, False otherwise.
+        """
+        if not cls._initialized or cls._instance is None:
+            return False
+
+        try:
+            await cls._instance.driver.verify_connectivity()
+            return True
+        except Exception as e:
+            logger.warning(f"Graphiti health check failed: {e}")
+            return False

@@ -92,3 +92,28 @@ async def test_initialization_failure_raises_connection_error() -> None:
 
     assert "Failed to connect to Neo4j" in str(exc_info.value.message)
     assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_health_check_returns_true_when_connected() -> None:
+    """Test that health_check returns True when client is connected."""
+    mock_graphiti_instance = MagicMock()
+    # Mock the driver's verify_connectivity method
+    mock_driver = MagicMock()
+    mock_driver.verify_connectivity = AsyncMock()
+    mock_graphiti_instance.driver = mock_driver
+
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    result = await GraphitiClient.health_check()
+
+    assert result is True
+    mock_driver.verify_connectivity.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_health_check_returns_false_when_not_initialized() -> None:
+    """Test that health_check returns False when client is not initialized."""
+    result = await GraphitiClient.health_check()
+    assert result is False
