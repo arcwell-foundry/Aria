@@ -159,3 +159,19 @@ class ExternalServiceError(ARIAException):
             status_code=502,
             details={"service": service},
         )
+
+
+class GraphitiConnectionError(ARIAException):
+    """Neo4j/Graphiti connection error (503)."""
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize Graphiti connection error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Failed to connect to Neo4j: {message}",
+            code="GRAPHITI_CONNECTION_ERROR",
+            status_code=503,
+        )
