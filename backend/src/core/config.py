@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Anthropic Claude API
     ANTHROPIC_API_KEY: SecretStr = SecretStr("")
 
+    # OpenAI (for embeddings - required by Graphiti)
+    OPENAI_API_KEY: SecretStr = SecretStr("")
+
     # Neo4j (Graphiti) Configuration
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
