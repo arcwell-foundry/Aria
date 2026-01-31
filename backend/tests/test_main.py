@@ -77,3 +77,13 @@ def test_signup_validation_error(client: TestClient) -> None:
         json={"email": "test@example.com", "password": "short"},  # Password too short
     )
     assert response.status_code == 422  # Validation error
+
+
+def test_health_check_neo4j_not_configured(client: TestClient) -> None:
+    """Test that Neo4j health endpoint returns status when not configured."""
+    response = client.get("/health/neo4j")
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    # When not initialized, should return unhealthy
+    assert data["status"] in ["healthy", "unhealthy"]

@@ -80,6 +80,19 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+@app.get("/health/neo4j", tags=["system"])
+async def health_check_neo4j() -> dict[str, str]:
+    """Health check endpoint for Neo4j/Graphiti connection.
+
+    Returns:
+        Health status of the Neo4j connection.
+    """
+    from src.db.graphiti import GraphitiClient
+
+    is_healthy = await GraphitiClient.health_check()
+    return {"status": "healthy" if is_healthy else "unhealthy"}
+
+
 @app.get("/", tags=["system"])
 async def root() -> dict[str, str]:
     """Root endpoint with API information.
