@@ -1,13 +1,15 @@
 """Tests for Graphiti client."""
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from src.db.graphiti import GraphitiClient
+import src.db.graphiti as graphiti_module
 
 
 @pytest.fixture(autouse=True)
 def reset_client() -> None:
-    """Reset the singleton before each test."""
+    """Reset the singleton and module state before each test."""
     GraphitiClient._instance = None
     GraphitiClient._initialized = False
 
@@ -17,3 +19,60 @@ def test_graphiti_client_is_singleton() -> None:
     assert GraphitiClient._instance is None
     assert hasattr(GraphitiClient, "get_instance")
     assert hasattr(GraphitiClient, "reset_client")
+
+
+@pytest.mark.asyncio
+async def test_get_instance_initializes_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that get_instance creates and initializes the client."""
+    mock_graphiti_instance = MagicMock()
+    mock_graphiti_instance.build_indices_and_constraints = AsyncMock()
+
+    mock_graphiti_class = MagicMock(return_value=mock_graphiti_instance)
+    mock_anthropic_client = MagicMock()
+    mock_llm_config = MagicMock()
+    mock_embedder = MagicMock()
+    mock_embedder_config = MagicMock()
+
+    # Patch the imports inside _initialize
+    monkeypatch.setattr("src.db.graphiti.GraphitiClient._initialize", AsyncMock())
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    client = await GraphitiClient.get_instance()
+
+    assert client is mock_graphiti_instance
+    assert GraphitiClient.is_initialized()
+
+
+@pytest.mark.asyncio
+async def test_get_instance_returns_same_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that get_instance returns the same instance on subsequent calls."""
+    mock_graphiti_instance = MagicMock()
+    mock_init = AsyncMock()
+
+    monkeypatch.setattr("src.db.graphiti.GraphitiClient._initialize", mock_init)
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    client1 = await GraphitiClient.get_instance()
+    client2 = await GraphitiClient.get_instance()
+
+    assert client1 is client2
+    # _initialize should not be called since instance exists
+    mock_init.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_close_cleans_up_client() -> None:
+    """Test that close properly cleans up the client."""
+    mock_graphiti_instance = MagicMock()
+    mock_graphiti_instance.close = AsyncMock()
+
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    await GraphitiClient.close()
+
+    assert not GraphitiClient.is_initialized()
+    assert GraphitiClient._instance is None
+    mock_graphiti_instance.close.assert_called_once()
