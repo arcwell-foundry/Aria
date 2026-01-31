@@ -1,0 +1,191 @@
+"""ARIA API - Main FastAPI Application."""
+
+import logging
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError as PydanticValidationError
+
+from src.api.routes import auth
+from src.core.exceptions import ARIAException
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def get_cors_origins() -> list[str]:
+    """Get CORS origins from environment or use defaults.
+
+    Returns:
+        List of allowed CORS origins.
+    """
+    try:
+        from src.core.config import settings
+
+        return settings.cors_origins_list
+    except Exception:
+        # Fallback to defaults if config not available
+        return [
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ]
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> Any:
+    """Application lifespan handler for startup and shutdown events."""
+    # Startup
+    logger.info("Starting ARIA API...")
+    yield
+    # Shutdown
+    logger.info("Shutting down ARIA API...")
+
+
+app = FastAPI(
+    title="ARIA API",
+    description="Autonomous Reasoning & Intelligence Agent - AI-powered Department Director",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Include API routers
+app.include_router(auth.router, prefix="/api/v1")
+
+
+@app.get("/health", tags=["system"])
+async def health_check() -> dict[str, str]:
+    """Health check endpoint.
+
+    Returns:
+        Health status of the API.
+    """
+    return {"status": "healthy"}
+
+
+@app.get("/", tags=["system"])
+async def root() -> dict[str, str]:
+    """Root endpoint with API information.
+
+    Returns:
+        Basic API information.
+    """
+    return {
+        "name": "ARIA API",
+        "version": "1.0.0",
+        "description": "Autonomous Reasoning & Intelligence Agent",
+    }
+
+
+# Custom ARIA exception handler
+@app.exception_handler(ARIAException)
+async def aria_exception_handler(request: Request, exc: ARIAException) -> JSONResponse:
+    """Handle ARIA-specific exceptions.
+
+    Args:
+        request: The incoming request.
+        exc: The ARIA exception.
+
+    Returns:
+        JSON error response with consistent format.
+    """
+    request_id = str(uuid.uuid4())
+    logger.warning(
+        "ARIA exception occurred",
+        extra={
+            "code": exc.code,
+            "status_code": exc.status_code,
+            "request_id": request_id,
+            "path": request.url.path,
+        },
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.message,
+            "code": exc.code,
+            "request_id": request_id,
+        },
+    )
+
+
+# Pydantic validation error handler
+@app.exception_handler(PydanticValidationError)
+async def pydantic_validation_handler(
+    request: Request, exc: PydanticValidationError
+) -> JSONResponse:
+    """Handle Pydantic validation errors.
+
+    Args:
+        request: The incoming request.
+        exc: The validation exception.
+
+    Returns:
+        JSON error response with validation details.
+    """
+    request_id = str(uuid.uuid4())
+    logger.warning(
+        "Validation error",
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+            "errors": exc.error_count(),
+        },
+    )
+    return JSONResponse(
+        status_code=400,
+        content={
+            "detail": "Validation error",
+            "code": "VALIDATION_ERROR",
+            "request_id": request_id,
+            "errors": exc.errors(),
+        },
+    )
+
+
+# Global exception handler for unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle unhandled exceptions globally.
+
+    Args:
+        request: The incoming request.
+        exc: The unhandled exception.
+
+    Returns:
+        JSON error response.
+    """
+    request_id = str(uuid.uuid4())
+    logger.exception(
+        "Unhandled exception occurred",
+        exc_info=exc,
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An internal server error occurred",
+            "code": "INTERNAL_ERROR",
+            "request_id": request_id,
+        },
+    )
