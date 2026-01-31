@@ -76,3 +76,19 @@ async def test_close_cleans_up_client() -> None:
     assert not GraphitiClient.is_initialized()
     assert GraphitiClient._instance is None
     mock_graphiti_instance.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_initialization_failure_raises_connection_error() -> None:
+    """Test that initialization failure raises GraphitiConnectionError."""
+    from src.core.exceptions import GraphitiConnectionError
+
+    # Make get_instance actually call _initialize by ensuring _instance is None
+    GraphitiClient._instance = None
+    GraphitiClient._initialized = False
+
+    with pytest.raises(GraphitiConnectionError) as exc_info:
+        await GraphitiClient.get_instance()
+
+    assert "Failed to connect to Neo4j" in str(exc_info.value.message)
+    assert exc_info.value.status_code == 503
