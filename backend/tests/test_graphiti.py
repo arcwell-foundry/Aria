@@ -117,3 +117,45 @@ async def test_health_check_returns_false_when_not_initialized() -> None:
     """Test that health_check returns False when client is not initialized."""
     result = await GraphitiClient.health_check()
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_add_episode_delegates_to_graphiti() -> None:
+    """Test that add_episode correctly delegates to the Graphiti instance."""
+    from datetime import datetime, timezone
+
+    mock_graphiti_instance = MagicMock()
+    mock_graphiti_instance.add_episode = AsyncMock(return_value=MagicMock(uuid="test-uuid"))
+    mock_graphiti_instance.driver = MagicMock()
+
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    result = await GraphitiClient.add_episode(
+        name="Test Episode",
+        episode_body="This is test content",
+        source_description="unit test",
+        reference_time=datetime.now(timezone.utc),
+    )
+
+    mock_graphiti_instance.add_episode.assert_called_once()
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_search_delegates_to_graphiti() -> None:
+    """Test that search correctly delegates to the Graphiti instance."""
+    mock_edge = MagicMock()
+    mock_edge.fact = "Test fact"
+
+    mock_graphiti_instance = MagicMock()
+    mock_graphiti_instance.search = AsyncMock(return_value=[mock_edge])
+    mock_graphiti_instance.driver = MagicMock()
+
+    GraphitiClient._instance = mock_graphiti_instance
+    GraphitiClient._initialized = True
+
+    results = await GraphitiClient.search("test query")
+
+    mock_graphiti_instance.search.assert_called_once_with("test query")
+    assert len(results) == 1

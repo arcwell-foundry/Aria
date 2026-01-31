@@ -1,6 +1,7 @@
 """Graphiti client module for temporal knowledge graph operations."""
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from src.core.config import settings
@@ -120,3 +121,54 @@ class GraphitiClient:
         except Exception as e:
             logger.warning(f"Graphiti health check failed: {e}")
             return False
+
+    @classmethod
+    async def add_episode(
+        cls,
+        name: str,
+        episode_body: str,
+        source_description: str,
+        reference_time: datetime,
+    ) -> object:
+        """Add an episode to the knowledge graph.
+
+        Args:
+            name: Unique name for the episode.
+            episode_body: Content of the episode.
+            source_description: Description of the data source.
+            reference_time: When this episode occurred.
+
+        Returns:
+            The created episode object.
+
+        Raises:
+            GraphitiConnectionError: If client is not initialized.
+        """
+        from graphiti_core.nodes import EpisodeType
+
+        client = await cls.get_instance()
+        result = await client.add_episode(
+            name=name,
+            episode_body=episode_body,
+            source=EpisodeType.text,
+            source_description=source_description,
+            reference_time=reference_time,
+        )
+        return result
+
+    @classmethod
+    async def search(cls, query: str) -> list[object]:
+        """Search the knowledge graph.
+
+        Args:
+            query: Search query string.
+
+        Returns:
+            List of matching edges/facts.
+
+        Raises:
+            GraphitiConnectionError: If client is not initialized.
+        """
+        client = await cls.get_instance()
+        results = await client.search(query)
+        return list(results)
