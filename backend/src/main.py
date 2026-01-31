@@ -42,11 +42,16 @@ def get_cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Any:
     """Application lifespan handler for startup and shutdown events."""
+    from src.db.graphiti import GraphitiClient
+
     # Startup
     logger.info("Starting ARIA API...")
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
+    if GraphitiClient.is_initialized():
+        await GraphitiClient.close()
+        logger.info("Graphiti connection closed")
 
 
 app = FastAPI(

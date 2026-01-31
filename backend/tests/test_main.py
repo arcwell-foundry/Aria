@@ -87,3 +87,20 @@ def test_health_check_neo4j_not_configured(client: TestClient) -> None:
     assert "status" in data
     # When not initialized, should return unhealthy
     assert data["status"] in ["healthy", "unhealthy"]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_closes_graphiti_on_shutdown() -> None:
+    """Test that lifespan handler closes Graphiti on shutdown."""
+    from unittest.mock import AsyncMock, patch
+
+    with patch("src.db.graphiti.GraphitiClient") as mock_client_class:
+        mock_client_class.close = AsyncMock()
+        mock_client_class.is_initialized.return_value = True
+
+        from src.main import lifespan, app
+
+        async with lifespan(app):
+            pass  # Simulate app running
+
+        mock_client_class.close.assert_called_once()
