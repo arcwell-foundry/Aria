@@ -10,6 +10,7 @@ This module implements ARIA's cognitive memory architecture:
 """
 
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 from src.memory.working import (
     WorkingMemory,
@@ -29,4 +30,7 @@ __all__ = [
     "FactSource",
     "SemanticFact",
     "SemanticMemory",
+    # Procedural Memory
+    "ProceduralMemory",
+    "Workflow",
 ]
