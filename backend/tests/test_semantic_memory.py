@@ -449,3 +449,54 @@ async def test_get_facts_about_filters_by_validity() -> None:
             as_of=now,
         )
         assert isinstance(results, list)
+
+
+@pytest.mark.asyncio
+async def test_search_facts_uses_semantic_search() -> None:
+    """Test search_facts uses Graphiti's semantic search."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Subject: John\nPredicate: works_at\nObject: Acme Corp\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_edge.created_at = now
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.search_facts(
+            user_id="user-456",
+            query="who works at Acme",
+            min_confidence=0.5,
+            limit=10,
+        )
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_search_facts_filters_by_confidence() -> None:
+    """Test search_facts filters by minimum confidence."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    # Low confidence fact
+    mock_edge = MagicMock()
+    mock_edge.fact = "Subject: John\nPredicate: works_at\nObject: Maybe Corp\nConfidence: 0.3\nSource: inferred\nValid From: " + now.isoformat()
+    mock_edge.created_at = now
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.search_facts(
+            user_id="user-456",
+            query="who works where",
+            min_confidence=0.5,  # Higher than the fact's confidence
+            limit=10,
+        )
+        # Should filter out the low-confidence fact
+        assert len(results) == 0
