@@ -630,7 +630,47 @@ class SemanticMemory:
             FactNotFoundError: If fact doesn't exist.
             SemanticMemoryError: If invalidation fails.
         """
-        raise NotImplementedError("Will be implemented in later task")
+        try:
+            client = await self._get_graphiti_client()
+
+            now = datetime.now(UTC)
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $fact_name
+            SET e.invalidated_at = $invalidated_at,
+                e.invalidation_reason = $reason
+            RETURN count(e) as updated
+            """
+
+            fact_name = f"fact:{fact_id}"
+
+            result = await client.driver.execute_query(
+                query,
+                {
+                    "fact_name": fact_name,
+                    "invalidated_at": now.isoformat(),
+                    "reason": reason,
+                },
+            )
+
+            records = result[0] if result else []
+            updated_count = records[0]["updated"] if records else 0
+
+            if updated_count == 0:
+                raise FactNotFoundError(fact_id)
+
+            logger.info(
+                "Invalidated fact",
+                extra={"fact_id": fact_id, "user_id": user_id, "reason": reason},
+            )
+
+        except FactNotFoundError:
+            raise
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to invalidate fact", extra={"fact_id": fact_id})
+            raise SemanticMemoryError(f"Failed to invalidate fact: {e}") from e
 
     async def delete_fact(self, user_id: str, fact_id: str) -> None:
         """Permanently delete a fact.

@@ -500,3 +500,49 @@ async def test_search_facts_filters_by_confidence() -> None:
         )
         # Should filter out the low-confidence fact
         assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_invalidate_fact_soft_deletes() -> None:
+    """Test invalidate_fact marks fact as invalidated."""
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"updated": 1}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        await memory.invalidate_fact(
+            user_id="user-456",
+            fact_id="fact-123",
+            reason="outdated information",
+        )
+        mock_driver.execute_query.assert_called_once()
+        # Verify the query includes invalidation fields
+        call_args = mock_driver.execute_query.call_args
+        assert "invalidated_at" in call_args[0][0]
+        assert "reason" in call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_invalidate_fact_raises_not_found() -> None:
+    """Test invalidate_fact raises FactNotFoundError when not found."""
+    from src.core.exceptions import FactNotFoundError
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        with pytest.raises(FactNotFoundError):
+            await memory.invalidate_fact(
+                user_id="user-456",
+                fact_id="nonexistent",
+                reason="test",
+            )
