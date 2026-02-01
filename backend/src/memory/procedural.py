@@ -201,7 +201,32 @@ class ProceduralMemory:
             WorkflowNotFoundError: If workflow doesn't exist.
             ProceduralMemoryError: If retrieval fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError, WorkflowNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("procedural_memories")
+                .select("*")
+                .eq("id", workflow_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+
+            if response.data is None:
+                raise WorkflowNotFoundError(workflow_id)
+
+            return Workflow.from_dict(response.data)
+
+        except WorkflowNotFoundError:
+            raise
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get workflow", extra={"workflow_id": workflow_id})
+            raise ProceduralMemoryError(f"Failed to get workflow: {e}") from e
 
     async def update_workflow(self, workflow: Workflow) -> None:
         """Update an existing workflow.

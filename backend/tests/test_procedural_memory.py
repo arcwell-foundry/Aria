@@ -283,3 +283,84 @@ async def test_create_workflow_generates_id_if_missing() -> None:
         call_args = mock_table.insert.call_args
         assert "id" in call_args[0][0]
         assert call_args[0][0]["id"] != ""
+
+
+@pytest.mark.asyncio
+async def test_get_workflow_retrieves_by_id() -> None:
+    """Test get_workflow retrieves specific workflow by ID."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq1 = MagicMock()
+    mock_select.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_single = MagicMock()
+    mock_eq2.single.return_value = mock_single
+    mock_execute = MagicMock()
+    mock_single.execute.return_value = mock_execute
+    mock_execute.data = {
+        "id": "wf-123",
+        "user_id": "user-456",
+        "workflow_name": "follow_up",
+        "description": "Test workflow",
+        "trigger_conditions": {"event": "meeting"},
+        "steps": [{"action": "email"}],
+        "success_count": 10,
+        "failure_count": 2,
+        "is_shared": False,
+        "version": 1,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        workflow = await memory.get_workflow(user_id="user-456", workflow_id="wf-123")
+
+        assert workflow is not None
+        assert workflow.id == "wf-123"
+        assert workflow.workflow_name == "follow_up"
+        mock_table.select.assert_called_with("*")
+
+
+@pytest.mark.asyncio
+async def test_get_workflow_raises_not_found() -> None:
+    """Test get_workflow raises WorkflowNotFoundError when not found."""
+    from unittest.mock import MagicMock, patch
+
+    from src.core.exceptions import WorkflowNotFoundError
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq1 = MagicMock()
+    mock_select.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_single = MagicMock()
+    mock_eq2.single.return_value = mock_single
+    mock_execute = MagicMock()
+    mock_single.execute.return_value = mock_execute
+    mock_execute.data = None
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(WorkflowNotFoundError):
+            await memory.get_workflow(user_id="user-456", workflow_id="nonexistent")
