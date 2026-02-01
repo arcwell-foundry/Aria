@@ -153,3 +153,142 @@ class SemanticFact:
             and self.predicate.lower() == other.predicate.lower()
             and self.object.lower() != other.object.lower()
         )
+
+
+class SemanticMemory:
+    """Service for storing and querying semantic facts in Graphiti.
+
+    Provides async methods for CRUD operations, contradiction detection,
+    and various query patterns on factual knowledge stored in the
+    temporal knowledge graph.
+    """
+
+    async def _get_graphiti_client(self) -> "Graphiti":
+        """Get the Graphiti client instance.
+
+        Returns:
+            Initialized Graphiti client.
+
+        Raises:
+            SemanticMemoryError: If client initialization fails.
+        """
+        from src.db.graphiti import GraphitiClient
+
+        try:
+            return await GraphitiClient.get_instance()
+        except Exception as e:
+            raise SemanticMemoryError(f"Failed to get Graphiti client: {e}") from e
+
+    async def add_fact(self, fact: SemanticFact) -> str:
+        """Add a new fact to semantic memory.
+
+        Checks for contradicting facts and invalidates them before
+        storing the new fact.
+
+        Args:
+            fact: The fact to add.
+
+        Returns:
+            The ID of the stored fact.
+
+        Raises:
+            SemanticMemoryError: If storage fails.
+        """
+        raise NotImplementedError("Will be implemented in next task")
+
+    async def get_fact(self, user_id: str, fact_id: str) -> SemanticFact:
+        """Retrieve a specific fact by ID.
+
+        Args:
+            user_id: The user who owns the fact.
+            fact_id: The fact ID.
+
+        Returns:
+            The requested SemanticFact.
+
+        Raises:
+            FactNotFoundError: If fact doesn't exist.
+            SemanticMemoryError: If retrieval fails.
+        """
+        raise NotImplementedError("Will be implemented in later task")
+
+    async def get_facts_about(
+        self,
+        user_id: str,
+        subject: str,
+        as_of: datetime | None = None,
+        include_invalidated: bool = False,
+    ) -> list[SemanticFact]:
+        """Get all facts about a specific subject.
+
+        Args:
+            user_id: The user whose facts to query.
+            subject: The entity to get facts about.
+            as_of: Point in time to check validity. Defaults to now.
+            include_invalidated: Whether to include invalidated facts.
+
+        Returns:
+            List of facts about the subject.
+
+        Raises:
+            SemanticMemoryError: If query fails.
+        """
+        raise NotImplementedError("Will be implemented in later task")
+
+    async def search_facts(
+        self,
+        user_id: str,
+        query: str,
+        min_confidence: float = 0.5,
+        limit: int = 20,
+    ) -> list[SemanticFact]:
+        """Search facts using semantic similarity.
+
+        Args:
+            user_id: The user whose facts to search.
+            query: Natural language search query.
+            min_confidence: Minimum confidence threshold.
+            limit: Maximum number of facts to return.
+
+        Returns:
+            List of relevant facts, ordered by relevance.
+
+        Raises:
+            SemanticMemoryError: If search fails.
+        """
+        raise NotImplementedError("Will be implemented in later task")
+
+    async def invalidate_fact(
+        self,
+        user_id: str,
+        fact_id: str,
+        reason: str,
+    ) -> None:
+        """Invalidate a fact (soft delete).
+
+        Preserves history by marking the fact as invalidated rather
+        than deleting it.
+
+        Args:
+            user_id: The user who owns the fact.
+            fact_id: The fact ID to invalidate.
+            reason: Reason for invalidation.
+
+        Raises:
+            FactNotFoundError: If fact doesn't exist.
+            SemanticMemoryError: If invalidation fails.
+        """
+        raise NotImplementedError("Will be implemented in later task")
+
+    async def delete_fact(self, user_id: str, fact_id: str) -> None:
+        """Permanently delete a fact.
+
+        Args:
+            user_id: The user who owns the fact.
+            fact_id: The fact ID to delete.
+
+        Raises:
+            FactNotFoundError: If fact doesn't exist.
+            SemanticMemoryError: If deletion fails.
+        """
+        raise NotImplementedError("Will be implemented in later task")

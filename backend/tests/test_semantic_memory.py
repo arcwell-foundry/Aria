@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.memory.semantic import FactSource, SemanticFact
+from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 
 
 def test_fact_source_enum_values() -> None:
@@ -287,3 +287,16 @@ def test_semantic_fact_contradicts_returns_false_for_same_object() -> None:
     )
 
     assert fact1.contradicts(fact2) is False
+
+
+def test_semantic_memory_has_required_methods() -> None:
+    """Test SemanticMemory class has required interface methods."""
+    memory = SemanticMemory()
+
+    # Check required async methods exist
+    assert hasattr(memory, "add_fact")
+    assert hasattr(memory, "get_fact")
+    assert hasattr(memory, "get_facts_about")
+    assert hasattr(memory, "search_facts")
+    assert hasattr(memory, "invalidate_fact")
+    assert hasattr(memory, "delete_fact")
