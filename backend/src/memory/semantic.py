@@ -12,6 +12,7 @@ Facts are stored in Graphiti (Neo4j) for semantic search and
 temporal querying capabilities.
 """
 
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -202,7 +203,7 @@ class SemanticMemory:
 
         return "\n".join(parts)
 
-    def _parse_edge_to_fact(self, edge: Any, user_id: str) -> SemanticFact | None:  # noqa: ARG002
+    def _parse_edge_to_fact(self, edge: Any, user_id: str) -> SemanticFact | None:
         """Parse a Graphiti edge into a SemanticFact.
 
         Args:
@@ -212,8 +213,91 @@ class SemanticMemory:
         Returns:
             SemanticFact if parsing succeeds, None otherwise.
         """
-        # Stub - will be properly implemented in Task 8
-        return None
+        try:
+            fact = getattr(edge, "fact", "")
+            created_at = getattr(edge, "created_at", datetime.now(UTC))
+            edge_uuid = getattr(edge, "uuid", None) or str(uuid.uuid4())
+
+            return self._parse_content_to_fact(
+                fact_id=edge_uuid,
+                content=fact,
+                user_id=user_id,
+                created_at=created_at,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse edge to fact: {e}")
+            return None
+
+    def _parse_content_to_fact(
+        self,
+        fact_id: str,
+        content: str,
+        user_id: str,
+        created_at: datetime,
+    ) -> SemanticFact | None:
+        """Parse fact content string into SemanticFact object.
+
+        Args:
+            fact_id: The fact ID.
+            content: The raw content string.
+            user_id: The user ID.
+            created_at: When the fact was created.
+
+        Returns:
+            SemanticFact if parsing succeeds, None otherwise.
+        """
+        try:
+            lines = content.split("\n")
+            subject = ""
+            predicate = ""
+            obj = ""
+            confidence = 0.5
+            source = FactSource.EXTRACTED
+            valid_from = created_at
+            valid_to = None
+            invalidated_at = None
+            invalidation_reason = None
+
+            for line in lines:
+                if line.startswith("Subject:"):
+                    subject = line.replace("Subject:", "").strip()
+                elif line.startswith("Predicate:"):
+                    predicate = line.replace("Predicate:", "").strip()
+                elif line.startswith("Object:"):
+                    obj = line.replace("Object:", "").strip()
+                elif line.startswith("Confidence:"):
+                    with contextlib.suppress(ValueError):
+                        confidence = float(line.replace("Confidence:", "").strip())
+                elif line.startswith("Source:"):
+                    source_str = line.replace("Source:", "").strip()
+                    with contextlib.suppress(ValueError):
+                        source = FactSource(source_str)
+                elif line.startswith("Valid From:"):
+                    with contextlib.suppress(ValueError):
+                        valid_from = datetime.fromisoformat(line.replace("Valid From:", "").strip())
+                elif line.startswith("Valid To:"):
+                    with contextlib.suppress(ValueError):
+                        valid_to = datetime.fromisoformat(line.replace("Valid To:", "").strip())
+
+            if not subject or not predicate or not obj:
+                return None
+
+            return SemanticFact(
+                id=fact_id,
+                user_id=user_id,
+                subject=subject,
+                predicate=predicate,
+                object=obj,
+                confidence=confidence,
+                source=source,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                invalidated_at=invalidated_at,
+                invalidation_reason=invalidation_reason,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse fact content: {e}")
+            return None
 
     async def _check_and_invalidate_contradictions(
         self,
@@ -354,7 +438,64 @@ class SemanticMemory:
             FactNotFoundError: If fact doesn't exist.
             SemanticMemoryError: If retrieval fails.
         """
-        raise NotImplementedError("Will be implemented in later task")
+        try:
+            client = await self._get_graphiti_client()
+
+            # Query for specific fact by name
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $fact_name
+            RETURN e
+            """
+
+            fact_name = f"fact:{fact_id}"
+
+            result = await client.driver.execute_query(
+                query,
+                {"fact_name": fact_name},
+            )
+
+            records = result[0] if result else []
+
+            if not records:
+                raise FactNotFoundError(fact_id)
+
+            # Parse the node into a SemanticFact
+            node = records[0]["e"]
+            content = getattr(node, "content", "") or node.get("content", "")
+            created_at = getattr(node, "created_at", None) or node.get("created_at")
+            invalidated_at_str = getattr(node, "invalidated_at", None) or node.get("invalidated_at")
+            invalidation_reason = getattr(node, "invalidation_reason", None) or node.get("invalidation_reason")
+
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            elif created_at is None:
+                created_at = datetime.now(UTC)
+
+            fact = self._parse_content_to_fact(
+                fact_id=fact_id,
+                content=content,
+                user_id=user_id,
+                created_at=created_at,
+            )
+
+            if fact is None:
+                raise FactNotFoundError(fact_id)
+
+            # Add invalidation info if present
+            if invalidated_at_str:
+                fact.invalidated_at = datetime.fromisoformat(invalidated_at_str) if isinstance(invalidated_at_str, str) else invalidated_at_str
+                fact.invalidation_reason = invalidation_reason
+
+            return fact
+
+        except FactNotFoundError:
+            raise
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get fact", extra={"fact_id": fact_id})
+            raise SemanticMemoryError(f"Failed to get fact: {e}") from e
 
     async def get_facts_about(
         self,

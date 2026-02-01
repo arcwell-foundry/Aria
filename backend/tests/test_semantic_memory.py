@@ -366,3 +366,43 @@ async def test_add_fact_generates_id_if_missing() -> None:
         # Should have generated a UUID
         assert result != ""
         assert len(result) > 0
+
+
+@pytest.mark.asyncio
+async def test_get_fact_retrieves_by_id() -> None:
+    """Test get_fact retrieves specific fact by ID."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = "Subject: John\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_node.created_at = now
+    mock_record = {"e": mock_node}
+    mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        fact = await memory.get_fact(user_id="user-456", fact_id="fact-123")
+        assert fact is not None
+        mock_driver.execute_query.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_fact_raises_not_found() -> None:
+    """Test get_fact raises FactNotFoundError when not found."""
+    from src.core.exceptions import FactNotFoundError
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        with pytest.raises(FactNotFoundError):
+            await memory.get_fact(user_id="user-456", fact_id="nonexistent")
