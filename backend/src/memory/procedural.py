@@ -231,6 +231,8 @@ class ProceduralMemory:
     async def update_workflow(self, workflow: Workflow) -> None:
         """Update an existing workflow.
 
+        Increments the version number automatically.
+
         Args:
             workflow: The Workflow instance with updated data.
 
@@ -238,7 +240,51 @@ class ProceduralMemory:
             WorkflowNotFoundError: If workflow doesn't exist.
             ProceduralMemoryError: If update fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError, WorkflowNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            data = {
+                "workflow_name": workflow.workflow_name,
+                "description": workflow.description,
+                "trigger_conditions": workflow.trigger_conditions,
+                "steps": workflow.steps,
+                "success_count": workflow.success_count,
+                "failure_count": workflow.failure_count,
+                "is_shared": workflow.is_shared,
+                "version": workflow.version + 1,
+                "updated_at": now.isoformat(),
+            }
+
+            response = (
+                client.table("procedural_memories")
+                .update(data)
+                .eq("id", workflow.id)
+                .eq("user_id", workflow.user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise WorkflowNotFoundError(workflow.id)
+
+            logger.info(
+                "Updated workflow",
+                extra={
+                    "workflow_id": workflow.id,
+                    "user_id": workflow.user_id,
+                    "new_version": workflow.version + 1,
+                },
+            )
+
+        except WorkflowNotFoundError:
+            raise
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update workflow", extra={"workflow_id": workflow.id})
+            raise ProceduralMemoryError(f"Failed to update workflow: {e}") from e
 
     async def delete_workflow(self, user_id: str, workflow_id: str) -> None:
         """Delete a workflow.

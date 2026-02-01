@@ -364,3 +364,98 @@ async def test_get_workflow_raises_not_found() -> None:
 
         with pytest.raises(WorkflowNotFoundError):
             await memory.get_workflow(user_id="user-456", workflow_id="nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_update_workflow_updates_in_supabase() -> None:
+    """Test update_workflow updates workflow in Supabase."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory, Workflow
+
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id="wf-123",
+        user_id="user-456",
+        workflow_name="updated_workflow",
+        description="Updated description",
+        trigger_conditions={"event": "new_event"},
+        steps=[{"action": "new_action"}],
+        success_count=10,
+        failure_count=2,
+        is_shared=True,
+        version=2,
+        created_at=now,
+        updated_at=now,
+    )
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_update = MagicMock()
+    mock_table.update.return_value = mock_update
+    mock_eq1 = MagicMock()
+    mock_update.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_execute = MagicMock()
+    mock_eq2.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "wf-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        await memory.update_workflow(workflow)
+
+        mock_table.update.assert_called_once()
+        # Verify version was incremented
+        call_args = mock_table.update.call_args
+        assert call_args[0][0]["version"] == 3  # version + 1
+
+
+@pytest.mark.asyncio
+async def test_update_workflow_raises_not_found() -> None:
+    """Test update_workflow raises WorkflowNotFoundError when not found."""
+    from unittest.mock import MagicMock, patch
+
+    from src.core.exceptions import WorkflowNotFoundError
+    from src.memory.procedural import ProceduralMemory, Workflow
+
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id="nonexistent",
+        user_id="user-456",
+        workflow_name="test",
+        description="Test",
+        trigger_conditions={},
+        steps=[],
+        success_count=0,
+        failure_count=0,
+        is_shared=False,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_update = MagicMock()
+    mock_table.update.return_value = mock_update
+    mock_eq1 = MagicMock()
+    mock_update.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_execute = MagicMock()
+    mock_eq2.execute.return_value = mock_execute
+    mock_execute.data = []  # No rows updated
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(WorkflowNotFoundError):
+            await memory.update_workflow(workflow)
