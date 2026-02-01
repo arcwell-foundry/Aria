@@ -6,10 +6,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import EpisodicMemoryError
 from src.memory.episodic import Episode, EpisodicMemory
 
 logger = logging.getLogger(__name__)
@@ -413,7 +414,14 @@ async def store_episode(
 
     # Store episode
     memory = EpisodicMemory()
-    episode_id = await memory.store_episode(episode)
+    try:
+        episode_id = await memory.store_episode(episode)
+    except EpisodicMemoryError as e:
+        logger.error(
+            "Failed to store episode",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Memory storage unavailable") from None
 
     logger.info(
         "Stored episode via API",

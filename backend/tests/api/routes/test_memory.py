@@ -686,3 +686,31 @@ class TestStoreEpisodeEndpoint:
         )
 
         assert response.status_code == 422
+
+    def test_store_episode_storage_failure_returns_503(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that storage failure returns 503 Service Unavailable."""
+        from src.core.exceptions import EpisodicMemoryError
+
+        with patch("src.api.routes.memory.EpisodicMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.store_episode = AsyncMock(
+                side_effect=EpisodicMemoryError("Graphiti connection failed")
+            )
+            mock_class.return_value = mock_instance
+
+            client = TestClient(app_with_mocked_auth)
+
+            response = client.post(
+                "/api/v1/memory/episode",
+                json={
+                    "event_type": "meeting",
+                    "content": "Test meeting content",
+                },
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+            assert response.status_code == 503
+            data = response.json()
+            assert data["detail"] == "Memory storage unavailable"
