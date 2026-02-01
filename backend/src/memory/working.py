@@ -98,3 +98,31 @@ class WorkingMemory:
             {"role": msg["role"], "content": msg["content"]}
             for msg in self.messages
         ]
+
+    def set_entity(self, key: str, value: Any) -> None:
+        """Store an active entity in working memory.
+
+        Args:
+            key: Unique identifier for the entity.
+            value: The entity data to store.
+        """
+        self.active_entities[key] = value
+
+    def get_entity(self, key: str) -> Any | None:
+        """Retrieve an active entity from working memory.
+
+        Args:
+            key: The entity identifier.
+
+        Returns:
+            The entity data if found, None otherwise.
+        """
+        return self.active_entities.get(key)
+
+    def remove_entity(self, key: str) -> None:
+        """Remove an entity from working memory.
+
+        Args:
+            key: The entity identifier to remove.
+        """
+        self.active_entities.pop(key, None)

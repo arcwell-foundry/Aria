@@ -117,3 +117,55 @@ def test_get_context_for_llm_excludes_metadata() -> None:
 
     assert "metadata" not in context[0]
     assert "internal_id" not in context[0]
+
+
+def test_set_entity_stores_entity() -> None:
+    """Test that set_entity stores an entity."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.set_entity("current_contact", {"name": "John Doe", "email": "john@example.com"})
+
+    assert "current_contact" in memory.active_entities
+    assert memory.active_entities["current_contact"]["name"] == "John Doe"
+
+
+def test_get_entity_returns_entity() -> None:
+    """Test that get_entity returns a stored entity."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.set_entity("deal", {"value": 50000, "stage": "negotiation"})
+
+    entity = memory.get_entity("deal")
+    assert entity is not None
+    assert entity["value"] == 50000
+
+
+def test_get_entity_returns_none_for_missing() -> None:
+    """Test that get_entity returns None for missing entities."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    entity = memory.get_entity("nonexistent")
+    assert entity is None
+
+
+def test_remove_entity_removes_entity() -> None:
+    """Test that remove_entity removes a stored entity."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.set_entity("temp", {"data": "value"})
+    assert "temp" in memory.active_entities
+
+    memory.remove_entity("temp")
+    assert "temp" not in memory.active_entities
