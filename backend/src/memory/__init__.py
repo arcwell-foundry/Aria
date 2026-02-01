@@ -9,6 +9,7 @@ This module implements ARIA's cognitive memory architecture:
 - Lead: Sales pursuit tracking (Graphiti + Supabase)
 """
 
+from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
@@ -16,7 +17,11 @@ from src.memory.working import (
 )
 
 __all__ = [
+    # Working Memory
     "WorkingMemory",
     "WorkingMemoryManager",
     "count_tokens",
+    # Episodic Memory
+    "Episode",
+    "EpisodicMemory",
 ]
