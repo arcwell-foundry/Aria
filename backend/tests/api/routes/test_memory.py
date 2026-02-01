@@ -220,3 +220,94 @@ class TestMemoryQueryResponseModel:
         assert response.page == 3
         assert response.page_size == 25
         assert response.has_more is True
+
+
+from unittest.mock import AsyncMock, patch
+
+
+class TestMemoryQueryService:
+    """Tests for MemoryQueryService."""
+
+    @pytest.mark.asyncio
+    async def test_query_episodic_only(self) -> None:
+        """Test querying only episodic memory."""
+        from datetime import UTC, datetime
+
+        from src.api.routes.memory import MemoryQueryService
+
+        service = MemoryQueryService()
+
+        with patch.object(service, "_query_episodic", new_callable=AsyncMock) as mock_episodic:
+            mock_episodic.return_value = [
+                {
+                    "id": "ep-1",
+                    "memory_type": "episodic",
+                    "content": "Meeting about budget",
+                    "relevance_score": 0.8,
+                    "confidence": None,
+                    "timestamp": datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+                }
+            ]
+
+            results = await service.query(
+                user_id="user-123",
+                query="budget meeting",
+                memory_types=["episodic"],
+                start_date=None,
+                end_date=None,
+                limit=20,
+                offset=0,
+            )
+
+            assert len(results) == 1
+            assert results[0]["memory_type"] == "episodic"
+            mock_episodic.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_query_multiple_types_sorted_by_relevance(self) -> None:
+        """Test querying multiple memory types returns sorted results."""
+        from datetime import UTC, datetime
+
+        from src.api.routes.memory import MemoryQueryService
+
+        service = MemoryQueryService()
+
+        with (
+            patch.object(service, "_query_episodic", new_callable=AsyncMock) as mock_ep,
+            patch.object(service, "_query_semantic", new_callable=AsyncMock) as mock_sem,
+        ):
+            mock_ep.return_value = [
+                {
+                    "id": "ep-1",
+                    "memory_type": "episodic",
+                    "content": "Low relevance episode",
+                    "relevance_score": 0.5,
+                    "confidence": None,
+                    "timestamp": datetime.now(UTC),
+                }
+            ]
+            mock_sem.return_value = [
+                {
+                    "id": "fact-1",
+                    "memory_type": "semantic",
+                    "content": "High relevance fact",
+                    "relevance_score": 0.9,
+                    "confidence": 0.85,
+                    "timestamp": datetime.now(UTC),
+                }
+            ]
+
+            results = await service.query(
+                user_id="user-123",
+                query="test query",
+                memory_types=["episodic", "semantic"],
+                start_date=None,
+                end_date=None,
+                limit=20,
+                offset=0,
+            )
+
+            assert len(results) == 2
+            # Should be sorted by relevance descending
+            assert results[0]["relevance_score"] == 0.9
+            assert results[1]["relevance_score"] == 0.5
