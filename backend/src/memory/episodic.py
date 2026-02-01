@@ -204,9 +204,11 @@ class EpisodicMemory:
                     participants = [p.strip() for p in participants_str.split(",") if p.strip()]
                 elif line.startswith("Content:"):
                     episode_content = line.replace("Content:", "").strip()
-                elif not any(line.startswith(p) for p in ["Occurred:", "Recorded:", "Context:"]):
-                    if episode_content:
-                        episode_content += "\n" + line
+                elif (
+                    not any(line.startswith(p) for p in ["Occurred:", "Recorded:", "Context:"])
+                    and episode_content
+                ):
+                    episode_content += "\n" + line
 
             return Episode(
                 id=episode_id,
