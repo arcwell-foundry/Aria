@@ -269,3 +269,59 @@ async def test_semantic_search_queries_graphiti() -> None:
         mock_client.search.assert_called_once()
         call_args = mock_client.search.call_args
         assert "revenue goals discussion" in call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_delete_episode_removes_from_graphiti() -> None:
+    """Test delete_episode removes episode from Graphiti."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"deleted": 1}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        await memory.delete_episode(user_id="user-456", episode_id="ep-123")
+        mock_driver.execute_query.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_episode_retrieves_by_id() -> None:
+    """Test get_episode retrieves specific episode by ID."""
+    now = datetime.now(UTC)
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = "Event Type: meeting\nContent: Team sync"
+    mock_node.created_at = now
+    mock_record = {"e": mock_node}
+    mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        episode = await memory.get_episode(user_id="user-456", episode_id="ep-123")
+        assert episode is not None
+        mock_driver.execute_query.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_episode_raises_not_found() -> None:
+    """Test get_episode raises EpisodeNotFoundError when not found."""
+    from src.core.exceptions import EpisodeNotFoundError
+
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        with pytest.raises(EpisodeNotFoundError):
+            await memory.get_episode(user_id="user-456", episode_id="nonexistent")

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.core.exceptions import EpisodicMemoryError
+from src.core.exceptions import EpisodeNotFoundError, EpisodicMemoryError
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -172,6 +172,56 @@ class EpisodicMemory:
             logger.warning(f"Failed to parse edge to episode: {e}")
             return None
 
+    def _parse_content_to_episode(
+        self,
+        episode_id: str,
+        content: str,
+        user_id: str,
+        created_at: datetime,
+    ) -> Episode | None:
+        """Parse episode content string into Episode object.
+
+        Args:
+            episode_id: The episode ID.
+            content: The raw content string.
+            user_id: The user ID.
+            created_at: When the episode was created.
+
+        Returns:
+            Episode if parsing succeeds, None otherwise.
+        """
+        try:
+            lines = content.split("\n")
+            event_type = "unknown"
+            episode_content = ""
+            participants: list[str] = []
+
+            for line in lines:
+                if line.startswith("Event Type:"):
+                    event_type = line.replace("Event Type:", "").strip()
+                elif line.startswith("Participants:"):
+                    participants_str = line.replace("Participants:", "").strip()
+                    participants = [p.strip() for p in participants_str.split(",") if p.strip()]
+                elif line.startswith("Content:"):
+                    episode_content = line.replace("Content:", "").strip()
+                elif not any(line.startswith(p) for p in ["Occurred:", "Recorded:", "Context:"]):
+                    if episode_content:
+                        episode_content += "\n" + line
+
+            return Episode(
+                id=episode_id,
+                user_id=user_id,
+                event_type=event_type,
+                content=episode_content.strip(),
+                participants=participants,
+                occurred_at=created_at,
+                recorded_at=datetime.now(UTC),
+                context={},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse episode content: {e}")
+            return None
+
     async def store_episode(self, episode: Episode) -> str:
         """Store an episode in memory.
 
@@ -218,16 +268,67 @@ class EpisodicMemory:
         """Retrieve a specific episode by ID.
 
         Args:
-            user_id: The user ID who owns the episode.
-            episode_id: The unique episode identifier.
+            user_id: The user who owns the episode.
+            episode_id: The episode ID.
 
         Returns:
-            The Episode instance if found.
+            The requested Episode.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodeNotFoundError: If episode doesn't exist.
+            EpisodicMemoryError: If retrieval fails.
         """
-        raise NotImplementedError("get_episode not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+
+            # Query for specific episode by name
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $episode_name
+            RETURN e
+            """
+
+            episode_name = episode_id
+
+            result = await client.driver.execute_query(
+                query,
+                {"episode_name": episode_name},
+            )
+
+            records = result[0] if result else []
+
+            if not records:
+                raise EpisodeNotFoundError(episode_id)
+
+            # Parse the node into an Episode
+            node = records[0]["e"]
+            content = getattr(node, "content", "") or node.get("content", "")
+            created_at = getattr(node, "created_at", None) or node.get("created_at")
+
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            elif created_at is None:
+                created_at = datetime.now(UTC)
+
+            episode = self._parse_content_to_episode(
+                episode_id=episode_id,
+                content=content,
+                user_id=user_id,
+                created_at=created_at,
+            )
+
+            if episode is None:
+                raise EpisodeNotFoundError(episode_id)
+
+            return episode
+
+        except EpisodeNotFoundError:
+            raise
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get episode", extra={"episode_id": episode_id})
+            raise EpisodicMemoryError(f"Failed to get episode: {e}") from e
 
     async def query_by_time_range(
         self, user_id: str, start: datetime, end: datetime, limit: int = 50
@@ -365,13 +466,47 @@ class EpisodicMemory:
             raise EpisodicMemoryError(f"Failed to search episodes: {e}") from e
 
     async def delete_episode(self, user_id: str, episode_id: str) -> None:
-        """Delete an episode from memory.
+        """Delete an episode.
 
         Args:
-            user_id: The user ID who owns the episode.
-            episode_id: The unique episode identifier to delete.
+            user_id: The user who owns the episode.
+            episode_id: The episode ID to delete.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodeNotFoundError: If episode doesn't exist.
+            EpisodicMemoryError: If deletion fails.
         """
-        raise NotImplementedError("delete_episode not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+
+            # Delete episode node by name
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $episode_name
+            DETACH DELETE e
+            RETURN count(e) as deleted
+            """
+
+            episode_name = episode_id  # Use episode_id directly as name
+
+            result = await client.driver.execute_query(
+                query,
+                {"episode_name": episode_name},
+            )
+
+            # Check if episode was found and deleted
+            records = result[0] if result else []
+            deleted_count = records[0]["deleted"] if records else 0
+
+            if deleted_count == 0:
+                raise EpisodeNotFoundError(episode_id)
+
+            logger.info("Deleted episode", extra={"episode_id": episode_id, "user_id": user_id})
+
+        except EpisodeNotFoundError:
+            raise
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to delete episode", extra={"episode_id": episode_id})
+            raise EpisodicMemoryError(f"Failed to delete episode: {e}") from e
