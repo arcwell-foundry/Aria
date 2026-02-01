@@ -108,7 +108,9 @@ class SemanticFact:
             source=FactSource(data["source"]),
             valid_from=datetime.fromisoformat(data["valid_from"]),
             valid_to=datetime.fromisoformat(data["valid_to"]) if data.get("valid_to") else None,
-            invalidated_at=datetime.fromisoformat(data["invalidated_at"]) if data.get("invalidated_at") else None,
+            invalidated_at=datetime.fromisoformat(data["invalidated_at"])
+            if data.get("invalidated_at")
+            else None,
             invalidation_reason=data.get("invalidation_reason"),
         )
 
@@ -131,10 +133,7 @@ class SemanticFact:
         if check_time < self.valid_from:
             return False
 
-        if self.valid_to is not None and check_time > self.valid_to:
-            return False
-
-        return True
+        return not (self.valid_to is not None and check_time > self.valid_to)
 
     def contradicts(self, other: "SemanticFact") -> bool:
         """Check if this fact contradicts another fact.
@@ -317,7 +316,11 @@ class SemanticMemory:
 
             for edge in results:
                 existing_fact = self._parse_edge_to_fact(edge, new_fact.user_id)
-                if existing_fact and existing_fact.is_valid() and new_fact.contradicts(existing_fact):
+                if (
+                    existing_fact
+                    and existing_fact.is_valid()
+                    and new_fact.contradicts(existing_fact)
+                ):
                     logger.info(
                         "Invalidating contradicting fact",
                         extra={
@@ -360,11 +363,9 @@ class SemanticMemory:
 
         await client.driver.execute_query(
             query,
-            {
-                "fact_name": f"fact:{fact_id}",
-                "invalidated_at": now.isoformat(),
-                "reason": reason,
-            },
+            fact_name=f"fact:{fact_id}",
+            invalidated_at=now.isoformat(),
+            reason=reason,
         )
 
     async def add_fact(self, fact: SemanticFact) -> str:
@@ -452,7 +453,7 @@ class SemanticMemory:
 
             result = await client.driver.execute_query(
                 query,
-                {"fact_name": fact_name},
+                fact_name=fact_name,
             )
 
             records = result[0] if result else []
@@ -465,7 +466,9 @@ class SemanticMemory:
             content = getattr(node, "content", "") or node.get("content", "")
             created_at = getattr(node, "created_at", None) or node.get("created_at")
             invalidated_at_str = getattr(node, "invalidated_at", None) or node.get("invalidated_at")
-            invalidation_reason = getattr(node, "invalidation_reason", None) or node.get("invalidation_reason")
+            invalidation_reason = getattr(node, "invalidation_reason", None) or node.get(
+                "invalidation_reason"
+            )
 
             if isinstance(created_at, str):
                 created_at = datetime.fromisoformat(created_at)
@@ -484,7 +487,11 @@ class SemanticMemory:
 
             # Add invalidation info if present
             if invalidated_at_str:
-                fact.invalidated_at = datetime.fromisoformat(invalidated_at_str) if isinstance(invalidated_at_str, str) else invalidated_at_str
+                fact.invalidated_at = (
+                    datetime.fromisoformat(invalidated_at_str)
+                    if isinstance(invalidated_at_str, str)
+                    else invalidated_at_str
+                )
                 fact.invalidation_reason = invalidation_reason
 
             return fact
@@ -584,7 +591,7 @@ class SemanticMemory:
 
             # Parse results and filter by confidence
             facts = []
-            for edge in results[:limit * 2]:  # Get extra to account for filtering
+            for edge in results[: limit * 2]:  # Get extra to account for filtering
                 fact = self._parse_edge_to_fact(edge, user_id)
                 if fact is None:
                     continue
@@ -646,11 +653,9 @@ class SemanticMemory:
 
             result = await client.driver.execute_query(
                 query,
-                {
-                    "fact_name": fact_name,
-                    "invalidated_at": now.isoformat(),
-                    "reason": reason,
-                },
+                fact_name=fact_name,
+                invalidated_at=now.isoformat(),
+                reason=reason,
             )
 
             records = result[0] if result else []
@@ -698,7 +703,7 @@ class SemanticMemory:
 
             result = await client.driver.execute_query(
                 query,
-                {"fact_name": fact_name},
+                fact_name=fact_name,
             )
 
             records = result[0] if result else []

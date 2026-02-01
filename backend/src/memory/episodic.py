@@ -298,7 +298,7 @@ class EpisodicMemory:
 
             result = await client.driver.execute_query(
                 query,
-                {"episode_name": episode_name},
+                episode_name=episode_name,
             )
 
             records = result[0] if result else []
@@ -497,7 +497,7 @@ class EpisodicMemory:
 
             result = await client.driver.execute_query(
                 query,
-                {"episode_name": episode_name},
+                episode_name=episode_name,
             )
 
             # Check if episode was found and deleted

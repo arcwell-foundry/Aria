@@ -523,7 +523,7 @@ async def test_invalidate_fact_soft_deletes() -> None:
         # Verify the query includes invalidation fields
         call_args = mock_driver.execute_query.call_args
         assert "invalidated_at" in call_args[0][0]
-        assert "reason" in call_args[0][1]
+        assert "reason" in call_args.kwargs
 
 
 @pytest.mark.asyncio
