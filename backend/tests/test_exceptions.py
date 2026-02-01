@@ -27,3 +27,13 @@ def test_episodic_memory_error_attributes() -> None:
     assert error.message == "Episodic memory operation failed: Failed to store episode"
     assert error.code == "EPISODIC_MEMORY_ERROR"
     assert error.status_code == 500
+
+
+def test_episode_not_found_error_attributes() -> None:
+    """Test EpisodeNotFoundError has correct attributes."""
+    from src.core.exceptions import EpisodeNotFoundError
+
+    error = EpisodeNotFoundError("ep-123")
+    assert error.message == "Episode with ID 'ep-123' not found"
+    assert error.code == "NOT_FOUND"
+    assert error.status_code == 404

@@ -213,3 +213,15 @@ class EpisodicMemoryError(ARIAException):
             code="EPISODIC_MEMORY_ERROR",
             status_code=500,
         )
+
+
+class EpisodeNotFoundError(NotFoundError):
+    """Episode not found error (404)."""
+
+    def __init__(self, episode_id: str) -> None:
+        """Initialize episode not found error.
+
+        Args:
+            episode_id: The ID of the episode that was not found.
+        """
+        super().__init__(resource="Episode", resource_id=episode_id)
