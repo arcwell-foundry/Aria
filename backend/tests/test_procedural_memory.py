@@ -638,3 +638,172 @@ async def test_record_outcome_raises_not_found() -> None:
 
         with pytest.raises(WorkflowNotFoundError):
             await memory.record_outcome(workflow_id="nonexistent", success=True)
+
+
+@pytest.mark.asyncio
+async def test_find_matching_workflow_returns_best_match() -> None:
+    """Test find_matching_workflow returns workflow matching trigger conditions."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq = MagicMock()
+    mock_select.eq.return_value = mock_eq
+    mock_execute = MagicMock()
+    mock_eq.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-123",
+            "user_id": "user-456",
+            "workflow_name": "meeting_followup",
+            "description": "Follow up after meeting",
+            "trigger_conditions": {"event": "meeting_completed", "lead_stage": "qualified"},
+            "steps": [{"action": "send_email"}],
+            "success_count": 20,
+            "failure_count": 5,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+        {
+            "id": "wf-456",
+            "user_id": "user-456",
+            "workflow_name": "cold_outreach",
+            "description": "Cold outreach sequence",
+            "trigger_conditions": {"event": "new_lead", "source": "conference"},
+            "steps": [{"action": "research"}],
+            "success_count": 10,
+            "failure_count": 10,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        context = {"event": "meeting_completed", "lead_stage": "qualified"}
+        workflow = await memory.find_matching_workflow(user_id="user-456", context=context)
+
+        assert workflow is not None
+        assert workflow.id == "wf-123"
+        assert workflow.workflow_name == "meeting_followup"
+
+
+@pytest.mark.asyncio
+async def test_find_matching_workflow_returns_none_when_no_match() -> None:
+    """Test find_matching_workflow returns None when no workflows match."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq = MagicMock()
+    mock_select.eq.return_value = mock_eq
+    mock_execute = MagicMock()
+    mock_eq.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-123",
+            "user_id": "user-456",
+            "workflow_name": "meeting_followup",
+            "description": "Follow up after meeting",
+            "trigger_conditions": {"event": "meeting_completed"},
+            "steps": [{"action": "send_email"}],
+            "success_count": 20,
+            "failure_count": 5,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        context = {"event": "unknown_event"}
+        workflow = await memory.find_matching_workflow(user_id="user-456", context=context)
+
+        assert workflow is None
+
+
+@pytest.mark.asyncio
+async def test_find_matching_workflow_prefers_higher_success_rate() -> None:
+    """Test find_matching_workflow prefers workflow with higher success rate."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq = MagicMock()
+    mock_select.eq.return_value = mock_eq
+    mock_execute = MagicMock()
+    mock_eq.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-low",
+            "user_id": "user-456",
+            "workflow_name": "workflow_low",
+            "description": "Low success rate",
+            "trigger_conditions": {"event": "test"},
+            "steps": [{"action": "a"}],
+            "success_count": 10,
+            "failure_count": 90,  # 10% success rate
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+        {
+            "id": "wf-high",
+            "user_id": "user-456",
+            "workflow_name": "workflow_high",
+            "description": "High success rate",
+            "trigger_conditions": {"event": "test"},
+            "steps": [{"action": "b"}],
+            "success_count": 90,
+            "failure_count": 10,  # 90% success rate
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        context = {"event": "test"}
+        workflow = await memory.find_matching_workflow(user_id="user-456", context=context)
+
+        assert workflow is not None
+        assert workflow.id == "wf-high"

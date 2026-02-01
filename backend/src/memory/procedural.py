@@ -329,7 +329,10 @@ class ProceduralMemory:
     async def find_matching_workflow(
         self, user_id: str, context: dict[str, Any]
     ) -> Workflow | None:
-        """Find a workflow that matches the given context.
+        """Find the best matching workflow for a given context.
+
+        Matches trigger conditions against the provided context and
+        returns the workflow with the highest success rate among matches.
 
         Args:
             user_id: The user to find workflows for.
@@ -339,9 +342,76 @@ class ProceduralMemory:
             The best matching Workflow, or None if no match found.
 
         Raises:
-            ProceduralMemoryError: If the search fails.
+            ProceduralMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            # Get all workflows for this user
+            response = (
+                client.table("procedural_memories").select("*").eq("user_id", user_id).execute()
+            )
+
+            if not response.data:
+                return None
+
+            # Find workflows whose trigger conditions match the context
+            matching_workflows: list[Workflow] = []
+
+            for row in response.data:
+                workflow = Workflow.from_dict(row)
+                trigger_conditions = workflow.trigger_conditions
+
+                # Check if all trigger conditions are satisfied by context
+                if self._matches_trigger_conditions(trigger_conditions, context):
+                    matching_workflows.append(workflow)
+
+            if not matching_workflows:
+                return None
+
+            # Return workflow with highest success rate
+            best_workflow = max(matching_workflows, key=lambda w: w.success_rate)
+
+            logger.info(
+                "Found matching workflow",
+                extra={
+                    "workflow_id": best_workflow.id,
+                    "workflow_name": best_workflow.workflow_name,
+                    "success_rate": best_workflow.success_rate,
+                    "context_keys": list(context.keys()),
+                },
+            )
+
+            return best_workflow
+
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to find matching workflow")
+            raise ProceduralMemoryError(f"Failed to find matching workflow: {e}") from e
+
+    def _matches_trigger_conditions(
+        self, trigger_conditions: dict[str, Any], context: dict[str, Any]
+    ) -> bool:
+        """Check if context satisfies trigger conditions.
+
+        All trigger conditions must be present in context with matching values.
+
+        Args:
+            trigger_conditions: The workflow's trigger conditions.
+            context: The current context to match against.
+
+        Returns:
+            True if all trigger conditions are satisfied.
+        """
+        for key, value in trigger_conditions.items():
+            if key not in context:
+                return False
+            if context[key] != value:
+                return False
+        return True
 
     async def record_outcome(self, workflow_id: str, success: bool) -> None:
         """Record the outcome of a workflow execution.
