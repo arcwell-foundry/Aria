@@ -1,0 +1,68 @@
+"""Semantic memory module for storing facts and knowledge.
+
+Semantic memory stores factual knowledge with:
+- Subject-predicate-object triple structure
+- Confidence scores (0.0-1.0) based on source reliability
+- Temporal validity windows (valid_from, valid_to)
+- Source tracking for provenance
+- Soft invalidation for history preservation
+- Contradiction detection
+
+Facts are stored in Graphiti (Neo4j) for semantic search and
+temporal querying capabilities.
+"""
+
+import logging
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+from src.core.exceptions import FactNotFoundError, SemanticMemoryError
+
+if TYPE_CHECKING:
+    from graphiti_core import Graphiti
+
+logger = logging.getLogger(__name__)
+
+
+class FactSource(Enum):
+    """Source of a semantic fact, used for confidence scoring."""
+
+    USER_STATED = "user_stated"
+    EXTRACTED = "extracted"
+    INFERRED = "inferred"
+    CRM_IMPORT = "crm_import"
+    WEB_RESEARCH = "web_research"
+
+
+# Base confidence by source type
+SOURCE_CONFIDENCE: dict[FactSource, float] = {
+    FactSource.USER_STATED: 0.95,
+    FactSource.CRM_IMPORT: 0.90,
+    FactSource.EXTRACTED: 0.75,
+    FactSource.WEB_RESEARCH: 0.70,
+    FactSource.INFERRED: 0.60,
+}
+
+
+@dataclass
+class SemanticFact:
+    """A semantic fact representing knowledge about an entity.
+
+    Uses subject-predicate-object triple structure (e.g., "John works_at Acme").
+    Tracks confidence, source, and temporal validity.
+    """
+
+    id: str
+    user_id: str
+    subject: str  # Entity the fact is about
+    predicate: str  # Relationship type
+    object: str  # Value or related entity
+    confidence: float  # 0.0 to 1.0
+    source: FactSource
+    valid_from: datetime
+    valid_to: datetime | None = None
+    invalidated_at: datetime | None = None
+    invalidation_reason: str | None = None
