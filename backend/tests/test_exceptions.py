@@ -1,6 +1,6 @@
 """Tests for custom exceptions."""
 
-from src.core.exceptions import GraphitiConnectionError, MemoryError
+from src.core.exceptions import GraphitiConnectionError, WorkingMemoryError
 
 
 def test_graphiti_connection_error_attributes() -> None:
@@ -11,9 +11,9 @@ def test_graphiti_connection_error_attributes() -> None:
     assert error.status_code == 503
 
 
-def test_memory_error_attributes() -> None:
-    """Test MemoryError has correct attributes."""
-    error = MemoryError("Context window exceeded")
+def test_working_memory_error_attributes() -> None:
+    """Test WorkingMemoryError has correct attributes."""
+    error = WorkingMemoryError("Context window exceeded")
     assert error.message == "Memory operation failed: Context window exceeded"
-    assert error.code == "MEMORY_ERROR"
+    assert error.code == "WORKING_MEMORY_ERROR"
     assert error.status_code == 400

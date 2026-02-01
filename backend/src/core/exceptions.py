@@ -177,17 +177,20 @@ class GraphitiConnectionError(ARIAException):
         )
 
 
-class MemoryError(ARIAException):
-    """Memory operation error (400)."""
+class WorkingMemoryError(ARIAException):
+    """Working memory operation error (400).
+
+    Note: Named WorkingMemoryError to avoid shadowing Python's built-in MemoryError.
+    """
 
     def __init__(self, message: str = "Unknown error") -> None:
-        """Initialize memory error.
+        """Initialize working memory error.
 
         Args:
             message: Error details.
         """
         super().__init__(
             message=f"Memory operation failed: {message}",
-            code="MEMORY_ERROR",
+            code="WORKING_MEMORY_ERROR",
             status_code=400,
         )
