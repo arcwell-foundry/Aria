@@ -142,6 +142,8 @@ class EpisodicMemory:
         try:
             fact = getattr(edge, "fact", "")
             created_at = getattr(edge, "created_at", datetime.now(UTC))
+            # Try to get edge uuid, fall back to generating new one
+            edge_uuid = getattr(edge, "uuid", None) or str(uuid.uuid4())
 
             # Parse structured content from fact
             lines = fact.split("\n")
@@ -159,7 +161,7 @@ class EpisodicMemory:
                     participants = [p.strip() for p in participants_str.split(",") if p.strip()]
 
             return Episode(
-                id=str(uuid.uuid4()),
+                id=edge_uuid,
                 user_id=user_id,
                 event_type=event_type,
                 content=content.strip(),
@@ -205,7 +207,9 @@ class EpisodicMemory:
                 elif line.startswith("Content:"):
                     episode_content = line.replace("Content:", "").strip()
                 elif (
-                    not any(line.startswith(p) for p in ["Occurred:", "Recorded:", "Context:"])
+                    not any(
+                        line.startswith(p) for p in ["Occurred At:", "Recorded At:", "Context:"]
+                    )
                     and episode_content
                 ):
                     episode_content += "\n" + line
