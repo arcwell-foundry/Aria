@@ -636,9 +636,7 @@ class TestStoreEpisodeEndpoint:
         data = response.json()
         assert "id" in data
 
-    def test_store_episode_validation_error_empty_content(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_episode_validation_error_empty_content(self, app_with_mocked_auth: Any) -> None:
         """Test that empty content returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -670,9 +668,7 @@ class TestStoreEpisodeEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_episode_missing_required_fields(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_episode_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
         """Test that missing required fields returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -687,9 +683,7 @@ class TestStoreEpisodeEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_episode_storage_failure_returns_503(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_episode_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
         from src.core.exceptions import EpisodicMemoryError
 
@@ -898,9 +892,7 @@ class TestStoreFactEndpoint:
             mock_class.return_value = mock_instance
             yield mock_instance
 
-    def test_store_fact_success(
-        self, app_with_mocked_auth: Any, mock_semantic_memory: Any
-    ) -> None:
+    def test_store_fact_success(self, app_with_mocked_auth: Any, mock_semantic_memory: Any) -> None:
         """Test successful fact creation."""
         client = TestClient(app_with_mocked_auth)
 
@@ -943,9 +935,7 @@ class TestStoreFactEndpoint:
         data = response.json()
         assert "id" in data
 
-    def test_store_fact_validation_error_empty_subject(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_fact_validation_error_empty_subject(self, app_with_mocked_auth: Any) -> None:
         """Test that empty subject returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -961,9 +951,7 @@ class TestStoreFactEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_fact_validation_error_invalid_source(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_fact_validation_error_invalid_source(self, app_with_mocked_auth: Any) -> None:
         """Test that invalid source returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -999,9 +987,7 @@ class TestStoreFactEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_fact_missing_required_fields(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_fact_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
         """Test that missing required fields returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -1017,9 +1003,7 @@ class TestStoreFactEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_fact_storage_failure_returns_503(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_fact_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
         from src.core.exceptions import SemanticMemoryError
 
@@ -1308,9 +1292,7 @@ class TestStoreTaskEndpoint:
         assert task.related_goal_id == "goal-abc"
         assert task.related_lead_id == "lead-xyz"
 
-    def test_store_task_validation_error_empty_task(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_task_validation_error_empty_task(self, app_with_mocked_auth: Any) -> None:
         """Test that empty task returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -1344,9 +1326,7 @@ class TestStoreTaskEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_task_validation_error_invalid_priority(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_task_validation_error_invalid_priority(self, app_with_mocked_auth: Any) -> None:
         """Test that invalid priority returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -1363,9 +1343,7 @@ class TestStoreTaskEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_task_missing_required_fields(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_task_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
         """Test that missing required fields returns 422."""
         client = TestClient(app_with_mocked_auth)
 
@@ -1380,9 +1358,7 @@ class TestStoreTaskEndpoint:
 
         assert response.status_code == 422
 
-    def test_store_task_storage_failure_returns_503(
-        self, app_with_mocked_auth: Any
-    ) -> None:
+    def test_store_task_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
         from src.core.exceptions import ProspectiveMemoryError
 
@@ -1401,6 +1377,331 @@ class TestStoreTaskEndpoint:
                     "task": "Follow up with client",
                     "trigger_type": "time",
                     "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+                },
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+            assert response.status_code == 503
+            data = response.json()
+            assert data["detail"] == "Memory storage unavailable"
+
+
+class TestCreateWorkflowRequestModel:
+    """Tests for CreateWorkflowRequest Pydantic model."""
+
+    def test_create_workflow_request_valid(self) -> None:
+        """Test creating a valid workflow request."""
+        from src.api.routes.memory import CreateWorkflowRequest
+
+        request = CreateWorkflowRequest(
+            workflow_name="follow_up_sequence",
+            description="Standard follow-up after initial contact",
+            trigger_conditions={"event_type": "initial_contact"},
+            steps=[
+                {"action": "send_email", "template": "follow_up_1", "delay_days": 1},
+                {"action": "send_email", "template": "follow_up_2", "delay_days": 3},
+            ],
+            is_shared=True,
+        )
+
+        assert request.workflow_name == "follow_up_sequence"
+        assert len(request.steps) == 2
+        assert request.is_shared is True
+
+    def test_create_workflow_request_minimal(self) -> None:
+        """Test creating workflow with only required fields."""
+        from src.api.routes.memory import CreateWorkflowRequest
+
+        request = CreateWorkflowRequest(
+            workflow_name="simple_workflow",
+            description="A simple workflow",
+            steps=[{"action": "log", "message": "Workflow executed"}],
+        )
+
+        assert request.workflow_name == "simple_workflow"
+        assert request.trigger_conditions == {}
+        assert request.is_shared is False
+
+    def test_create_workflow_request_empty_steps_fails(self) -> None:
+        """Test that empty steps list raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateWorkflowRequest
+
+        with pytest.raises(ValidationError):
+            CreateWorkflowRequest(
+                workflow_name="empty_workflow",
+                description="No steps",
+                steps=[],
+            )
+
+    def test_create_workflow_request_empty_workflow_name_fails(self) -> None:
+        """Test that empty workflow_name raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateWorkflowRequest
+
+        with pytest.raises(ValidationError):
+            CreateWorkflowRequest(
+                workflow_name="",
+                description="Some description",
+                steps=[{"action": "log"}],
+            )
+
+    def test_create_workflow_request_empty_description_fails(self) -> None:
+        """Test that empty description raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateWorkflowRequest
+
+        with pytest.raises(ValidationError):
+            CreateWorkflowRequest(
+                workflow_name="test_workflow",
+                description="",
+                steps=[{"action": "log"}],
+            )
+
+
+class TestCreateWorkflowResponseModel:
+    """Tests for CreateWorkflowResponse Pydantic model."""
+
+    def test_create_workflow_response_valid(self) -> None:
+        """Test creating a valid workflow response."""
+        from src.api.routes.memory import CreateWorkflowResponse
+
+        response = CreateWorkflowResponse(
+            id="workflow-123",
+        )
+
+        assert response.id == "workflow-123"
+        assert response.message == "Workflow created successfully"
+
+    def test_create_workflow_response_custom_message(self) -> None:
+        """Test creating workflow response with custom message."""
+        from src.api.routes.memory import CreateWorkflowResponse
+
+        response = CreateWorkflowResponse(
+            id="workflow-456",
+            message="Custom success message",
+        )
+
+        assert response.id == "workflow-456"
+        assert response.message == "Custom success message"
+
+
+class TestStoreWorkflowEndpoint:
+    """Tests for POST /api/v1/memory/workflow endpoint."""
+
+    def test_store_workflow_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "test_workflow",
+                "description": "A test workflow",
+                "steps": [{"action": "log"}],
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_procedural_memory(self) -> Any:
+        """Fixture to mock ProceduralMemory."""
+        with patch("src.api.routes.memory.ProceduralMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.create_workflow = AsyncMock(return_value="workflow-id-123")
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_store_workflow_success(
+        self, app_with_mocked_auth: Any, mock_procedural_memory: Any
+    ) -> None:
+        """Test successful workflow creation."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "follow_up_sequence",
+                "description": "Standard follow-up after initial contact",
+                "steps": [
+                    {"action": "send_email", "template": "follow_up_1", "delay_days": 1},
+                    {"action": "send_email", "template": "follow_up_2", "delay_days": 3},
+                ],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        assert data["message"] == "Workflow created successfully"
+
+    def test_store_workflow_minimal(
+        self, app_with_mocked_auth: Any, mock_procedural_memory: Any
+    ) -> None:
+        """Test workflow creation with only required fields."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "simple_workflow",
+                "description": "A simple workflow",
+                "steps": [{"action": "log", "message": "Workflow executed"}],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        # Verify defaults were applied
+        mock_procedural_memory.create_workflow.assert_called_once()
+        call_args = mock_procedural_memory.create_workflow.call_args
+        workflow = call_args[0][0]
+        assert workflow.trigger_conditions == {}
+        assert workflow.is_shared is False
+
+    def test_store_workflow_with_all_fields(
+        self, app_with_mocked_auth: Any, mock_procedural_memory: Any
+    ) -> None:
+        """Test workflow creation with all optional fields."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "full_workflow",
+                "description": "A workflow with all options",
+                "trigger_conditions": {"event_type": "lead_qualified", "score": 80},
+                "steps": [
+                    {"action": "notify", "channel": "slack"},
+                    {"action": "create_task", "task": "Schedule demo"},
+                ],
+                "is_shared": True,
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        # Verify all fields were passed correctly
+        mock_procedural_memory.create_workflow.assert_called_once()
+        call_args = mock_procedural_memory.create_workflow.call_args
+        workflow = call_args[0][0]
+        assert workflow.trigger_conditions == {"event_type": "lead_qualified", "score": 80}
+        assert workflow.is_shared is True
+
+    def test_store_workflow_validation_error_empty_workflow_name(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty workflow_name returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "",
+                "description": "Some description",
+                "steps": [{"action": "log"}],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_workflow_validation_error_empty_description(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty description returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "test_workflow",
+                "description": "",
+                "steps": [{"action": "log"}],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_workflow_validation_error_empty_steps(self, app_with_mocked_auth: Any) -> None:
+        """Test that empty steps list returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "test_workflow",
+                "description": "Some description",
+                "steps": [],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_workflow_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
+        """Test that missing required fields returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/workflow",
+            json={
+                "workflow_name": "test_workflow",
+                # Missing description and steps
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_workflow_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
+        """Test that storage failure returns 503 Service Unavailable."""
+        from src.core.exceptions import ProceduralMemoryError
+
+        with patch("src.api.routes.memory.ProceduralMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.create_workflow = AsyncMock(
+                side_effect=ProceduralMemoryError("Supabase connection failed")
+            )
+            mock_class.return_value = mock_instance
+
+            client = TestClient(app_with_mocked_auth)
+
+            response = client.post(
+                "/api/v1/memory/workflow",
+                json={
+                    "workflow_name": "test_workflow",
+                    "description": "A test workflow",
+                    "steps": [{"action": "log"}],
                 },
                 headers={"Authorization": "Bearer test-token"},
             )

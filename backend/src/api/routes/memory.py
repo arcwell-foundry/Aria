@@ -10,8 +10,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import EpisodicMemoryError, ProspectiveMemoryError, SemanticMemoryError
+from src.core.exceptions import (
+    EpisodicMemoryError,
+    ProceduralMemoryError,
+    ProspectiveMemoryError,
+    SemanticMemoryError,
+)
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
     ProspectiveMemory,
     ProspectiveTask,
@@ -123,6 +129,27 @@ class CreateTaskResponse(BaseModel):
 
     id: str
     message: str = "Task created successfully"
+
+
+class CreateWorkflowRequest(BaseModel):
+    """Request body for creating a new procedural workflow."""
+
+    workflow_name: str = Field(..., min_length=1, description="Name of the workflow")
+    description: str = Field(..., min_length=1, description="Description of what the workflow does")
+    trigger_conditions: dict[str, Any] = Field(
+        default_factory=dict, description="Conditions that trigger this workflow"
+    )
+    steps: list[dict[str, Any]] = Field(
+        ..., min_length=1, description="Ordered list of workflow steps"
+    )
+    is_shared: bool = Field(False, description="Whether workflow is available to other users")
+
+
+class CreateWorkflowResponse(BaseModel):
+    """Response body for workflow creation."""
+
+    id: str
+    message: str = "Workflow created successfully"
 
 
 class MemoryQueryService:
@@ -602,3 +629,61 @@ async def store_task(
     )
 
     return CreateTaskResponse(id=task_id)
+
+
+@router.post("/workflow", response_model=CreateWorkflowResponse, status_code=201)
+async def store_workflow(
+    current_user: CurrentUser,
+    request: CreateWorkflowRequest,
+) -> CreateWorkflowResponse:
+    """Store a new procedural workflow.
+
+    Creates a workflow representing a repeatable sequence of actions.
+    Workflows are stored in Supabase with trigger-based matching and
+    success rate tracking for continuous improvement.
+
+    Args:
+        current_user: Authenticated user.
+        request: Workflow creation request body.
+
+    Returns:
+        Created workflow with ID.
+    """
+    # Build workflow from request
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        workflow_name=request.workflow_name,
+        description=request.description,
+        trigger_conditions=request.trigger_conditions,
+        steps=request.steps,
+        success_count=0,
+        failure_count=0,
+        is_shared=request.is_shared,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Store workflow with error handling
+    memory = ProceduralMemory()
+    try:
+        workflow_id = await memory.create_workflow(workflow)
+    except ProceduralMemoryError as e:
+        logger.error(
+            "Failed to store workflow",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Memory storage unavailable") from None
+
+    logger.info(
+        "Stored workflow via API",
+        extra={
+            "workflow_id": workflow_id,
+            "user_id": current_user.id,
+            "workflow_name": request.workflow_name,
+        },
+    )
+
+    return CreateWorkflowResponse(id=workflow_id)
