@@ -47,3 +47,13 @@ def test_semantic_memory_error_attributes() -> None:
     assert error.message == "Semantic memory operation failed: Failed to store fact"
     assert error.code == "SEMANTIC_MEMORY_ERROR"
     assert error.status_code == 500
+
+
+def test_fact_not_found_error_attributes() -> None:
+    """Test FactNotFoundError has correct attributes."""
+    from src.core.exceptions import FactNotFoundError
+
+    error = FactNotFoundError("fact-123")
+    assert error.message == "Fact with ID 'fact-123' not found"
+    assert error.code == "NOT_FOUND"
+    assert error.status_code == 404

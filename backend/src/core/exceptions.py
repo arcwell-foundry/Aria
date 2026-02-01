@@ -244,3 +244,15 @@ class SemanticMemoryError(ARIAException):
             code="SEMANTIC_MEMORY_ERROR",
             status_code=500,
         )
+
+
+class FactNotFoundError(NotFoundError):
+    """Fact not found error (404)."""
+
+    def __init__(self, fact_id: str) -> None:
+        """Initialize fact not found error.
+
+        Args:
+            fact_id: The ID of the fact that was not found.
+        """
+        super().__init__(resource="Fact", resource_id=fact_id)
