@@ -2,7 +2,7 @@
 
 import json
 
-from src.memory.working import WorkingMemory
+from src.memory.working import WorkingMemory, WorkingMemoryManager
 
 
 def test_working_memory_initialization() -> None:
@@ -274,3 +274,54 @@ def test_clear_resets_all_state() -> None:
     # conversation_id and user_id should remain
     assert memory.conversation_id == "conv-123"
     assert memory.user_id == "user-456"
+
+
+class TestWorkingMemoryManager:
+    """Tests for WorkingMemoryManager."""
+
+    def setup_method(self) -> None:
+        """Reset the manager before each test."""
+        WorkingMemoryManager._sessions = {}
+
+    def test_get_or_create_creates_new_session(self) -> None:
+        """Test that get_or_create creates a new session."""
+        manager = WorkingMemoryManager()
+
+        memory = manager.get_or_create(
+            conversation_id="conv-123",
+            user_id="user-456",
+        )
+
+        assert memory.conversation_id == "conv-123"
+        assert memory.user_id == "user-456"
+
+    def test_get_or_create_returns_existing_session(self) -> None:
+        """Test that get_or_create returns existing session."""
+        manager = WorkingMemoryManager()
+
+        memory1 = manager.get_or_create("conv-123", "user-456")
+        memory1.add_message(role="user", content="Hello!")
+
+        memory2 = manager.get_or_create("conv-123", "user-456")
+
+        assert memory1 is memory2
+        assert len(memory2.messages) == 1
+
+    def test_get_returns_none_for_missing(self) -> None:
+        """Test that get returns None for non-existent session."""
+        manager = WorkingMemoryManager()
+
+        memory = manager.get("nonexistent")
+
+        assert memory is None
+
+    def test_delete_removes_session(self) -> None:
+        """Test that delete removes a session."""
+        manager = WorkingMemoryManager()
+
+        manager.get_or_create("conv-123", "user-456")
+        assert manager.get("conv-123") is not None
+
+        manager.delete("conv-123")
+
+        assert manager.get("conv-123") is None

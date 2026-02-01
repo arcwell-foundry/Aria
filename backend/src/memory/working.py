@@ -194,3 +194,68 @@ class WorkingMemory:
         memory.current_goal = data.get("current_goal")
         memory.context_tokens = data.get("context_tokens", 0)
         return memory
+
+
+class WorkingMemoryManager:
+    """Manages multiple working memory sessions.
+
+    Singleton that tracks all active conversation sessions.
+    Sessions are keyed by conversation_id.
+    """
+
+    _sessions: dict[str, WorkingMemory] = {}
+
+    def get_or_create(
+        self,
+        conversation_id: str,
+        user_id: str,
+        max_tokens: int = 100000,
+    ) -> WorkingMemory:
+        """Get existing session or create a new one.
+
+        Args:
+            conversation_id: Unique conversation identifier.
+            user_id: The user who owns this conversation.
+            max_tokens: Maximum tokens for context window.
+
+        Returns:
+            WorkingMemory instance for the conversation.
+        """
+        if conversation_id not in self._sessions:
+            self._sessions[conversation_id] = WorkingMemory(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                max_tokens=max_tokens,
+            )
+        return self._sessions[conversation_id]
+
+    def get(self, conversation_id: str) -> WorkingMemory | None:
+        """Get an existing session.
+
+        Args:
+            conversation_id: The conversation identifier.
+
+        Returns:
+            WorkingMemory if found, None otherwise.
+        """
+        return self._sessions.get(conversation_id)
+
+    def delete(self, conversation_id: str) -> None:
+        """Delete a session.
+
+        Args:
+            conversation_id: The conversation to delete.
+        """
+        self._sessions.pop(conversation_id, None)
+
+    def clear_all(self) -> None:
+        """Clear all sessions."""
+        self._sessions.clear()
+
+    def list_sessions(self) -> list[str]:
+        """List all active session IDs.
+
+        Returns:
+            List of conversation IDs.
+        """
+        return list(self._sessions.keys())
