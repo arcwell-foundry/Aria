@@ -2,13 +2,15 @@
 
 import asyncio
 import logging
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.memory.episodic import Episode, EpisodicMemory
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,30 @@ class MemoryQueryResponse(BaseModel):
     page: int
     page_size: int
     has_more: bool
+
+
+# Request Models for Store Endpoints
+class CreateEpisodeRequest(BaseModel):
+    """Request body for creating a new episodic memory."""
+
+    event_type: str = Field(
+        ..., min_length=1, description="Type of event (meeting, call, email, etc.)"
+    )
+    content: str = Field(..., min_length=1, description="Event content/description")
+    participants: list[str] = Field(
+        default_factory=list, description="People involved in the event"
+    )
+    occurred_at: datetime | None = Field(
+        None, description="When the event occurred (defaults to now)"
+    )
+    context: dict[str, Any] = Field(default_factory=dict, description="Additional context metadata")
+
+
+class CreateEpisodeResponse(BaseModel):
+    """Response body for episode creation."""
+
+    id: str
+    message: str = "Episode created successfully"
 
 
 class MemoryQueryService:
@@ -353,3 +379,49 @@ async def query_memory(
         page_size=page_size,
         has_more=has_more,
     )
+
+
+@router.post("/episode", response_model=CreateEpisodeResponse, status_code=201)
+async def store_episode(
+    current_user: CurrentUser,
+    request: CreateEpisodeRequest,
+) -> CreateEpisodeResponse:
+    """Store a new episodic memory.
+
+    Creates an episode representing a past event or interaction.
+    Episodes are stored in Graphiti for temporal querying.
+
+    Args:
+        current_user: Authenticated user.
+        request: Episode creation request body.
+
+    Returns:
+        Created episode with ID.
+    """
+    # Build episode from request
+    now = datetime.now(UTC)
+    episode = Episode(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        event_type=request.event_type,
+        content=request.content,
+        participants=request.participants,
+        occurred_at=request.occurred_at or now,
+        recorded_at=now,
+        context=request.context,
+    )
+
+    # Store episode
+    memory = EpisodicMemory()
+    episode_id = await memory.store_episode(episode)
+
+    logger.info(
+        "Stored episode via API",
+        extra={
+            "episode_id": episode_id,
+            "user_id": current_user.id,
+            "event_type": request.event_type,
+        },
+    )
+
+    return CreateEpisodeResponse(id=episode_id)

@@ -457,3 +457,232 @@ class TestQueryMemoryIntegration:
         )
 
         assert response.status_code == 422
+
+
+class TestCreateEpisodeRequestModel:
+    """Tests for CreateEpisodeRequest Pydantic model."""
+
+    def test_create_episode_request_valid(self) -> None:
+        """Test creating a valid episode request."""
+        from src.api.routes.memory import CreateEpisodeRequest
+
+        request = CreateEpisodeRequest(
+            event_type="meeting",
+            content="Discussed Q3 budget with finance team",
+            participants=["John Smith", "Jane Doe"],
+            occurred_at=datetime(2024, 6, 15, 14, 0, 0, tzinfo=UTC),
+            context={"location": "Conference Room A"},
+        )
+
+        assert request.event_type == "meeting"
+        assert request.content == "Discussed Q3 budget with finance team"
+        assert len(request.participants) == 2
+        assert request.context["location"] == "Conference Room A"
+
+    def test_create_episode_request_minimal(self) -> None:
+        """Test creating episode with only required fields."""
+        from src.api.routes.memory import CreateEpisodeRequest
+
+        request = CreateEpisodeRequest(
+            event_type="note",
+            content="Quick note about project status",
+        )
+
+        assert request.event_type == "note"
+        assert request.content == "Quick note about project status"
+        assert request.participants == []
+        assert request.occurred_at is None
+        assert request.context == {}
+
+    def test_create_episode_request_empty_content_fails(self) -> None:
+        """Test that empty content raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateEpisodeRequest
+
+        with pytest.raises(ValidationError):
+            CreateEpisodeRequest(
+                event_type="meeting",
+                content="",
+            )
+
+    def test_create_episode_request_empty_event_type_fails(self) -> None:
+        """Test that empty event_type raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateEpisodeRequest
+
+        with pytest.raises(ValidationError):
+            CreateEpisodeRequest(
+                event_type="",
+                content="Some content",
+            )
+
+
+class TestCreateEpisodeResponseModel:
+    """Tests for CreateEpisodeResponse Pydantic model."""
+
+    def test_create_episode_response_valid(self) -> None:
+        """Test creating a valid episode response."""
+        from src.api.routes.memory import CreateEpisodeResponse
+
+        response = CreateEpisodeResponse(
+            id="episode-123",
+        )
+
+        assert response.id == "episode-123"
+        assert response.message == "Episode created successfully"
+
+    def test_create_episode_response_custom_message(self) -> None:
+        """Test creating episode response with custom message."""
+        from src.api.routes.memory import CreateEpisodeResponse
+
+        response = CreateEpisodeResponse(
+            id="episode-456",
+            message="Custom success message",
+        )
+
+        assert response.id == "episode-456"
+        assert response.message == "Custom success message"
+
+
+class TestStoreEpisodeEndpoint:
+    """Tests for POST /api/v1/memory/episode endpoint."""
+
+    def test_store_episode_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "meeting",
+                "content": "Test meeting content",
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_episodic_memory(self) -> Any:
+        """Fixture to mock EpisodicMemory."""
+        with patch("src.api.routes.memory.EpisodicMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.store_episode = AsyncMock(return_value="episode-id-123")
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_store_episode_success(
+        self, app_with_mocked_auth: Any, mock_episodic_memory: Any
+    ) -> None:
+        """Test successful episode creation."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "meeting",
+                "content": "Discussed Q3 budget with finance team",
+                "participants": ["John Smith"],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        assert data["message"] == "Episode created successfully"
+
+    def test_store_episode_with_all_fields(
+        self, app_with_mocked_auth: Any, mock_episodic_memory: Any
+    ) -> None:
+        """Test episode creation with all optional fields."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "call",
+                "content": "Sales call with prospect",
+                "participants": ["Alice", "Bob"],
+                "occurred_at": "2024-06-15T14:00:00Z",
+                "context": {"duration_minutes": 30, "call_type": "video"},
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+
+    def test_store_episode_validation_error_empty_content(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty content returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "meeting",
+                "content": "",  # Empty string should fail
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_episode_validation_error_empty_event_type(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty event_type returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "",  # Empty string should fail
+                "content": "Some content",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_episode_missing_required_fields(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that missing required fields returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/episode",
+            json={
+                "event_type": "meeting",
+                # Missing content
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
