@@ -13,7 +13,7 @@ semantic search capabilities.
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import EpisodicMemoryError
@@ -129,6 +129,49 @@ class EpisodicMemory:
 
         return "\n".join(parts)
 
+    def _parse_edge_to_episode(self, edge: Any, user_id: str) -> Episode | None:
+        """Parse a Graphiti edge into an Episode.
+
+        Args:
+            edge: The Graphiti edge object.
+            user_id: The expected user ID.
+
+        Returns:
+            Episode if parsing succeeds and matches user, None otherwise.
+        """
+        try:
+            fact = getattr(edge, "fact", "")
+            created_at = getattr(edge, "created_at", datetime.now(UTC))
+
+            # Parse structured content from fact
+            lines = fact.split("\n")
+            event_type = "unknown"
+            content = ""
+            participants: list[str] = []
+
+            for line in lines:
+                if line.startswith("Event Type:"):
+                    event_type = line.replace("Event Type:", "").strip()
+                elif line.startswith("Content:"):
+                    content = line.replace("Content:", "").strip()
+                elif line.startswith("Participants:"):
+                    participants_str = line.replace("Participants:", "").strip()
+                    participants = [p.strip() for p in participants_str.split(",") if p.strip()]
+
+            return Episode(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                event_type=event_type,
+                content=content.strip(),
+                participants=participants,
+                occurred_at=created_at if isinstance(created_at, datetime) else datetime.now(UTC),
+                recorded_at=datetime.now(UTC),
+                context={},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse edge to episode: {e}")
+            return None
+
     async def store_episode(self, episode: Episode) -> str:
         """Store an episode in memory.
 
@@ -201,9 +244,24 @@ class EpisodicMemory:
             List of Episode instances within the time range.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodicMemoryError: If the query fails.
         """
-        raise NotImplementedError("query_by_time_range not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+            query = f"episodes for user {user_id} between {start.isoformat()} and {end.isoformat()}"
+            results = await client.search(query)
+
+            episodes = []
+            for edge in results[:limit]:
+                episode = self._parse_edge_to_episode(edge, user_id)
+                if episode:
+                    episodes.append(episode)
+            return episodes
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to query episodes by time range")
+            raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_event_type(
         self, user_id: str, event_type: str, limit: int = 50
@@ -219,9 +277,24 @@ class EpisodicMemory:
             List of Episode instances matching the event type.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodicMemoryError: If the query fails.
         """
-        raise NotImplementedError("query_by_event_type not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+            query = f"{event_type} events for user {user_id}"
+            results = await client.search(query)
+
+            episodes = []
+            for edge in results[:limit]:
+                episode = self._parse_edge_to_episode(edge, user_id)
+                if episode and episode.event_type == event_type:
+                    episodes.append(episode)
+            return episodes
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to query episodes by event type")
+            raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_participant(
         self, user_id: str, participant: str, limit: int = 50
@@ -237,9 +310,28 @@ class EpisodicMemory:
             List of Episode instances involving the participant.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodicMemoryError: If the query fails.
         """
-        raise NotImplementedError("query_by_participant not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+            query = f"interactions with {participant} for user {user_id}"
+            results = await client.search(query)
+
+            episodes = []
+            participant_lower = participant.lower()
+            for edge in results[:limit]:
+                episode = self._parse_edge_to_episode(edge, user_id)
+                if episode and (
+                    any(participant_lower in p.lower() for p in episode.participants)
+                    or participant_lower in episode.content.lower()
+                ):
+                    episodes.append(episode)
+            return episodes
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to query episodes by participant")
+            raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def semantic_search(self, user_id: str, query: str, limit: int = 10) -> list[Episode]:
         """Search episodes using semantic similarity.
@@ -253,9 +345,24 @@ class EpisodicMemory:
             List of Episode instances semantically similar to the query.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodicMemoryError: If the search fails.
         """
-        raise NotImplementedError("semantic_search not yet implemented")
+        try:
+            client = await self._get_graphiti_client()
+            search_query = f"{query} (user: {user_id})"
+            results = await client.search(search_query)
+
+            episodes = []
+            for edge in results[:limit]:
+                episode = self._parse_edge_to_episode(edge, user_id)
+                if episode:
+                    episodes.append(episode)
+            return episodes
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to perform semantic search")
+            raise EpisodicMemoryError(f"Failed to search episodes: {e}") from e
 
     async def delete_episode(self, user_id: str, episode_id: str) -> None:
         """Delete an episode from memory.

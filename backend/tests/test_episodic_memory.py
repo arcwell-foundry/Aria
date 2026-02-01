@@ -1,7 +1,7 @@
 """Tests for episodic memory module."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -185,3 +185,87 @@ async def test_store_episode_generates_id_if_missing() -> None:
         # Should have generated a UUID
         assert result != ""
         assert len(result) > 0
+
+
+@pytest.mark.asyncio
+async def test_query_by_time_range_returns_episodes() -> None:
+    """Test query_by_time_range returns episodes in range."""
+    now = datetime.now(UTC)
+    start = now - timedelta(days=7)
+    end = now
+
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Event Type: meeting\nContent: First meeting"
+    mock_edge.created_at = now - timedelta(days=1)
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.query_by_time_range("user-456", start, end, limit=10)
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_query_by_event_type_filters_correctly() -> None:
+    """Test query_by_event_type returns only matching event types."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Event Type: meeting\nContent: Team sync"
+    mock_edge.created_at = datetime.now(UTC)
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.query_by_event_type("user-456", "meeting", limit=10)
+        assert isinstance(results, list)
+        call_args = mock_client.search.call_args
+        assert "meeting" in call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_query_by_participant_searches_correctly() -> None:
+    """Test query_by_participant searches for participant name."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Event Type: meeting\nParticipants: John Doe, Jane\nContent: Discussed project"
+    mock_edge.created_at = datetime.now(UTC)
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.query_by_participant("user-456", "John Doe", limit=10)
+        assert isinstance(results, list)
+        call_args = mock_client.search.call_args
+        assert "John Doe" in call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_queries_graphiti() -> None:
+    """Test semantic_search uses Graphiti's semantic search."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Event Type: meeting\nContent: Discussed Q1 revenue targets"
+    mock_edge.created_at = datetime.now(UTC)
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.semantic_search("user-456", "revenue goals discussion", limit=5)
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+        call_args = mock_client.search.call_args
+        assert "revenue goals discussion" in call_args[0][0]
