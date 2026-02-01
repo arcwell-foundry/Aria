@@ -2,10 +2,20 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
+
+
+@pytest.fixture
+def mock_graphiti_client() -> MagicMock:
+    """Create a mock GraphitiClient for testing."""
+    mock_instance = MagicMock()
+    mock_instance.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-fact-123"))
+    mock_instance.search = AsyncMock(return_value=[])
+    return mock_instance
 
 
 def test_fact_source_enum_values() -> None:
@@ -300,3 +310,59 @@ def test_semantic_memory_has_required_methods() -> None:
     assert hasattr(memory, "search_facts")
     assert hasattr(memory, "invalidate_fact")
     assert hasattr(memory, "delete_fact")
+
+
+@pytest.mark.asyncio
+async def test_add_fact_stores_in_graphiti(mock_graphiti_client: MagicMock) -> None:
+    """Test that add_fact stores fact in Graphiti."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John Doe",
+        predicate="works_at",
+        object="Acme Corp",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+    )
+
+    memory = SemanticMemory()
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_graphiti_client
+
+        result = await memory.add_fact(fact)
+
+        assert result == "fact-123"
+        mock_graphiti_client.add_episode.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_add_fact_generates_id_if_missing() -> None:
+    """Test that add_fact generates ID if not provided."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="",  # Empty ID
+        user_id="user-456",
+        subject="Jane",
+        predicate="title",
+        object="CEO",
+        confidence=0.90,
+        source=FactSource.CRM_IMPORT,
+        valid_from=now,
+    )
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="new-uuid"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        result = await memory.add_fact(fact)
+
+        # Should have generated a UUID
+        assert result != ""
+        assert len(result) > 0

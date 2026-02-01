@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from src.core.exceptions import FactNotFoundError, SemanticMemoryError
+from src.core.exceptions import FactNotFoundError, SemanticMemoryError  # noqa: F401
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -179,6 +179,110 @@ class SemanticMemory:
         except Exception as e:
             raise SemanticMemoryError(f"Failed to get Graphiti client: {e}") from e
 
+    def _build_fact_body(self, fact: SemanticFact) -> str:
+        """Build a structured fact body string for storage.
+
+        Args:
+            fact: The SemanticFact instance to serialize.
+
+        Returns:
+            Structured text representation of the fact.
+        """
+        parts = [
+            f"Subject: {fact.subject}",
+            f"Predicate: {fact.predicate}",
+            f"Object: {fact.object}",
+            f"Confidence: {fact.confidence}",
+            f"Source: {fact.source.value}",
+            f"Valid From: {fact.valid_from.isoformat()}",
+        ]
+
+        if fact.valid_to:
+            parts.append(f"Valid To: {fact.valid_to.isoformat()}")
+
+        return "\n".join(parts)
+
+    def _parse_edge_to_fact(self, edge: Any, user_id: str) -> SemanticFact | None:  # noqa: ARG002
+        """Parse a Graphiti edge into a SemanticFact.
+
+        Args:
+            edge: The Graphiti edge object.
+            user_id: The expected user ID.
+
+        Returns:
+            SemanticFact if parsing succeeds, None otherwise.
+        """
+        # Stub - will be properly implemented in Task 8
+        return None
+
+    async def _check_and_invalidate_contradictions(
+        self,
+        client: "Graphiti",
+        new_fact: SemanticFact,
+    ) -> None:
+        """Check for and invalidate contradicting facts.
+
+        Args:
+            client: The Graphiti client.
+            new_fact: The new fact being added.
+        """
+        try:
+            # Search for existing facts about the same subject-predicate
+            query = f"facts about {new_fact.subject} {new_fact.predicate}"
+            results = await client.search(query)
+
+            for edge in results:
+                existing_fact = self._parse_edge_to_fact(edge, new_fact.user_id)
+                if existing_fact and existing_fact.is_valid() and new_fact.contradicts(existing_fact):
+                    logger.info(
+                        "Invalidating contradicting fact",
+                        extra={
+                            "old_fact_id": existing_fact.id,
+                            "new_fact_id": new_fact.id,
+                        },
+                    )
+                    # Invalidate by updating in Neo4j
+                    await self._invalidate_in_neo4j(
+                        client,
+                        existing_fact.id,
+                        f"superseded by fact:{new_fact.id}",
+                    )
+
+        except Exception as e:
+            logger.warning(f"Failed to check contradictions: {e}")
+            # Continue with adding the fact even if contradiction check fails
+
+    async def _invalidate_in_neo4j(
+        self,
+        client: "Graphiti",
+        fact_id: str,
+        reason: str,
+    ) -> None:
+        """Mark a fact as invalidated in Neo4j.
+
+        Args:
+            client: The Graphiti client.
+            fact_id: The fact ID to invalidate.
+            reason: Reason for invalidation.
+        """
+        now = datetime.now(UTC)
+        query = """
+        MATCH (e:Episode)
+        WHERE e.name = $fact_name
+        SET e.invalidated_at = $invalidated_at,
+            e.invalidation_reason = $reason
+        RETURN e
+        """
+
+        await client.driver.execute_query(
+            query,
+            {
+                "fact_name": f"fact:{fact_id}",
+                "invalidated_at": now.isoformat(),
+                "reason": reason,
+            },
+        )
+
     async def add_fact(self, fact: SemanticFact) -> str:
         """Add a new fact to semantic memory.
 
@@ -194,7 +298,47 @@ class SemanticMemory:
         Raises:
             SemanticMemoryError: If storage fails.
         """
-        raise NotImplementedError("Will be implemented in next task")
+        try:
+            # Generate ID if not provided
+            fact_id = fact.id if fact.id else str(uuid.uuid4())
+
+            # Get Graphiti client
+            client = await self._get_graphiti_client()
+
+            # Check for contradicting facts and invalidate them
+            await self._check_and_invalidate_contradictions(client, fact)
+
+            # Build fact body
+            fact_body = self._build_fact_body(fact)
+
+            # Store in Graphiti
+            from graphiti_core.nodes import EpisodeType
+
+            await client.add_episode(
+                name=f"fact:{fact_id}",
+                episode_body=fact_body,
+                source=EpisodeType.text,
+                source_description=f"semantic_memory:{fact.user_id}:{fact.predicate}",
+                reference_time=fact.valid_from,
+            )
+
+            logger.info(
+                "Stored fact",
+                extra={
+                    "fact_id": fact_id,
+                    "user_id": fact.user_id,
+                    "subject": fact.subject,
+                    "predicate": fact.predicate,
+                },
+            )
+
+            return fact_id
+
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to store fact", extra={"fact_id": fact.id})
+            raise SemanticMemoryError(f"Failed to store fact: {e}") from e
 
     async def get_fact(self, user_id: str, fact_id: str) -> SemanticFact:
         """Retrieve a specific fact by ID.
