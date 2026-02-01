@@ -807,3 +807,172 @@ async def test_find_matching_workflow_prefers_higher_success_rate() -> None:
 
         assert workflow is not None
         assert workflow.id == "wf-high"
+
+
+@pytest.mark.asyncio
+async def test_list_workflows_returns_user_workflows() -> None:
+    """Test list_workflows returns workflows for user."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_or = MagicMock()
+    mock_select.or_.return_value = mock_or
+    mock_execute = MagicMock()
+    mock_or.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-1",
+            "user_id": "user-456",
+            "workflow_name": "workflow_1",
+            "description": "First workflow",
+            "trigger_conditions": {},
+            "steps": [],
+            "success_count": 10,
+            "failure_count": 2,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+        {
+            "id": "wf-2",
+            "user_id": "user-456",
+            "workflow_name": "workflow_2",
+            "description": "Second workflow",
+            "trigger_conditions": {},
+            "steps": [],
+            "success_count": 5,
+            "failure_count": 1,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        workflows = await memory.list_workflows(user_id="user-456")
+
+        assert len(workflows) == 2
+        assert workflows[0].id == "wf-1"
+        assert workflows[1].id == "wf-2"
+
+
+@pytest.mark.asyncio
+async def test_list_workflows_includes_shared_workflows() -> None:
+    """Test list_workflows includes shared workflows when include_shared is True."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_or = MagicMock()
+    mock_select.or_.return_value = mock_or
+    mock_execute = MagicMock()
+    mock_or.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-own",
+            "user_id": "user-456",
+            "workflow_name": "own_workflow",
+            "description": "Own workflow",
+            "trigger_conditions": {},
+            "steps": [],
+            "success_count": 10,
+            "failure_count": 2,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+        {
+            "id": "wf-shared",
+            "user_id": "other-user",
+            "workflow_name": "shared_workflow",
+            "description": "Shared workflow",
+            "trigger_conditions": {},
+            "steps": [],
+            "success_count": 50,
+            "failure_count": 5,
+            "is_shared": True,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        workflows = await memory.list_workflows(user_id="user-456", include_shared=True)
+
+        assert len(workflows) == 2
+        # Verify or_ was called for shared workflows
+        mock_select.or_.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_workflows_excludes_shared_when_disabled() -> None:
+    """Test list_workflows excludes shared workflows when include_shared is False."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    now = datetime.now(UTC)
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq = MagicMock()
+    mock_select.eq.return_value = mock_eq
+    mock_execute = MagicMock()
+    mock_eq.execute.return_value = mock_execute
+    mock_execute.data = [
+        {
+            "id": "wf-own",
+            "user_id": "user-456",
+            "workflow_name": "own_workflow",
+            "description": "Own workflow",
+            "trigger_conditions": {},
+            "steps": [],
+            "success_count": 10,
+            "failure_count": 2,
+            "is_shared": False,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        },
+    ]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        workflows = await memory.list_workflows(user_id="user-456", include_shared=False)
+
+        assert len(workflows) == 1
+        # Verify eq was called (not or_)
+        mock_select.eq.assert_called_once()

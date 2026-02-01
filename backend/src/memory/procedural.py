@@ -480,11 +480,11 @@ class ProceduralMemory:
             raise ProceduralMemoryError(f"Failed to record outcome: {e}") from e
 
     async def list_workflows(self, user_id: str, include_shared: bool = True) -> list[Workflow]:
-        """List all workflows for a user.
+        """List all workflows available to a user.
 
         Args:
             user_id: The user to list workflows for.
-            include_shared: Whether to include shared workflows.
+            include_shared: Whether to include shared workflows from other users.
 
         Returns:
             List of Workflow instances.
@@ -492,4 +492,40 @@ class ProceduralMemory:
         Raises:
             ProceduralMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            query = client.table("procedural_memories").select("*")
+
+            if include_shared:
+                # Get user's own workflows OR shared workflows
+                query = query.or_(f"user_id.eq.{user_id},is_shared.eq.true")
+            else:
+                # Only get user's own workflows
+                query = query.eq("user_id", user_id)
+
+            response = query.execute()
+
+            if not response.data:
+                return []
+
+            workflows = [Workflow.from_dict(row) for row in response.data]
+
+            logger.info(
+                "Listed workflows",
+                extra={
+                    "user_id": user_id,
+                    "include_shared": include_shared,
+                    "count": len(workflows),
+                },
+            )
+
+            return workflows
+
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to list workflows")
+            raise ProceduralMemoryError(f"Failed to list workflows: {e}") from e
