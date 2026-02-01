@@ -37,3 +37,13 @@ def test_episode_not_found_error_attributes() -> None:
     assert error.message == "Episode with ID 'ep-123' not found"
     assert error.code == "NOT_FOUND"
     assert error.status_code == 404
+
+
+def test_semantic_memory_error_attributes() -> None:
+    """Test SemanticMemoryError has correct attributes."""
+    from src.core.exceptions import SemanticMemoryError
+
+    error = SemanticMemoryError("Failed to store fact")
+    assert error.message == "Semantic memory operation failed: Failed to store fact"
+    assert error.code == "SEMANTIC_MEMORY_ERROR"
+    assert error.status_code == 500

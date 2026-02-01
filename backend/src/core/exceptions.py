@@ -225,3 +225,22 @@ class EpisodeNotFoundError(NotFoundError):
             episode_id: The ID of the episode that was not found.
         """
         super().__init__(resource="Episode", resource_id=episode_id)
+
+
+class SemanticMemoryError(ARIAException):
+    """Semantic memory operation error (500).
+
+    Used for failures when storing or retrieving facts from Graphiti.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize semantic memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Semantic memory operation failed: {message}",
+            code="SEMANTIC_MEMORY_ERROR",
+            status_code=500,
+        )
