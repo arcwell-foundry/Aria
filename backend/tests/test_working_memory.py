@@ -29,3 +29,34 @@ def test_count_tokens_returns_integer() -> None:
     assert isinstance(tokens, int)
     assert tokens > 0
     assert tokens < 100  # Sanity check for a short message
+
+
+def test_add_message_stores_message() -> None:
+    """Test that add_message stores a message and updates token count."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(role="user", content="Hello, ARIA!")
+
+    assert len(memory.messages) == 1
+    assert memory.messages[0]["role"] == "user"
+    assert memory.messages[0]["content"] == "Hello, ARIA!"
+    assert memory.context_tokens > 0
+
+
+def test_add_message_with_metadata() -> None:
+    """Test that add_message can include metadata."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(
+        role="assistant",
+        content="I can help you with that.",
+        metadata={"tool_calls": ["search"]},
+    )
+
+    assert memory.messages[0]["metadata"] == {"tool_calls": ["search"]}

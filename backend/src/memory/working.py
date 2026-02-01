@@ -43,3 +43,27 @@ class WorkingMemory:
     active_entities: dict[str, Any] = field(default_factory=dict)
     context_tokens: int = 0
     max_tokens: int = 100000
+
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Add a message to the conversation history.
+
+        Args:
+            role: The role of the message sender ('user', 'assistant', 'system').
+            content: The message content.
+            metadata: Optional metadata to attach to the message.
+        """
+        message: dict[str, Any] = {
+            "role": role,
+            "content": content,
+        }
+        if metadata:
+            message["metadata"] = metadata
+
+        message_tokens = count_tokens(content)
+        self.messages.append(message)
+        self.context_tokens += message_tokens
