@@ -66,3 +66,47 @@ class SemanticFact:
     valid_to: datetime | None = None
     invalidated_at: datetime | None = None
     invalidation_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize fact to a dictionary.
+
+        Returns:
+            Dictionary representation suitable for JSON serialization.
+        """
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "subject": self.subject,
+            "predicate": self.predicate,
+            "object": self.object,
+            "confidence": self.confidence,
+            "source": self.source.value,
+            "valid_from": self.valid_from.isoformat(),
+            "valid_to": self.valid_to.isoformat() if self.valid_to else None,
+            "invalidated_at": self.invalidated_at.isoformat() if self.invalidated_at else None,
+            "invalidation_reason": self.invalidation_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SemanticFact":
+        """Create a SemanticFact instance from a dictionary.
+
+        Args:
+            data: Dictionary containing fact data.
+
+        Returns:
+            SemanticFact instance with restored state.
+        """
+        return cls(
+            id=data["id"],
+            user_id=data["user_id"],
+            subject=data["subject"],
+            predicate=data["predicate"],
+            object=data["object"],
+            confidence=data["confidence"],
+            source=FactSource(data["source"]),
+            valid_from=datetime.fromisoformat(data["valid_from"]),
+            valid_to=datetime.fromisoformat(data["valid_to"]) if data.get("valid_to") else None,
+            invalidated_at=datetime.fromisoformat(data["invalidated_at"]) if data.get("invalidated_at") else None,
+            invalidation_reason=data.get("invalidation_reason"),
+        )
