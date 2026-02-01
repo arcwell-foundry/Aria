@@ -346,17 +346,68 @@ class ProceduralMemory:
     async def record_outcome(self, workflow_id: str, success: bool) -> None:
         """Record the outcome of a workflow execution.
 
-        Updates the success or failure count for the workflow.
+        Updates the success or failure count based on the result.
 
         Args:
-            workflow_id: The workflow ID.
-            success: True if execution succeeded, False otherwise.
+            workflow_id: The workflow that was executed.
+            success: True if execution succeeded, False if failed.
 
         Raises:
             WorkflowNotFoundError: If workflow doesn't exist.
-            ProceduralMemoryError: If recording fails.
+            ProceduralMemoryError: If update fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError, WorkflowNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            # Get current counts
+            response = (
+                client.table("procedural_memories")
+                .select("success_count, failure_count")
+                .eq("id", workflow_id)
+                .single()
+                .execute()
+            )
+
+            if response.data is None:
+                raise WorkflowNotFoundError(workflow_id)
+
+            current_success = response.data["success_count"]
+            current_failure = response.data["failure_count"]
+
+            # Update the appropriate counter
+            now = datetime.now(UTC)
+            if success:
+                update_data = {
+                    "success_count": current_success + 1,
+                    "updated_at": now.isoformat(),
+                }
+            else:
+                update_data = {
+                    "failure_count": current_failure + 1,
+                    "updated_at": now.isoformat(),
+                }
+
+            client.table("procedural_memories").update(update_data).eq("id", workflow_id).execute()
+
+            logger.info(
+                "Recorded workflow outcome",
+                extra={
+                    "workflow_id": workflow_id,
+                    "success": success,
+                    "new_success_count": current_success + (1 if success else 0),
+                    "new_failure_count": current_failure + (0 if success else 1),
+                },
+            )
+
+        except WorkflowNotFoundError:
+            raise
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to record outcome", extra={"workflow_id": workflow_id})
+            raise ProceduralMemoryError(f"Failed to record outcome: {e}") from e
 
     async def list_workflows(self, user_id: str, include_shared: bool = True) -> list[Workflow]:
         """List all workflows for a user.

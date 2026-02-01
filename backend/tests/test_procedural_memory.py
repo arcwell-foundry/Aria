@@ -519,3 +519,122 @@ async def test_delete_workflow_raises_not_found() -> None:
 
         with pytest.raises(WorkflowNotFoundError):
             await memory.delete_workflow(user_id="user-456", workflow_id="nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_increments_success_count() -> None:
+    """Test record_outcome increments success_count on success."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    # First, setup select to get current counts
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq_select = MagicMock()
+    mock_select.eq.return_value = mock_eq_select
+    mock_single = MagicMock()
+    mock_eq_select.single.return_value = mock_single
+    mock_execute_select = MagicMock()
+    mock_single.execute.return_value = mock_execute_select
+    mock_execute_select.data = {"success_count": 10, "failure_count": 2}
+
+    # Then, setup update
+    mock_update = MagicMock()
+    mock_table.update.return_value = mock_update
+    mock_eq_update = MagicMock()
+    mock_update.eq.return_value = mock_eq_update
+    mock_execute_update = MagicMock()
+    mock_eq_update.execute.return_value = mock_execute_update
+    mock_execute_update.data = [{"id": "wf-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        await memory.record_outcome(workflow_id="wf-123", success=True)
+
+        # Verify update was called with incremented success_count
+        mock_table.update.assert_called_once()
+        call_args = mock_table.update.call_args
+        assert call_args[0][0]["success_count"] == 11
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_increments_failure_count() -> None:
+    """Test record_outcome increments failure_count on failure."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    # Setup select
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq_select = MagicMock()
+    mock_select.eq.return_value = mock_eq_select
+    mock_single = MagicMock()
+    mock_eq_select.single.return_value = mock_single
+    mock_execute_select = MagicMock()
+    mock_single.execute.return_value = mock_execute_select
+    mock_execute_select.data = {"success_count": 10, "failure_count": 2}
+
+    # Setup update
+    mock_update = MagicMock()
+    mock_table.update.return_value = mock_update
+    mock_eq_update = MagicMock()
+    mock_update.eq.return_value = mock_eq_update
+    mock_execute_update = MagicMock()
+    mock_eq_update.execute.return_value = mock_execute_update
+    mock_execute_update.data = [{"id": "wf-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        await memory.record_outcome(workflow_id="wf-123", success=False)
+
+        # Verify update was called with incremented failure_count
+        mock_table.update.assert_called_once()
+        call_args = mock_table.update.call_args
+        assert call_args[0][0]["failure_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_raises_not_found() -> None:
+    """Test record_outcome raises WorkflowNotFoundError when not found."""
+    from unittest.mock import MagicMock, patch
+
+    from src.core.exceptions import WorkflowNotFoundError
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    mock_select = MagicMock()
+    mock_table.select.return_value = mock_select
+    mock_eq_select = MagicMock()
+    mock_select.eq.return_value = mock_eq_select
+    mock_single = MagicMock()
+    mock_eq_select.single.return_value = mock_single
+    mock_execute_select = MagicMock()
+    mock_single.execute.return_value = mock_execute_select
+    mock_execute_select.data = None
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(WorkflowNotFoundError):
+            await memory.record_outcome(workflow_id="nonexistent", success=True)
