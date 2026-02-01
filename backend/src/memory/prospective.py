@@ -13,8 +13,9 @@ integration with the rest of the application state.
 """
 
 import logging
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -123,3 +124,213 @@ class ProspectiveTask:
             completed_at=completed_at,
             created_at=created_at,
         )
+
+
+class ProspectiveMemory:
+    """Service class for prospective memory operations.
+
+    Provides async interface for storing, retrieving, and managing
+    future tasks and reminders. Uses Supabase as the underlying storage
+    for structured querying and status tracking.
+    """
+
+    def _get_supabase_client(self) -> Any:
+        """Get the Supabase client instance.
+
+        Returns:
+            Initialized Supabase client.
+
+        Raises:
+            ProspectiveMemoryError: If client initialization fails.
+        """
+        from src.core.exceptions import ProspectiveMemoryError
+        from src.db.supabase import SupabaseClient
+
+        try:
+            return SupabaseClient.get_client()
+        except Exception as e:
+            raise ProspectiveMemoryError(f"Failed to get Supabase client: {e}") from e
+
+    async def create_task(self, task: ProspectiveTask) -> str:
+        """Create a new task in prospective memory.
+
+        Args:
+            task: The ProspectiveTask instance to store.
+
+        Returns:
+            The ID of the stored task.
+
+        Raises:
+            ProspectiveMemoryError: If storage fails.
+        """
+        from src.core.exceptions import ProspectiveMemoryError
+
+        try:
+            task_id = task.id if task.id else str(uuid.uuid4())
+
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            data = {
+                "id": task_id,
+                "user_id": task.user_id,
+                "task": task.task,
+                "description": task.description,
+                "trigger_type": task.trigger_type.value,
+                "trigger_config": task.trigger_config,
+                "status": task.status.value,
+                "priority": task.priority.value,
+                "related_goal_id": task.related_goal_id,
+                "related_lead_id": task.related_lead_id,
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                "created_at": now.isoformat(),
+            }
+
+            response = client.table("prospective_memories").insert(data).execute()
+
+            if not response.data or len(response.data) == 0:
+                raise ProspectiveMemoryError("Failed to insert task")
+
+            logger.info(
+                "Created prospective task",
+                extra={
+                    "task_id": task_id,
+                    "user_id": task.user_id,
+                    "task": task.task,
+                    "trigger_type": task.trigger_type.value,
+                },
+            )
+
+            return task_id
+
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to create task")
+            raise ProspectiveMemoryError(f"Failed to create task: {e}") from e
+
+    async def get_task(self, user_id: str, task_id: str) -> ProspectiveTask:
+        """Retrieve a specific task by ID.
+
+        Args:
+            user_id: The user who owns the task.
+            task_id: The task ID.
+
+        Returns:
+            The requested ProspectiveTask.
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist.
+            ProspectiveMemoryError: If retrieval fails.
+        """
+        raise NotImplementedError
+
+    async def update_task(self, task: ProspectiveTask) -> None:
+        """Update an existing task.
+
+        Args:
+            task: The ProspectiveTask instance with updated data.
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist.
+            ProspectiveMemoryError: If update fails.
+        """
+        raise NotImplementedError
+
+    async def delete_task(self, user_id: str, task_id: str) -> None:
+        """Delete a task.
+
+        Args:
+            user_id: The user who owns the task.
+            task_id: The task ID to delete.
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist.
+            ProspectiveMemoryError: If deletion fails.
+        """
+        raise NotImplementedError
+
+    async def complete_task(self, user_id: str, task_id: str) -> None:
+        """Mark a task as completed.
+
+        Args:
+            user_id: The user who owns the task.
+            task_id: The task ID to complete.
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist.
+            ProspectiveMemoryError: If update fails.
+        """
+        raise NotImplementedError
+
+    async def cancel_task(self, user_id: str, task_id: str) -> None:
+        """Mark a task as cancelled.
+
+        Args:
+            user_id: The user who owns the task.
+            task_id: The task ID to cancel.
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist.
+            ProspectiveMemoryError: If update fails.
+        """
+        raise NotImplementedError
+
+    async def get_upcoming_tasks(self, user_id: str, limit: int = 10) -> list[ProspectiveTask]:
+        """Get upcoming tasks for a user.
+
+        Args:
+            user_id: The user to get tasks for.
+            limit: Maximum number of tasks to return.
+
+        Returns:
+            List of upcoming ProspectiveTask instances.
+
+        Raises:
+            ProspectiveMemoryError: If query fails.
+        """
+        raise NotImplementedError
+
+    async def get_overdue_tasks(self, user_id: str) -> list[ProspectiveTask]:
+        """Get overdue tasks for a user.
+
+        Args:
+            user_id: The user to get tasks for.
+
+        Returns:
+            List of overdue ProspectiveTask instances.
+
+        Raises:
+            ProspectiveMemoryError: If query fails.
+        """
+        raise NotImplementedError
+
+    async def get_tasks_for_goal(self, user_id: str, goal_id: str) -> list[ProspectiveTask]:
+        """Get all tasks related to a specific goal.
+
+        Args:
+            user_id: The user to get tasks for.
+            goal_id: The goal ID to filter by.
+
+        Returns:
+            List of ProspectiveTask instances related to the goal.
+
+        Raises:
+            ProspectiveMemoryError: If query fails.
+        """
+        raise NotImplementedError
+
+    async def get_tasks_for_lead(self, user_id: str, lead_id: str) -> list[ProspectiveTask]:
+        """Get all tasks related to a specific lead.
+
+        Args:
+            user_id: The user to get tasks for.
+            lead_id: The lead ID to filter by.
+
+        Returns:
+            List of ProspectiveTask instances related to the lead.
+
+        Raises:
+            ProspectiveMemoryError: If query fails.
+        """
+        raise NotImplementedError

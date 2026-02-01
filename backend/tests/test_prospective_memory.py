@@ -3,6 +3,9 @@
 import json
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
 
 
 def test_trigger_type_enum_values() -> None:
@@ -184,3 +187,131 @@ def test_prospective_task_from_dict_handles_datetime_objects() -> None:
 
     assert task.created_at == now
     assert task.completed_at is None
+
+
+def test_prospective_memory_has_required_methods() -> None:
+    """Test ProspectiveMemory class has required interface methods."""
+    from src.memory.prospective import ProspectiveMemory
+
+    memory = ProspectiveMemory()
+
+    assert hasattr(memory, "create_task")
+    assert hasattr(memory, "get_task")
+    assert hasattr(memory, "update_task")
+    assert hasattr(memory, "delete_task")
+    assert hasattr(memory, "complete_task")
+    assert hasattr(memory, "cancel_task")
+    assert hasattr(memory, "get_upcoming_tasks")
+    assert hasattr(memory, "get_overdue_tasks")
+    assert hasattr(memory, "get_tasks_for_goal")
+    assert hasattr(memory, "get_tasks_for_lead")
+
+
+@pytest.fixture
+def mock_supabase_client() -> MagicMock:
+    """Create a mock Supabase client for testing."""
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_create_task_stores_in_supabase(mock_supabase_client: MagicMock) -> None:
+    """Test that create_task stores task in Supabase."""
+    from unittest.mock import patch
+
+    from src.memory.prospective import (
+        ProspectiveMemory,
+        ProspectiveTask,
+        TaskPriority,
+        TaskStatus,
+        TriggerType,
+    )
+
+    now = datetime.now(UTC)
+    due_at = datetime(2026, 2, 15, 10, 0, 0, tzinfo=UTC)
+    task = ProspectiveTask(
+        id="",  # Will be generated
+        user_id="user-456",
+        task="Follow up with Dr. Smith",
+        description="Send research paper",
+        trigger_type=TriggerType.TIME,
+        trigger_config={"due_at": due_at.isoformat()},
+        status=TaskStatus.PENDING,
+        priority=TaskPriority.HIGH,
+        related_goal_id=None,
+        related_lead_id=None,
+        completed_at=None,
+        created_at=now,
+    )
+
+    memory = ProspectiveMemory()
+
+    mock_table = mock_supabase_client.table.return_value
+    mock_insert = MagicMock()
+    mock_table.insert.return_value = mock_insert
+    mock_execute = MagicMock()
+    mock_insert.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "generated-uuid-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_supabase_client
+
+        result = await memory.create_task(task)
+
+        assert result != ""
+        assert len(result) > 0
+        mock_supabase_client.table.assert_called_with("prospective_memories")
+        mock_table.insert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_task_generates_id_if_missing() -> None:
+    """Test that create_task generates ID if not provided."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.prospective import (
+        ProspectiveMemory,
+        ProspectiveTask,
+        TaskPriority,
+        TaskStatus,
+        TriggerType,
+    )
+
+    now = datetime.now(UTC)
+    task = ProspectiveTask(
+        id="",  # Empty ID
+        user_id="user-456",
+        task="Test task",
+        description=None,
+        trigger_type=TriggerType.TIME,
+        trigger_config={"due_at": now.isoformat()},
+        status=TaskStatus.PENDING,
+        priority=TaskPriority.MEDIUM,
+        related_goal_id=None,
+        related_lead_id=None,
+        completed_at=None,
+        created_at=now,
+    )
+
+    memory = ProspectiveMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_insert = MagicMock()
+    mock_table.insert.return_value = mock_insert
+    mock_execute = MagicMock()
+    mock_insert.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "new-generated-uuid"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        result = await memory.create_task(task)
+
+        assert result != ""
+        call_args = mock_table.insert.call_args
+        assert "id" in call_args[0][0]
+        assert call_args[0][0]["id"] != ""
