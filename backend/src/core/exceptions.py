@@ -175,3 +175,19 @@ class GraphitiConnectionError(ARIAException):
             code="GRAPHITI_CONNECTION_ERROR",
             status_code=503,
         )
+
+
+class MemoryError(ARIAException):
+    """Memory operation error (400)."""
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Memory operation failed: {message}",
+            code="MEMORY_ERROR",
+            status_code=400,
+        )
