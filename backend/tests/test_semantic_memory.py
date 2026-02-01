@@ -1,7 +1,7 @@
 """Tests for semantic memory module."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -127,3 +127,163 @@ def test_semantic_fact_from_dict_deserializes_correctly() -> None:
     assert fact.source == FactSource.CRM_IMPORT
     assert fact.valid_from == now
     assert fact.valid_to is None
+
+
+def test_semantic_fact_is_valid_returns_true_for_active_fact() -> None:
+    """Test is_valid returns True for facts within validity window."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=30),
+        valid_to=now + timedelta(days=30),
+    )
+
+    assert fact.is_valid() is True
+    assert fact.is_valid(as_of=now) is True
+
+
+def test_semantic_fact_is_valid_returns_false_for_invalidated() -> None:
+    """Test is_valid returns False for invalidated facts."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=30),
+        invalidated_at=now - timedelta(days=1),
+        invalidation_reason="superseded",
+    )
+
+    assert fact.is_valid() is False
+
+
+def test_semantic_fact_is_valid_returns_false_for_expired() -> None:
+    """Test is_valid returns False for facts past valid_to."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=60),
+        valid_to=now - timedelta(days=30),
+    )
+
+    assert fact.is_valid() is False
+
+
+def test_semantic_fact_is_valid_with_as_of_date() -> None:
+    """Test is_valid checks against specific point in time."""
+    now = datetime.now(UTC)
+    past = now - timedelta(days=15)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=30),
+        valid_to=now - timedelta(days=10),
+    )
+
+    # Valid at 15 days ago (within window)
+    assert fact.is_valid(as_of=past) is True
+    # Invalid now (past valid_to)
+    assert fact.is_valid() is False
+
+
+def test_semantic_fact_contradicts_detects_same_subject_predicate() -> None:
+    """Test contradicts detects facts with same subject-predicate but different object."""
+    now = datetime.now(UTC)
+    fact1 = SemanticFact(
+        id="fact-1",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+    )
+    fact2 = SemanticFact(
+        id="fact-2",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Other Corp",
+        confidence=0.90,
+        source=FactSource.EXTRACTED,
+        valid_from=now,
+    )
+
+    assert fact1.contradicts(fact2) is True
+    assert fact2.contradicts(fact1) is True
+
+
+def test_semantic_fact_contradicts_returns_false_for_different_predicate() -> None:
+    """Test contradicts returns False for different predicates."""
+    now = datetime.now(UTC)
+    fact1 = SemanticFact(
+        id="fact-1",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+    )
+    fact2 = SemanticFact(
+        id="fact-2",
+        user_id="user-456",
+        subject="John",
+        predicate="lives_in",
+        object="New York",
+        confidence=0.90,
+        source=FactSource.EXTRACTED,
+        valid_from=now,
+    )
+
+    assert fact1.contradicts(fact2) is False
+
+
+def test_semantic_fact_contradicts_returns_false_for_same_object() -> None:
+    """Test contradicts returns False when objects are the same."""
+    now = datetime.now(UTC)
+    fact1 = SemanticFact(
+        id="fact-1",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+    )
+    fact2 = SemanticFact(
+        id="fact-2",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.90,
+        source=FactSource.EXTRACTED,
+        valid_from=now,
+    )
+
+    assert fact1.contradicts(fact2) is False

@@ -110,3 +110,46 @@ class SemanticFact:
             invalidated_at=datetime.fromisoformat(data["invalidated_at"]) if data.get("invalidated_at") else None,
             invalidation_reason=data.get("invalidation_reason"),
         )
+
+    def is_valid(self, as_of: datetime | None = None) -> bool:
+        """Check if this fact is valid at a given point in time.
+
+        Args:
+            as_of: The point in time to check validity. Defaults to now.
+
+        Returns:
+            True if the fact is valid at the specified time.
+        """
+        check_time = as_of or datetime.now(UTC)
+
+        # Invalidated facts are never valid
+        if self.invalidated_at is not None:
+            return False
+
+        # Check if we're within the validity window
+        if check_time < self.valid_from:
+            return False
+
+        if self.valid_to is not None and check_time > self.valid_to:
+            return False
+
+        return True
+
+    def contradicts(self, other: "SemanticFact") -> bool:
+        """Check if this fact contradicts another fact.
+
+        Two facts contradict if they have the same subject and predicate
+        but different objects. This is used for contradiction detection
+        when adding new facts.
+
+        Args:
+            other: Another fact to compare against.
+
+        Returns:
+            True if the facts contradict each other.
+        """
+        return (
+            self.subject.lower() == other.subject.lower()
+            and self.predicate.lower() == other.predicate.lower()
+            and self.object.lower() != other.object.lower()
+        )
