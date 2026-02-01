@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
@@ -87,18 +87,20 @@ class MemoryQueryService:
             tasks.append(self._query_prospective(user_id, query, limit))
 
         # Execute all queries in parallel
-        results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+        results_lists: list[list[dict[str, Any]] | BaseException] = await asyncio.gather(
+            *tasks, return_exceptions=True
+        )
 
         # Flatten results, filtering out exceptions
         all_results: list[dict[str, Any]] = []
         for result in results_lists:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.warning("Memory query failed: %s", result)
                 continue
             all_results.extend(result)
 
         # Sort by relevance score descending
-        all_results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        all_results.sort(key=lambda x: float(x.get("relevance_score", 0.0)), reverse=True)
 
         # Apply offset and limit
         return all_results[offset : offset + limit]
@@ -193,7 +195,7 @@ class MemoryQueryService:
                     "timestamp": workflow.created_at,
                 })
 
-        results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
 
     async def _query_prospective(
@@ -224,7 +226,7 @@ class MemoryQueryService:
                     "timestamp": task.created_at,
                 })
 
-        results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
 
     def _calculate_text_relevance(self, query: str, text: str) -> float:
