@@ -1,5 +1,7 @@
 """Tests for working memory module."""
 
+import json
+
 from src.memory.working import WorkingMemory
 
 
@@ -200,3 +202,48 @@ def test_clear_goal_removes_goal() -> None:
 
     memory.clear_goal()
     assert memory.current_goal is None
+
+
+def test_to_dict_serializes_memory() -> None:
+    """Test that to_dict returns a serializable dictionary."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(role="user", content="Hello!")
+    memory.set_entity("contact", {"name": "John"})
+    memory.set_goal(objective="Find information")
+
+    data = memory.to_dict()
+
+    assert data["conversation_id"] == "conv-123"
+    assert data["user_id"] == "user-456"
+    assert len(data["messages"]) == 1
+    assert "contact" in data["active_entities"]
+    assert data["current_goal"]["objective"] == "Find information"
+
+    # Verify it's JSON serializable
+    json_str = json.dumps(data)
+    assert isinstance(json_str, str)
+
+
+def test_from_dict_deserializes_memory() -> None:
+    """Test that from_dict creates a WorkingMemory from a dictionary."""
+    data = {
+        "conversation_id": "conv-123",
+        "user_id": "user-456",
+        "messages": [{"role": "user", "content": "Hello!"}],
+        "active_entities": {"contact": {"name": "John"}},
+        "current_goal": {"objective": "Find info", "context": {}},
+        "context_tokens": 5,
+        "max_tokens": 100000,
+    }
+
+    memory = WorkingMemory.from_dict(data)
+
+    assert memory.conversation_id == "conv-123"
+    assert memory.user_id == "user-456"
+    assert len(memory.messages) == 1
+    assert memory.active_entities["contact"]["name"] == "John"
+    assert memory.current_goal["objective"] == "Find info"

@@ -146,3 +146,40 @@ class WorkingMemory:
     def clear_goal(self) -> None:
         """Clear the current goal."""
         self.current_goal = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize working memory to a dictionary.
+
+        Returns:
+            Dictionary representation suitable for JSON serialization.
+        """
+        return {
+            "conversation_id": self.conversation_id,
+            "user_id": self.user_id,
+            "messages": self.messages,
+            "active_entities": self.active_entities,
+            "current_goal": self.current_goal,
+            "context_tokens": self.context_tokens,
+            "max_tokens": self.max_tokens,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WorkingMemory":
+        """Create a WorkingMemory instance from a dictionary.
+
+        Args:
+            data: Dictionary containing working memory state.
+
+        Returns:
+            WorkingMemory instance with restored state.
+        """
+        memory = cls(
+            conversation_id=data["conversation_id"],
+            user_id=data["user_id"],
+            max_tokens=data.get("max_tokens", 100000),
+        )
+        memory.messages = data.get("messages", [])
+        memory.active_entities = data.get("active_entities", {})
+        memory.current_goal = data.get("current_goal")
+        memory.context_tokens = data.get("context_tokens", 0)
+        return memory
