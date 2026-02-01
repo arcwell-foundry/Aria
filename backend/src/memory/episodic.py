@@ -11,9 +11,15 @@ semantic search capabilities.
 """
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from src.core.exceptions import EpisodicMemoryError
+
+if TYPE_CHECKING:
+    from graphiti_core import Graphiti
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,47 @@ class EpisodicMemory:
     for temporal querying and semantic search capabilities.
     """
 
+    async def _get_graphiti_client(self) -> "Graphiti":
+        """Get the Graphiti client instance.
+
+        Returns:
+            Initialized Graphiti client.
+
+        Raises:
+            EpisodicMemoryError: If client initialization fails.
+        """
+        from src.db.graphiti import GraphitiClient
+
+        try:
+            return await GraphitiClient.get_instance()
+        except Exception as e:
+            raise EpisodicMemoryError(f"Failed to get Graphiti client: {e}") from e
+
+    def _build_episode_body(self, episode: Episode) -> str:
+        """Build a structured episode body string for storage.
+
+        Args:
+            episode: The Episode instance to serialize.
+
+        Returns:
+            Structured text representation of the episode.
+        """
+        parts = [
+            f"Event Type: {episode.event_type}",
+            f"Content: {episode.content}",
+            f"Occurred At: {episode.occurred_at.isoformat()}",
+            f"Recorded At: {episode.recorded_at.isoformat()}",
+        ]
+
+        if episode.participants:
+            parts.append(f"Participants: {', '.join(episode.participants)}")
+
+        if episode.context:
+            context_items = [f"{k}={v}" for k, v in episode.context.items()]
+            parts.append(f"Context: {'; '.join(context_items)}")
+
+        return "\n".join(parts)
+
     async def store_episode(self, episode: Episode) -> str:
         """Store an episode in memory.
 
@@ -92,9 +139,37 @@ class EpisodicMemory:
             The ID of the stored episode.
 
         Raises:
-            NotImplementedError: Method not yet implemented.
+            EpisodicMemoryError: If storage fails.
         """
-        raise NotImplementedError("store_episode not yet implemented")
+        try:
+            # Generate ID if not provided
+            episode_id = episode.id if episode.id else str(uuid.uuid4())
+
+            # Get Graphiti client
+            client = await self._get_graphiti_client()
+
+            # Build episode body
+            episode_body = self._build_episode_body(episode)
+
+            # Store in Graphiti
+            from graphiti_core.nodes import EpisodeType
+
+            await client.add_episode(
+                name=episode_id,
+                episode_body=episode_body,
+                source=EpisodeType.text,
+                source_description=f"episodic_memory:{episode.user_id}",
+                reference_time=episode.occurred_at,
+            )
+
+            logger.info(f"Stored episode {episode_id} for user {episode.user_id}")
+            return episode_id
+
+        except EpisodicMemoryError:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to store episode: {e}")
+            raise EpisodicMemoryError(f"Failed to store episode: {e}") from e
 
     async def get_episode(self, user_id: str, episode_id: str) -> Episode:
         """Retrieve a specific episode by ID.

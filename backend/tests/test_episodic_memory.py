@@ -2,8 +2,11 @@
 
 import json
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.memory.episodic import Episode
+import pytest
+
+from src.memory.episodic import Episode, EpisodicMemory
 
 
 def test_episode_initialization() -> None:
@@ -119,3 +122,66 @@ def test_episodic_memory_has_required_methods() -> None:
     assert hasattr(memory, "query_by_participant")
     assert hasattr(memory, "semantic_search")
     assert hasattr(memory, "delete_episode")
+
+
+@pytest.fixture
+def mock_graphiti_client() -> MagicMock:
+    """Create a mock GraphitiClient for testing."""
+    mock_instance = MagicMock()
+    mock_instance.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-ep-123"))
+    return mock_instance
+
+
+@pytest.mark.asyncio
+async def test_store_episode_stores_in_graphiti(mock_graphiti_client: MagicMock) -> None:
+    """Test that store_episode stores episode in Graphiti."""
+    now = datetime.now(UTC)
+    episode = Episode(
+        id="ep-123",
+        user_id="user-456",
+        event_type="meeting",
+        content="Team standup discussion",
+        participants=["Alice", "Bob"],
+        occurred_at=now,
+        recorded_at=now,
+        context={"room": "Conference A"},
+    )
+
+    memory = EpisodicMemory()
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_graphiti_client
+
+        result = await memory.store_episode(episode)
+
+        assert result == "ep-123"
+        mock_graphiti_client.add_episode.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_store_episode_generates_id_if_missing() -> None:
+    """Test that store_episode generates ID if not provided."""
+    now = datetime.now(UTC)
+    episode = Episode(
+        id="",  # Empty ID
+        user_id="user-456",
+        event_type="note",
+        content="Quick note",
+        participants=[],
+        occurred_at=now,
+        recorded_at=now,
+        context={},
+    )
+
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="new-uuid"))
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        result = await memory.store_episode(episode)
+
+        # Should have generated a UUID
+        assert result != ""
+        assert len(result) > 0
