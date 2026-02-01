@@ -129,14 +129,16 @@ class MemoryQueryService:
         results = []
         for episode in episodes:
             relevance = self._calculate_text_relevance(query, episode.content)
-            results.append({
-                "id": episode.id,
-                "memory_type": "episodic",
-                "content": f"[{episode.event_type}] {episode.content}",
-                "relevance_score": relevance,
-                "confidence": None,
-                "timestamp": episode.occurred_at,
-            })
+            results.append(
+                {
+                    "id": episode.id,
+                    "memory_type": "episodic",
+                    "content": f"[{episode.event_type}] {episode.content}",
+                    "relevance_score": relevance,
+                    "confidence": None,
+                    "timestamp": episode.occurred_at,
+                }
+            )
 
         return results
 
@@ -157,14 +159,16 @@ class MemoryQueryService:
             relevance = self._calculate_text_relevance(
                 query, f"{fact.subject} {fact.predicate} {fact.object}"
             )
-            results.append({
-                "id": fact.id,
-                "memory_type": "semantic",
-                "content": f"{fact.subject} {fact.predicate} {fact.object}",
-                "relevance_score": relevance,
-                "confidence": fact.confidence,
-                "timestamp": fact.valid_from,
-            })
+            results.append(
+                {
+                    "id": fact.id,
+                    "memory_type": "semantic",
+                    "content": f"{fact.subject} {fact.predicate} {fact.object}",
+                    "relevance_score": relevance,
+                    "confidence": fact.confidence,
+                    "timestamp": fact.valid_from,
+                }
+            )
 
         return results
 
@@ -186,14 +190,16 @@ class MemoryQueryService:
             text = f"{workflow.workflow_name} {workflow.description}"
             if query_lower in text.lower():
                 relevance = self._calculate_text_relevance(query, text)
-                results.append({
-                    "id": workflow.id,
-                    "memory_type": "procedural",
-                    "content": f"{workflow.workflow_name}: {workflow.description}",
-                    "relevance_score": relevance,
-                    "confidence": workflow.success_rate,
-                    "timestamp": workflow.created_at,
-                })
+                results.append(
+                    {
+                        "id": workflow.id,
+                        "memory_type": "procedural",
+                        "content": f"{workflow.workflow_name}: {workflow.description}",
+                        "relevance_score": relevance,
+                        "confidence": workflow.success_rate,
+                        "timestamp": workflow.created_at,
+                    }
+                )
 
         results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
@@ -217,14 +223,16 @@ class MemoryQueryService:
             text = f"{task.task} {task.description or ''}"
             if query_lower in text.lower():
                 relevance = self._calculate_text_relevance(query, text)
-                results.append({
-                    "id": task.id,
-                    "memory_type": "prospective",
-                    "content": f"[{task.status.value}] {task.task}",
-                    "relevance_score": relevance,
-                    "confidence": None,
-                    "timestamp": task.created_at,
-                })
+                results.append(
+                    {
+                        "id": task.id,
+                        "memory_type": "prospective",
+                        "content": f"[{task.status.value}] {task.task}",
+                        "relevance_score": relevance,
+                        "confidence": None,
+                        "timestamp": task.created_at,
+                    }
+                )
 
         results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
