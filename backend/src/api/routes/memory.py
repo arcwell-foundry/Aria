@@ -93,7 +93,7 @@ class MemoryQueryService:
         all_results: list[dict[str, Any]] = []
         for result in results_lists:
             if isinstance(result, Exception):
-                logger.warning(f"Memory query failed: {result}")
+                logger.warning("Memory query failed: %s", result)
                 continue
             all_results.extend(result)
 
@@ -280,8 +280,14 @@ async def query_memory(
     Returns:
         Paginated memory query results.
     """
-    # Validate memory types
+    # Validate and filter memory types
     valid_types = {"episodic", "semantic", "procedural", "prospective"}
+    invalid_types = [t for t in types if t not in valid_types]
+    if invalid_types:
+        logger.warning(
+            "Invalid memory types ignored in query",
+            extra={"invalid_types": invalid_types, "user_id": current_user.id},
+        )
     requested_types = [t for t in types if t in valid_types]
 
     if not requested_types:
@@ -332,7 +338,7 @@ async def query_memory(
 
     return MemoryQueryResponse(
         items=items,
-        total=len(items),  # Approximate - would need count query for exact
+        total=len(items),  # Count of items in current page (not total across all pages)
         page=page,
         page_size=page_size,
         has_more=has_more,
