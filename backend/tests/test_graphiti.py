@@ -98,9 +98,9 @@ async def test_initialization_failure_raises_connection_error() -> None:
 async def test_health_check_returns_true_when_connected() -> None:
     """Test that health_check returns True when client is connected."""
     mock_graphiti_instance = MagicMock()
-    # Mock the driver's verify_connectivity method
+    # Mock the driver's execute_query method
     mock_driver = MagicMock()
-    mock_driver.verify_connectivity = AsyncMock()
+    mock_driver.execute_query = AsyncMock(return_value=([], None, None))
     mock_graphiti_instance.driver = mock_driver
 
     GraphitiClient._instance = mock_graphiti_instance
@@ -109,7 +109,7 @@ async def test_health_check_returns_true_when_connected() -> None:
     result = await GraphitiClient.health_check()
 
     assert result is True
-    mock_driver.verify_connectivity.assert_called_once()
+    mock_driver.execute_query.assert_called_once_with("RETURN 1 AS health")
 
 
 @pytest.mark.asyncio

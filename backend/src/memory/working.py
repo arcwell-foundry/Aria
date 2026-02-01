@@ -94,10 +94,7 @@ class WorkingMemory:
         Returns:
             List of messages with only role and content fields.
         """
-        return [
-            {"role": msg["role"], "content": msg["content"]}
-            for msg in self.messages
-        ]
+        return [{"role": msg["role"], "content": msg["content"]} for msg in self.messages]
 
     def set_entity(self, key: str, value: Any) -> None:
         """Store an active entity in working memory.

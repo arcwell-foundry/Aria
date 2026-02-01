@@ -116,7 +116,8 @@ class GraphitiClient:
             return False
 
         try:
-            await cls._instance.driver.verify_connectivity()
+            # Execute a simple query to verify connectivity
+            await cls._instance.driver.execute_query("RETURN 1 AS health")
             return True
         except Exception as e:
             logger.warning(f"Graphiti health check failed: {e}")
