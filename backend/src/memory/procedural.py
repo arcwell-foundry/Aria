@@ -297,7 +297,34 @@ class ProceduralMemory:
             WorkflowNotFoundError: If workflow doesn't exist.
             ProceduralMemoryError: If deletion fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProceduralMemoryError, WorkflowNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("procedural_memories")
+                .delete()
+                .eq("id", workflow_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise WorkflowNotFoundError(workflow_id)
+
+            logger.info(
+                "Deleted workflow",
+                extra={"workflow_id": workflow_id, "user_id": user_id},
+            )
+
+        except WorkflowNotFoundError:
+            raise
+        except ProceduralMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to delete workflow", extra={"workflow_id": workflow_id})
+            raise ProceduralMemoryError(f"Failed to delete workflow: {e}") from e
 
     async def find_matching_workflow(
         self, user_id: str, context: dict[str, Any]

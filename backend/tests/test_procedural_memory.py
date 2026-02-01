@@ -459,3 +459,63 @@ async def test_update_workflow_raises_not_found() -> None:
 
         with pytest.raises(WorkflowNotFoundError):
             await memory.update_workflow(workflow)
+
+
+@pytest.mark.asyncio
+async def test_delete_workflow_removes_from_supabase() -> None:
+    """Test delete_workflow removes workflow from Supabase."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_delete = MagicMock()
+    mock_table.delete.return_value = mock_delete
+    mock_eq1 = MagicMock()
+    mock_delete.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_execute = MagicMock()
+    mock_eq2.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "wf-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        await memory.delete_workflow(user_id="user-456", workflow_id="wf-123")
+
+        mock_table.delete.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_workflow_raises_not_found() -> None:
+    """Test delete_workflow raises WorkflowNotFoundError when not found."""
+    from unittest.mock import MagicMock, patch
+
+    from src.core.exceptions import WorkflowNotFoundError
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_delete = MagicMock()
+    mock_table.delete.return_value = mock_delete
+    mock_eq1 = MagicMock()
+    mock_delete.eq.return_value = mock_eq1
+    mock_eq2 = MagicMock()
+    mock_eq1.eq.return_value = mock_eq2
+    mock_execute = MagicMock()
+    mock_eq2.execute.return_value = mock_execute
+    mock_execute.data = []  # No rows deleted
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(WorkflowNotFoundError):
+            await memory.delete_workflow(user_id="user-456", workflow_id="nonexistent")
