@@ -194,3 +194,22 @@ class WorkingMemoryError(ARIAException):
             code="WORKING_MEMORY_ERROR",
             status_code=400,
         )
+
+
+class EpisodicMemoryError(ARIAException):
+    """Episodic memory operation error (500).
+
+    Used for failures when storing or retrieving episodes from Graphiti.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize episodic memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Episodic memory operation failed: {message}",
+            code="EPISODIC_MEMORY_ERROR",
+            status_code=500,
+        )

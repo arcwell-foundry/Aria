@@ -17,3 +17,13 @@ def test_working_memory_error_attributes() -> None:
     assert error.message == "Memory operation failed: Context window exceeded"
     assert error.code == "WORKING_MEMORY_ERROR"
     assert error.status_code == 400
+
+
+def test_episodic_memory_error_attributes() -> None:
+    """Test EpisodicMemoryError has correct attributes."""
+    from src.core.exceptions import EpisodicMemoryError
+
+    error = EpisodicMemoryError("Failed to store episode")
+    assert error.message == "Episodic memory operation failed: Failed to store episode"
+    assert error.code == "EPISODIC_MEMORY_ERROR"
+    assert error.status_code == 500
