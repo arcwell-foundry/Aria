@@ -105,13 +105,20 @@ class MemoryQueryService:
         self,
         user_id: str,
         query: str,
-        start_date: datetime | None,
-        end_date: datetime | None,
+        _start_date: datetime | None,
+        _end_date: datetime | None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Query episodic memory."""
+        """Query episodic memory.
+
+        Note: _start_date and _end_date are accepted for API consistency but
+        date filtering is not yet implemented in EpisodicMemory.semantic_search().
+        """
+        # TODO: Add date filtering when EpisodicMemory.semantic_search supports it
         from src.memory.episodic import EpisodicMemory
 
+        # Note: Creating memory instance per request is acceptable - classes are
+        # lightweight and stateless. Could optimize with DI if needed in future.
         memory = EpisodicMemory()
         episodes = await memory.semantic_search(user_id, query, limit=limit)
 
@@ -197,6 +204,7 @@ class MemoryQueryService:
         from src.memory.prospective import ProspectiveMemory
 
         memory = ProspectiveMemory()
+        # Fetch extra to allow for filtering (query matching reduces result count)
         upcoming = await memory.get_upcoming_tasks(user_id, limit=limit * 2)
 
         results = []
