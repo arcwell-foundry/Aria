@@ -57,3 +57,25 @@ def test_fact_not_found_error_attributes() -> None:
     assert error.message == "Fact with ID 'fact-123' not found"
     assert error.code == "NOT_FOUND"
     assert error.status_code == 404
+
+
+def test_prospective_memory_error_initialization() -> None:
+    """Test ProspectiveMemoryError initializes correctly."""
+    from src.core.exceptions import ProspectiveMemoryError
+
+    error = ProspectiveMemoryError("Test error message")
+
+    assert str(error) == "Prospective memory operation failed: Test error message"
+    assert error.code == "PROSPECTIVE_MEMORY_ERROR"
+    assert error.status_code == 500
+
+
+def test_task_not_found_error_initialization() -> None:
+    """Test TaskNotFoundError initializes correctly."""
+    from src.core.exceptions import TaskNotFoundError
+
+    error = TaskNotFoundError("task-123")
+
+    assert "task-123" in str(error)
+    assert error.code == "NOT_FOUND"
+    assert error.status_code == 404

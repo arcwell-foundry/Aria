@@ -287,3 +287,34 @@ class WorkflowNotFoundError(NotFoundError):
             workflow_id: The ID of the workflow that was not found.
         """
         super().__init__(resource="Workflow", resource_id=workflow_id)
+
+
+class ProspectiveMemoryError(ARIAException):
+    """Prospective memory operation error (500).
+
+    Used for failures when storing or retrieving tasks from Supabase.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize prospective memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Prospective memory operation failed: {message}",
+            code="PROSPECTIVE_MEMORY_ERROR",
+            status_code=500,
+        )
+
+
+class TaskNotFoundError(NotFoundError):
+    """Prospective task not found error (404)."""
+
+    def __init__(self, task_id: str) -> None:
+        """Initialize task not found error.
+
+        Args:
+            task_id: The ID of the task that was not found.
+        """
+        super().__init__(resource="Task", resource_id=task_id)
