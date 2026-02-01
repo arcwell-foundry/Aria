@@ -222,7 +222,8 @@ class TestMemoryQueryResponseModel:
         assert response.has_more is True
 
 
-from unittest.mock import AsyncMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestMemoryQueryService:
@@ -341,3 +342,118 @@ class TestQueryMemoryEndpoint:
         )
         # Should fail validation - missing required q param
         assert response.status_code in [401, 422]  # 401 if auth fails first, 422 if validation
+
+
+class TestQueryMemoryIntegration:
+    """Integration tests for memory query endpoint."""
+
+    @pytest.fixture
+    def mock_auth(self) -> Any:
+        """Fixture to mock authentication."""
+        with patch("src.api.deps.get_current_user", new_callable=AsyncMock) as mock:
+            user = MagicMock()
+            user.id = "test-user-123"
+            mock.return_value = user
+            yield mock
+
+    @pytest.fixture
+    def mock_graphiti(self) -> Any:
+        """Fixture to mock Graphiti client."""
+        with patch("src.db.graphiti.GraphitiClient.get_instance", new_callable=AsyncMock) as mock:
+            client = MagicMock()
+            client.search = AsyncMock(return_value=[])
+            mock.return_value = client
+            yield mock
+
+    @pytest.fixture
+    def mock_supabase(self) -> Any:
+        """Fixture to mock Supabase client."""
+        with patch("src.db.supabase.SupabaseClient.get_client") as mock:
+            client = MagicMock()
+            # Mock table queries to return empty results
+            table_mock = MagicMock()
+            table_mock.select.return_value = table_mock
+            table_mock.eq.return_value = table_mock
+            table_mock.or_.return_value = table_mock
+            table_mock.order.return_value = table_mock
+            table_mock.limit.return_value = table_mock
+            table_mock.execute.return_value = MagicMock(data=[])
+            client.table.return_value = table_mock
+            mock.return_value = client
+            yield mock
+
+    def test_query_returns_paginated_response(
+        self, mock_auth: Any, mock_graphiti: Any, mock_supabase: Any
+    ) -> None:
+        """Test that query returns properly paginated response."""
+        from src.main import app
+
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/memory/query",
+            params={"q": "test query", "page": 1, "page_size": 10},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert "has_more" in data
+        assert data["page"] == 1
+        assert data["page_size"] == 10
+
+    def test_query_filters_by_memory_type(
+        self, mock_auth: Any, mock_graphiti: Any, mock_supabase: Any
+    ) -> None:
+        """Test that query respects memory type filter."""
+        from src.main import app
+
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/memory/query",
+            params={"q": "test", "types": ["procedural"]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+
+    def test_query_with_date_range(
+        self, mock_auth: Any, mock_graphiti: Any, mock_supabase: Any
+    ) -> None:
+        """Test that query accepts date range parameters."""
+        from src.main import app
+
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/memory/query",
+            params={
+                "q": "meeting",
+                "start_date": "2024-01-01T00:00:00Z",
+                "end_date": "2024-12-31T23:59:59Z",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+
+    def test_query_invalid_page_size(
+        self, mock_auth: Any, mock_graphiti: Any, mock_supabase: Any
+    ) -> None:
+        """Test that invalid page_size returns validation error."""
+        from src.main import app
+
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/memory/query",
+            params={"q": "test", "page_size": 500},  # Max is 100
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
