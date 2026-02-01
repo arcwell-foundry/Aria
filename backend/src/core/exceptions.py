@@ -256,3 +256,34 @@ class FactNotFoundError(NotFoundError):
             fact_id: The ID of the fact that was not found.
         """
         super().__init__(resource="Fact", resource_id=fact_id)
+
+
+class ProceduralMemoryError(ARIAException):
+    """Procedural memory operation error (500).
+
+    Used for failures when storing or retrieving workflows from Supabase.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize procedural memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Procedural memory operation failed: {message}",
+            code="PROCEDURAL_MEMORY_ERROR",
+            status_code=500,
+        )
+
+
+class WorkflowNotFoundError(NotFoundError):
+    """Workflow not found error (404)."""
+
+    def __init__(self, workflow_id: str) -> None:
+        """Initialize workflow not found error.
+
+        Args:
+            workflow_id: The ID of the workflow that was not found.
+        """
+        super().__init__(resource="Workflow", resource_id=workflow_id)
