@@ -87,3 +87,14 @@ class WorkingMemory:
             else:
                 # All messages are system messages, can't truncate further
                 break
+
+    def get_context_for_llm(self) -> list[dict[str, str]]:
+        """Get messages formatted for LLM consumption.
+
+        Returns:
+            List of messages with only role and content fields.
+        """
+        return [
+            {"role": msg["role"], "content": msg["content"]}
+            for msg in self.messages
+        ]

@@ -79,3 +79,41 @@ def test_add_message_truncates_when_exceeding_max_tokens() -> None:
     assert memory.context_tokens <= memory.max_tokens
     # First message should be removed
     assert not any(m["content"].startswith("First") for m in memory.messages)
+
+
+def test_get_context_for_llm_returns_formatted_messages() -> None:
+    """Test that get_context_for_llm returns properly formatted messages."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(role="system", content="You are ARIA.")
+    memory.add_message(role="user", content="Hello!")
+    memory.add_message(role="assistant", content="Hi there!")
+
+    context = memory.get_context_for_llm()
+
+    assert len(context) == 3
+    assert context[0] == {"role": "system", "content": "You are ARIA."}
+    assert context[1] == {"role": "user", "content": "Hello!"}
+    assert context[2] == {"role": "assistant", "content": "Hi there!"}
+
+
+def test_get_context_for_llm_excludes_metadata() -> None:
+    """Test that get_context_for_llm excludes internal metadata."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(
+        role="user",
+        content="Hello!",
+        metadata={"internal_id": "12345"},
+    )
+
+    context = memory.get_context_for_llm()
+
+    assert "metadata" not in context[0]
+    assert "internal_id" not in context[0]
