@@ -10,8 +10,15 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import EpisodicMemoryError, SemanticMemoryError
+from src.core.exceptions import EpisodicMemoryError, ProspectiveMemoryError, SemanticMemoryError
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.prospective import (
+    ProspectiveMemory,
+    ProspectiveTask,
+    TaskPriority,
+    TaskStatus,
+    TriggerType,
+)
 from src.memory.semantic import SOURCE_CONFIDENCE, FactSource, SemanticFact, SemanticMemory
 
 logger = logging.getLogger(__name__)
@@ -95,6 +102,27 @@ class CreateFactResponse(BaseModel):
 
     id: str
     message: str = "Fact created successfully"
+
+
+class CreateTaskRequest(BaseModel):
+    """Request body for creating a new prospective task."""
+
+    task: str = Field(..., min_length=1, description="Short task description")
+    description: str | None = Field(None, description="Detailed description")
+    trigger_type: Literal["time", "event", "condition"] = Field(..., description="Type of trigger")
+    trigger_config: dict[str, Any] = Field(..., description="Trigger-specific configuration")
+    priority: Literal["low", "medium", "high", "urgent"] = Field(
+        "medium", description="Task priority"
+    )
+    related_goal_id: str | None = Field(None, description="Optional linked goal ID")
+    related_lead_id: str | None = Field(None, description="Optional linked lead ID")
+
+
+class CreateTaskResponse(BaseModel):
+    """Response body for task creation."""
+
+    id: str
+    message: str = "Task created successfully"
 
 
 class MemoryQueryService:
@@ -516,3 +544,61 @@ async def store_fact(
     )
 
     return CreateFactResponse(id=fact_id)
+
+
+@router.post("/task", response_model=CreateTaskResponse, status_code=201)
+async def store_task(
+    current_user: CurrentUser,
+    request: CreateTaskRequest,
+) -> CreateTaskResponse:
+    """Store a new prospective task.
+
+    Creates a task representing a future action to be completed.
+    Tasks are stored in Supabase with trigger-based scheduling.
+
+    Args:
+        current_user: Authenticated user.
+        request: Task creation request body.
+
+    Returns:
+        Created task with ID.
+    """
+    # Build task from request
+    now = datetime.now(UTC)
+    task = ProspectiveTask(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        task=request.task,
+        description=request.description,
+        trigger_type=TriggerType(request.trigger_type),
+        trigger_config=request.trigger_config,
+        status=TaskStatus.PENDING,
+        priority=TaskPriority(request.priority),
+        related_goal_id=request.related_goal_id,
+        related_lead_id=request.related_lead_id,
+        completed_at=None,
+        created_at=now,
+    )
+
+    # Store task with error handling
+    memory = ProspectiveMemory()
+    try:
+        task_id = await memory.create_task(task)
+    except ProspectiveMemoryError as e:
+        logger.error(
+            "Failed to store task",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Memory storage unavailable") from None
+
+    logger.info(
+        "Stored task via API",
+        extra={
+            "task_id": task_id,
+            "user_id": current_user.id,
+            "task": request.task,
+            "trigger_type": request.trigger_type,
+        },
+    )
+
+    return CreateTaskResponse(id=task_id)

@@ -1070,3 +1070,341 @@ class TestStoreFactEndpoint:
         call_args = mock_semantic_memory.add_fact.call_args
         fact = call_args[0][0]
         assert fact.confidence == 0.75  # SOURCE_CONFIDENCE[EXTRACTED]
+
+
+class TestCreateTaskRequestModel:
+    """Tests for CreateTaskRequest Pydantic model."""
+
+    def test_create_task_request_valid(self) -> None:
+        """Test creating a valid task request."""
+        from src.api.routes.memory import CreateTaskRequest
+
+        request = CreateTaskRequest(
+            task="Follow up with client",
+            description="Send proposal review request",
+            trigger_type="time",
+            trigger_config={"due_at": "2024-07-01T10:00:00Z"},
+            priority="high",
+        )
+
+        assert request.task == "Follow up with client"
+        assert request.description == "Send proposal review request"
+        assert request.trigger_type == "time"
+        assert request.priority == "high"
+
+    def test_create_task_request_minimal(self) -> None:
+        """Test creating task with only required fields."""
+        from src.api.routes.memory import CreateTaskRequest
+
+        request = CreateTaskRequest(
+            task="Call John",
+            trigger_type="time",
+            trigger_config={"due_at": "2024-07-01T10:00:00Z"},
+        )
+
+        assert request.task == "Call John"
+        assert request.description is None
+        assert request.priority == "medium"  # default
+
+    def test_create_task_request_invalid_trigger_type(self) -> None:
+        """Test that invalid trigger_type raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateTaskRequest
+
+        with pytest.raises(ValidationError):
+            CreateTaskRequest(
+                task="Call John",
+                trigger_type="invalid",
+                trigger_config={},
+            )
+
+    def test_create_task_request_invalid_priority(self) -> None:
+        """Test that invalid priority raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateTaskRequest
+
+        with pytest.raises(ValidationError):
+            CreateTaskRequest(
+                task="Call John",
+                trigger_type="time",
+                trigger_config={"due_at": "2024-07-01T10:00:00Z"},
+                priority="invalid",
+            )
+
+    def test_create_task_request_empty_task_fails(self) -> None:
+        """Test that empty task raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateTaskRequest
+
+        with pytest.raises(ValidationError):
+            CreateTaskRequest(
+                task="",
+                trigger_type="time",
+                trigger_config={"due_at": "2024-07-01T10:00:00Z"},
+            )
+
+    def test_create_task_request_with_related_ids(self) -> None:
+        """Test creating task with related goal and lead IDs."""
+        from src.api.routes.memory import CreateTaskRequest
+
+        request = CreateTaskRequest(
+            task="Review proposal",
+            trigger_type="event",
+            trigger_config={"event_name": "contract_signed"},
+            related_goal_id="goal-123",
+            related_lead_id="lead-456",
+        )
+
+        assert request.related_goal_id == "goal-123"
+        assert request.related_lead_id == "lead-456"
+
+
+class TestCreateTaskResponseModel:
+    """Tests for CreateTaskResponse Pydantic model."""
+
+    def test_create_task_response_valid(self) -> None:
+        """Test creating a valid task response."""
+        from src.api.routes.memory import CreateTaskResponse
+
+        response = CreateTaskResponse(
+            id="task-123",
+        )
+
+        assert response.id == "task-123"
+        assert response.message == "Task created successfully"
+
+    def test_create_task_response_custom_message(self) -> None:
+        """Test creating task response with custom message."""
+        from src.api.routes.memory import CreateTaskResponse
+
+        response = CreateTaskResponse(
+            id="task-456",
+            message="Custom success message",
+        )
+
+        assert response.id == "task-456"
+        assert response.message == "Custom success message"
+
+
+class TestStoreTaskEndpoint:
+    """Tests for POST /api/v1/memory/task endpoint."""
+
+    def test_store_task_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Follow up with client",
+                "trigger_type": "time",
+                "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_prospective_memory(self) -> Any:
+        """Fixture to mock ProspectiveMemory."""
+        with patch("src.api.routes.memory.ProspectiveMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.create_task = AsyncMock(return_value="task-id-123")
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_store_task_success(
+        self, app_with_mocked_auth: Any, mock_prospective_memory: Any
+    ) -> None:
+        """Test successful task creation."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Follow up with client",
+                "trigger_type": "time",
+                "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        assert data["message"] == "Task created successfully"
+
+    def test_store_task_with_all_fields(
+        self, app_with_mocked_auth: Any, mock_prospective_memory: Any
+    ) -> None:
+        """Test task creation with all optional fields."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Review contract",
+                "description": "Review and provide feedback on partnership contract",
+                "trigger_type": "event",
+                "trigger_config": {"event_name": "document_received"},
+                "priority": "urgent",
+                "related_goal_id": "goal-123",
+                "related_lead_id": "lead-456",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+
+    def test_store_task_with_related_ids(
+        self, app_with_mocked_auth: Any, mock_prospective_memory: Any
+    ) -> None:
+        """Test task creation with related goal_id and lead_id."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Schedule demo",
+                "trigger_type": "condition",
+                "trigger_config": {"condition": "lead_qualified"},
+                "related_goal_id": "goal-abc",
+                "related_lead_id": "lead-xyz",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        # Verify create_task was called with related IDs
+        mock_prospective_memory.create_task.assert_called_once()
+        call_args = mock_prospective_memory.create_task.call_args
+        task = call_args[0][0]
+        assert task.related_goal_id == "goal-abc"
+        assert task.related_lead_id == "lead-xyz"
+
+    def test_store_task_validation_error_empty_task(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty task returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "",
+                "trigger_type": "time",
+                "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_task_validation_error_invalid_trigger_type(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that invalid trigger_type returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Call John",
+                "trigger_type": "invalid",
+                "trigger_config": {},
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_task_validation_error_invalid_priority(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that invalid priority returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Call John",
+                "trigger_type": "time",
+                "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+                "priority": "invalid",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_task_missing_required_fields(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that missing required fields returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/task",
+            json={
+                "task": "Call John",
+                # Missing trigger_type and trigger_config
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_task_storage_failure_returns_503(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that storage failure returns 503 Service Unavailable."""
+        from src.core.exceptions import ProspectiveMemoryError
+
+        with patch("src.api.routes.memory.ProspectiveMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.create_task = AsyncMock(
+                side_effect=ProspectiveMemoryError("Supabase connection failed")
+            )
+            mock_class.return_value = mock_instance
+
+            client = TestClient(app_with_mocked_auth)
+
+            response = client.post(
+                "/api/v1/memory/task",
+                json={
+                    "task": "Follow up with client",
+                    "trigger_type": "time",
+                    "trigger_config": {"due_at": "2024-07-01T10:00:00Z"},
+                },
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+            assert response.status_code == 503
+            data = response.json()
+            assert data["detail"] == "Memory storage unavailable"
