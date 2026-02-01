@@ -17,3 +17,15 @@ def test_working_memory_initialization() -> None:
     assert memory.active_entities == {}
     assert memory.context_tokens == 0
     assert memory.max_tokens == 100000
+
+
+def test_count_tokens_returns_integer() -> None:
+    """Test that count_tokens returns a token count."""
+    from src.memory.working import count_tokens
+
+    text = "Hello, this is a test message."
+    tokens = count_tokens(text)
+
+    assert isinstance(tokens, int)
+    assert tokens > 0
+    assert tokens < 100  # Sanity check for a short message

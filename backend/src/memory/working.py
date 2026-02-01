@@ -10,6 +10,23 @@ Working memory stores current conversation context in-memory, including:
 from dataclasses import dataclass, field
 from typing import Any
 
+import tiktoken
+
+# Use cl100k_base encoding (used by Claude and GPT-4)
+_ENCODING = tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens in a text string.
+
+    Args:
+        text: The text to count tokens for.
+
+    Returns:
+        Number of tokens in the text.
+    """
+    return len(_ENCODING.encode(text))
+
 
 @dataclass
 class WorkingMemory:
