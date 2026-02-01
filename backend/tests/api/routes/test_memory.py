@@ -714,3 +714,359 @@ class TestStoreEpisodeEndpoint:
             assert response.status_code == 503
             data = response.json()
             assert data["detail"] == "Memory storage unavailable"
+
+
+class TestCreateFactRequestModel:
+    """Tests for CreateFactRequest Pydantic model."""
+
+    def test_create_fact_request_valid(self) -> None:
+        """Test creating a valid fact request."""
+        from src.api.routes.memory import CreateFactRequest
+
+        request = CreateFactRequest(
+            subject="Acme Corp",
+            predicate="has_budget_cycle",
+            object="Q3",
+            source="user_stated",
+            confidence=0.95,
+        )
+
+        assert request.subject == "Acme Corp"
+        assert request.predicate == "has_budget_cycle"
+        assert request.object == "Q3"
+        assert request.source == "user_stated"
+        assert request.confidence == 0.95
+
+    def test_create_fact_request_minimal(self) -> None:
+        """Test creating fact with only required fields."""
+        from src.api.routes.memory import CreateFactRequest
+
+        request = CreateFactRequest(
+            subject="John",
+            predicate="works_at",
+            object="TechCorp",
+        )
+
+        assert request.subject == "John"
+        assert request.source is None
+        assert request.confidence is None
+
+    def test_create_fact_request_invalid_source(self) -> None:
+        """Test that invalid source raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateFactRequest
+
+        with pytest.raises(ValidationError):
+            CreateFactRequest(
+                subject="John",
+                predicate="works_at",
+                object="TechCorp",
+                source="invalid_source",
+            )
+
+    def test_create_fact_request_confidence_bounds(self) -> None:
+        """Test that confidence must be between 0 and 1."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateFactRequest
+
+        with pytest.raises(ValidationError):
+            CreateFactRequest(
+                subject="John",
+                predicate="works_at",
+                object="TechCorp",
+                confidence=1.5,
+            )
+
+    def test_create_fact_request_confidence_negative(self) -> None:
+        """Test that negative confidence raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateFactRequest
+
+        with pytest.raises(ValidationError):
+            CreateFactRequest(
+                subject="John",
+                predicate="works_at",
+                object="TechCorp",
+                confidence=-0.1,
+            )
+
+    def test_create_fact_request_empty_subject_fails(self) -> None:
+        """Test that empty subject raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import CreateFactRequest
+
+        with pytest.raises(ValidationError):
+            CreateFactRequest(
+                subject="",
+                predicate="works_at",
+                object="TechCorp",
+            )
+
+    def test_create_fact_request_with_validity_dates(self) -> None:
+        """Test creating fact with validity date range."""
+        from src.api.routes.memory import CreateFactRequest
+
+        request = CreateFactRequest(
+            subject="Acme Corp",
+            predicate="has_ceo",
+            object="John Smith",
+            valid_from=datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
+            valid_to=datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC),
+        )
+
+        assert request.valid_from is not None
+        assert request.valid_to is not None
+        assert request.valid_from.year == 2024
+
+
+class TestCreateFactResponseModel:
+    """Tests for CreateFactResponse Pydantic model."""
+
+    def test_create_fact_response_valid(self) -> None:
+        """Test creating a valid fact response."""
+        from src.api.routes.memory import CreateFactResponse
+
+        response = CreateFactResponse(
+            id="fact-123",
+        )
+
+        assert response.id == "fact-123"
+        assert response.message == "Fact created successfully"
+
+    def test_create_fact_response_custom_message(self) -> None:
+        """Test creating fact response with custom message."""
+        from src.api.routes.memory import CreateFactResponse
+
+        response = CreateFactResponse(
+            id="fact-456",
+            message="Custom success message",
+        )
+
+        assert response.id == "fact-456"
+        assert response.message == "Custom success message"
+
+
+class TestStoreFactEndpoint:
+    """Tests for POST /api/v1/memory/fact endpoint."""
+
+    def test_store_fact_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "Acme Corp",
+                "predicate": "has_budget_cycle",
+                "object": "Q3",
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_semantic_memory(self) -> Any:
+        """Fixture to mock SemanticMemory."""
+        with patch("src.api.routes.memory.SemanticMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.add_fact = AsyncMock(return_value="fact-id-123")
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_store_fact_success(
+        self, app_with_mocked_auth: Any, mock_semantic_memory: Any
+    ) -> None:
+        """Test successful fact creation."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "Acme Corp",
+                "predicate": "has_budget_cycle",
+                "object": "Q3",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        assert data["message"] == "Fact created successfully"
+
+    def test_store_fact_with_all_fields(
+        self, app_with_mocked_auth: Any, mock_semantic_memory: Any
+    ) -> None:
+        """Test fact creation with all optional fields."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "John Smith",
+                "predicate": "works_at",
+                "object": "Acme Corp",
+                "source": "crm_import",
+                "confidence": 0.9,
+                "valid_from": "2024-01-01T00:00:00Z",
+                "valid_to": "2024-12-31T23:59:59Z",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+
+    def test_store_fact_validation_error_empty_subject(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty subject returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "",
+                "predicate": "works_at",
+                "object": "TechCorp",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_fact_validation_error_invalid_source(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that invalid source returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "John",
+                "predicate": "works_at",
+                "object": "TechCorp",
+                "source": "invalid_source",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_fact_validation_error_confidence_out_of_bounds(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that confidence > 1.0 returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "John",
+                "predicate": "works_at",
+                "object": "TechCorp",
+                "confidence": 1.5,
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_fact_missing_required_fields(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that missing required fields returns 422."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "John",
+                "predicate": "works_at",
+                # Missing object
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_store_fact_storage_failure_returns_503(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that storage failure returns 503 Service Unavailable."""
+        from src.core.exceptions import SemanticMemoryError
+
+        with patch("src.api.routes.memory.SemanticMemory") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.add_fact = AsyncMock(
+                side_effect=SemanticMemoryError("Graphiti connection failed")
+            )
+            mock_class.return_value = mock_instance
+
+            client = TestClient(app_with_mocked_auth)
+
+            response = client.post(
+                "/api/v1/memory/fact",
+                json={
+                    "subject": "Acme Corp",
+                    "predicate": "has_budget_cycle",
+                    "object": "Q3",
+                },
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+            assert response.status_code == 503
+            data = response.json()
+            assert data["detail"] == "Memory storage unavailable"
+
+    def test_store_fact_uses_default_confidence_from_source(
+        self, app_with_mocked_auth: Any, mock_semantic_memory: Any
+    ) -> None:
+        """Test that default confidence is set based on source when not provided."""
+        client = TestClient(app_with_mocked_auth)
+
+        response = client.post(
+            "/api/v1/memory/fact",
+            json={
+                "subject": "Acme Corp",
+                "predicate": "has_budget_cycle",
+                "object": "Q3",
+                "source": "extracted",
+                # No confidence provided - should use SOURCE_CONFIDENCE[EXTRACTED] = 0.75
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 201
+        # Verify add_fact was called with the correct confidence
+        mock_semantic_memory.add_fact.assert_called_once()
+        call_args = mock_semantic_memory.add_fact.call_args
+        fact = call_args[0][0]
+        assert fact.confidence == 0.75  # SOURCE_CONFIDENCE[EXTRACTED]

@@ -10,8 +10,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import EpisodicMemoryError
+from src.core.exceptions import EpisodicMemoryError, SemanticMemoryError
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.semantic import SOURCE_CONFIDENCE, FactSource, SemanticFact, SemanticMemory
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,27 @@ class CreateEpisodeResponse(BaseModel):
 
     id: str
     message: str = "Episode created successfully"
+
+
+class CreateFactRequest(BaseModel):
+    """Request body for creating a new semantic fact."""
+
+    subject: str = Field(..., min_length=1, description="Entity the fact is about")
+    predicate: str = Field(..., min_length=1, description="Relationship type")
+    object: str = Field(..., min_length=1, description="Value or related entity")
+    source: Literal["user_stated", "extracted", "inferred", "crm_import", "web_research"] | None = (
+        Field(None, description="Source of the fact")
+    )
+    confidence: float | None = Field(None, ge=0.0, le=1.0, description="Confidence score")
+    valid_from: datetime | None = Field(None, description="When the fact became valid")
+    valid_to: datetime | None = Field(None, description="When the fact expires")
+
+
+class CreateFactResponse(BaseModel):
+    """Response body for fact creation."""
+
+    id: str
+    message: str = "Fact created successfully"
 
 
 class MemoryQueryService:
@@ -433,3 +455,64 @@ async def store_episode(
     )
 
     return CreateEpisodeResponse(id=episode_id)
+
+
+@router.post("/fact", response_model=CreateFactResponse, status_code=201)
+async def store_fact(
+    current_user: CurrentUser,
+    request: CreateFactRequest,
+) -> CreateFactResponse:
+    """Store a new semantic fact.
+
+    Creates a fact representing knowledge about an entity as a
+    subject-predicate-object triple. Facts are stored in Graphiti
+    for semantic search and temporal querying. Contradiction detection
+    is automatically performed.
+
+    Args:
+        current_user: Authenticated user.
+        request: Fact creation request body.
+
+    Returns:
+        Created fact with ID.
+    """
+    # Determine source and confidence
+    source = FactSource(request.source) if request.source else FactSource.USER_STATED
+    confidence = request.confidence if request.confidence is not None else SOURCE_CONFIDENCE[source]
+
+    # Build fact from request
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        subject=request.subject,
+        predicate=request.predicate,
+        object=request.object,
+        confidence=confidence,
+        source=source,
+        valid_from=request.valid_from or now,
+        valid_to=request.valid_to,
+    )
+
+    # Store fact with error handling
+    memory = SemanticMemory()
+    try:
+        fact_id = await memory.add_fact(fact)
+    except SemanticMemoryError as e:
+        logger.error(
+            "Failed to store fact",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Memory storage unavailable") from None
+
+    logger.info(
+        "Stored fact via API",
+        extra={
+            "fact_id": fact_id,
+            "user_id": current_user.id,
+            "subject": request.subject,
+            "predicate": request.predicate,
+        },
+    )
+
+    return CreateFactResponse(id=fact_id)
