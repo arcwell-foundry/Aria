@@ -247,3 +247,30 @@ def test_from_dict_deserializes_memory() -> None:
     assert len(memory.messages) == 1
     assert memory.active_entities["contact"]["name"] == "John"
     assert memory.current_goal["objective"] == "Find info"
+
+
+def test_clear_resets_all_state() -> None:
+    """Test that clear resets messages, entities, and goal."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.add_message(role="user", content="Hello!")
+    memory.set_entity("contact", {"name": "John"})
+    memory.set_goal(objective="Find information")
+
+    assert len(memory.messages) > 0
+    assert len(memory.active_entities) > 0
+    assert memory.current_goal is not None
+    assert memory.context_tokens > 0
+
+    memory.clear()
+
+    assert memory.messages == []
+    assert memory.active_entities == {}
+    assert memory.current_goal is None
+    assert memory.context_tokens == 0
+    # conversation_id and user_id should remain
+    assert memory.conversation_id == "conv-123"
+    assert memory.user_id == "user-456"

@@ -147,6 +147,17 @@ class WorkingMemory:
         """Clear the current goal."""
         self.current_goal = None
 
+    def clear(self) -> None:
+        """Clear all working memory state.
+
+        Resets messages, entities, goal, and token count.
+        Preserves conversation_id and user_id.
+        """
+        self.messages = []
+        self.active_entities = {}
+        self.current_goal = None
+        self.context_tokens = 0
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize working memory to a dictionary.
 
