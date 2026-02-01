@@ -162,3 +162,124 @@ def test_workflow_from_dict_deserializes_correctly() -> None:
     assert workflow.version == 1
     assert workflow.created_at == now
     assert workflow.updated_at == now
+
+
+# --- ProceduralMemory Service Tests ---
+
+import pytest
+from unittest.mock import MagicMock
+
+
+def test_procedural_memory_has_required_methods() -> None:
+    """Test ProceduralMemory class has required interface methods."""
+    from src.memory.procedural import ProceduralMemory
+
+    memory = ProceduralMemory()
+
+    # Check required async methods exist
+    assert hasattr(memory, "create_workflow")
+    assert hasattr(memory, "get_workflow")
+    assert hasattr(memory, "update_workflow")
+    assert hasattr(memory, "delete_workflow")
+    assert hasattr(memory, "find_matching_workflow")
+    assert hasattr(memory, "record_outcome")
+    assert hasattr(memory, "list_workflows")
+
+
+@pytest.fixture
+def mock_supabase_client() -> MagicMock:
+    """Create a mock Supabase client for testing."""
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_stores_in_supabase(mock_supabase_client: MagicMock) -> None:
+    """Test that create_workflow stores workflow in Supabase."""
+    from unittest.mock import patch
+
+    from src.memory.procedural import ProceduralMemory, Workflow
+
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id="",  # Will be generated
+        user_id="user-456",
+        workflow_name="follow_up_sequence",
+        description="Standard follow-up",
+        trigger_conditions={"event": "meeting_completed"},
+        steps=[{"action": "send_email", "template": "follow_up_1"}],
+        success_count=0,
+        failure_count=0,
+        is_shared=False,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    memory = ProceduralMemory()
+
+    # Setup mock response
+    mock_table = mock_supabase_client.table.return_value
+    mock_insert = MagicMock()
+    mock_table.insert.return_value = mock_insert
+    mock_execute = MagicMock()
+    mock_insert.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "generated-uuid-123"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_supabase_client
+
+        result = await memory.create_workflow(workflow)
+
+        assert result != ""
+        assert len(result) > 0
+        mock_supabase_client.table.assert_called_with("procedural_memories")
+        mock_table.insert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_generates_id_if_missing() -> None:
+    """Test that create_workflow generates ID if not provided."""
+    from unittest.mock import MagicMock, patch
+
+    from src.memory.procedural import ProceduralMemory, Workflow
+
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id="",  # Empty ID
+        user_id="user-456",
+        workflow_name="test_workflow",
+        description="Test",
+        trigger_conditions={},
+        steps=[],
+        success_count=0,
+        failure_count=0,
+        is_shared=False,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_insert = MagicMock()
+    mock_table.insert.return_value = mock_insert
+    mock_execute = MagicMock()
+    mock_insert.execute.return_value = mock_execute
+    mock_execute.data = [{"id": "new-generated-uuid"}]
+
+    with patch.object(memory, "_get_supabase_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        result = await memory.create_workflow(workflow)
+
+        assert result != ""
+        # Verify the insert was called with a generated UUID
+        call_args = mock_table.insert.call_args
+        assert "id" in call_args[0][0]
+        assert call_args[0][0]["id"] != ""
