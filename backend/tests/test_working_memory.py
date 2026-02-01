@@ -60,3 +60,22 @@ def test_add_message_with_metadata() -> None:
     )
 
     assert memory.messages[0]["metadata"] == {"tool_calls": ["search"]}
+
+
+def test_add_message_truncates_when_exceeding_max_tokens() -> None:
+    """Test that old messages are removed when context exceeds max tokens."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+        max_tokens=15,  # Very small for testing (each message is ~6-8 tokens)
+    )
+
+    # Add messages that will exceed the limit
+    memory.add_message(role="user", content="First message with some content.")
+    memory.add_message(role="assistant", content="Second message with more content.")
+    memory.add_message(role="user", content="Third message that should trigger truncation.")
+
+    # Should have truncated old messages
+    assert memory.context_tokens <= memory.max_tokens
+    # First message should be removed
+    assert not any(m["content"].startswith("First") for m in memory.messages)

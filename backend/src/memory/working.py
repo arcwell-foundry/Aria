@@ -52,6 +52,9 @@ class WorkingMemory:
     ) -> None:
         """Add a message to the conversation history.
 
+        Automatically truncates old messages if context window is exceeded.
+        System messages are preserved during truncation.
+
         Args:
             role: The role of the message sender ('user', 'assistant', 'system').
             content: The message content.
@@ -67,3 +70,20 @@ class WorkingMemory:
         message_tokens = count_tokens(content)
         self.messages.append(message)
         self.context_tokens += message_tokens
+
+        # Truncate old messages if exceeding max tokens
+        self._truncate_if_needed()
+
+    def _truncate_if_needed(self) -> None:
+        """Remove oldest non-system messages until under token limit."""
+        while self.context_tokens > self.max_tokens and len(self.messages) > 1:
+            # Find first non-system message to remove
+            for i, msg in enumerate(self.messages):
+                if msg["role"] != "system":
+                    removed_tokens = count_tokens(msg["content"])
+                    self.messages.pop(i)
+                    self.context_tokens -= removed_tokens
+                    break
+            else:
+                # All messages are system messages, can't truncate further
+                break
