@@ -5,8 +5,10 @@ import logging
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
+
+from src.api.deps import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -245,3 +247,93 @@ class MemoryQueryService:
 
         overlap = len(query_words & text_words)
         return min(1.0, overlap / len(query_words))
+
+
+@router.get("/query", response_model=MemoryQueryResponse)
+async def query_memory(
+    current_user: CurrentUser,
+    q: str = Query(..., min_length=1, description="Search query string"),
+    types: list[str] = Query(
+        default=["episodic", "semantic"],
+        description="Memory types to search",
+    ),
+    start_date: datetime | None = Query(None, description="Start of time range filter"),
+    end_date: datetime | None = Query(None, description="End of time range filter"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+) -> MemoryQueryResponse:
+    """Query across multiple memory types.
+
+    Searches episodic, semantic, procedural, and/or prospective memories
+    based on the provided query string. Returns ranked results sorted by
+    relevance score.
+
+    Args:
+        current_user: Authenticated user.
+        q: Search query string.
+        types: List of memory types to search.
+        start_date: Optional start of time range filter.
+        end_date: Optional end of time range filter.
+        page: Page number (1-indexed).
+        page_size: Number of results per page.
+
+    Returns:
+        Paginated memory query results.
+    """
+    # Validate memory types
+    valid_types = {"episodic", "semantic", "procedural", "prospective"}
+    requested_types = [t for t in types if t in valid_types]
+
+    if not requested_types:
+        requested_types = ["episodic", "semantic"]
+
+    # Calculate offset
+    offset = (page - 1) * page_size
+
+    # Query memories
+    service = MemoryQueryService()
+    # Request extra to determine has_more
+    results = await service.query(
+        user_id=current_user.id,
+        query=q,
+        memory_types=requested_types,
+        start_date=start_date,
+        end_date=end_date,
+        limit=page_size + 1,  # Get one extra to check has_more
+        offset=offset,
+    )
+
+    # Check if there are more results
+    has_more = len(results) > page_size
+    results = results[:page_size]
+
+    # Convert to response models
+    items = [
+        MemoryQueryResult(
+            id=r["id"],
+            memory_type=r["memory_type"],
+            content=r["content"],
+            relevance_score=r["relevance_score"],
+            confidence=r["confidence"],
+            timestamp=r["timestamp"],
+        )
+        for r in results
+    ]
+
+    logger.info(
+        "Memory query executed",
+        extra={
+            "user_id": current_user.id,
+            "query": q,
+            "types": requested_types,
+            "results_count": len(items),
+        },
+    )
+
+    return MemoryQueryResponse(
+        items=items,
+        total=len(items),  # Approximate - would need count query for exact
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+    )

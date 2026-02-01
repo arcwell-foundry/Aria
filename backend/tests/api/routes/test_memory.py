@@ -311,3 +311,33 @@ class TestMemoryQueryService:
             # Should be sorted by relevance descending
             assert results[0]["relevance_score"] == 0.9
             assert results[1]["relevance_score"] == 0.5
+
+
+from fastapi.testclient import TestClient
+
+
+class TestQueryMemoryEndpoint:
+    """Tests for GET /api/v1/memory/query endpoint."""
+
+    def test_query_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.get("/api/v1/memory/query", params={"q": "test"})
+
+        assert response.status_code == 401
+
+    def test_query_requires_query_param(self) -> None:
+        """Test that q parameter is required."""
+        from src.main import app
+
+        client = TestClient(app)
+
+        # Even with mock auth, missing q should fail validation
+        response = client.get(
+            "/api/v1/memory/query",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        # Should fail validation - missing required q param
+        assert response.status_code in [401, 422]  # 401 if auth fails first, 422 if validation

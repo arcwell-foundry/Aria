@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
-from src.api.routes import auth
+from src.api.routes import auth, memory
 from src.core.exceptions import ARIAException
 
 # Configure logging
@@ -73,6 +73,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(memory.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
