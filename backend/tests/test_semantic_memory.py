@@ -546,3 +546,40 @@ async def test_invalidate_fact_raises_not_found() -> None:
                 fact_id="nonexistent",
                 reason="test",
             )
+
+
+@pytest.mark.asyncio
+async def test_delete_fact_removes_from_graphiti() -> None:
+    """Test delete_fact permanently removes fact from Graphiti."""
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"deleted": 1}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        await memory.delete_fact(user_id="user-456", fact_id="fact-123")
+        mock_driver.execute_query.assert_called_once()
+        # Verify DETACH DELETE is used
+        call_args = mock_driver.execute_query.call_args
+        assert "DETACH DELETE" in call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_delete_fact_raises_not_found() -> None:
+    """Test delete_fact raises FactNotFoundError when not found."""
+    from src.core.exceptions import FactNotFoundError
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"deleted": 0}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        with pytest.raises(FactNotFoundError):
+            await memory.delete_fact(user_id="user-456", fact_id="nonexistent")

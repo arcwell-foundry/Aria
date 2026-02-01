@@ -683,4 +683,39 @@ class SemanticMemory:
             FactNotFoundError: If fact doesn't exist.
             SemanticMemoryError: If deletion fails.
         """
-        raise NotImplementedError("Will be implemented in later task")
+        try:
+            client = await self._get_graphiti_client()
+
+            # Delete fact node by name
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $fact_name
+            DETACH DELETE e
+            RETURN count(e) as deleted
+            """
+
+            fact_name = f"fact:{fact_id}"
+
+            result = await client.driver.execute_query(
+                query,
+                {"fact_name": fact_name},
+            )
+
+            records = result[0] if result else []
+            deleted_count = records[0]["deleted"] if records else 0
+
+            if deleted_count == 0:
+                raise FactNotFoundError(fact_id)
+
+            logger.info(
+                "Deleted fact",
+                extra={"fact_id": fact_id, "user_id": user_id},
+            )
+
+        except FactNotFoundError:
+            raise
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to delete fact", extra={"fact_id": fact_id})
+            raise SemanticMemoryError(f"Failed to delete fact: {e}") from e
