@@ -169,3 +169,34 @@ def test_remove_entity_removes_entity() -> None:
 
     memory.remove_entity("temp")
     assert "temp" not in memory.active_entities
+
+
+def test_set_goal_stores_goal() -> None:
+    """Test that set_goal stores the current goal."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.set_goal(
+        objective="Schedule a meeting with John",
+        context={"contact_id": "john-123"},
+    )
+
+    assert memory.current_goal is not None
+    assert memory.current_goal["objective"] == "Schedule a meeting with John"
+    assert memory.current_goal["context"]["contact_id"] == "john-123"
+
+
+def test_clear_goal_removes_goal() -> None:
+    """Test that clear_goal removes the current goal."""
+    memory = WorkingMemory(
+        conversation_id="conv-123",
+        user_id="user-456",
+    )
+
+    memory.set_goal(objective="Some task")
+    assert memory.current_goal is not None
+
+    memory.clear_goal()
+    assert memory.current_goal is None

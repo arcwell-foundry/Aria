@@ -126,3 +126,23 @@ class WorkingMemory:
             key: The entity identifier to remove.
         """
         self.active_entities.pop(key, None)
+
+    def set_goal(
+        self,
+        objective: str,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """Set the current conversation goal.
+
+        Args:
+            objective: Description of what the user wants to achieve.
+            context: Additional context related to the goal.
+        """
+        self.current_goal = {
+            "objective": objective,
+            "context": context or {},
+        }
+
+    def clear_goal(self) -> None:
+        """Clear the current goal."""
+        self.current_goal = None
