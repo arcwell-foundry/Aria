@@ -223,7 +223,32 @@ class ProspectiveMemory:
             TaskNotFoundError: If task doesn't exist.
             ProspectiveMemoryError: If retrieval fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError, TaskNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .select("*")
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+
+            if response.data is None:
+                raise TaskNotFoundError(task_id)
+
+            return ProspectiveTask.from_dict(response.data)
+
+        except TaskNotFoundError:
+            raise
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get task", extra={"task_id": task_id})
+            raise ProspectiveMemoryError(f"Failed to get task: {e}") from e
 
     async def update_task(self, task: ProspectiveTask) -> None:
         """Update an existing task.
@@ -235,7 +260,50 @@ class ProspectiveMemory:
             TaskNotFoundError: If task doesn't exist.
             ProspectiveMemoryError: If update fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError, TaskNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            data = {
+                "task": task.task,
+                "description": task.description,
+                "trigger_type": task.trigger_type.value,
+                "trigger_config": task.trigger_config,
+                "status": task.status.value,
+                "priority": task.priority.value,
+                "related_goal_id": task.related_goal_id,
+                "related_lead_id": task.related_lead_id,
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            }
+
+            response = (
+                client.table("prospective_memories")
+                .update(data)
+                .eq("id", task.id)
+                .eq("user_id", task.user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise TaskNotFoundError(task.id)
+
+            logger.info(
+                "Updated prospective task",
+                extra={
+                    "task_id": task.id,
+                    "user_id": task.user_id,
+                    "status": task.status.value,
+                },
+            )
+
+        except TaskNotFoundError:
+            raise
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update task", extra={"task_id": task.id})
+            raise ProspectiveMemoryError(f"Failed to update task: {e}") from e
 
     async def delete_task(self, user_id: str, task_id: str) -> None:
         """Delete a task.
@@ -248,10 +316,39 @@ class ProspectiveMemory:
             TaskNotFoundError: If task doesn't exist.
             ProspectiveMemoryError: If deletion fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError, TaskNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .delete()
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise TaskNotFoundError(task_id)
+
+            logger.info(
+                "Deleted prospective task",
+                extra={"task_id": task_id, "user_id": user_id},
+            )
+
+        except TaskNotFoundError:
+            raise
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to delete task", extra={"task_id": task_id})
+            raise ProspectiveMemoryError(f"Failed to delete task: {e}") from e
 
     async def complete_task(self, user_id: str, task_id: str) -> None:
         """Mark a task as completed.
+
+        Sets the task status to 'completed' and records the completion time.
 
         Args:
             user_id: The user who owns the task.
@@ -261,10 +358,45 @@ class ProspectiveMemory:
             TaskNotFoundError: If task doesn't exist.
             ProspectiveMemoryError: If update fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError, TaskNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            data = {
+                "status": TaskStatus.COMPLETED.value,
+                "completed_at": now.isoformat(),
+            }
+
+            response = (
+                client.table("prospective_memories")
+                .update(data)
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise TaskNotFoundError(task_id)
+
+            logger.info(
+                "Completed prospective task",
+                extra={"task_id": task_id, "user_id": user_id},
+            )
+
+        except TaskNotFoundError:
+            raise
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to complete task", extra={"task_id": task_id})
+            raise ProspectiveMemoryError(f"Failed to complete task: {e}") from e
 
     async def cancel_task(self, user_id: str, task_id: str) -> None:
         """Mark a task as cancelled.
+
+        Sets the task status to 'cancelled'.
 
         Args:
             user_id: The user who owns the task.
@@ -274,63 +406,218 @@ class ProspectiveMemory:
             TaskNotFoundError: If task doesn't exist.
             ProspectiveMemoryError: If update fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError, TaskNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            data = {"status": TaskStatus.CANCELLED.value}
+
+            response = (
+                client.table("prospective_memories")
+                .update(data)
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise TaskNotFoundError(task_id)
+
+            logger.info(
+                "Cancelled prospective task",
+                extra={"task_id": task_id, "user_id": user_id},
+            )
+
+        except TaskNotFoundError:
+            raise
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to cancel task", extra={"task_id": task_id})
+            raise ProspectiveMemoryError(f"Failed to cancel task: {e}") from e
 
     async def get_upcoming_tasks(self, user_id: str, limit: int = 10) -> list[ProspectiveTask]:
-        """Get upcoming tasks for a user.
+        """Get upcoming time-based tasks for a user.
+
+        Returns pending tasks with time triggers, ordered by due date.
 
         Args:
             user_id: The user to get tasks for.
             limit: Maximum number of tasks to return.
 
         Returns:
-            List of upcoming ProspectiveTask instances.
+            List of upcoming ProspectiveTasks ordered by due date.
 
         Raises:
-            ProspectiveMemoryError: If query fails.
+            ProspectiveMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("status", TaskStatus.PENDING.value)
+                .eq("trigger_type", TriggerType.TIME.value)
+                .order("trigger_config->due_at")
+                .limit(limit)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            tasks = [ProspectiveTask.from_dict(row) for row in response.data]
+
+            logger.info(
+                "Retrieved upcoming tasks",
+                extra={"user_id": user_id, "count": len(tasks)},
+            )
+
+            return tasks
+
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get upcoming tasks")
+            raise ProspectiveMemoryError(f"Failed to get upcoming tasks: {e}") from e
 
     async def get_overdue_tasks(self, user_id: str) -> list[ProspectiveTask]:
         """Get overdue tasks for a user.
 
+        Returns tasks that have overdue status, ordered by priority.
+
         Args:
-            user_id: The user to get tasks for.
+            user_id: The user to get overdue tasks for.
 
         Returns:
-            List of overdue ProspectiveTask instances.
+            List of overdue ProspectiveTasks ordered by priority (urgent first).
 
         Raises:
-            ProspectiveMemoryError: If query fails.
+            ProspectiveMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("status", TaskStatus.OVERDUE.value)
+                .order("priority", desc=True)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            tasks = [ProspectiveTask.from_dict(row) for row in response.data]
+
+            logger.info(
+                "Retrieved overdue tasks",
+                extra={"user_id": user_id, "count": len(tasks)},
+            )
+
+            return tasks
+
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get overdue tasks")
+            raise ProspectiveMemoryError(f"Failed to get overdue tasks: {e}") from e
 
     async def get_tasks_for_goal(self, user_id: str, goal_id: str) -> list[ProspectiveTask]:
-        """Get all tasks related to a specific goal.
+        """Get tasks linked to a specific goal.
 
         Args:
             user_id: The user to get tasks for.
             goal_id: The goal ID to filter by.
 
         Returns:
-            List of ProspectiveTask instances related to the goal.
+            List of ProspectiveTasks linked to the goal.
 
         Raises:
-            ProspectiveMemoryError: If query fails.
+            ProspectiveMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("related_goal_id", goal_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            tasks = [ProspectiveTask.from_dict(row) for row in response.data]
+
+            logger.info(
+                "Retrieved tasks for goal",
+                extra={"user_id": user_id, "goal_id": goal_id, "count": len(tasks)},
+            )
+
+            return tasks
+
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get tasks for goal", extra={"goal_id": goal_id})
+            raise ProspectiveMemoryError(f"Failed to get tasks for goal: {e}") from e
 
     async def get_tasks_for_lead(self, user_id: str, lead_id: str) -> list[ProspectiveTask]:
-        """Get all tasks related to a specific lead.
+        """Get tasks linked to a specific lead.
 
         Args:
             user_id: The user to get tasks for.
             lead_id: The lead ID to filter by.
 
         Returns:
-            List of ProspectiveTask instances related to the lead.
+            List of ProspectiveTasks linked to the lead.
 
         Raises:
-            ProspectiveMemoryError: If query fails.
+            ProspectiveMemoryError: If the query fails.
         """
-        raise NotImplementedError
+        from src.core.exceptions import ProspectiveMemoryError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("prospective_memories")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("related_lead_id", lead_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            tasks = [ProspectiveTask.from_dict(row) for row in response.data]
+
+            logger.info(
+                "Retrieved tasks for lead",
+                extra={"user_id": user_id, "lead_id": lead_id, "count": len(tasks)},
+            )
+
+            return tasks
+
+        except ProspectiveMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get tasks for lead", extra={"lead_id": lead_id})
+            raise ProspectiveMemoryError(f"Failed to get tasks for lead: {e}") from e

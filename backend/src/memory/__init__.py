@@ -11,6 +11,13 @@ This module implements ARIA's cognitive memory architecture:
 
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
+from src.memory.prospective import (
+    ProspectiveMemory,
+    ProspectiveTask,
+    TaskPriority,
+    TaskStatus,
+    TriggerType,
+)
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 from src.memory.working import (
     WorkingMemory,
@@ -33,4 +40,10 @@ __all__ = [
     # Procedural Memory
     "ProceduralMemory",
     "Workflow",
+    # Prospective Memory
+    "ProspectiveMemory",
+    "ProspectiveTask",
+    "TriggerType",
+    "TaskStatus",
+    "TaskPriority",
 ]
