@@ -103,3 +103,19 @@ def test_episode_from_dict_deserializes_correctly() -> None:
     assert episode.occurred_at == now
     assert episode.recorded_at == now
     assert episode.context["deal_value"] == 50000
+
+
+def test_episodic_memory_has_required_methods() -> None:
+    """Test EpisodicMemory class has required interface methods."""
+    from src.memory.episodic import EpisodicMemory
+
+    memory = EpisodicMemory()
+
+    # Check required async methods exist
+    assert hasattr(memory, "store_episode")
+    assert hasattr(memory, "get_episode")
+    assert hasattr(memory, "query_by_time_range")
+    assert hasattr(memory, "query_by_event_type")
+    assert hasattr(memory, "query_by_participant")
+    assert hasattr(memory, "semantic_search")
+    assert hasattr(memory, "delete_episode")
