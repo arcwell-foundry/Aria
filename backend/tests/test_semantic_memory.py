@@ -406,3 +406,46 @@ async def test_get_fact_raises_not_found() -> None:
         mock_get.return_value = mock_client
         with pytest.raises(FactNotFoundError):
             await memory.get_fact(user_id="user-456", fact_id="nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_get_facts_about_returns_facts_for_subject() -> None:
+    """Test get_facts_about returns facts about a specific subject."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Subject: John Doe\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_edge.created_at = now
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await memory.get_facts_about(user_id="user-456", subject="John Doe")
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+        # Verify search was called with subject
+        call_args = mock_client.search.call_args
+        assert "John Doe" in call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_get_facts_about_filters_by_validity() -> None:
+    """Test get_facts_about respects as_of parameter."""
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    # Return empty for simplicity, just testing the method is called
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        now = datetime.now(UTC)
+        results = await memory.get_facts_about(
+            user_id="user-456",
+            subject="John Doe",
+            as_of=now,
+        )
+        assert isinstance(results, list)

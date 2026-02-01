@@ -518,7 +518,40 @@ class SemanticMemory:
         Raises:
             SemanticMemoryError: If query fails.
         """
-        raise NotImplementedError("Will be implemented in later task")
+        try:
+            client = await self._get_graphiti_client()
+
+            # Build query for facts about the subject
+            query = f"facts about {subject} for user {user_id}"
+
+            results = await client.search(query)
+
+            # Parse results and filter
+            check_time = as_of or datetime.now(UTC)
+            facts = []
+
+            for edge in results:
+                fact = self._parse_edge_to_fact(edge, user_id)
+                if fact is None:
+                    continue
+
+                # Check subject matches (case-insensitive)
+                if subject.lower() not in fact.subject.lower():
+                    continue
+
+                # Filter by validity unless including invalidated
+                if not include_invalidated and not fact.is_valid(as_of=check_time):
+                    continue
+
+                facts.append(fact)
+
+            return facts
+
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get facts about subject", extra={"subject": subject})
+            raise SemanticMemoryError(f"Failed to get facts: {e}") from e
 
     async def search_facts(
         self,
