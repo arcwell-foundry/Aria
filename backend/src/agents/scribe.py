@@ -185,12 +185,15 @@ class ScribeAgent(BaseAgent):
 
     async def _draft_document(
         self,
-        document_type: str = "brief",  # noqa: ARG002
-        context: str = "",  # noqa: ARG002
-        goal: str = "",  # noqa: ARG002
-        tone: str = "formal",  # noqa: ARG002
+        document_type: str = "brief",
+        context: str = "",
+        goal: str = "",
+        tone: str = "formal",
     ) -> dict[str, Any]:
         """Draft a document.
+
+        This is a mock implementation that generates template-based documents.
+        In production, this would use the LLM with Digital Twin style.
 
         Args:
             document_type: Type of document (brief, report, proposal).
@@ -199,9 +202,60 @@ class ScribeAgent(BaseAgent):
             tone: Tone of the document.
 
         Returns:
-            Drafted document with title and body.
+            Drafted document with title, body, sections, and metadata.
         """
-        return {}
+        logger.info(
+            f"Drafting {document_type} document",
+            extra={
+                "document_type": document_type,
+                "tone": tone,
+                "goal": goal[:50] if goal else "",
+            },
+        )
+
+        # Generate title from goal
+        title = goal if goal else f"{document_type.capitalize()} Document"
+
+        # Generate sections based on document type
+        if document_type == "brief":
+            sections = [
+                {"heading": "Summary", "content": context if context else "Summary content here."},
+                {"heading": "Key Points", "content": "• Point 1\n• Point 2\n• Point 3"},
+            ]
+        elif document_type == "report":
+            sections = [
+                {"heading": "Executive Summary", "content": context if context else "Executive summary."},
+                {"heading": "Background", "content": "Background information and context."},
+                {"heading": "Analysis", "content": "Detailed analysis of the situation."},
+                {"heading": "Recommendations", "content": "Recommended actions moving forward."},
+            ]
+        elif document_type == "proposal":
+            sections = [
+                {"heading": "Introduction", "content": context if context else "Introduction to the proposal."},
+                {"heading": "Proposed Solution", "content": "Details of the proposed solution."},
+                {"heading": "Benefits", "content": "Expected benefits and outcomes."},
+                {"heading": "Next Steps", "content": "Proposed next steps and timeline."},
+            ]
+        else:
+            sections = [
+                {"heading": "Content", "content": context if context else "Document content."},
+            ]
+
+        # Build body from sections
+        body_parts = []
+        for section in sections:
+            body_parts.append(f"## {section['heading']}\n\n{section['content']}")
+        body = "\n\n".join(body_parts)
+
+        word_count = len(body.split())
+
+        return {
+            "title": title,
+            "body": body,
+            "sections": sections,
+            "document_type": document_type,
+            "word_count": word_count,
+        }
 
     async def _personalize(
         self,

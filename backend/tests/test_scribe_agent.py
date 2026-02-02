@@ -355,3 +355,164 @@ async def test_draft_email_logs_drafting(caplog: Any) -> None:
         )
 
     assert "Drafting email" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_draft_document_returns_dict() -> None:
+    """Test _draft_document returns a dictionary."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="brief",
+        context="Q4 sales performance",
+        goal="Summarize results for leadership",
+        tone="formal",
+    )
+
+    assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_draft_document_has_title_and_body() -> None:
+    """Test _draft_document returns document with title and body."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="report",
+        context="Monthly metrics",
+        goal="Provide monthly update",
+        tone="formal",
+    )
+
+    assert "title" in result
+    assert "body" in result
+    assert len(result["title"]) > 0
+    assert len(result["body"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_draft_document_includes_sections() -> None:
+    """Test _draft_document includes structured sections."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="report",
+        context="Quarterly business review",
+        goal="Present Q4 results",
+        tone="formal",
+    )
+
+    assert "sections" in result
+    assert isinstance(result["sections"], list)
+    assert len(result["sections"]) > 0
+
+    # Each section should have heading and content
+    for section in result["sections"]:
+        assert "heading" in section
+        assert "content" in section
+
+
+@pytest.mark.asyncio
+async def test_draft_document_brief_type() -> None:
+    """Test _draft_document with brief type is concise."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="brief",
+        context="Product launch plan",
+        goal="Quick overview of launch strategy",
+        tone="formal",
+    )
+
+    assert result["document_type"] == "brief"
+    # Briefs should be concise
+    assert result["word_count"] < 500
+
+
+@pytest.mark.asyncio
+async def test_draft_document_report_type() -> None:
+    """Test _draft_document with report type is more detailed."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="report",
+        context="Annual review data",
+        goal="Comprehensive annual summary",
+        tone="formal",
+    )
+
+    assert result["document_type"] == "report"
+    # Reports should have multiple sections
+    assert len(result["sections"]) >= 2
+
+
+@pytest.mark.asyncio
+async def test_draft_document_proposal_type() -> None:
+    """Test _draft_document with proposal type."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="proposal",
+        context="New partnership opportunity",
+        goal="Propose collaboration terms",
+        tone="formal",
+    )
+
+    assert result["document_type"] == "proposal"
+
+
+@pytest.mark.asyncio
+async def test_draft_document_tracks_word_count() -> None:
+    """Test _draft_document includes word count."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="brief",
+        context="Test",
+        goal="Test",
+        tone="formal",
+    )
+
+    assert "word_count" in result
+    assert isinstance(result["word_count"], int)
+    assert result["word_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_draft_document_logs_drafting(caplog: Any) -> None:
+    """Test _draft_document logs the drafting activity."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level("INFO"):
+        await agent._draft_document(
+            document_type="brief",
+            context="Test",
+            goal="Test",
+            tone="formal",
+        )
+
+    assert "Drafting document" in caplog.text or "brief" in caplog.text.lower()
