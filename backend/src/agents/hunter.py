@@ -198,13 +198,77 @@ class HunterAgent(BaseAgent):
 
         return enriched
 
-    async def _find_contacts(self) -> list[Any]:
+    async def _find_contacts(
+        self,
+        company_name: str,
+        roles: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Find contacts at a target company.
 
+        Args:
+            company_name: Name of the company to find contacts for.
+            roles: Optional list of role keywords to filter by (case-insensitive).
+
         Returns:
-            List of contacts.
+            List of contacts at the company.
         """
-        return []
+        logger.info(
+            f"Finding contacts for '{company_name}'"
+            + (f" with roles: {roles}" if roles else ""),
+        )
+
+        # Mock contact data
+        all_contacts = [
+            {
+                "name": "Sarah Johnson",
+                "title": "CEO",
+                "email": "sarah.johnson@testcompany.com",
+                "linkedin_url": "https://www.linkedin.com/in/sarahjohnson",
+                "seniority": "C-Level",
+                "department": "Executive",
+            },
+            {
+                "name": "Michael Chen",
+                "title": "VP Sales",
+                "email": "michael.chen@testcompany.com",
+                "linkedin_url": "https://www.linkedin.com/in/michaelchen",
+                "seniority": "VP-Level",
+                "department": "Sales",
+            },
+            {
+                "name": "Emily Rodriguez",
+                "title": "Director of Marketing",
+                "email": "emily.rodriguez@testcompany.com",
+                "linkedin_url": "https://www.linkedin.com/in/emilyrodriguez",
+                "seniority": "Director-Level",
+                "department": "Marketing",
+            },
+            {
+                "name": "David Kim",
+                "title": "CTO",
+                "email": "david.kim@testcompany.com",
+                "linkedin_url": "https://www.linkedin.com/in/davidkim",
+                "seniority": "C-Level",
+                "department": "Engineering",
+            },
+        ]
+
+        # Filter by roles if provided
+        if roles:
+            filtered_contacts = []
+            for contact in all_contacts:
+                title_lower = contact["title"].lower()
+                # Check if any role keyword matches the title (case-insensitive)
+                # Use word boundaries to avoid substring matches like "CTO" in "Director"
+                if any(
+                    role.lower() in title_lower.split()
+                    or role.lower() in title_lower.replace(".", " ").split()
+                    for role in roles
+                ):
+                    filtered_contacts.append(contact)
+            return filtered_contacts
+
+        return all_contacts
 
     async def _score_fit(self) -> tuple[float, list[Any], list[Any]]:
         """Score company fit against ICP.

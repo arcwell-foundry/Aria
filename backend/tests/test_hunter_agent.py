@@ -338,3 +338,103 @@ async def test_enrich_company_adds_funding_stage() -> None:
     assert "funding_stage" in result
     assert isinstance(result["funding_stage"], str)
     assert len(result["funding_stage"]) > 0
+
+
+# Task 5: find_contacts tool tests
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_returns_list() -> None:
+    """Test find_contacts returns a list."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._find_contacts(company_name="Test Company")
+
+    assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_returns_contact_dicts() -> None:
+    """Test find_contacts returns contact dictionaries with required fields."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._find_contacts(company_name="Test Company")
+
+    assert len(result) > 0
+    contact = result[0]
+    assert "name" in contact
+    assert "title" in contact
+    assert "email" in contact
+    assert "linkedin_url" in contact
+    assert "seniority" in contact
+    assert "department" in contact
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_filters_by_roles() -> None:
+    """Test find_contacts filters contacts by roles (case-insensitive)."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test with CEO role (uppercase)
+    result_ceo = await agent._find_contacts(company_name="Test Company", roles=["CEO"])
+    assert len(result_ceo) == 1
+    assert "CEO" in result_ceo[0]["title"] or "Chief Executive" in result_ceo[0]["title"]
+
+    # Test with multiple roles
+    result_multiple = await agent._find_contacts(
+        company_name="Test Company", roles=["CEO", "CTO"]
+    )
+    assert len(result_multiple) == 2
+    titles = [contact["title"] for contact in result_multiple]
+    assert any("CEO" in t or "Chief Executive" in t for t in titles)
+    assert any("CTO" in t or "Chief Technology" in t for t in titles)
+
+    # Test with lowercase role
+    result_lowercase = await agent._find_contacts(
+        company_name="Test Company", roles=["sales"]
+    )
+    assert len(result_lowercase) > 0
+    assert any("sales" in contact["title"].lower() for contact in result_lowercase)
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_includes_seniority() -> None:
+    """Test find_contacts includes seniority field for all contacts."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._find_contacts(company_name="Test Company")
+
+    assert len(result) > 0
+    for contact in result:
+        assert "seniority" in contact
+        assert isinstance(contact["seniority"], str)
+        assert len(contact["seniority"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_includes_department() -> None:
+    """Test find_contacts includes department field for all contacts."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._find_contacts(company_name="Test Company")
+
+    assert len(result) > 0
+    for contact in result:
+        assert "department" in contact
+        assert isinstance(contact["department"], str)
+        assert len(contact["department"]) > 0
