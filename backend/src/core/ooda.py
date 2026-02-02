@@ -316,3 +316,105 @@ class OODALoop:
         )
 
         return state
+
+    async def orient(
+        self,
+        state: OODAState,
+        goal: dict[str, Any],
+    ) -> OODAState:
+        """Analyze observations and identify patterns.
+
+        Uses LLM to synthesize observations, identify threats and
+        opportunities, and map to available agent capabilities.
+
+        Args:
+            state: Current OODA state with observations.
+            goal: The goal being pursued.
+
+        Returns:
+            Updated state with orientation analysis.
+        """
+        import json
+
+        start_time = time.perf_counter()
+
+        # Build prompt for LLM analysis
+        observations_summary = json.dumps(state.observations, indent=2, default=str)
+
+        system_prompt = """You are ARIA's cognitive analysis module. Analyze the observations and produce a structured analysis.
+
+Output ONLY valid JSON with this structure:
+{
+    "patterns": ["list of patterns identified"],
+    "opportunities": ["list of opportunities to pursue the goal"],
+    "threats": ["list of obstacles or risks"],
+    "recommended_focus": "single most important area to focus on"
+}"""
+
+        user_prompt = f"""Goal: {goal.get("title", "Unknown")}
+Description: {goal.get("description", "No description")}
+
+Observations:
+{observations_summary}
+
+Analyze these observations and identify patterns, opportunities, and threats relevant to achieving the goal."""
+
+        # Call LLM for analysis
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                max_tokens=self.config.orient_budget,
+                temperature=0.3,  # Lower temperature for more focused analysis
+            )
+
+            # Parse JSON response
+            try:
+                orientation = json.loads(response)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse LLM response as JSON, using default orientation")
+                orientation = {
+                    "patterns": [],
+                    "opportunities": [],
+                    "threats": [],
+                    "recommended_focus": "Unable to analyze - proceeding with default strategy",
+                    "raw_response": response,
+                }
+
+        except Exception as e:
+            logger.error(f"LLM call failed in orient phase: {e}")
+            orientation = {
+                "patterns": [],
+                "opportunities": [],
+                "threats": [],
+                "recommended_focus": "LLM analysis failed - proceeding cautiously",
+                "error": str(e),
+            }
+
+        # Update state
+        state.orientation = orientation
+        state.current_phase = OODAPhase.DECIDE
+
+        # Log phase execution
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        state.phase_logs.append(
+            OODAPhaseLogEntry(
+                phase=OODAPhase.ORIENT,
+                iteration=state.iteration,
+                input_summary=f"Analyzed {len(state.observations)} observations",
+                output_summary=f"Focus: {orientation.get('recommended_focus', 'Unknown')}",
+                duration_ms=duration_ms,
+            )
+        )
+
+        logger.info(
+            "OODA orient phase complete",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+                "patterns_found": len(orientation.get("patterns", [])),
+                "duration_ms": duration_ms,
+            },
+        )
+
+        return state

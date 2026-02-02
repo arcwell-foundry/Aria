@@ -286,3 +286,107 @@ async def test_ooda_loop_observe_handles_memory_errors_gracefully() -> None:
 
     # Verify we got some observations (at least from working memory)
     assert new_state is not None
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_orient_analyzes_observations() -> None:
+    """Test orient phase uses LLM to analyze observations."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = """{
+        "patterns": ["Budget meeting coming up", "John is key stakeholder"],
+        "opportunities": ["Prepare talking points"],
+        "threats": ["Tight deadline"],
+        "recommended_focus": "Gather budget data"
+    }"""
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.observations = [
+        {"source": "episodic", "type": "episode", "data": {"content": "Q3 budget meeting scheduled"}},
+        {"source": "semantic", "type": "fact", "data": {"subject": "John", "predicate": "is", "object": "CFO"}},
+    ]
+    goal = {"id": "goal-123", "title": "Prepare budget meeting"}
+
+    new_state = await loop.orient(state, goal)
+
+    # Verify orientation was produced
+    assert new_state.orientation is not None
+    assert "patterns" in new_state.orientation
+    assert new_state.current_phase == OODAPhase.DECIDE
+
+    # Verify LLM was called
+    mock_llm.generate_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_orient_logs_phase_execution() -> None:
+    """Test orient phase logs its execution."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = '{"patterns": [], "opportunities": [], "threats": [], "recommended_focus": "test"}'
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.observations = []
+    goal = {"id": "goal-123", "title": "Test goal"}
+
+    new_state = await loop.orient(state, goal)
+
+    # Find orient phase log
+    orient_logs = [log for log in new_state.phase_logs if log.phase == OODAPhase.ORIENT]
+    assert len(orient_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_orient_handles_invalid_llm_response() -> None:
+    """Test orient phase handles malformed LLM response."""
+    from src.core.ooda import OODALoop, OODAState
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = "This is not valid JSON"
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.observations = []
+    goal = {"id": "goal-123", "title": "Test goal"}
+
+    # Should not raise, but produce default orientation
+    new_state = await loop.orient(state, goal)
+
+    assert new_state.orientation is not None
