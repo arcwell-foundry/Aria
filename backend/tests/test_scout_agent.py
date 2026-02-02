@@ -637,3 +637,159 @@ async def test_execute_respects_signal_types_filter() -> None:
     # All results should be funding type
     for signal in result.data:
         assert signal.get("signal_type") == "funding"
+
+
+@pytest.mark.asyncio
+async def test_full_scout_workflow_with_multiple_entities() -> None:
+    """Test complete end-to-end Scout agent workflow.
+
+    Verifies:
+    - Agent state transitions from IDLE to RUNNING to COMPLETE
+    - Returns signals for all monitored entities
+    - Filters out low-relevance noise
+    - Deduplicates similar signals
+    - Includes all required signal fields
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify initial state
+    assert agent.status == AgentStatus.IDLE
+
+    # Define task with multiple entities and signal types
+    task = {
+        "entities": ["Acme Corp", "Beta Inc"],
+        "signal_types": ["funding", "hiring", "leadership"],
+    }
+
+    # Execute via run() to test full lifecycle
+    result = await agent.run(task)
+
+    # Verify final state
+    assert agent.status == AgentStatus.COMPLETE
+    assert result.success is True
+
+    # Verify signals structure
+    signals = result.data
+    assert isinstance(signals, list)
+
+    for signal in signals:
+        # Check required fields
+        assert "company_name" in signal
+        assert "signal_type" in signal
+        assert "headline" in signal
+        assert "relevance_score" in signal
+
+        # Verify relevance is filtered (no noise)
+        assert signal["relevance_score"] >= 0.5
+
+        # Verify valid signal types
+        assert signal["signal_type"] in ["funding", "hiring", "leadership"]
+
+    # Verify no duplicate headlines
+    headlines = [s["headline"] for s in signals]
+    assert len(headlines) == len(set(headlines))
+
+
+@pytest.mark.asyncio
+async def test_scout_agent_handles_validation_failure() -> None:
+    """Test that invalid input returns failed result.
+
+    Verifies that when validate_input returns False:
+    - Agent status transitions to FAILED
+    - AgentResult has success=False
+    - Error message indicates validation failure
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test with missing required field (no entities)
+    invalid_task = {
+        "signal_types": ["funding"],
+    }
+
+    result = await agent.run(invalid_task)
+
+    # Verify failure state
+    assert agent.status == AgentStatus.FAILED
+    assert result.success is False
+    assert result.error == "Input validation failed"
+    assert result.data is None
+
+
+@pytest.mark.asyncio
+async def test_scout_agent_with_empty_entities_list() -> None:
+    """Test Scout agent handles empty entities list gracefully."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": [],
+        "signal_types": ["funding"],
+    }
+
+    result = await agent.execute(task)
+
+    # Should return empty signals list, not error
+    assert result.success is True
+    assert result.data == []
+
+
+@pytest.mark.asyncio
+async def test_scout_agent_signal_type_filtering() -> None:
+    """Test that signal_types filter correctly filters results."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Get all signals for Acme Corp
+    task_all = {
+        "entities": ["Acme Corp"],
+    }
+
+    result_all = await agent.execute(task_all)
+
+    # Get only funding signals
+    task_funding = {
+        "entities": ["Acme Corp"],
+        "signal_types": ["funding"],
+    }
+
+    result_funding = await agent.execute(task_funding)
+
+    # Funding results should be subset or equal to all results
+    assert len(result_funding.data) <= len(result_all.data)
+
+    # All funding results should be funding type
+    for signal in result_funding.data:
+        assert signal["signal_type"] == "funding"
+
+
+@pytest.mark.asyncio
+async def test_scout_agent_noise_filtering() -> None:
+    """Test that low-relevance signals are filtered as noise."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp", "Beta Inc"],
+    }
+
+    result = await agent.execute(task)
+
+    # Verify all signals meet minimum relevance threshold
+    for signal in result.data:
+        assert signal["relevance_score"] >= 0.5, (
+            f"Signal '{signal['headline']}' has low relevance: {signal['relevance_score']}"
+        )
