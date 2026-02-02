@@ -8,6 +8,7 @@ This module implements ARIA's cognitive memory architecture:
 - Prospective: Future tasks/reminders (Supabase)
 - Lead: Sales pursuit tracking (Graphiti + Supabase)
 - Digital Twin: User writing style fingerprinting (Graphiti)
+- Corporate: Company-level shared knowledge (Graphiti + Supabase)
 """
 
 from src.memory.audit import (
@@ -37,6 +38,12 @@ from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
     count_tokens,
+)
+from src.memory.corporate import (
+    CorporateFact,
+    CorporateFactSource,
+    CorporateMemory,
+    CORPORATE_SOURCE_CONFIDENCE,
 )
 
 __all__ = [
@@ -72,4 +79,9 @@ __all__ = [
     "DigitalTwin",
     "TextStyleAnalyzer",
     "WritingStyleFingerprint",
+    # Corporate Memory
+    "CorporateFact",
+    "CorporateFactSource",
+    "CorporateMemory",
+    "CORPORATE_SOURCE_CONFIDENCE",
 ]
