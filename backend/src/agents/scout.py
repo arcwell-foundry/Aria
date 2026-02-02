@@ -99,10 +99,7 @@ class ScoutAgent(BaseAgent):
 
         # Step 2: Filter noise (low relevance signals)
         min_relevance = 0.5
-        filtered_signals = [
-            s for s in signals
-            if s.get("relevance_score", 0) >= min_relevance
-        ]
+        filtered_signals = [s for s in signals if s.get("relevance_score", 0) >= min_relevance]
 
         logger.info(
             f"Filtered {len(signals)} signals to {len(filtered_signals)} "
@@ -112,9 +109,7 @@ class ScoutAgent(BaseAgent):
         # Step 3: Deduplicate signals
         deduplicated_signals = await self._deduplicate_signals(filtered_signals)
 
-        logger.info(
-            f"Scout agent completed - returning {len(deduplicated_signals)} signals"
-        )
+        logger.info(f"Scout agent completed - returning {len(deduplicated_signals)} signals")
 
         return AgentResult(success=True, data=deduplicated_signals)
 
