@@ -950,3 +950,177 @@ async def test_execute_success_flag() -> None:
     result = await agent.execute(task)
 
     assert result.success is True
+
+
+# ============================================================================
+# Integration Tests - Full Workflow
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_full_scribe_email_workflow() -> None:
+    """Integration test demonstrating complete Scribe agent email workflow."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify initial state
+    assert agent.is_idle
+    assert agent.total_tokens_used == 0
+
+    # Define a realistic email task
+    task = {
+        "communication_type": "email",
+        "recipient": {
+            "name": "Dr. Sarah Chen",
+            "title": "VP of Research",
+            "company": "BioTech Solutions",
+        },
+        "context": "Following up on our conversation at the conference last week about potential collaboration opportunities in gene therapy research",
+        "goal": "Schedule a call to discuss partnership possibilities",
+        "tone": "formal",
+    }
+
+    # Run the agent
+    result = await agent.run(task)
+
+    # Verify execution result
+    assert result.success is True
+    assert result.execution_time_ms >= 0
+
+    # Verify draft structure
+    data = result.data
+    assert data["draft_type"] == "email"
+    assert data["ready_for_review"] is True
+
+    # Verify email content
+    content = data["content"]
+    assert "subject" in content
+    assert "body" in content
+    assert len(content["subject"]) > 0
+    assert len(content["body"]) > 0
+    assert "Sarah" in content["body"]  # Recipient name should be included
+    assert content["tone"] == "formal"
+    assert "Dear" in content["body"]  # Formal tone
+
+    # Verify agent state
+    assert agent.is_complete
+
+
+@pytest.mark.asyncio
+async def test_full_scribe_document_workflow() -> None:
+    """Integration test demonstrating complete Scribe agent document workflow."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Define a document task
+    task = {
+        "communication_type": "document",
+        "document_type": "report",
+        "context": "Q4 2024 sales exceeded targets by 15%, driven by strong performance in the biotech vertical",
+        "goal": "Executive Summary: Q4 Sales Performance",
+        "tone": "formal",
+    }
+
+    # Run the agent
+    result = await agent.run(task)
+
+    # Verify execution result
+    assert result.success is True
+
+    # Verify document structure
+    data = result.data
+    assert data["draft_type"] == "document"
+    assert data["ready_for_review"] is True
+
+    # Verify document content
+    content = data["content"]
+    assert "title" in content
+    assert "body" in content
+    assert "sections" in content
+    assert len(content["sections"]) >= 2  # Reports should have multiple sections
+
+    # Verify agent state
+    assert agent.is_complete
+
+
+@pytest.mark.asyncio
+async def test_scribe_agent_handles_validation_failure() -> None:
+    """Test Scribe agent handles invalid input gracefully."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Invalid task - missing goal
+    invalid_task = {
+        "communication_type": "email",
+        "context": "Some context",
+    }
+
+    result = await agent.run(invalid_task)
+
+    # Should fail validation
+    assert result.success is False
+    assert "validation" in (result.error or "").lower()
+    assert agent.is_failed
+
+
+@pytest.mark.asyncio
+async def test_scribe_with_template_and_style() -> None:
+    """Test Scribe agent with both template and style customization."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Alex"},
+        "context": "our product demo yesterday",
+        "goal": "Follow up on demo",
+        "template_name": "follow_up_email",
+        "style": {"signature": "Best regards,\nJohn Smith\nSales Manager"},
+    }
+
+    result = await agent.run(task)
+
+    assert result.success is True
+    data = result.data
+
+    # Template should be used
+    assert data.get("template_used") == "follow_up_email"
+    # Style should be applied
+    assert data.get("style_applied") is not None
+    # Signature should be in content
+    assert "John Smith" in data["content"]["body"]
+
+
+@pytest.mark.asyncio
+async def test_scribe_urgent_tone_workflow() -> None:
+    """Test Scribe agent with urgent tone."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Engineering Team"},
+        "context": "Critical production issue affecting customer data",
+        "goal": "Immediate action required on production bug",
+        "tone": "urgent",
+    }
+
+    result = await agent.run(task)
+
+    assert result.success is True
+    content = result.data["content"]
+
+    # Should have urgency indicators
+    subject = content["subject"].lower()
+    body = content["body"].lower()
+    assert "urgent" in subject or "urgent" in body or "immediate" in body or "asap" in body
