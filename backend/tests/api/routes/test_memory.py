@@ -256,6 +256,7 @@ class TestMemoryQueryService:
                 memory_types=["episodic"],
                 start_date=None,
                 end_date=None,
+                min_confidence=None,
                 limit=20,
                 offset=0,
             )
@@ -304,6 +305,7 @@ class TestMemoryQueryService:
                 memory_types=["episodic", "semantic"],
                 start_date=None,
                 end_date=None,
+                min_confidence=None,
                 limit=20,
                 offset=0,
             )
