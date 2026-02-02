@@ -543,3 +543,74 @@ async def test_crm_read_accounts_filters() -> None:
     assert result["total_count"] == 1
     assert result["records"][0]["name"] == "Acme Corp"
     assert result["records"][0]["industry"] == "Technology"
+
+
+@pytest.mark.asyncio
+async def test_crm_write_creates_record() -> None:
+    """Test crm_write creates a new CRM record."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="create",
+        record_type="leads",
+        record={"name": "New Lead", "status": "prospecting"},
+    )
+
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert "record_id" in result
+
+
+@pytest.mark.asyncio
+async def test_crm_write_supports_update() -> None:
+    """Test crm_write supports updating existing records."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="update",
+        record_type="leads",
+        record_id="lead-001",
+        record={"status": "qualified"},
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_crm_write_supports_delete() -> None:
+    """Test crm_write supports deleting records."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="delete",
+        record_type="leads",
+        record_id="lead-001",
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_crm_write_validates_action() -> None:
+    """Test crm_write validates action parameter."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="invalid_action",
+        record_type="leads",
+    )
+
+    assert result["success"] is False
+    assert "error" in result

@@ -326,14 +326,83 @@ class OperatorAgent(BaseAgent):
             "total_count": len(records),
         }
 
-    async def _crm_write(self, **kwargs: Any) -> Any:
-        """Write data to CRM system.
+    async def _crm_write(
+        self,
+        action: str,
+        record_type: str,
+        record: dict[str, Any] | None = None,
+        record_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Write CRM operations (create, update, delete).
+
+        This is a mock implementation for CRM write operations.
+        In production, this would integrate with Salesforce, HubSpot, etc.
 
         Args:
-            **kwargs: CRM write parameters.
+            action: Operation type - "create", "update", or "delete".
+            record_type: Type of record - "leads", "contacts", "accounts".
+            record: Record data for create/update operations.
+            record_id: Record ID for update/delete operations.
 
         Returns:
-            CRM write result.
+            Dictionary with operation result and record_id.
         """
-        # Placeholder implementation - will be implemented in Task 6
-        pass
+        valid_actions = {"create", "update", "delete"}
+        valid_record_types = {"leads", "contacts", "accounts"}
+
+        logger.info(
+            f"CRM write operation: {action} on {record_type}",
+            extra={"user_id": self.user_id, "record_id": record_id},
+        )
+
+        # Validate action
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": f"Invalid action: {action}. Must be one of {valid_actions}",
+            }
+
+        # Validate record_type
+        if record_type not in valid_record_types:
+            return {
+                "success": False,
+                "error": f"Invalid record_type: {record_type}. Must be one of {valid_record_types}",
+            }
+
+        # Handle create
+        if action == "create":
+            if not record:
+                return {"success": False, "error": "Record data required for create"}
+            new_record_id = f"{record_type[:-1]}-{id(record)}"
+            return {
+                "success": True,
+                "action": "create",
+                "record_type": record_type,
+                "record_id": new_record_id,
+                "record": {**record, "id": new_record_id},
+            }
+
+        # Handle update
+        if action == "update":
+            if not record_id:
+                return {"success": False, "error": "record_id required for update"}
+            return {
+                "success": True,
+                "action": "update",
+                "record_type": record_type,
+                "record_id": record_id,
+                "updated_fields": list(record.keys()) if record else [],
+            }
+
+        # Handle delete
+        if action == "delete":
+            if not record_id:
+                return {"success": False, "error": "record_id required for delete"}
+            return {
+                "success": True,
+                "action": "delete",
+                "record_type": record_type,
+                "record_id": record_id,
+            }
+
+        return {"success": False, "error": "Unknown error"}
