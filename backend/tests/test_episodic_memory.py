@@ -484,3 +484,23 @@ async def test_semantic_search_respects_as_of() -> None:
         )
 
         assert len(results) == 0
+
+
+def test_parse_edge_to_episode_extracts_recorded_at() -> None:
+    """Test _parse_edge_to_episode extracts recorded_at from edge content."""
+    memory = EpisodicMemory()
+
+    now = datetime.now(UTC)
+    occurred = now - timedelta(days=30)
+    recorded = now - timedelta(days=10)
+
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Event Type: meeting\nContent: Planning session\nOccurred At: {occurred.isoformat()}\nRecorded At: {recorded.isoformat()}\nParticipants: Alice, Bob"
+    mock_edge.created_at = occurred
+    mock_edge.uuid = "edge-123"
+
+    episode = memory._parse_edge_to_episode(mock_edge, "user-456")
+
+    assert episode is not None
+    assert episode.recorded_at == recorded
+    assert episode.occurred_at == occurred
