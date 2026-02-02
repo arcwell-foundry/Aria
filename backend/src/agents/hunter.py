@@ -3,12 +3,15 @@
 Discovers and qualifies new leads based on Ideal Customer Profile (ICP).
 """
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class HunterAgent(BaseAgent):
@@ -93,13 +96,68 @@ class HunterAgent(BaseAgent):
         """
         return AgentResult(success=True, data=[])
 
-    async def _search_companies(self) -> list[Any]:
+    async def _search_companies(
+        self,
+        query: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
         """Search for companies matching ICP criteria.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results to return.
 
         Returns:
             List of matching companies.
+
+        Raises:
+            ValueError: If limit is less than or equal to zero.
         """
-        return []
+        # Return empty list for empty or whitespace-only queries
+        if not query or query.strip() == "":
+            return []
+
+        # Validate limit
+        if limit <= 0:
+            raise ValueError(f"limit must be greater than 0, got {limit}")
+
+        logger.info(
+            f"Searching for companies with query='{query}', limit={limit}",
+        )
+
+        # Mock company data
+        mock_companies = [
+            {
+                "name": "GenTech Bio",
+                "domain": "gentechbio.com",
+                "description": "Leading biotechnology company specializing in gene therapy research and development.",
+                "industry": "Biotechnology",
+                "size": "Mid-market (100-500)",
+                "geography": "North America",
+                "website": "https://www.gentechbio.com",
+            },
+            {
+                "name": "PharmaCorp Solutions",
+                "domain": "pharmacorpsolutions.com",
+                "description": "Pharmaceutical solutions provider focusing on drug discovery and clinical trials.",
+                "industry": "Pharmaceuticals",
+                "size": "Enterprise (500+)",
+                "geography": "North America",
+                "website": "https://www.pharmacorpsolutions.com",
+            },
+            {
+                "name": "BioInnovate Labs",
+                "domain": "bioinnovatelabs.com",
+                "description": "Innovative biotech laboratory developing cutting-edge diagnostic tools.",
+                "industry": "Biotechnology",
+                "size": "Startup (1-50)",
+                "geography": "Europe",
+                "website": "https://www.bioinnovatelabs.com",
+            },
+        ]
+
+        # Return results up to the limit
+        return mock_companies[:limit]
 
     async def _enrich_company(self) -> dict[str, Any]:
         """Enrich company data with additional information.

@@ -1,5 +1,6 @@
 """Tests for HunterAgent module."""
 
+import pytest
 from unittest.mock import MagicMock
 
 
@@ -144,3 +145,85 @@ def test_validate_input_validates_target_count_is_positive() -> None:
         "target_count": -5,
     }
     assert agent.validate_input(task_negative) is False
+
+
+# Task 3: search_companies tool tests
+
+
+@pytest.mark.asyncio
+async def test_search_companies_returns_list() -> None:
+    """Test search_companies returns a list."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._search_companies(query="biotechnology", limit=10)
+
+    assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_search_companies_respects_limit() -> None:
+    """Test search_companies respects the limit parameter."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._search_companies(query="biotechnology", limit=2)
+
+    assert len(result) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_companies_returns_company_dicts() -> None:
+    """Test search_companies returns company dictionaries with required fields."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._search_companies(query="biotechnology", limit=10)
+
+    assert len(result) > 0
+    company = result[0]
+    assert "name" in company
+    assert "domain" in company
+    assert "description" in company
+    assert "industry" in company
+    assert "size" in company
+    assert "geography" in company
+    assert "website" in company
+
+
+@pytest.mark.asyncio
+async def test_search_companies_handles_empty_query() -> None:
+    """Test search_companies returns empty list for empty/whitespace query."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test with empty string
+    result_empty = await agent._search_companies(query="", limit=10)
+    assert result_empty == []
+
+    # Test with whitespace
+    result_whitespace = await agent._search_companies(query="   ", limit=10)
+    assert result_whitespace == []
+
+
+@pytest.mark.asyncio
+async def test_search_companies_logs_searches(caplog: Any) -> None:
+    """Test search_companies logs search queries."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level("INFO"):
+        await agent._search_companies(query="biotechnology", limit=5)
+
+    assert "Searching for companies" in caplog.text
+    assert "biotechnology" in caplog.text
