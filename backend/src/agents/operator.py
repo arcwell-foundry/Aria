@@ -395,14 +395,12 @@ class OperatorAgent(BaseAgent):
             }
 
         # Handle delete
-        if action == "delete":
-            if not record_id:
-                return {"success": False, "error": "record_id required for delete"}
-            return {
-                "success": True,
-                "action": "delete",
-                "record_type": record_type,
-                "record_id": record_id,
-            }
-
-        return {"success": False, "error": "Unknown error"}
+        # action is guaranteed to be "delete" here due to validation above
+        if not record_id:
+            return {"success": False, "error": "record_id required for delete"}
+        return {
+            "success": True,
+            "action": "delete",
+            "record_type": record_type,
+            "record_id": record_id,
+        }

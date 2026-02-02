@@ -614,3 +614,100 @@ async def test_crm_write_validates_action() -> None:
 
     assert result["success"] is False
     assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_crm_write_create_requires_record_data() -> None:
+    """Test crm_write create action requires record data."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="create",
+        record_type="leads",
+        record=None,
+    )
+
+    assert result["success"] is False
+    assert "error" in result
+    assert "Record data required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_crm_write_create_requires_non_empty_record() -> None:
+    """Test crm_write create action fails with empty record dict."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Empty dict evaluates to False in boolean context
+    result = await agent._crm_write(
+        action="create",
+        record_type="leads",
+        record={},
+    )
+
+    assert result["success"] is False
+    assert "error" in result
+    assert "Record data required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_crm_write_update_requires_record_id() -> None:
+    """Test crm_write update action requires record_id."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="update",
+        record_type="leads",
+        record_id=None,
+        record={"status": "qualified"},
+    )
+
+    assert result["success"] is False
+    assert "error" in result
+    assert "record_id required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_crm_write_delete_requires_record_id() -> None:
+    """Test crm_write delete action requires record_id."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="delete",
+        record_type="leads",
+        record_id=None,
+    )
+
+    assert result["success"] is False
+    assert "error" in result
+    assert "record_id required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_crm_write_validates_record_type() -> None:
+    """Test crm_write validates record_type parameter."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_write(
+        action="create",
+        record_type="invalid_type",
+        record={"name": "Test"},
+    )
+
+    assert result["success"] is False
+    assert "error" in result
+    assert "Invalid record_type" in result["error"]
