@@ -19,6 +19,12 @@ from src.memory.audit import (
     log_memory_operation,
 )
 from src.memory.confidence import ConfidenceScorer
+from src.memory.corporate import (
+    CORPORATE_SOURCE_CONFIDENCE,
+    CorporateFact,
+    CorporateFactSource,
+    CorporateMemory,
+)
 from src.memory.digital_twin import (
     DigitalTwin,
     TextStyleAnalyzer,
@@ -38,12 +44,6 @@ from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
     count_tokens,
-)
-from src.memory.corporate import (
-    CorporateFact,
-    CorporateFactSource,
-    CorporateMemory,
-    CORPORATE_SOURCE_CONFIDENCE,
 )
 
 __all__ = [
