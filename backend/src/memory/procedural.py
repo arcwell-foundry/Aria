@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
+
 logger = logging.getLogger(__name__)
 
 
@@ -177,6 +179,16 @@ class ProceduralMemory:
                     "user_id": workflow.user_id,
                     "workflow_name": workflow.workflow_name,
                 },
+            )
+
+            # Audit log the creation
+            await log_memory_operation(
+                user_id=workflow.user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.PROCEDURAL,
+                memory_id=workflow_id,
+                metadata={"workflow_name": workflow.workflow_name},
+                suppress_errors=True,
             )
 
             return workflow_id

@@ -976,3 +976,46 @@ async def test_list_workflows_excludes_shared_when_disabled() -> None:
         assert len(workflows) == 1
         # Verify eq was called (not or_)
         mock_select.eq.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_logs_audit_entry() -> None:
+    """Test that create_workflow logs an audit entry."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.memory.audit import MemoryOperation, MemoryType
+    from src.memory.procedural import ProceduralMemory, Workflow
+
+    now = datetime.now(UTC)
+    workflow = Workflow(
+        id="wf-audit-test",
+        user_id="user-456",
+        workflow_name="test_workflow",
+        description="Test",
+        trigger_conditions={},
+        steps=[{"action": "test"}],
+        success_count=0,
+        failure_count=0,
+        is_shared=False,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    memory = ProceduralMemory()
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = [{"id": "wf-audit-test"}]
+    mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+    with patch.object(memory, "_get_supabase_client", return_value=mock_client):
+        with patch("src.memory.procedural.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-wf-123"
+
+            await memory.create_workflow(workflow)
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["operation"] == MemoryOperation.CREATE
+            assert call_kwargs["memory_type"] == MemoryType.PROCEDURAL
