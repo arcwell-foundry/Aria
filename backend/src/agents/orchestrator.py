@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,21 @@ class OrchestrationResult:
     def all_succeeded(self) -> bool:
         """Check if all agent executions succeeded."""
         return all(r.success for r in self.results)
+
+
+@dataclass
+class ProgressUpdate:
+    """Progress update for orchestration monitoring.
+
+    Provides real-time status updates during agent execution.
+    """
+
+    agent_name: str
+    agent_id: str
+    status: str  # "starting", "running", "complete", "failed"
+    task_index: int
+    total_tasks: int
+    message: str
 
 
 class AgentOrchestrator:
@@ -115,12 +131,18 @@ class AgentOrchestrator:
         self,
         agent_class: type[BaseAgent],
         task: dict[str, Any],
+        task_index: int = 0,
+        total_tasks: int = 1,
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> AgentResult:
         """Spawn an agent and execute a task.
 
         Args:
             agent_class: The agent class to instantiate.
             task: Task specification for the agent.
+            task_index: Index of this task in the overall execution (0-based).
+            total_tasks: Total number of tasks being executed.
+            on_progress: Optional callback for progress updates.
 
         Returns:
             AgentResult from the agent execution.
@@ -137,13 +159,60 @@ class AgentOrchestrator:
             },
         )
 
+        # Report starting
+        if on_progress is not None:
+            on_progress(
+                ProgressUpdate(
+                    agent_name=agent.name,
+                    agent_id=agent_id,
+                    status="starting",
+                    task_index=task_index,
+                    total_tasks=total_tasks,
+                    message=f"Starting {agent.name} agent",
+                )
+            )
+
         try:
             result = await agent.run(task)
 
             # Accumulate token usage
             self._total_tokens_used += result.tokens_used
 
+            # Report complete or failed
+            if on_progress is not None:
+                status = "complete" if result.success else "failed"
+                message = (
+                    f"{agent.name} completed successfully"
+                    if result.success
+                    else f"{agent.name} failed: {result.error}"
+                )
+                on_progress(
+                    ProgressUpdate(
+                        agent_name=agent.name,
+                        agent_id=agent_id,
+                        status=status,
+                        task_index=task_index,
+                        total_tasks=total_tasks,
+                        message=message,
+                    )
+                )
+
             return result
+
+        except Exception as e:
+            # Report failure on exception
+            if on_progress is not None:
+                on_progress(
+                    ProgressUpdate(
+                        agent_name=agent.name,
+                        agent_id=agent_id,
+                        status="failed",
+                        task_index=task_index,
+                        total_tasks=total_tasks,
+                        message=f"{agent.name} failed with exception: {e!s}",
+                    )
+                )
+            raise
 
         finally:
             # Clean up agent after execution
@@ -157,6 +226,7 @@ class AgentOrchestrator:
     async def execute_parallel(
         self,
         tasks: list[tuple[type[BaseAgent], dict[str, Any]]],
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> OrchestrationResult:
         """Execute multiple agents in parallel.
 
@@ -164,6 +234,7 @@ class AgentOrchestrator:
 
         Args:
             tasks: List of (agent_class, task) tuples to execute.
+            on_progress: Optional callback for progress updates.
 
         Returns:
             OrchestrationResult with all agent results.
@@ -176,14 +247,24 @@ class AgentOrchestrator:
             )
 
         start_time = time.perf_counter()
+        total_tasks = len(tasks)
 
         logger.info(
-            f"Starting parallel execution of {len(tasks)} agents",
-            extra={"task_count": len(tasks), "user_id": self.user_id},
+            f"Starting parallel execution of {total_tasks} agents",
+            extra={"task_count": total_tasks, "user_id": self.user_id},
         )
 
-        # Create coroutines for all tasks
-        coros = [self.spawn_and_execute(agent_class, task) for agent_class, task in tasks]
+        # Create coroutines for all tasks with task_index and total_tasks
+        coros = [
+            self.spawn_and_execute(
+                agent_class,
+                task,
+                task_index=i,
+                total_tasks=total_tasks,
+                on_progress=on_progress,
+            )
+            for i, (agent_class, task) in enumerate(tasks)
+        ]
 
         # Execute all concurrently - return_exceptions=True ensures failures don't abort
         raw_results = await asyncio.gather(*coros, return_exceptions=True)
@@ -226,6 +307,7 @@ class AgentOrchestrator:
         self,
         tasks: list[tuple[type[BaseAgent], dict[str, Any]]],
         continue_on_failure: bool = False,
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> OrchestrationResult:
         """Execute agents sequentially, passing context between them.
 
@@ -234,6 +316,7 @@ class AgentOrchestrator:
         Args:
             tasks: List of (agent_class, task) tuples to execute in order.
             continue_on_failure: If True, continue executing even if an agent fails.
+            on_progress: Optional callback for progress updates.
 
         Returns:
             OrchestrationResult with all agent results.
@@ -248,11 +331,12 @@ class AgentOrchestrator:
         start_time = time.perf_counter()
         results: list[AgentResult] = []
         context: dict[str, Any] = {}
+        total_tasks = len(tasks)
 
         logger.info(
-            f"Starting sequential execution of {len(tasks)} agents",
+            f"Starting sequential execution of {total_tasks} agents",
             extra={
-                "task_count": len(tasks),
+                "task_count": total_tasks,
                 "continue_on_failure": continue_on_failure,
                 "user_id": self.user_id,
             },
@@ -263,7 +347,13 @@ class AgentOrchestrator:
             task_with_context = {**task, "context": context}
 
             try:
-                result = await self.spawn_and_execute(agent_class, task_with_context)
+                result = await self.spawn_and_execute(
+                    agent_class,
+                    task_with_context,
+                    task_index=i,
+                    total_tasks=total_tasks,
+                    on_progress=on_progress,
+                )
                 results.append(result)
 
                 # Add result to context for next agent

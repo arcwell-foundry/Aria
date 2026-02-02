@@ -464,3 +464,76 @@ async def test_execute_sequential_continue_on_failure_option() -> None:
     assert len(result.results) == 2
     assert result.failed_count == 1
     assert result.success_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_calls_progress_callback() -> None:
+    """Test execute_parallel calls progress callback for each agent."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator, ProgressUpdate
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    progress_updates: list[ProgressUpdate] = []
+
+    def on_progress(update: ProgressUpdate) -> None:
+        progress_updates.append(update)
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (ScoutAgent, {"entities": ["Beta Inc"]}),
+    ]
+
+    await orchestrator.execute_parallel(tasks, on_progress=on_progress)
+
+    # Should have at least start and complete for each task
+    assert len(progress_updates) >= 4  # 2 starts + 2 completes
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_calls_progress_callback() -> None:
+    """Test execute_sequential calls progress callback for each agent."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator, ProgressUpdate
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    progress_updates: list[ProgressUpdate] = []
+
+    def on_progress(update: ProgressUpdate) -> None:
+        progress_updates.append(update)
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+    ]
+
+    await orchestrator.execute_sequential(tasks, on_progress=on_progress)
+
+    assert len(progress_updates) >= 2  # At least start and complete
+
+
+def test_progress_update_has_required_fields() -> None:
+    """Test ProgressUpdate dataclass has all required fields."""
+    from src.agents.orchestrator import ProgressUpdate
+
+    update = ProgressUpdate(
+        agent_name="Scout",
+        agent_id="agent-123",
+        status="running",
+        task_index=0,
+        total_tasks=3,
+        message="Processing entities",
+    )
+
+    assert update.agent_name == "Scout"
+    assert update.agent_id == "agent-123"
+    assert update.status == "running"
+    assert update.task_index == 0
+    assert update.total_tasks == 3
+    assert update.message == "Processing entities"
