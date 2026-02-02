@@ -221,3 +221,101 @@ class AgentOrchestrator:
             total_tokens=total_tokens,
             total_execution_time_ms=elapsed_ms,
         )
+
+    async def execute_sequential(
+        self,
+        tasks: list[tuple[type[BaseAgent], dict[str, Any]]],
+        continue_on_failure: bool = False,
+    ) -> OrchestrationResult:
+        """Execute agents sequentially, passing context between them.
+
+        Each subsequent agent receives the results of previous agents in context.
+
+        Args:
+            tasks: List of (agent_class, task) tuples to execute in order.
+            continue_on_failure: If True, continue executing even if an agent fails.
+
+        Returns:
+            OrchestrationResult with all agent results.
+        """
+        if not tasks:
+            return OrchestrationResult(
+                results=[],
+                total_tokens=0,
+                total_execution_time_ms=0,
+            )
+
+        start_time = time.perf_counter()
+        results: list[AgentResult] = []
+        context: dict[str, Any] = {}
+
+        logger.info(
+            f"Starting sequential execution of {len(tasks)} agents",
+            extra={
+                "task_count": len(tasks),
+                "continue_on_failure": continue_on_failure,
+                "user_id": self.user_id,
+            },
+        )
+
+        for i, (agent_class, task) in enumerate(tasks):
+            # Inject context from previous agents
+            task_with_context = {**task, "context": context}
+
+            try:
+                result = await self.spawn_and_execute(agent_class, task_with_context)
+                results.append(result)
+
+                # Add result to context for next agent
+                context[agent_class.name] = result.data
+
+                if not result.success and not continue_on_failure:
+                    logger.warning(
+                        f"Sequential execution stopped at task {i + 1} due to failure",
+                        extra={
+                            "task_index": i,
+                            "agent_name": agent_class.name,
+                            "error": result.error,
+                        },
+                    )
+                    break
+
+            except Exception as e:
+                error_result = AgentResult(
+                    success=False,
+                    data=None,
+                    error=str(e),
+                )
+                results.append(error_result)
+
+                if not continue_on_failure:
+                    logger.error(
+                        f"Sequential execution stopped at task {i + 1} due to exception",
+                        extra={
+                            "task_index": i,
+                            "agent_name": agent_class.name,
+                            "error": str(e),
+                        },
+                    )
+                    break
+
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        total_tokens = sum(r.tokens_used for r in results)
+
+        logger.info(
+            "Sequential execution complete",
+            extra={
+                "tasks_executed": len(results),
+                "tasks_total": len(tasks),
+                "success_count": sum(1 for r in results if r.success),
+                "failed_count": sum(1 for r in results if not r.success),
+                "total_tokens": total_tokens,
+                "execution_time_ms": elapsed_ms,
+            },
+        )
+
+        return OrchestrationResult(
+            results=results,
+            total_tokens=total_tokens,
+            total_execution_time_ms=elapsed_ms,
+        )

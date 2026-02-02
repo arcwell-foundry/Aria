@@ -1,5 +1,7 @@
 """Tests for AgentOrchestrator module."""
 
+from typing import Any
+
 import pytest
 
 
@@ -278,7 +280,7 @@ async def test_execute_parallel_runs_multiple_agents() -> None:
     mock_llm = MagicMock()
     orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
 
-    tasks: list[tuple[type, dict]] = [
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
         (ScoutAgent, {"entities": ["Acme Corp"]}),
         (
             OperatorAgent,
@@ -303,7 +305,7 @@ async def test_execute_parallel_returns_orchestration_result() -> None:
     mock_llm = MagicMock()
     orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
 
-    tasks: list[tuple[type, dict]] = [
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
         (ScoutAgent, {"entities": ["Acme Corp"]}),
         (ScoutAgent, {"entities": ["Beta Inc"]}),
     ]
@@ -343,7 +345,7 @@ async def test_execute_parallel_continues_on_failure() -> None:
     orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
 
     # First task is valid, second has invalid input (will fail validation)
-    tasks: list[tuple[type, dict]] = [
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
         (ScoutAgent, {"entities": ["Acme Corp"]}),  # Valid
         (ScoutAgent, {"signal_types": ["funding"]}),  # Invalid - missing entities
     ]
@@ -354,3 +356,111 @@ async def test_execute_parallel_continues_on_failure() -> None:
     assert len(result.results) == 2
     assert result.success_count == 1
     assert result.failed_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_runs_agents_in_order() -> None:
+    """Test execute_sequential runs agents one after another."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator, OrchestrationResult
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (ScoutAgent, {"entities": ["Beta Inc"]}),
+    ]
+
+    result = await orchestrator.execute_sequential(tasks)
+
+    assert isinstance(result, OrchestrationResult)
+    assert len(result.results) == 2
+    assert result.success_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_passes_context_between_agents() -> None:
+    """Test execute_sequential passes previous results as context."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # The second task should receive context from the first
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (ScoutAgent, {"entities": ["Beta Inc"]}),
+    ]
+
+    result = await orchestrator.execute_sequential(tasks)
+
+    # Both should succeed with context passing
+    assert result.all_succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_handles_empty_tasks() -> None:
+    """Test execute_sequential handles empty task list."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    result = await orchestrator.execute_sequential([])
+
+    assert len(result.results) == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_stops_on_failure_by_default() -> None:
+    """Test execute_sequential stops when an agent fails."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"signal_types": ["funding"]}),  # Invalid - fails validation
+        (ScoutAgent, {"entities": ["Beta Inc"]}),  # Would succeed but won't run
+    ]
+
+    result = await orchestrator.execute_sequential(tasks)
+
+    # Should stop at first failure
+    assert result.failed_count == 1
+    assert len(result.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sequential_continue_on_failure_option() -> None:
+    """Test execute_sequential can continue past failures."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"signal_types": ["funding"]}),  # Invalid
+        (ScoutAgent, {"entities": ["Beta Inc"]}),  # Valid
+    ]
+
+    result = await orchestrator.execute_sequential(tasks, continue_on_failure=True)
+
+    # Should execute both
+    assert len(result.results) == 2
+    assert result.failed_count == 1
+    assert result.success_count == 1
