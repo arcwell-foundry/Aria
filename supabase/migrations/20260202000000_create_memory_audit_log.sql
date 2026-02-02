@@ -23,17 +23,18 @@ CREATE INDEX idx_audit_memory_type ON memory_audit_log(memory_type);
 -- Enable RLS
 ALTER TABLE memory_audit_log ENABLE ROW LEVEL SECURITY;
 
--- Admin can read all audit logs
-CREATE POLICY "Admins can read all audit logs"
-    ON memory_audit_log
-    FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE user_profiles.id = auth.uid()
-            AND user_profiles.role = 'admin'
-        )
-    );
+-- Users can only read their own audit logs
+-- NOTE: Admin policy commented out until user_profiles table is created
+-- CREATE POLICY "Admins can read all audit logs"
+--     ON memory_audit_log
+--     FOR SELECT
+--     USING (
+--         EXISTS (
+--             SELECT 1 FROM user_profiles
+--             WHERE user_profiles.id = auth.uid()
+--             AND user_profiles.role = 'admin'
+--         )
+--     );
 
 -- Users can only read their own audit logs
 CREATE POLICY "Users can read own audit logs"
