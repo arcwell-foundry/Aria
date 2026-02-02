@@ -614,6 +614,7 @@ class SemanticMemory:
         query: str,
         min_confidence: float = 0.5,
         limit: int = 20,
+        as_of: datetime | None = None,
     ) -> list[SemanticFact]:
         """Search facts using semantic similarity.
 
@@ -622,6 +623,7 @@ class SemanticMemory:
             query: Natural language search query.
             min_confidence: Minimum confidence threshold.
             limit: Maximum number of facts to return.
+            as_of: Point in time to check validity. Defaults to now.
 
         Returns:
             List of relevant facts, ordered by relevance.
@@ -648,8 +650,8 @@ class SemanticMemory:
                 if fact.confidence < min_confidence:
                     continue
 
-                # Only include valid facts
-                if not fact.is_valid():
+                # Only include valid facts (check validity at as_of time or now)
+                if not fact.is_valid(as_of=as_of):
                     continue
 
                 facts.append(fact)

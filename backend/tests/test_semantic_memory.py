@@ -924,3 +924,67 @@ async def test_delete_fact_logs_audit_entry() -> None:
             mock_log.assert_called_once()
             call_kwargs = mock_log.call_args.kwargs
             assert call_kwargs["operation"] == MemoryOperation.DELETE
+
+
+@pytest.mark.asyncio
+async def test_search_facts_respects_as_of_validity() -> None:
+    """Test search_facts filters by validity at as_of date."""
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    past = now - timedelta(days=60)
+
+    # Fact that was valid in the past but is now expired
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Subject: John\nPredicate: works_at\nObject: OldCorp\nConfidence: 0.90\nSource: user_stated\nValid From: {past.isoformat()}\nValid To: {(now - timedelta(days=30)).isoformat()}"
+    mock_edge.created_at = past
+    mock_edge.uuid = "fact-temporal"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        # Query as of 45 days ago - fact should be valid then
+        as_of_date = now - timedelta(days=45)
+        results = await memory.search_facts(
+            user_id="user-456",
+            query="where does John work",
+            as_of=as_of_date,
+        )
+
+        # Should include the fact (was valid at that time)
+        assert len(results) == 1
+        assert results[0].object == "OldCorp"
+
+
+@pytest.mark.asyncio
+async def test_search_facts_excludes_invalid_at_as_of() -> None:
+    """Test search_facts excludes facts invalid at as_of date."""
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    past = now - timedelta(days=60)
+
+    # Fact that was valid in the past but is now expired
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Subject: John\nPredicate: works_at\nObject: OldCorp\nConfidence: 0.90\nSource: user_stated\nValid From: {past.isoformat()}\nValid To: {(now - timedelta(days=30)).isoformat()}"
+    mock_edge.created_at = past
+    mock_edge.uuid = "fact-temporal-2"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        # Query as of today - fact should be expired
+        results = await memory.search_facts(
+            user_id="user-456",
+            query="where does John work",
+            as_of=now,
+        )
+
+        # Should NOT include the fact (expired)
+        assert len(results) == 0
