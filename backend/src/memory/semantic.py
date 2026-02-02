@@ -21,6 +21,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import FactNotFoundError, SemanticMemoryError  # noqa: F401
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 from src.memory.confidence import ConfidenceScorer
 
 if TYPE_CHECKING:
@@ -454,6 +455,16 @@ class SemanticMemory:
                 },
             )
 
+            # Audit log the creation
+            await log_memory_operation(
+                user_id=fact.user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.SEMANTIC,
+                memory_id=fact_id,
+                metadata={"subject": fact.subject, "predicate": fact.predicate},
+                suppress_errors=True,
+            )
+
             return fact_id
 
         except SemanticMemoryError:
@@ -706,6 +717,16 @@ class SemanticMemory:
                 extra={"fact_id": fact_id, "user_id": user_id, "reason": reason},
             )
 
+            # Audit log the invalidation
+            await log_memory_operation(
+                user_id=user_id,
+                operation=MemoryOperation.INVALIDATE,
+                memory_type=MemoryType.SEMANTIC,
+                memory_id=fact_id,
+                metadata={"reason": reason},
+                suppress_errors=True,
+            )
+
         except FactNotFoundError:
             raise
         except SemanticMemoryError:
@@ -752,6 +773,15 @@ class SemanticMemory:
             logger.info(
                 "Deleted fact",
                 extra={"fact_id": fact_id, "user_id": user_id},
+            )
+
+            # Audit log the deletion
+            await log_memory_operation(
+                user_id=user_id,
+                operation=MemoryOperation.DELETE,
+                memory_type=MemoryType.SEMANTIC,
+                memory_id=fact_id,
+                suppress_errors=True,
             )
 
         except FactNotFoundError:

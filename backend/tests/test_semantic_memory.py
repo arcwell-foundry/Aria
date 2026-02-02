@@ -832,3 +832,95 @@ def test_get_effective_confidence_with_decay() -> None:
     # 0.75 - ((60-7) * 0.05/30) = 0.75 - 0.0883 = 0.6617
     expected = 0.75 - ((60 - 7) * 0.05 / 30)
     assert result == pytest.approx(expected, rel=0.01)
+
+
+@pytest.mark.asyncio
+async def test_add_fact_logs_audit_entry() -> None:
+    """Test that add_fact logs an audit entry."""
+    from src.memory.audit import MemoryOperation, MemoryType
+
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-audit-test",
+        user_id="user-456",
+        subject="Jane",
+        predicate="title",
+        object="CEO",
+        confidence=0.90,
+        source=FactSource.CRM_IMPORT,
+        valid_from=now,
+    )
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="new-uuid"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_client
+
+        with patch("src.memory.semantic.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-123"
+
+            await memory.add_fact(fact)
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["user_id"] == "user-456"
+            assert call_kwargs["operation"] == MemoryOperation.CREATE
+            assert call_kwargs["memory_type"] == MemoryType.SEMANTIC
+            assert call_kwargs["memory_id"] == "fact-audit-test"
+            assert call_kwargs["suppress_errors"] is True
+
+
+@pytest.mark.asyncio
+async def test_invalidate_fact_logs_audit_entry() -> None:
+    """Test that invalidate_fact logs an audit entry."""
+    from src.memory.audit import MemoryOperation, MemoryType
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"updated": 1}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        with patch("src.memory.semantic.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-456"
+
+            await memory.invalidate_fact(
+                user_id="user-456",
+                fact_id="fact-123",
+                reason="outdated",
+            )
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["operation"] == MemoryOperation.INVALIDATE
+            assert call_kwargs["memory_type"] == MemoryType.SEMANTIC
+
+
+@pytest.mark.asyncio
+async def test_delete_fact_logs_audit_entry() -> None:
+    """Test that delete_fact logs an audit entry."""
+    from src.memory.audit import MemoryOperation, MemoryType
+
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"deleted": 1}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        with patch("src.memory.semantic.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-789"
+
+            await memory.delete_fact(user_id="user-456", fact_id="fact-123")
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["operation"] == MemoryOperation.DELETE
