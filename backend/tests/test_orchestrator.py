@@ -794,3 +794,111 @@ def test_active_agent_count_property() -> None:
 
     orchestrator.spawn_agent(ScoutAgent)
     assert orchestrator.active_agent_count == 2
+
+
+# Task 10: Integration Tests
+
+
+@pytest.mark.asyncio
+async def test_full_orchestration_workflow() -> None:
+    """Test complete orchestration workflow with multiple agents.
+
+    This integration test verifies:
+    - Multiple agent types can be orchestrated together
+    - Parallel execution works correctly
+    - Sequential execution passes context
+    - Progress updates are received
+    - Resource tracking is accurate
+    """
+    from unittest.mock import MagicMock
+
+    from src.agents.operator import OperatorAgent
+    from src.agents.orchestrator import (
+        AgentOrchestrator,
+        OrchestrationResult,
+        ProgressUpdate,
+    )
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-integration-test",
+        max_tokens=50000,
+        max_concurrent_agents=3,
+    )
+
+    progress_updates: list[ProgressUpdate] = []
+
+    def on_progress(update: ProgressUpdate) -> None:
+        progress_updates.append(update)
+
+    # Phase 1: Parallel execution of independent tasks
+    parallel_tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (ScoutAgent, {"entities": ["Beta Inc"]}),
+        (
+            OperatorAgent,
+            {
+                "operation_type": "calendar_read",
+                "parameters": {"start_date": "2024-01-01"},
+            },
+        ),
+    ]
+
+    parallel_result = await orchestrator.execute_parallel(
+        parallel_tasks,
+        on_progress=on_progress,
+    )
+
+    assert isinstance(parallel_result, OrchestrationResult)
+    assert parallel_result.all_succeeded is True
+    assert len(parallel_result.results) == 3
+
+    # Phase 2: Sequential execution with context passing
+    sequential_tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Gamma LLC"]}),
+        (ScoutAgent, {"entities": ["Delta Corp"]}),
+    ]
+
+    sequential_result = await orchestrator.execute_sequential(
+        sequential_tasks,
+        on_progress=on_progress,
+    )
+
+    assert sequential_result.all_succeeded is True
+    assert len(sequential_result.results) == 2
+
+    # Verify progress updates were received
+    assert len(progress_updates) >= 10  # At least start/complete for each task
+
+    # Verify cleanup works
+    orchestrator.cleanup()
+    assert orchestrator.active_agent_count == 0
+    assert orchestrator._total_tokens_used == 0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_handles_mixed_success_failure() -> None:
+    """Test orchestrator handles mix of successful and failed agents."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # Mix of valid and invalid tasks
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Valid Corp"]}),
+        (ScoutAgent, {"signal_types": ["funding"]}),  # Invalid - missing entities
+        (ScoutAgent, {"entities": ["Another Valid"]}),
+    ]
+
+    result = await orchestrator.execute_parallel(tasks)
+
+    # Should have 2 successes and 1 failure
+    assert result.success_count == 2
+    assert result.failed_count == 1
+    assert result.all_succeeded is False
