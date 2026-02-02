@@ -270,10 +270,86 @@ class HunterAgent(BaseAgent):
 
         return all_contacts
 
-    async def _score_fit(self) -> tuple[float, list[Any], list[Any]]:
-        """Score company fit against ICP.
+    async def _score_fit(
+        self,
+        company: dict[str, Any],
+        icp: dict[str, Any],
+    ) -> tuple[float, list[str], list[str]]:
+        """Score company fit against ICP using weighted algorithm.
+
+        Args:
+            company: Company data to score.
+            icp: Ideal Customer Profile criteria.
 
         Returns:
-            Tuple of (score, strengths, gaps).
+            Tuple of (score 0-100, fit_reasons list, gaps list).
         """
-        return 0.0, [], []
+        score = 0.0
+        fit_reasons: list[str] = []
+        gaps: list[str] = []
+
+        # Industry match: 40% weight
+        industry_weight = 0.40
+        company_industry = company.get("industry", "")
+        icp_industry = icp.get("industry", "")
+        if company_industry and icp_industry:
+            # Handle string or list of strings
+            icp_industries = (
+                [icp_industry] if isinstance(icp_industry, str) else icp_industry
+            )
+            if company_industry in icp_industries:
+                score += industry_weight * 100
+                fit_reasons.append(f"Industry match: {company_industry}")
+            else:
+                gaps.append(f"Industry mismatch: {company_industry} vs {icp_industries}")
+
+        # Size match: 25% weight (exact match)
+        size_weight = 0.25
+        company_size = company.get("size", "")
+        icp_size = icp.get("size", "")
+        if company_size and icp_size:
+            if company_size == icp_size:
+                score += size_weight * 100
+                fit_reasons.append(f"Size match: {company_size}")
+            else:
+                gaps.append(f"Size mismatch: {company_size} vs {icp_size}")
+
+        # Geography match: 20% weight
+        geo_weight = 0.20
+        company_geo = company.get("geography", "")
+        icp_geo = icp.get("geography", "")
+        if company_geo and icp_geo:
+            # Handle string or list of strings
+            icp_geos = [icp_geo] if isinstance(icp_geo, str) else icp_geo
+            if company_geo in icp_geos:
+                score += geo_weight * 100
+                fit_reasons.append(f"Geography match: {company_geo}")
+            else:
+                gaps.append(f"Geography mismatch: {company_geo} vs {icp_geos}")
+
+        # Technology overlap: 15% weight (proportional to overlap)
+        tech_weight = 0.15
+        company_techs = company.get("technologies", [])
+        icp_techs = icp.get("technologies", [])
+        if company_techs and icp_techs:
+            # Calculate overlap proportion
+            company_tech_set = set(company_techs) if isinstance(company_techs, list) else {company_techs}
+            icp_tech_set = set(icp_techs) if isinstance(icp_techs, list) else {icp_techs}
+            overlap = company_tech_set & icp_tech_set
+            overlap_ratio = len(overlap) / len(icp_tech_set) if icp_tech_set else 0
+            tech_score = tech_weight * 100 * overlap_ratio
+            score += tech_score
+            if overlap:
+                fit_reasons.append(f"Technology overlap: {len(overlap)}/{len(icp_tech_set)} ({', '.join(overlap)})")
+            missing_techs = icp_tech_set - company_tech_set
+            if missing_techs:
+                gaps.append(f"Missing technologies: {', '.join(missing_techs)}")
+
+        # Clamp score to 0-100 range
+        score = max(0.0, min(100.0, score))
+
+        logger.debug(
+            f"Fit score for {company.get('name', 'Unknown')}: {score:.1f}/100",
+        )
+
+        return score, fit_reasons, gaps

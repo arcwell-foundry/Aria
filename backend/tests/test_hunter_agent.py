@@ -438,3 +438,143 @@ async def test_find_contacts_includes_department() -> None:
         assert "department" in contact
         assert isinstance(contact["department"], str)
         assert len(contact["department"]) > 0
+
+
+# Task 6: score_fit tool tests
+
+
+@pytest.mark.asyncio
+async def test_score_fit_returns_tuple() -> None:
+    """Test score_fit returns a tuple of (score, reasons, gaps)."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {"name": "Test Corp", "industry": "Biotechnology", "size": "Mid-market"}
+    icp = {"industry": "Biotechnology", "size": "Mid-market", "geography": "North America"}
+
+    result = await agent._score_fit(company=company, icp=icp)
+
+    assert isinstance(result, tuple)
+    assert len(result) == 3
+    assert isinstance(result[0], float)  # score
+    assert isinstance(result[1], list)  # fit_reasons
+    assert isinstance(result[2], list)  # gaps
+
+
+@pytest.mark.asyncio
+async def test_score_fit_perfect_match() -> None:
+    """Test score_fit returns 100.0 for perfect match with no gaps."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Corp",
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot", "Marketo"],
+    }
+    icp = {
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot", "Marketo"],
+    }
+
+    score, fit_reasons, gaps = await agent._score_fit(company=company, icp=icp)
+
+    assert score == 100.0
+    assert len(fit_reasons) > 0
+    assert len(gaps) == 0
+
+
+@pytest.mark.asyncio
+async def test_score_fit_partial_match() -> None:
+    """Test score_fit returns partial score with both reasons and gaps."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Corp",
+        "industry": "Biotechnology",
+        "size": "Enterprise",  # Mismatch
+        "geography": "Europe",  # Mismatch
+        "technologies": ["Salesforce"],
+    }
+    icp = {
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot", "Marketo"],
+    }
+
+    score, fit_reasons, gaps = await agent._score_fit(company=company, icp=icp)
+
+    assert 0 < score < 100
+    assert len(fit_reasons) > 0
+    assert len(gaps) > 0
+
+
+@pytest.mark.asyncio
+async def test_score_fit_no_match() -> None:
+    """Test score_fit returns low score with 3+ gaps for poor match."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Corp",
+        "industry": "Retail",  # Mismatch
+        "size": "Startup",  # Mismatch
+        "geography": "Asia",  # Mismatch
+        "technologies": ["Shopify"],
+    }
+    icp = {
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot", "Marketo"],
+    }
+
+    score, fit_reasons, gaps = await agent._score_fit(company=company, icp=icp)
+
+    assert score < 50
+    assert len(gaps) >= 3
+
+
+@pytest.mark.asyncio
+async def test_score_fit_technology_overlap() -> None:
+    """Test score_fit calculates proportional technology overlap."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Corp",
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot"],  # 2 out of 3
+    }
+    icp = {
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+        "geography": "North America",
+        "technologies": ["Salesforce", "HubSpot", "Marketo"],
+    }
+
+    score, fit_reasons, gaps = await agent._score_fit(company=company, icp=icp)
+
+    # Technology overlap is 15% weight, 2/3 overlap = ~10 points
+    # Industry match (40%) + size match (25%) + geography match (20%) + tech overlap (10%) = 95
+    assert score > 90
+    assert score < 100
+    assert len(gaps) == 1  # Only missing Marketo
