@@ -633,3 +633,139 @@ async def test_personalize_logs_style_application(caplog: Any) -> None:
         await agent._personalize(content="Test content", style=style)
 
     assert "Personalizing" in caplog.text or "style" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_apply_template_returns_string() -> None:
+    """Test _apply_template returns a string."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    # First register a template
+    agent._templates["welcome"] = "Welcome to {company}, {name}!"
+
+    result = await agent._apply_template(
+        template_name="welcome",
+        variables={"company": "Acme Inc", "name": "John"},
+    )
+
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_apply_template_substitutes_variables() -> None:
+    """Test _apply_template substitutes variables correctly."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    agent._templates["intro"] = "Hello {name}, I'm reaching out about {topic}."
+
+    result = await agent._apply_template(
+        template_name="intro",
+        variables={"name": "Sarah", "topic": "our partnership"},
+    )
+
+    assert "Sarah" in result
+    assert "our partnership" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_template_unknown_template_returns_empty() -> None:
+    """Test _apply_template returns empty string for unknown template."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._apply_template(
+        template_name="nonexistent",
+        variables={},
+    )
+
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_apply_template_handles_missing_variables() -> None:
+    """Test _apply_template handles missing variables gracefully."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    agent._templates["greeting"] = "Hello {name}, welcome to {company}!"
+
+    result = await agent._apply_template(
+        template_name="greeting",
+        variables={"name": "John"},  # Missing 'company'
+    )
+
+    # Should handle missing variable
+    assert "John" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_template_uses_builtin_templates() -> None:
+    """Test _apply_template has built-in templates."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Should have some built-in templates
+    assert len(agent._templates) > 0
+
+
+@pytest.mark.asyncio
+async def test_apply_template_follow_up_email() -> None:
+    """Test _apply_template has follow_up_email template."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._apply_template(
+        template_name="follow_up_email",
+        variables={"name": "Mike", "meeting_topic": "the demo"},
+    )
+
+    assert "Mike" in result
+    assert "demo" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_template_meeting_request() -> None:
+    """Test _apply_template has meeting_request template."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._apply_template(
+        template_name="meeting_request",
+        variables={"name": "Sarah", "purpose": "discuss Q1 goals"},
+    )
+
+    assert "Sarah" in result
+    assert "Q1 goals" in result or "discuss" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_template_logs_usage(caplog: Any) -> None:
+    """Test _apply_template logs template usage."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level("INFO"):
+        await agent._apply_template(
+            template_name="follow_up_email",
+            variables={"name": "Test"},
+        )
+
+    assert "template" in caplog.text.lower()

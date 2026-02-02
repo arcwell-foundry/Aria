@@ -36,8 +36,44 @@ class ScribeAgent(BaseAgent):
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
         """
-        self._templates: dict[str, dict[str, Any]] = {}
+        self._templates: dict[str, str] = self._get_builtin_templates()
         super().__init__(llm_client=llm_client, user_id=user_id)
+
+    def _get_builtin_templates(self) -> dict[str, str]:
+        """Get built-in communication templates.
+
+        Returns:
+            Dictionary of template name to template string.
+        """
+        return {
+            "follow_up_email": (
+                "Hi {name},\n\n"
+                "I wanted to follow up on {meeting_topic}. "
+                "I hope you found our discussion valuable.\n\n"
+                "Please let me know if you have any questions or would like to schedule a follow-up.\n\n"
+                "Best regards"
+            ),
+            "meeting_request": (
+                "Hi {name},\n\n"
+                "I would like to schedule a meeting to {purpose}. "
+                "Would you have time this week or next?\n\n"
+                "Please let me know your availability.\n\n"
+                "Best regards"
+            ),
+            "introduction": (
+                "Hi {name},\n\n"
+                "I'm {sender_name} from {company}. "
+                "I'm reaching out because {reason}.\n\n"
+                "I'd love to connect and discuss how we might work together.\n\n"
+                "Best regards"
+            ),
+            "thank_you": (
+                "Hi {name},\n\n"
+                "Thank you for {reason}. "
+                "I really appreciate your time and {detail}.\n\n"
+                "Best regards"
+            ),
+        }
 
     def _register_tools(self) -> dict[str, Any]:
         """Register Scribe agent's drafting tools.
@@ -319,16 +355,39 @@ class ScribeAgent(BaseAgent):
 
     async def _apply_template(
         self,
-        template_name: str,  # noqa: ARG002
-        variables: dict[str, Any],  # noqa: ARG002
+        template_name: str,
+        variables: dict[str, Any],
     ) -> str:
         """Apply a template with variables.
+
+        Substitutes variables into a named template.
 
         Args:
             template_name: Name of the template to use.
             variables: Variables to substitute in template.
 
         Returns:
-            Rendered template content.
+            Rendered template content, or empty string if template not found.
         """
-        return ""
+        if template_name not in self._templates:
+            logger.warning(f"Template not found: {template_name}")
+            return ""
+
+        logger.info(
+            f"Applying template: {template_name}",
+            extra={"template": template_name, "variables": list(variables.keys())},
+        )
+
+        template = self._templates[template_name]
+
+        # Substitute variables
+        try:
+            # Use str.format with partial substitution support
+            result = template
+            for key, value in variables.items():
+                placeholder = "{" + key + "}"
+                result = result.replace(placeholder, str(value))
+            return result
+        except KeyError as e:
+            logger.warning(f"Missing variable in template: {e}")
+            return template
