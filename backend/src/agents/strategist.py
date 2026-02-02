@@ -263,10 +263,10 @@ class StrategistAgent(BaseAgent):
 
     async def _generate_strategy(
         self,
-        goal: dict[str, Any],  # noqa: ARG002
-        analysis: dict[str, Any],  # noqa: ARG002
-        resources: dict[str, Any],  # noqa: ARG002
-        constraints: dict[str, Any] | None = None,  # noqa: ARG002
+        goal: dict[str, Any],
+        analysis: dict[str, Any],
+        resources: dict[str, Any],
+        constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Generate pursuit strategy with phases.
 
@@ -279,7 +279,562 @@ class StrategistAgent(BaseAgent):
         Returns:
             Strategy with phases, milestones, and agent tasks.
         """
-        return {}
+        goal_type = goal.get("type", "general")
+        time_horizon = resources.get("time_horizon_days", 90)
+        available_agents = resources.get("available_agents", [])
+        constraints = constraints or {}
+
+        logger.info(
+            f"Generating strategy for goal: {goal.get('title')}",
+            extra={"goal_type": goal_type, "time_horizon": time_horizon},
+        )
+
+        # Generate phases based on goal type
+        phases = self._generate_phases(goal_type, time_horizon)
+
+        # Generate agent tasks based on available agents and phases
+        agent_tasks = self._generate_agent_tasks(goal_type, available_agents, phases, analysis)
+
+        # Generate risks from challenges and constraints
+        challenges = analysis.get("challenges", [])
+        risks = self._generate_risks(challenges, constraints)
+
+        # Generate success criteria
+        success_criteria = self._generate_success_criteria(goal_type, goal)
+
+        # Generate summary
+        summary = self._generate_summary(goal, phases, agent_tasks)
+
+        # Track applied constraints
+        constraints_applied = {
+            "has_deadline": "deadline" in constraints,
+            "has_exclusions": "exclusions" in constraints,
+            "has_compliance_notes": "compliance_notes" in constraints,
+        }
+
+        return {
+            "goal_type": goal_type,
+            "phases": phases,
+            "agent_tasks": agent_tasks,
+            "risks": risks,
+            "success_criteria": success_criteria,
+            "summary": summary,
+            "constraints_applied": constraints_applied,
+        }
+
+    def _generate_phases(
+        self,
+        goal_type: str,
+        time_horizon: int,
+    ) -> list[dict[str, Any]]:
+        """Generate phase templates based on goal type.
+
+        Args:
+            goal_type: Type of goal.
+            time_horizon: Time horizon in days.
+
+        Returns:
+            List of phase dictionaries.
+        """
+        # Phase templates by goal type with duration percentages
+        phase_templates: dict[str, list[dict[str, Any]]] = {
+            "lead_gen": [
+                {
+                    "name": "Discovery",
+                    "description": "Identify and qualify potential leads",
+                    "duration_pct": 0.4,
+                    "objectives": ["Define ICP criteria", "Source initial leads"],
+                },
+                {
+                    "name": "Enrichment",
+                    "description": "Enrich lead data and validate fit",
+                    "duration_pct": 0.35,
+                    "objectives": ["Gather company data", "Identify stakeholders"],
+                },
+                {
+                    "name": "Handoff",
+                    "description": "Prepare leads for outreach",
+                    "duration_pct": 0.25,
+                    "objectives": ["Score leads", "Create outreach plan"],
+                },
+            ],
+            "research": [
+                {
+                    "name": "Scoping",
+                    "description": "Define research scope and questions",
+                    "duration_pct": 0.2,
+                    "objectives": ["Identify research questions", "Define sources"],
+                },
+                {
+                    "name": "Investigation",
+                    "description": "Conduct research and gather intelligence",
+                    "duration_pct": 0.5,
+                    "objectives": ["Query scientific APIs", "Analyze competitors"],
+                },
+                {
+                    "name": "Synthesis",
+                    "description": "Synthesize findings and create deliverables",
+                    "duration_pct": 0.3,
+                    "objectives": ["Create summary report", "Identify insights"],
+                },
+            ],
+            "outreach": [
+                {
+                    "name": "Preparation",
+                    "description": "Research and prepare outreach materials",
+                    "duration_pct": 0.3,
+                    "objectives": ["Research prospect", "Draft messaging"],
+                },
+                {
+                    "name": "Execution",
+                    "description": "Execute outreach campaign",
+                    "duration_pct": 0.4,
+                    "objectives": ["Send communications", "Track responses"],
+                },
+                {
+                    "name": "Follow-up",
+                    "description": "Follow up and nurture responses",
+                    "duration_pct": 0.3,
+                    "objectives": ["Follow up on opens", "Schedule meetings"],
+                },
+            ],
+            "close": [
+                {
+                    "name": "Discovery",
+                    "description": "Understand needs and build relationships",
+                    "duration_pct": 0.2,
+                    "objectives": ["Conduct discovery calls", "Map stakeholders"],
+                },
+                {
+                    "name": "Proposal",
+                    "description": "Create and present proposal",
+                    "duration_pct": 0.25,
+                    "objectives": ["Draft proposal", "Present solution"],
+                },
+                {
+                    "name": "Negotiation",
+                    "description": "Navigate objections and negotiate terms",
+                    "duration_pct": 0.3,
+                    "objectives": ["Handle objections", "Negotiate pricing"],
+                },
+                {
+                    "name": "Closing",
+                    "description": "Finalize deal and onboard",
+                    "duration_pct": 0.25,
+                    "objectives": ["Complete contracts", "Plan implementation"],
+                },
+            ],
+            "retention": [
+                {
+                    "name": "Assessment",
+                    "description": "Assess account health and risks",
+                    "duration_pct": 0.3,
+                    "objectives": ["Review usage metrics", "Identify churn risks"],
+                },
+                {
+                    "name": "Engagement",
+                    "description": "Proactive engagement and value delivery",
+                    "duration_pct": 0.4,
+                    "objectives": ["Schedule QBRs", "Share success stories"],
+                },
+                {
+                    "name": "Renewal",
+                    "description": "Prepare and execute renewal",
+                    "duration_pct": 0.3,
+                    "objectives": ["Prepare renewal proposal", "Close renewal"],
+                },
+            ],
+        }
+
+        # Default phases for unknown goal types
+        default_phases = [
+            {
+                "name": "Planning",
+                "description": "Plan and prepare for execution",
+                "duration_pct": 0.3,
+                "objectives": ["Define objectives", "Allocate resources"],
+            },
+            {
+                "name": "Execution",
+                "description": "Execute planned activities",
+                "duration_pct": 0.7,
+                "objectives": ["Complete tasks", "Monitor progress"],
+            },
+        ]
+
+        templates = phase_templates.get(goal_type, default_phases)
+
+        phases = []
+        for i, template in enumerate(templates):
+            duration_days = int(time_horizon * template["duration_pct"])
+            phases.append(
+                {
+                    "phase_number": i + 1,
+                    "name": template["name"],
+                    "description": template["description"],
+                    "duration_days": max(1, duration_days),
+                    "objectives": template["objectives"],
+                }
+            )
+
+        return phases
+
+    def _generate_agent_tasks(
+        self,
+        goal_type: str,
+        available_agents: list[str],
+        phases: list[dict[str, Any]],
+        analysis: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Generate agent tasks based on available agents and phases.
+
+        Args:
+            goal_type: Type of goal.
+            available_agents: List of available agent names.
+            phases: List of phases.
+            analysis: Account analysis results.
+
+        Returns:
+            List of agent task dictionaries.
+        """
+        # Agent capabilities and task types
+        agent_capabilities: dict[str, list[dict[str, Any]]] = {
+            "Hunter": [
+                {
+                    "task_type": "lead_discovery",
+                    "description": "Discover and qualify new leads",
+                    "priority": "high",
+                    "goal_types": ["lead_gen", "close"],
+                },
+                {
+                    "task_type": "lead_enrichment",
+                    "description": "Enrich lead data with additional information",
+                    "priority": "medium",
+                    "goal_types": ["lead_gen", "outreach"],
+                },
+            ],
+            "Analyst": [
+                {
+                    "task_type": "research",
+                    "description": "Conduct market and competitive research",
+                    "priority": "high",
+                    "goal_types": ["research", "close"],
+                },
+                {
+                    "task_type": "competitive_analysis",
+                    "description": "Analyze competitive landscape",
+                    "priority": "medium",
+                    "goal_types": ["research", "close", "outreach"],
+                },
+            ],
+            "Scribe": [
+                {
+                    "task_type": "draft_outreach",
+                    "description": "Draft personalized outreach communications",
+                    "priority": "high",
+                    "goal_types": ["outreach", "lead_gen"],
+                },
+                {
+                    "task_type": "draft_proposal",
+                    "description": "Draft proposal and ROI documentation",
+                    "priority": "high",
+                    "goal_types": ["close"],
+                },
+            ],
+            "Operator": [
+                {
+                    "task_type": "schedule_meetings",
+                    "description": "Schedule and coordinate meetings",
+                    "priority": "medium",
+                    "goal_types": ["close", "outreach", "retention"],
+                },
+                {
+                    "task_type": "crm_update",
+                    "description": "Update CRM with activity data",
+                    "priority": "low",
+                    "goal_types": ["lead_gen", "close", "outreach", "retention"],
+                },
+            ],
+            "Scout": [
+                {
+                    "task_type": "monitor_signals",
+                    "description": "Monitor account signals and triggers",
+                    "priority": "medium",
+                    "goal_types": ["retention", "close"],
+                },
+            ],
+        }
+
+        tasks = []
+        task_id = 1
+
+        for agent in available_agents:
+            capabilities = agent_capabilities.get(agent, [])
+
+            for capability in capabilities:
+                # Only include tasks relevant to this goal type
+                if goal_type not in capability.get("goal_types", []):
+                    continue
+
+                # Determine which phase this task belongs to
+                phase_num = self._determine_task_phase(
+                    capability["task_type"], goal_type, len(phases)
+                )
+
+                tasks.append(
+                    {
+                        "id": f"task-{task_id}",
+                        "agent": agent,
+                        "task_type": capability["task_type"],
+                        "description": capability["description"],
+                        "phase": phase_num,
+                        "priority": capability["priority"],
+                    }
+                )
+                task_id += 1
+
+        # Add tasks from key actions in analysis
+        key_actions = analysis.get("key_actions", [])
+        for action in key_actions:
+            # Try to match action to an available agent
+            assigned_agent = self._match_action_to_agent(action, available_agents)
+            if assigned_agent:
+                tasks.append(
+                    {
+                        "id": f"task-{task_id}",
+                        "agent": assigned_agent,
+                        "task_type": "custom_action",
+                        "description": action,
+                        "phase": 1,
+                        "priority": "medium",
+                    }
+                )
+                task_id += 1
+
+        return tasks
+
+    def _determine_task_phase(
+        self,
+        task_type: str,
+        goal_type: str,  # noqa: ARG002
+        num_phases: int,
+    ) -> int:
+        """Determine which phase a task belongs to.
+
+        Args:
+            task_type: Type of task.
+            goal_type: Type of goal.
+            num_phases: Number of phases.
+
+        Returns:
+            Phase number (1-indexed).
+        """
+        # Early phase tasks
+        early_tasks = {"lead_discovery", "research", "competitive_analysis"}
+        # Late phase tasks
+        late_tasks = {"draft_proposal", "crm_update", "schedule_meetings"}
+
+        if task_type in early_tasks:
+            return 1
+        elif task_type in late_tasks:
+            return num_phases
+        else:
+            # Middle phase
+            return max(1, num_phases // 2)
+
+    def _match_action_to_agent(
+        self,
+        action: str,
+        available_agents: list[str],
+    ) -> str | None:
+        """Match a key action to an available agent.
+
+        Args:
+            action: Action description.
+            available_agents: List of available agent names.
+
+        Returns:
+            Agent name or None if no match.
+        """
+        action_lower = action.lower()
+
+        agent_keywords: dict[str, list[str]] = {
+            "Hunter": ["lead", "prospect", "discover", "find"],
+            "Analyst": ["research", "analyze", "competitive", "intelligence"],
+            "Scribe": ["draft", "write", "communication", "email", "proposal"],
+            "Operator": ["schedule", "meeting", "crm", "sync"],
+            "Scout": ["monitor", "signal", "alert", "track"],
+        }
+
+        for agent in available_agents:
+            keywords = agent_keywords.get(agent, [])
+            if any(keyword in action_lower for keyword in keywords):
+                return agent
+
+        # Return first available agent as fallback
+        return available_agents[0] if available_agents else None
+
+    def _generate_risks(
+        self,
+        challenges: list[str],
+        constraints: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Generate risks from challenges and constraints.
+
+        Args:
+            challenges: List of identified challenges.
+            constraints: Constraints dict with deadline, exclusions, etc.
+
+        Returns:
+            List of risk dictionaries.
+        """
+        risks = []
+
+        # Convert challenges to risks
+        for challenge in challenges:
+            risk = {
+                "description": challenge,
+                "likelihood": "medium",
+                "impact": "medium",
+                "mitigation": f"Monitor and address: {challenge}",
+            }
+
+            # Adjust likelihood/impact based on keywords
+            challenge_lower = challenge.lower()
+            if any(word in challenge_lower for word in ["budget", "cost", "price", "funding"]):
+                risk["likelihood"] = "high"
+                risk["impact"] = "high"
+                risk["mitigation"] = "Prepare ROI justification and flexible pricing"
+            elif any(
+                word in challenge_lower for word in ["timeline", "deadline", "urgent", "delay"]
+            ):
+                risk["likelihood"] = "medium"
+                risk["impact"] = "high"
+                risk["mitigation"] = "Accelerate early phases, parallel workstreams"
+            elif any(
+                word in challenge_lower for word in ["competitor", "competition", "alternative"]
+            ):
+                risk["likelihood"] = "high"
+                risk["impact"] = "medium"
+                risk["mitigation"] = "Emphasize differentiators, faster response"
+
+            risks.append(risk)
+
+        # Add deadline risk if constraint exists
+        if "deadline" in constraints:
+            risks.append(
+                {
+                    "description": f"Hard deadline: {constraints['deadline']}",
+                    "likelihood": "high",
+                    "impact": "high",
+                    "mitigation": "Build buffer time, prioritize critical path",
+                }
+            )
+
+        # Add compliance risk if noted
+        if "compliance_notes" in constraints:
+            risks.append(
+                {
+                    "description": "Compliance requirements must be met",
+                    "likelihood": "medium",
+                    "impact": "high",
+                    "mitigation": "Review all communications for compliance",
+                }
+            )
+
+        return risks
+
+    def _generate_success_criteria(
+        self,
+        goal_type: str,
+        goal: dict[str, Any],
+    ) -> list[str]:
+        """Generate success criteria based on goal type.
+
+        Args:
+            goal_type: Type of goal.
+            goal: Goal details.
+
+        Returns:
+            List of success criteria strings.
+        """
+        criteria_templates: dict[str, list[str]] = {
+            "lead_gen": [
+                "Minimum qualified leads identified",
+                "Lead data enrichment complete",
+                "Leads scored and prioritized",
+                "Outreach sequences prepared",
+            ],
+            "research": [
+                "Research questions answered",
+                "Competitive analysis complete",
+                "Key insights documented",
+                "Recommendations delivered",
+            ],
+            "outreach": [
+                "Outreach sequence completed",
+                "Response rate above threshold",
+                "Meetings scheduled",
+                "Pipeline value generated",
+            ],
+            "close": [
+                "Proposal delivered",
+                "Key stakeholder buy-in obtained",
+                "Terms negotiated",
+                "Contract signed",
+            ],
+            "retention": [
+                "Account health assessed",
+                "QBR completed",
+                "Renewal proposal delivered",
+                "Renewal confirmed",
+            ],
+        }
+
+        default_criteria = [
+            "Goal objectives achieved",
+            "Timeline met",
+            "Quality standards maintained",
+        ]
+
+        criteria = criteria_templates.get(goal_type, default_criteria)
+
+        # Add goal-specific criteria if target company specified
+        if goal.get("target_company"):
+            criteria.append(f"Engagement with {goal['target_company']} established")
+
+        return criteria
+
+    def _generate_summary(
+        self,
+        goal: dict[str, Any],
+        phases: list[dict[str, Any]],
+        agent_tasks: list[dict[str, Any]],
+    ) -> str:
+        """Generate executive summary of the strategy.
+
+        Args:
+            goal: Goal details.
+            phases: List of phases.
+            agent_tasks: List of agent tasks.
+
+        Returns:
+            Summary text.
+        """
+        goal_title = goal.get("title", "Unnamed goal")
+        num_phases = len(phases)
+        num_tasks = len(agent_tasks)
+        total_days = sum(phase.get("duration_days", 0) for phase in phases)
+
+        # Count unique agents
+        agents_involved = list({task["agent"] for task in agent_tasks})
+        num_agents = len(agents_involved)
+
+        return (
+            f"Strategy for '{goal_title}': {num_phases} phases over {total_days} days, "
+            f"with {num_tasks} tasks assigned to {num_agents} agent(s) "
+            f"({', '.join(agents_involved) if agents_involved else 'none'})."
+        )
 
     async def _create_timeline(
         self,

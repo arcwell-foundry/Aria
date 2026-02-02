@@ -305,3 +305,145 @@ async def test_analyze_account_identifies_key_actions() -> None:
 
     assert "key_actions" in result
     assert isinstance(result["key_actions"], list)
+
+
+# Task 4: _generate_strategy tests
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_returns_strategy_dict() -> None:
+    """Test _generate_strategy returns strategy dictionary."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Close deal with Acme Corp",
+        "type": "close",
+        "target_company": "Acme Corp",
+    }
+    analysis = {
+        "opportunities": ["Strong product fit"],
+        "challenges": ["Budget constraints"],
+        "key_actions": ["Engage decision maker"],
+    }
+    resources = {
+        "available_agents": ["Hunter", "Analyst", "Scribe"],
+        "time_horizon_days": 90,
+    }
+
+    result = await agent._generate_strategy(
+        goal=goal, analysis=analysis, resources=resources
+    )
+
+    assert isinstance(result, dict)
+    assert "phases" in result
+    assert "agent_tasks" in result
+    assert "risks" in result
+    assert "success_criteria" in result
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_creates_phases() -> None:
+    """Test _generate_strategy creates multiple phases."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Close deal", "type": "close"}
+    analysis = {"opportunities": [], "challenges": [], "key_actions": []}
+    resources = {"available_agents": ["Hunter"], "time_horizon_days": 90}
+
+    result = await agent._generate_strategy(
+        goal=goal, analysis=analysis, resources=resources
+    )
+
+    assert len(result["phases"]) >= 2
+    for phase in result["phases"]:
+        assert "phase_number" in phase
+        assert "name" in phase
+        assert "description" in phase
+        assert "duration_days" in phase
+        assert "objectives" in phase
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_creates_agent_tasks() -> None:
+    """Test _generate_strategy creates tasks for available agents."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Lead generation", "type": "lead_gen"}
+    analysis = {"opportunities": [], "challenges": [], "key_actions": []}
+    resources = {"available_agents": ["Hunter", "Analyst"], "time_horizon_days": 30}
+
+    result = await agent._generate_strategy(
+        goal=goal, analysis=analysis, resources=resources
+    )
+
+    assert len(result["agent_tasks"]) > 0
+    for task in result["agent_tasks"]:
+        assert "id" in task
+        assert "agent" in task
+        assert "task_type" in task
+        assert "description" in task
+        assert "phase" in task
+        assert "priority" in task
+        assert task["agent"] in resources["available_agents"]
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_identifies_risks() -> None:
+    """Test _generate_strategy identifies risks."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Close deal", "type": "close"}
+    analysis = {
+        "opportunities": [],
+        "challenges": ["Budget constraints", "Long sales cycle"],
+        "key_actions": [],
+    }
+    resources = {"available_agents": ["Scribe"], "time_horizon_days": 60}
+
+    result = await agent._generate_strategy(
+        goal=goal, analysis=analysis, resources=resources
+    )
+
+    assert len(result["risks"]) > 0
+    for risk in result["risks"]:
+        assert "description" in risk
+        assert "likelihood" in risk
+        assert "impact" in risk
+        assert "mitigation" in risk
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_respects_constraints() -> None:
+    """Test _generate_strategy respects provided constraints."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Lead generation", "type": "lead_gen"}
+    analysis = {"opportunities": [], "challenges": [], "key_actions": []}
+    resources = {"available_agents": ["Hunter"], "time_horizon_days": 30}
+    constraints = {
+        "deadline": "2026-03-01",
+        "exclusions": ["Competitor Inc"],
+        "compliance_notes": ["GDPR compliance required"],
+    }
+
+    result = await agent._generate_strategy(
+        goal=goal, analysis=analysis, resources=resources, constraints=constraints
+    )
+
+    assert "constraints_applied" in result
+    assert result["constraints_applied"]["has_deadline"] is True
