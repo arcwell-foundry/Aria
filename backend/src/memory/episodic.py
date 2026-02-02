@@ -463,7 +463,11 @@ class EpisodicMemory:
             raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_participant(
-        self, user_id: str, participant: str, limit: int = 50
+        self,
+        user_id: str,
+        participant: str,
+        limit: int = 50,
+        as_of: datetime | None = None,
     ) -> list[Episode]:
         """Query episodes by participant.
 
@@ -471,6 +475,8 @@ class EpisodicMemory:
             user_id: The user ID to query episodes for.
             participant: The participant name to search for.
             limit: Maximum number of episodes to return.
+            as_of: Optional point-in-time filter. If provided, only episodes
+                   recorded on or before this datetime are included.
 
         Returns:
             List of Episode instances involving the participant.
@@ -486,6 +492,14 @@ class EpisodicMemory:
             episodes = []
             participant_lower = participant.lower()
             for edge in results[:limit]:
+                # Apply as_of filter if provided
+                if as_of is not None:
+                    fact = getattr(edge, "fact", "")
+                    recorded_at = self._extract_recorded_at_from_fact(fact)
+                    if recorded_at is not None and recorded_at > as_of:
+                        # Skip episodes recorded after the as_of date
+                        continue
+
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode and (
                     any(participant_lower in p.lower() for p in episode.participants)

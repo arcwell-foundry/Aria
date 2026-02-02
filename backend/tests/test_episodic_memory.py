@@ -426,3 +426,32 @@ async def test_query_by_event_type_respects_as_of() -> None:
         )
 
         assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_query_by_participant_respects_as_of() -> None:
+    """Test query_by_participant filters episodes recorded after as_of date."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    past = now - timedelta(days=30)
+
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Event Type: meeting\nContent: Discussion with John\nParticipants: John Smith\nOccurred At: {past.isoformat()}\nRecorded At: {now.isoformat()}"
+    mock_edge.created_at = past
+    mock_edge.uuid = "episode-789"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        as_of_date = now - timedelta(days=7)
+        results = await memory.query_by_participant(
+            user_id="user-456",
+            participant="John",
+            as_of=as_of_date,
+        )
+
+        assert len(results) == 0
