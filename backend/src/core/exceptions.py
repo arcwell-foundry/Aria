@@ -318,3 +318,34 @@ class TaskNotFoundError(NotFoundError):
             task_id: The ID of the task that was not found.
         """
         super().__init__(resource="Task", resource_id=task_id)
+
+
+class DigitalTwinError(ARIAException):
+    """Digital twin operation error (500).
+
+    Used for failures when analyzing writing style or managing fingerprints.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize digital twin error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Digital twin operation failed: {message}",
+            code="DIGITAL_TWIN_ERROR",
+            status_code=500,
+        )
+
+
+class FingerprintNotFoundError(NotFoundError):
+    """Writing style fingerprint not found error (404)."""
+
+    def __init__(self, fingerprint_id: str) -> None:
+        """Initialize fingerprint not found error.
+
+        Args:
+            fingerprint_id: The ID of the fingerprint that was not found.
+        """
+        super().__init__(resource="Fingerprint", resource_id=fingerprint_id)

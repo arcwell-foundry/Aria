@@ -79,3 +79,25 @@ def test_task_not_found_error_initialization() -> None:
     assert "task-123" in str(error)
     assert error.code == "NOT_FOUND"
     assert error.status_code == 404
+
+
+def test_digital_twin_error_has_correct_attributes() -> None:
+    """Test DigitalTwinError has correct message, code, and status."""
+    from src.core.exceptions import DigitalTwinError
+
+    error = DigitalTwinError("Style extraction failed")
+    assert error.message == "Digital twin operation failed: Style extraction failed"
+    assert error.code == "DIGITAL_TWIN_ERROR"
+    assert error.status_code == 500
+
+
+def test_fingerprint_not_found_error_has_correct_attributes() -> None:
+    """Test FingerprintNotFoundError has correct message and details."""
+    from src.core.exceptions import FingerprintNotFoundError
+
+    error = FingerprintNotFoundError("fp-123")
+    assert "Fingerprint" in error.message
+    assert "fp-123" in error.message
+    assert error.status_code == 404
+    assert error.details["resource"] == "Fingerprint"
+    assert error.details["resource_id"] == "fp-123"
