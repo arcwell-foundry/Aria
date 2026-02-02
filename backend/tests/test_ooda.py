@@ -506,3 +506,119 @@ async def test_ooda_loop_decide_can_mark_blocked() -> None:
     assert new_state.decision["action"] == "blocked"
     assert new_state.is_blocked is True
     assert "permissions" in new_state.blocked_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_act_executes_decision() -> None:
+    """Test act phase executes the decided action."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    # Create a mock agent executor
+    mock_executor = AsyncMock()
+    mock_executor.return_value = {
+        "success": True,
+        "data": {"results": ["Budget data found"]},
+    }
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+    loop.agent_executor = mock_executor
+
+    state = OODAState(goal_id="goal-123")
+    state.decision = {
+        "action": "research",
+        "agent": "analyst",
+        "parameters": {"query": "Q3 budget data"},
+        "reasoning": "Need budget data",
+    }
+    goal = {"id": "goal-123", "title": "Prepare budget meeting"}
+
+    new_state = await loop.act(state, goal)
+
+    # Verify action was executed
+    assert new_state.action_result is not None
+    assert new_state.action_result["success"] is True
+    assert new_state.current_phase == OODAPhase.OBSERVE  # Loops back
+    assert new_state.iteration == 1  # Incremented
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_act_skips_complete_state() -> None:
+    """Test act phase does nothing if goal is complete."""
+    from src.core.ooda import OODALoop, OODAState
+
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    mock_executor = AsyncMock()
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+    loop.agent_executor = mock_executor
+
+    state = OODAState(goal_id="goal-123")
+    state.decision = {"action": "complete"}
+    state.is_complete = True
+    goal = {"id": "goal-123", "title": "Complete goal"}
+
+    new_state = await loop.act(state, goal)
+
+    # Agent executor should not be called
+    mock_executor.assert_not_called()
+    assert new_state.is_complete is True
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_act_handles_execution_failure() -> None:
+    """Test act phase handles agent execution failure."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    mock_executor = AsyncMock()
+    mock_executor.side_effect = Exception("Agent failed")
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+    loop.agent_executor = mock_executor
+
+    state = OODAState(goal_id="goal-123")
+    state.decision = {
+        "action": "research",
+        "agent": "analyst",
+        "parameters": {},
+    }
+    goal = {"id": "goal-123", "title": "Test goal"}
+
+    new_state = await loop.act(state, goal)
+
+    # Should record failure but continue
+    assert new_state.action_result is not None
+    assert new_state.action_result["success"] is False
+    assert "error" in new_state.action_result
+    assert new_state.current_phase == OODAPhase.OBSERVE  # Still loops back

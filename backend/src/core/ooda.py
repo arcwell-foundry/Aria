@@ -463,15 +463,15 @@ Output ONLY valid JSON with this structure:
     "reasoning": "why this action was chosen"
 }"""
 
-        user_prompt = f"""Goal: {goal.get('title', 'Unknown')}
-Description: {goal.get('description', 'No description')}
+        user_prompt = f"""Goal: {goal.get("title", "Unknown")}
+Description: {goal.get("description", "No description")}
 
 Analysis:
 {orientation_summary}
 
 Iteration: {state.iteration + 1} of {state.max_iterations}
 
-Previous action result: {state.action_result if state.action_result else 'No previous action'}
+Previous action result: {state.action_result if state.action_result else "No previous action"}
 
 Select the best action to make progress toward the goal."""
 
@@ -537,6 +537,102 @@ Select the best action to make progress toward the goal."""
                 "iteration": state.iteration,
                 "action": decision.get("action"),
                 "agent": decision.get("agent"),
+                "duration_ms": duration_ms,
+            },
+        )
+
+        return state
+
+    async def act(
+        self,
+        state: OODAState,
+        goal: dict[str, Any],
+    ) -> OODAState:
+        """Execute the decided action.
+
+        Dispatches to the appropriate agent and records the result.
+        Increments iteration and loops back to observe phase.
+
+        Args:
+            state: Current OODA state with decision.
+            goal: The goal being pursued.
+
+        Returns:
+            Updated state with action result.
+        """
+        start_time = time.perf_counter()
+
+        # Skip execution if goal is complete or blocked
+        if state.is_complete or state.is_blocked:
+            logger.info(
+                "OODA act phase skipped",
+                extra={
+                    "goal_id": state.goal_id,
+                    "is_complete": state.is_complete,
+                    "is_blocked": state.is_blocked,
+                },
+            )
+            return state
+
+        decision = state.decision or {}
+        action = decision.get("action", "unknown")
+        agent = decision.get("agent")
+        parameters = decision.get("parameters", {})
+
+        # Execute action via agent executor
+        try:
+            if hasattr(self, "agent_executor") and self.agent_executor:
+                result = await self.agent_executor(
+                    action=action,
+                    agent=agent,
+                    parameters=parameters,
+                    goal=goal,
+                )
+                state.action_result = result
+            else:
+                # No agent executor configured - record as pending
+                state.action_result = {
+                    "success": False,
+                    "pending": True,
+                    "message": "Agent executor not configured",
+                    "action": action,
+                    "agent": agent,
+                }
+
+        except Exception as e:
+            logger.error(f"Agent execution failed: {e}")
+            state.action_result = {
+                "success": False,
+                "error": str(e),
+                "action": action,
+                "agent": agent,
+            }
+
+        # Loop back to observe phase and increment iteration
+        state.current_phase = OODAPhase.OBSERVE
+        state.iteration += 1
+
+        # Log phase execution
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        success = state.action_result.get("success", False) if state.action_result else False
+        state.phase_logs.append(
+            OODAPhaseLogEntry(
+                phase=OODAPhase.ACT,
+                iteration=state.iteration - 1,  # Log for previous iteration
+                input_summary=f"Action: {action}, Agent: {agent}",
+                output_summary=f"Success: {success}",
+                duration_ms=duration_ms,
+            )
+        )
+
+        logger.info(
+            "OODA act phase complete",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+                "action": action,
+                "agent": agent,
+                "success": success,
                 "duration_ms": duration_ms,
             },
         )
