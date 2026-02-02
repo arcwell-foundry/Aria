@@ -848,3 +848,11 @@ async def test_execute_dispatches_crm_write() -> None:
     assert result.data["success"] is True
     assert result.data["action"] == "create"
 
+
+def test_operator_agent_exported_from_module() -> None:
+    """Test OperatorAgent is exported from src.agents module."""
+    from src.agents import OperatorAgent
+
+    assert OperatorAgent is not None
+    assert OperatorAgent.name == "Operator"
+
