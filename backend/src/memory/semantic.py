@@ -215,6 +215,12 @@ class SemanticMemory:
         if fact.valid_to:
             parts.append(f"Valid To: {fact.valid_to.isoformat()}")
 
+        if fact.last_confirmed_at:
+            parts.append(f"Last Confirmed At: {fact.last_confirmed_at.isoformat()}")
+
+        if fact.corroborating_sources:
+            parts.append(f"Corroborating Sources: {','.join(fact.corroborating_sources)}")
+
         return "\n".join(parts)
 
     def _parse_edge_to_fact(self, edge: Any, user_id: str) -> SemanticFact | None:
@@ -271,6 +277,8 @@ class SemanticMemory:
             valid_to = None
             invalidated_at = None
             invalidation_reason = None
+            last_confirmed_at = None
+            corroborating_sources: list[str] = []
 
             for line in lines:
                 if line.startswith("Subject:"):
@@ -292,6 +300,17 @@ class SemanticMemory:
                 elif line.startswith("Valid To:"):
                     with contextlib.suppress(ValueError):
                         valid_to = datetime.fromisoformat(line.replace("Valid To:", "").strip())
+                elif line.startswith("Last Confirmed At:"):
+                    with contextlib.suppress(ValueError):
+                        last_confirmed_at = datetime.fromisoformat(
+                            line.replace("Last Confirmed At:", "").strip()
+                        )
+                elif line.startswith("Corroborating Sources:"):
+                    sources_str = line.replace("Corroborating Sources:", "").strip()
+                    if sources_str:
+                        corroborating_sources = [
+                            s.strip() for s in sources_str.split(",") if s.strip()
+                        ]
 
             if not subject or not predicate or not obj:
                 return None
@@ -308,6 +327,8 @@ class SemanticMemory:
                 valid_to=valid_to,
                 invalidated_at=invalidated_at,
                 invalidation_reason=invalidation_reason,
+                last_confirmed_at=last_confirmed_at,
+                corroborating_sources=corroborating_sources,
             )
         except Exception as e:
             logger.warning(f"Failed to parse fact content: {e}")

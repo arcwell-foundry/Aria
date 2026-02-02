@@ -663,3 +663,55 @@ def test_semantic_fact_from_dict_restores_corroboration() -> None:
 
     assert fact.last_confirmed_at == now
     assert fact.corroborating_sources == ["source:a", "source:b"]
+
+
+def test_build_fact_body_includes_corroboration_fields() -> None:
+    """Test _build_fact_body includes last_confirmed_at and corroborating_sources."""
+    now = datetime.now(UTC)
+    confirmed = now - timedelta(days=5)
+
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+        last_confirmed_at=confirmed,
+        corroborating_sources=["source:abc", "source:def"],
+    )
+
+    memory = SemanticMemory()
+    body = memory._build_fact_body(fact)
+
+    assert f"Last Confirmed At: {confirmed.isoformat()}" in body
+    assert "Corroborating Sources: source:abc,source:def" in body
+
+
+def test_parse_content_to_fact_handles_corroboration_fields() -> None:
+    """Test _parse_content_to_fact parses new fields correctly."""
+    now = datetime.now(UTC)
+    confirmed = now - timedelta(days=3)
+
+    content = f"""Subject: Jane
+Predicate: title
+Object: CEO
+Confidence: 0.90
+Source: crm_import
+Valid From: {now.isoformat()}
+Last Confirmed At: {confirmed.isoformat()}
+Corroborating Sources: source:1,source:2"""
+
+    memory = SemanticMemory()
+    fact = memory._parse_content_to_fact(
+        fact_id="fact-123",
+        content=content,
+        user_id="user-456",
+        created_at=now,
+    )
+
+    assert fact is not None
+    assert fact.last_confirmed_at == confirmed
+    assert fact.corroborating_sources == ["source:1", "source:2"]
