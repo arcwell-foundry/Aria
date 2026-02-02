@@ -1,5 +1,6 @@
 """Tests for OperatorAgent module."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 
@@ -18,7 +19,7 @@ def test_validate_input_accepts_valid_task() -> None:
     mock_llm = MagicMock()
     agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
 
-    task = {
+    task: dict[str, Any] = {
         "operation_type": "calendar_read",
         "parameters": {},
     }
@@ -33,7 +34,7 @@ def test_validate_input_requires_operation_type() -> None:
     mock_llm = MagicMock()
     agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
 
-    task = {
+    task: dict[str, Any] = {
         "parameters": {},
     }
 
@@ -47,7 +48,7 @@ def test_validate_input_validates_operation_type() -> None:
     mock_llm = MagicMock()
     agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
 
-    task = {
+    task: dict[str, Any] = {
         "operation_type": "invalid_operation",
         "parameters": {},
     }
@@ -62,7 +63,7 @@ def test_validate_input_requires_parameters() -> None:
     mock_llm = MagicMock()
     agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
 
-    task = {
+    task: dict[str, Any] = {
         "operation_type": "calendar_read",
     }
 
@@ -76,7 +77,7 @@ def test_validate_input_requires_parameters_as_dict() -> None:
     mock_llm = MagicMock()
     agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
 
-    task = {
+    task: dict[str, Any] = {
         "operation_type": "calendar_read",
         "parameters": "not_a_dict",
     }
