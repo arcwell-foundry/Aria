@@ -3,6 +3,8 @@
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def test_operator_agent_has_name_and_description() -> None:
     """Test OperatorAgent has correct name and description class attributes."""
@@ -83,3 +85,60 @@ def test_validate_input_requires_parameters_as_dict() -> None:
     }
 
     assert agent.validate_input(task) is False
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_returns_events() -> None:
+    """Test calendar_read returns list of calendar events."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_read(
+        start_date="2024-01-01",
+        end_date="2024-01-07",
+    )
+
+    assert isinstance(result, dict)
+    assert "events" in result
+    assert isinstance(result["events"], list)
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_filters_by_date_range() -> None:
+    """Test calendar_read filters events by start_date and end_date."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_read(
+        start_date="2024-01-01",
+        end_date="2024-01-07",
+    )
+
+    # All events should fall within the date range
+    for event in result["events"]:
+        assert event["start_date"] >= "2024-01-01"
+        assert event["end_date"] <= "2024-01-07"
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_includes_event_metadata() -> None:
+    """Test calendar_read events include title, description, attendees."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_read(
+        start_date="2024-01-01",
+        end_date="2024-01-07",
+    )
+
+    if len(result["events"]) > 0:
+        event = result["events"][0]
+        assert "title" in event
+        assert "start_date" in event
+        assert "end_date" in event

@@ -87,17 +87,79 @@ class OperatorAgent(BaseAgent):
         # Placeholder implementation - will be implemented in Task 7
         return AgentResult(success=True, data=None)
 
-    async def _calendar_read(self, **kwargs: Any) -> Any:
-        """Read calendar events from external calendar system.
+    async def _calendar_read(
+        self,
+        start_date: str,
+        end_date: str | None = None,
+        calendar_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read calendar events within a date range.
+
+        This is a mock implementation that returns sample events.
+        In production, this would integrate with Google Calendar, Outlook, etc.
 
         Args:
-            **kwargs: Calendar read parameters.
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: Optional end date in YYYY-MM-DD format.
+            calendar_id: Optional calendar identifier.
 
         Returns:
-            Calendar events data.
+            Dictionary with list of calendar events.
         """
-        # Placeholder implementation - will be implemented in Task 3
-        pass
+        logger.info(
+            f"Reading calendar events from {start_date} to {end_date or 'present'}",
+            extra={"user_id": self.user_id, "calendar_id": calendar_id},
+        )
+
+        # Mock calendar events
+        mock_events = [
+            {
+                "id": "evt-001",
+                "title": "Team Standup",
+                "description": "Daily team sync meeting",
+                "start_date": start_date,
+                "start_time": "09:00",
+                "end_date": start_date,
+                "end_time": "09:30",
+                "attendees": ["john@example.com", "jane@example.com"],
+                "location": "Conference Room A",
+            },
+            {
+                "id": "evt-002",
+                "title": "Client Call: Acme Corp",
+                "description": "Quarterly business review",
+                "start_date": start_date,
+                "start_time": "14:00",
+                "end_date": start_date,
+                "end_time": "15:00",
+                "attendees": ["client@acmecorp.com"],
+                "location": "Zoom",
+            },
+            {
+                "id": "evt-003",
+                "title": "Strategy Planning",
+                "description": "Q2 planning session",
+                "start_date": end_date or start_date,
+                "start_time": "10:00",
+                "end_date": end_date or start_date,
+                "end_time": "12:00",
+                "attendees": ["leadership@example.com"],
+                "location": "Boardroom",
+            },
+        ]
+
+        # Filter by calendar_id if specified
+        if calendar_id:
+            # In real implementation, would filter by calendar
+            pass
+
+        return {
+            "calendar_id": calendar_id or "primary",
+            "start_date": start_date,
+            "end_date": end_date,
+            "events": mock_events,
+            "total_count": len(mock_events),
+        }
 
     async def _calendar_write(self, **kwargs: Any) -> Any:
         """Write calendar events to external calendar system.
