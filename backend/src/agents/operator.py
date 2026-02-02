@@ -161,17 +161,73 @@ class OperatorAgent(BaseAgent):
             "total_count": len(mock_events),
         }
 
-    async def _calendar_write(self, **kwargs: Any) -> Any:
-        """Write calendar events to external calendar system.
+    async def _calendar_write(
+        self,
+        action: str,
+        event: dict[str, Any] | None = None,
+        event_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Write calendar operations (create, update, delete).
+
+        This is a mock implementation for calendar write operations.
+        In production, this would integrate with Google Calendar, Outlook, etc.
 
         Args:
-            **kwargs: Calendar write parameters.
+            action: Operation type - "create", "update", or "delete".
+            event: Event data for create/update operations.
+            event_id: Event ID for update/delete operations.
 
         Returns:
-            Calendar write result.
+            Dictionary with operation result and event_id.
         """
-        # Placeholder implementation - will be implemented in Task 4
-        pass
+        valid_actions = {"create", "update", "delete"}
+
+        logger.info(
+            f"Calendar write operation: {action}",
+            extra={"user_id": self.user_id, "event_id": event_id},
+        )
+
+        # Validate action
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": f"Invalid action: {action}. Must be one of {valid_actions}",
+            }
+
+        # Handle create
+        if action == "create":
+            if not event:
+                return {"success": False, "error": "Event data required for create"}
+            new_event_id = f"evt-{id(event)}"
+            return {
+                "success": True,
+                "action": "create",
+                "event_id": new_event_id,
+                "event": {**event, "id": new_event_id},
+            }
+
+        # Handle update
+        if action == "update":
+            if not event_id:
+                return {"success": False, "error": "event_id required for update"}
+            return {
+                "success": True,
+                "action": "update",
+                "event_id": event_id,
+                "updated_fields": list(event.keys()) if event else [],
+            }
+
+        # Handle delete
+        if action == "delete":
+            if not event_id:
+                return {"success": False, "error": "event_id required for delete"}
+            return {
+                "success": True,
+                "action": "delete",
+                "event_id": event_id,
+            }
+
+        return {"success": False, "error": "Unknown error"}
 
     async def _crm_read(self, **kwargs: Any) -> Any:
         """Read data from CRM system.

@@ -142,3 +142,77 @@ async def test_calendar_read_includes_event_metadata() -> None:
         assert "title" in event
         assert "start_date" in event
         assert "end_date" in event
+
+
+@pytest.mark.asyncio
+async def test_calendar_write_creates_event() -> None:
+    """Test calendar_write creates a new calendar event."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_write(
+        action="create",
+        event={
+            "title": "New Meeting",
+            "start_date": "2024-02-01",
+            "start_time": "10:00",
+            "end_date": "2024-02-01",
+            "end_time": "11:00",
+        },
+    )
+
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert "event_id" in result
+
+
+@pytest.mark.asyncio
+async def test_calendar_write_supports_update() -> None:
+    """Test calendar_write supports updating existing events."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_write(
+        action="update",
+        event_id="evt-123",
+        event={"title": "Updated Meeting Title"},
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_calendar_write_supports_delete() -> None:
+    """Test calendar_write supports deleting events."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_write(
+        action="delete",
+        event_id="evt-123",
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_calendar_write_validates_action() -> None:
+    """Test calendar_write validates action parameter."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._calendar_write(
+        action="invalid_action",
+        event={},
+    )
+
+    assert result["success"] is False
+    assert "error" in result
