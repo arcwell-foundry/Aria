@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
-from src.api.routes import auth, battle_cards, briefings, chat, memory
+from src.api.routes import auth, battle_cards, briefings, chat, memory, signals
 from src.core.exceptions import ARIAException
 
 # Configure logging
@@ -77,6 +77,7 @@ app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
+app.include_router(signals.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
@@ -100,6 +101,20 @@ async def health_check_neo4j() -> dict[str, str]:
 
     is_healthy = await GraphitiClient.health_check()
     return {"status": "healthy" if is_healthy else "unhealthy"}
+
+
+@app.get("/health/tavus", tags=["system"])
+async def health_check_tavus() -> dict[str, str]:
+    """Health check endpoint for Tavus API connectivity.
+
+    Returns:
+        Health status of the Tavus API connection.
+    """
+    from src.integrations.tavus import get_tavus_client
+
+    client = get_tavus_client()
+    is_healthy = await client.health_check()
+    return {"service": "tavus", "status": "healthy" if is_healthy else "unhealthy"}
 
 
 @app.get("/", tags=["system"])
