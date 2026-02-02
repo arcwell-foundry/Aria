@@ -153,3 +153,51 @@ def test_base_agent_registers_tools_on_init() -> None:
     assert "tool_one" in agent.tools
     assert "tool_two" in agent.tools
     assert len(agent.tools) == 2
+
+
+def test_base_agent_validate_input_returns_true_by_default() -> None:
+    """Test validate_input returns True for any input by default."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Default implementation should accept anything
+    assert agent.validate_input({}) is True
+    assert agent.validate_input({"any": "value"}) is True
+
+
+def test_base_agent_validate_input_can_be_overridden() -> None:
+    """Test subclass can override validate_input with custom logic."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class StrictAgent(BaseAgent):
+        name = "Strict Agent"
+        description = "Agent with strict validation"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        def validate_input(self, task: dict[str, Any]) -> bool:
+            # Require 'query' field
+            return "query" in task
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = StrictAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.validate_input({"query": "search term"}) is True
+    assert agent.validate_input({"other": "field"}) is False
+    assert agent.validate_input({}) is False

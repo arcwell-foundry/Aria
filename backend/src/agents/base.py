@@ -85,6 +85,19 @@ class BaseAgent(ABC):
         """
         pass
 
+    def validate_input(self, task: dict[str, Any]) -> bool:  # noqa: ARG002
+        """Validate task input before execution.
+
+        Subclasses can override to add custom validation logic.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        return True
+
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the agent's primary task.
