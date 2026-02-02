@@ -55,3 +55,55 @@ class AnalystAgent(BaseAgent):
         from src.agents.base import AgentResult
 
         return AgentResult(success=True, data={})
+
+    async def _pubmed_search(self, query: str, max_results: int = 20) -> dict[str, Any]:
+        """Search PubMed for articles matching the query.
+
+        Args:
+            query: Search query string.
+            max_results: Maximum number of results to return.
+
+        Returns:
+            Dictionary with search results.
+        """
+        raise NotImplementedError("PubMed search will be implemented in Task 4")
+
+    async def _clinical_trials_search(
+        self, query: str, max_results: int = 20
+    ) -> dict[str, Any]:
+        """Search ClinicalTrials.gov for studies matching the query.
+
+        Args:
+            query: Search query string.
+            max_results: Maximum number of results to return.
+
+        Returns:
+            Dictionary with search results.
+        """
+        raise NotImplementedError("ClinicalTrials search will be implemented in Task 6")
+
+    async def _fda_drug_search(
+        self, drug_name: str, search_type: str = "brand"
+    ) -> dict[str, Any]:
+        """Search OpenFDA API for drug or device information.
+
+        Args:
+            drug_name: Name of the drug or device to search.
+            search_type: Type of search - "brand", "generic", or "device".
+
+        Returns:
+            Dictionary with search results.
+        """
+        raise NotImplementedError("FDA search will be implemented in Task 7")
+
+    async def _chembl_search(self, query: str, max_results: int = 20) -> dict[str, Any]:
+        """Search ChEMBL database for bioactive molecules.
+
+        Args:
+            query: Search query string.
+            max_results: Maximum number of results to return.
+
+        Returns:
+            Dictionary with search results.
+        """
+        raise NotImplementedError("ChEMBL search will be implemented in Task 8")

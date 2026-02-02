@@ -32,6 +32,43 @@ class HunterAgent(BaseAgent):
         self._company_cache: dict[str, Any] = {}
         super().__init__(llm_client=llm_client, user_id=user_id)
 
+    def validate_input(self, task: dict[str, Any]) -> bool:
+        """Validate Hunter agent task input.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Check required fields exist
+        if "icp" not in task:
+            return False
+        if "target_count" not in task:
+            return False
+
+        # Validate icp is a dict with required industry field
+        icp = task["icp"]
+        if not isinstance(icp, dict):
+            return False
+        if "industry" not in icp:
+            return False
+
+        # Validate target_count is a positive integer
+        target_count = task["target_count"]
+        if not isinstance(target_count, int):
+            return False
+        if target_count <= 0:
+            return False
+
+        # Validate exclusions is a list if present
+        if "exclusions" in task:
+            exclusions = task["exclusions"]
+            if not isinstance(exclusions, list):
+                return False
+
+        return True
+
     def _register_tools(self) -> dict[str, Any]:
         """Register Hunter agent's lead discovery tools.
 
