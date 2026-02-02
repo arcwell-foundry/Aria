@@ -33,6 +33,34 @@ class ScoutAgent(BaseAgent):
         """
         super().__init__(llm_client=llm_client, user_id=user_id)
 
+    def validate_input(self, task: dict[str, Any]) -> bool:
+        """Validate Scout agent task input.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Check required fields exist
+        if "entities" not in task:
+            return False
+
+        # Validate entities is a non-empty list
+        entities = task["entities"]
+        if not isinstance(entities, list):
+            return False
+        if len(entities) == 0:
+            return False
+
+        # Validate signal_types is a list if present
+        if "signal_types" in task:
+            signal_types = task["signal_types"]
+            if not isinstance(signal_types, list):
+                return False
+
+        return True
+
     def _register_tools(self) -> dict[str, Any]:
         """Register Scout agent's intelligence gathering tools.
 
