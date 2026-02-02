@@ -870,9 +870,7 @@ class StrategistAgent(BaseAgent):
             deadline_date = datetime.fromisoformat(deadline)
 
         # Calculate total duration from phases
-        total_phase_duration = sum(
-            phase.get("duration_days", 0) for phase in phases
-        )
+        total_phase_duration = sum(phase.get("duration_days", 0) for phase in phases)
 
         # Determine scaling factor if phases exceed time horizon or deadline
         start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -920,9 +918,7 @@ class StrategistAgent(BaseAgent):
 
             # Create milestone for phase completion
             milestone_id = f"milestone-{phase_number}"
-            success_criteria = (
-                objectives if objectives else [f"Complete {phase_name}"]
-            )
+            success_criteria = objectives if objectives else [f"Complete {phase_name}"]
 
             milestones.append(
                 {
@@ -951,12 +947,8 @@ class StrategistAgent(BaseAgent):
             )
 
             if phase_info:
-                phase_start = datetime.strptime(
-                    phase_info["start_date"], "%Y-%m-%d"
-                )
-                phase_end = datetime.strptime(
-                    phase_info["end_date"], "%Y-%m-%d"
-                )
+                phase_start = datetime.strptime(phase_info["start_date"], "%Y-%m-%d")
+                phase_end = datetime.strptime(phase_info["end_date"], "%Y-%m-%d")
                 phase_duration = (phase_end - phase_start).days
 
                 # High priority tasks start at phase start
