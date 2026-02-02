@@ -376,8 +376,12 @@ async def test_analyst_execute_generates_research_report() -> None:
     agent._clinical_trials_search = AsyncMock(
         return_value={"total_count": 1, "studies": [{"nct_id": "NCT001", "status": "Recruiting"}]}
     )
-    agent._fda_drug_search = AsyncMock(return_value={"total": 1, "products": [{"brand_name": "TestDrug"}]})
-    agent._chembl_search = AsyncMock(return_value={"total_count": 1, "molecules": [{"molecule_chembl_id": "CHEMBL001"}]})
+    agent._fda_drug_search = AsyncMock(
+        return_value={"total": 1, "products": [{"brand_name": "TestDrug"}]}
+    )
+    agent._chembl_search = AsyncMock(
+        return_value={"total_count": 1, "molecules": [{"molecule_chembl_id": "CHEMBL001"}]}
+    )
 
     task = {"query": "cancer immunotherapy", "depth": "comprehensive"}
 

@@ -516,3 +516,23 @@ async def test_draft_document_logs_drafting(caplog: Any) -> None:
         )
 
     assert "Drafting document" in caplog.text or "brief" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_draft_document_unknown_type_fallback() -> None:
+    """Test _draft_document with unknown type uses fallback section."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="memo",  # Unknown type
+        context="Test content",
+        goal="Test goal",
+        tone="formal",
+    )
+
+    assert len(result["sections"]) == 1
+    assert result["sections"][0]["heading"] == "Content"
+    assert result["document_type"] == "memo"

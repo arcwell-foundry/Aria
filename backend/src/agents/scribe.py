@@ -224,14 +224,20 @@ class ScribeAgent(BaseAgent):
             ]
         elif document_type == "report":
             sections = [
-                {"heading": "Executive Summary", "content": context if context else "Executive summary."},
+                {
+                    "heading": "Executive Summary",
+                    "content": context if context else "Executive summary.",
+                },
                 {"heading": "Background", "content": "Background information and context."},
                 {"heading": "Analysis", "content": "Detailed analysis of the situation."},
                 {"heading": "Recommendations", "content": "Recommended actions moving forward."},
             ]
         elif document_type == "proposal":
             sections = [
-                {"heading": "Introduction", "content": context if context else "Introduction to the proposal."},
+                {
+                    "heading": "Introduction",
+                    "content": context if context else "Introduction to the proposal.",
+                },
                 {"heading": "Proposed Solution", "content": "Details of the proposed solution."},
                 {"heading": "Benefits", "content": "Expected benefits and outcomes."},
                 {"heading": "Next Steps", "content": "Proposed next steps and timeline."},
@@ -255,6 +261,7 @@ class ScribeAgent(BaseAgent):
             "sections": sections,
             "document_type": document_type,
             "word_count": word_count,
+            "tone": tone,
         }
 
     async def _personalize(
