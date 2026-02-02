@@ -349,3 +349,22 @@ class FingerprintNotFoundError(NotFoundError):
             fingerprint_id: The ID of the fingerprint that was not found.
         """
         super().__init__(resource="Fingerprint", resource_id=fingerprint_id)
+
+
+class AuditLogError(ARIAException):
+    """Audit log operation error (500).
+
+    Used for failures when writing or querying audit logs.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize audit log error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Audit log operation failed: {message}",
+            code="AUDIT_LOG_ERROR",
+            status_code=500,
+        )

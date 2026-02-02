@@ -101,3 +101,14 @@ def test_fingerprint_not_found_error_has_correct_attributes() -> None:
     assert error.status_code == 404
     assert error.details["resource"] == "Fingerprint"
     assert error.details["resource_id"] == "fp-123"
+
+
+def test_audit_log_error_initialization() -> None:
+    """Test AuditLogError initializes correctly."""
+    from src.core.exceptions import AuditLogError
+
+    error = AuditLogError("Failed to write audit log")
+
+    assert error.message == "Audit log operation failed: Failed to write audit log"
+    assert error.code == "AUDIT_LOG_ERROR"
+    assert error.status_code == 500
