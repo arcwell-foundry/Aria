@@ -809,3 +809,157 @@ def test_format_output_preserves_original_data() -> None:
     assert formatted["strategy"] == data["strategy"]
     assert formatted["timeline"] == data["timeline"]
     assert formatted["analysis"] == data["analysis"]
+
+
+# Task 8: Integration tests for full workflow
+
+
+@pytest.mark.asyncio
+async def test_full_strategist_workflow() -> None:
+    """Integration test demonstrating complete Strategist agent workflow."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify initial state
+    assert agent.is_idle
+    assert agent.total_tokens_used == 0
+
+    # Define a comprehensive task
+    task = {
+        "goal": {
+            "title": "Close enterprise deal with BioTech Corp",
+            "type": "close",
+            "target_company": "BioTech Corp",
+            "target_value": 500000,
+        },
+        "resources": {
+            "available_agents": ["Hunter", "Analyst", "Scribe", "Operator"],
+            "budget": 10000,
+            "time_horizon_days": 90,
+        },
+        "constraints": {
+            "deadline": "2026-05-01",
+            "exclusions": ["Competitor Inc"],
+            "compliance_notes": ["SOC2 required"],
+        },
+        "context": {
+            "competitive_landscape": {
+                "competitors": ["Competitor A", "Competitor B"],
+                "our_strengths": ["Technical depth", "Customer support"],
+                "our_weaknesses": ["Brand awareness"],
+            },
+            "stakeholder_map": {
+                "decision_makers": [
+                    {"name": "CEO John", "role": "CEO"},
+                    {"name": "CFO Sarah", "role": "CFO"},
+                ],
+                "influencers": [
+                    {"name": "VP Tech Mike", "role": "VP Engineering"},
+                ],
+                "blockers": [],
+            },
+        },
+    }
+
+    # Run the agent
+    result = await agent.run(task)
+
+    # Verify execution result
+    assert result.success is True
+    assert result.execution_time_ms >= 0
+
+    data = result.data
+
+    # Verify analysis
+    assert "analysis" in data
+    assert "competitive_analysis" in data["analysis"]
+    assert "stakeholder_analysis" in data["analysis"]
+    assert len(data["analysis"]["opportunities"]) > 0
+
+    # Verify strategy
+    assert "strategy" in data
+    strategy = data["strategy"]
+    assert len(strategy["phases"]) >= 3  # Close type has 4 phases
+    assert len(strategy["agent_tasks"]) > 0
+    assert len(strategy["risks"]) > 0
+    assert len(strategy["success_criteria"]) > 0
+
+    # Verify all tasks use available agents
+    for task_item in strategy["agent_tasks"]:
+        assert task_item["agent"] in task["resources"]["available_agents"]
+
+    # Verify timeline
+    assert "timeline" in data
+    timeline = data["timeline"]
+    assert timeline["deadline"] == "2026-05-01"
+    assert len(timeline["milestones"]) > 0
+    assert len(timeline["schedule"]) > 0
+
+    # Verify all milestone dates respect deadline
+    for milestone in timeline["milestones"]:
+        assert milestone["target_date"] <= "2026-05-01"
+
+    # Verify summary stats
+    assert "summary_stats" in data
+    assert data["summary_stats"]["phase_count"] == len(strategy["phases"])
+
+    # Verify agent state
+    assert agent.is_complete
+
+    # Verify metadata
+    assert "goal_id" in data
+    assert "created_at" in data
+
+
+@pytest.mark.asyncio
+async def test_strategist_agent_handles_validation_failure() -> None:
+    """Test Strategist agent handles invalid input gracefully."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Invalid task - missing goal
+    invalid_task = {
+        "resources": {
+            "available_agents": ["Hunter"],
+            "time_horizon_days": 30,
+        },
+    }
+
+    result = await agent.run(invalid_task)
+
+    # Should fail validation
+    assert result.success is False
+    assert "validation" in (result.error or "").lower()
+    assert agent.is_failed
+
+
+@pytest.mark.asyncio
+async def test_strategist_minimal_task() -> None:
+    """Test Strategist handles minimal valid task."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Minimal valid task
+    task = {
+        "goal": {
+            "title": "Simple research",
+            "type": "research",
+        },
+        "resources": {
+            "available_agents": [],
+            "time_horizon_days": 7,
+        },
+    }
+
+    result = await agent.run(task)
+
+    # Should still succeed
+    assert result.success is True
+    assert "strategy" in result.data
+    assert "timeline" in result.data
