@@ -8,7 +8,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
 
@@ -108,3 +108,46 @@ class AgentOrchestrator:
         )
 
         return agent_id
+
+    async def spawn_and_execute(
+        self,
+        agent_class: type[BaseAgent],
+        task: dict[str, Any],
+    ) -> AgentResult:
+        """Spawn an agent and execute a task.
+
+        Args:
+            agent_class: The agent class to instantiate.
+            task: Task specification for the agent.
+
+        Returns:
+            AgentResult from the agent execution.
+        """
+        agent_id = self.spawn_agent(agent_class)
+        agent = self.active_agents[agent_id]
+
+        logger.info(
+            f"Executing task with {agent.name}",
+            extra={
+                "agent_id": agent_id,
+                "agent_name": agent.name,
+                "task_keys": list(task.keys()),
+            },
+        )
+
+        try:
+            result = await agent.run(task)
+
+            # Accumulate token usage
+            self._total_tokens_used += result.tokens_used
+
+            return result
+
+        finally:
+            # Clean up agent after execution
+            if agent_id in self.active_agents:
+                del self.active_agents[agent_id]
+                logger.debug(
+                    f"Cleaned up agent {agent_id}",
+                    extra={"agent_id": agent_id},
+                )
