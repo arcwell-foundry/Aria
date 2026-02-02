@@ -6,9 +6,9 @@ that help sales representatives handle competitive situations.
 
 import logging
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
-from typing import Any
 
 from src.db.supabase import SupabaseClient
 
@@ -88,16 +88,18 @@ class BattleCardService:
             .execute()
         )
 
+        card = cast(dict[str, Any], result.data[0])
+
         logger.info(
             "Created battle card",
             extra={
                 "company_id": company_id,
                 "competitor_name": data.competitor_name,
-                "card_id": result.data[0]["id"],
+                "card_id": card.get("id"),
             },
         )
 
-        return result.data[0]
+        return card
 
     async def get_battle_card(
         self,
@@ -122,7 +124,9 @@ class BattleCardService:
             .execute()
         )
 
-        return result.data if result.data else None
+        if result.data:
+            return cast(dict[str, Any], result.data)
+        return None
 
     async def get_battle_card_by_id(self, card_id: str) -> dict[str, Any] | None:
         """Get battle card by ID.
@@ -141,7 +145,9 @@ class BattleCardService:
             .execute()
         )
 
-        return result.data if result.data else None
+        if result.data:
+            return cast(dict[str, Any], result.data)
+        return None
 
     async def list_battle_cards(
         self,
@@ -163,7 +169,7 @@ class BattleCardService:
             query = query.ilike("competitor_name", f"%{search}%")
 
         result = query.order("competitor_name").execute()
-        return result.data
+        return cast(list[dict[str, Any]], result.data)
 
     async def update_battle_card(
         self,
@@ -239,7 +245,7 @@ class BattleCardService:
             },
         )
 
-        return result.data[0]
+        return cast(dict[str, Any], result.data[0])
 
     async def delete_battle_card(self, card_id: str) -> bool:
         """Delete a battle card.
@@ -275,7 +281,7 @@ class BattleCardService:
             .execute()
         )
 
-        return result.data
+        return cast(list[dict[str, Any]], result.data)
 
     async def add_objection_handler(
         self,
@@ -300,7 +306,7 @@ class BattleCardService:
         if not current:
             raise ValueError("Battle card not found")
 
-        handlers = current.get("objection_handlers", [])
+        handlers = list(current.get("objection_handlers", []))
         handlers.append({"objection": objection, "response": response})
 
         return await self.update_battle_card(

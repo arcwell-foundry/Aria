@@ -2,6 +2,7 @@
 
 import logging
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,17 +13,16 @@ from src.services.briefing import BriefingService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/briefings", tags=["briefings"])
-briefing_service = BriefingService()
 
 
 class BriefingContent(BaseModel):
     """Content of a daily briefing."""
 
     summary: str = Field(..., description="Executive summary")
-    calendar: dict = Field(..., description="Calendar information")
-    leads: dict = Field(..., description="Lead status summary")
-    signals: dict = Field(..., description="Market signals")
-    tasks: dict = Field(..., description="Task status")
+    calendar: dict[str, Any] = Field(..., description="Calendar information")
+    leads: dict[str, Any] = Field(..., description="Lead status summary")
+    signals: dict[str, Any] = Field(..., description="Market signals")
+    tasks: dict[str, Any] = Field(..., description="Task status")
     generated_at: str = Field(..., description="ISO timestamp of generation")
 
 
@@ -40,7 +40,7 @@ class BriefingListResponse(BaseModel):
 
     id: str
     briefing_date: str
-    content: dict
+    content: dict[str, Any]
 
 
 class GenerateBriefingRequest(BaseModel):
@@ -51,18 +51,19 @@ class GenerateBriefingRequest(BaseModel):
 
 @router.get("/today", response_model=BriefingContent)
 async def get_today_briefing(
-    regenerate: bool = Query(False, description="Force regenerate briefing"),
     current_user: CurrentUser,
+    regenerate: bool = Query(False, description="Force regenerate briefing"),
 ) -> BriefingContent:
     """Get today's briefing, generating if needed.
 
     Returns the daily briefing content for the current user.
     If regenerate=true, forces generation of a new briefing.
     """
+    service = BriefingService()
     if regenerate:
-        content = await briefing_service.generate_briefing(current_user.id)
+        content = await service.generate_briefing(current_user.id)
     else:
-        content = await briefing_service.get_or_generate_briefing(current_user.id)
+        content = await service.get_or_generate_briefing(current_user.id)
 
     logger.info(
         "Today's briefing retrieved",
@@ -74,14 +75,15 @@ async def get_today_briefing(
 
 @router.get("", response_model=list[BriefingListResponse])
 async def list_briefings(
-    limit: int = Query(7, ge=1, le=30, description="Maximum number of briefings"),
     current_user: CurrentUser,
+    limit: int = Query(7, ge=1, le=30, description="Maximum number of briefings"),
 ) -> list[BriefingListResponse]:
     """List recent briefings.
 
     Returns a list of recent briefings for the current user.
     """
-    briefings = await briefing_service.list_briefings(current_user.id, limit)
+    service = BriefingService()
+    briefings = await service.list_briefings(current_user.id, limit)
 
     logger.info(
         "Briefings listed",
@@ -93,15 +95,16 @@ async def list_briefings(
 
 @router.get("/{briefing_date}", response_model=BriefingResponse)
 async def get_briefing_by_date(
-    briefing_date: date,
     current_user: CurrentUser,
+    briefing_date: date,
 ) -> BriefingResponse:
     """Get briefing for specific date.
 
     Returns the briefing for the specified date.
     Raises 404 if not found.
     """
-    briefing = await briefing_service.get_briefing(current_user.id, briefing_date)
+    service = BriefingService()
+    briefing = await service.get_briefing(current_user.id, briefing_date)
 
     if not briefing:
         raise HTTPException(
@@ -118,8 +121,8 @@ async def get_briefing_by_date(
 
 @router.post("/generate", response_model=BriefingContent)
 async def generate_briefing(
-    request: GenerateBriefingRequest | None = None,
     current_user: CurrentUser,
+    request: GenerateBriefingRequest | None = None,
 ) -> BriefingContent:
     """Force generate a new briefing.
 
@@ -129,7 +132,8 @@ async def generate_briefing(
     if request and request.briefing_date:
         briefing_date = date.fromisoformat(request.briefing_date)
 
-    content = await briefing_service.generate_briefing(current_user.id, briefing_date)
+    service = BriefingService()
+    content = await service.generate_briefing(current_user.id, briefing_date)
 
     logger.info(
         "Briefing generated",
