@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def test_scout_agent_has_name_and_description() -> None:
     """Test ScoutAgent has correct name and description class attributes."""
@@ -103,3 +105,74 @@ def test_validate_input_validates_signal_types_is_list_if_present() -> None:
     }
 
     assert agent.validate_input(task) is False
+
+
+@pytest.mark.asyncio
+async def test_web_search_returns_list() -> None:
+    """Test web_search returns a list."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._web_search(query="biotechnology funding", limit=10)
+
+    assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_web_search_respects_limit() -> None:
+    """Test web_search respects the limit parameter."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._web_search(query="biotechnology funding", limit=3)
+
+    assert len(result) <= 3
+
+
+@pytest.mark.asyncio
+async def test_web_search_returns_result_dicts() -> None:
+    """Test web_search returns result dictionaries with required fields."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._web_search(query="biotechnology funding", limit=10)
+
+    if len(result) > 0:
+        item = result[0]
+        assert "title" in item
+        assert "url" in item
+        assert "snippet" in item
+
+
+@pytest.mark.asyncio
+async def test_web_search_handles_empty_query() -> None:
+    """Test web_search returns empty list for empty query."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._web_search(query="", limit=10)
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_web_search_validates_positive_limit() -> None:
+    """Test web_search raises ValueError for non-positive limit."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        await agent._web_search(query="test", limit=0)
+
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        await agent._web_search(query="test", limit=-5)

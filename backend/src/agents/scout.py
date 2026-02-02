@@ -91,8 +91,8 @@ class ScoutAgent(BaseAgent):
 
     async def _web_search(
         self,
-        query: str,  # noqa: ARG002
-        limit: int = 10,  # noqa: ARG002
+        query: str,
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Search the web for relevant information.
 
@@ -102,9 +102,42 @@ class ScoutAgent(BaseAgent):
 
         Returns:
             List of search results with title, url, snippet.
+
+        Raises:
+            ValueError: If limit is less than or equal to zero.
         """
-        # Implementation in later tasks
-        return []
+        # Return empty list for empty or whitespace-only queries
+        if not query or query.strip() == "":
+            return []
+
+        # Validate limit
+        if limit <= 0:
+            raise ValueError(f"limit must be greater than 0, got {limit}")
+
+        logger.info(
+            f"Web search with query='{query}', limit={limit}",
+        )
+
+        # Mock web search results
+        mock_results = [
+            {
+                "title": "Biotechnology Funding Trends 2024",
+                "url": "https://example.com/biotech-funding",
+                "snippet": "Latest trends in biotechnology funding show increased investment in gene therapy and diagnostic tools.",
+            },
+            {
+                "title": "VC Investment in Life Sciences",
+                "url": "https://example.com/vc-life-sciences",
+                "snippet": "Venture capital firms are doubling down on life sciences investments with $50B deployed in 2024.",
+            },
+            {
+                "title": "Emerging Biotech Companies to Watch",
+                "url": "https://example.com/emerging-biotech",
+                "snippet": "A roundup of the most promising emerging biotechnology companies seeking Series A funding.",
+            },
+        ]
+
+        return mock_results[:limit]
 
     async def _news_search(
         self,
