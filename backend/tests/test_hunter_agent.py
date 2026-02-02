@@ -786,3 +786,176 @@ async def test_execute_includes_source() -> None:
     lead = result.data[0]
     assert "source" in lead
     assert lead["source"] == "hunter_pro"
+
+
+# Task 8: Integration tests
+
+
+@pytest.mark.asyncio
+async def test_full_hunter_workflow() -> None:
+    """Test complete end-to-end Hunter agent workflow with realistic ICP.
+
+    Verifies:
+    - Agent state transitions from IDLE to RUNNING to COMPLETE
+    - Lead structure has all required fields
+    - Company enrichment adds technologies, linkedin_url, funding_stage
+    - Contacts are found with name, title, email, seniority, department
+    - Scoring produces fit_score, fit_reasons, and gaps
+    - Exclusions are properly filtered out
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify initial state
+    assert agent.status == AgentStatus.IDLE
+
+    # Define realistic ICP
+    task = {
+        "icp": {
+            "industry": "Biotechnology",
+            "size": "Mid-market (100-500)",
+            "geography": "North America",
+            "technologies": ["Salesforce", "HubSpot"],
+        },
+        "target_count": 2,
+        "exclusions": ["bioinnovatelabs.com"],  # Exclude EU company
+    }
+
+    # Execute via run() to test full lifecycle
+    result = await agent.run(task)
+
+    # Verify final state
+    assert agent.status == AgentStatus.COMPLETE
+    assert result.success is True
+
+    # Verify lead structure
+    leads = result.data
+    assert isinstance(leads, list)
+    assert len(leads) > 0
+
+    for lead in leads:
+        # Check top-level fields
+        assert "company" in lead
+        assert "contacts" in lead
+        assert "fit_score" in lead
+        assert "fit_reasons" in lead
+        assert "gaps" in lead
+        assert "source" in lead
+
+        # Check company enrichment
+        company = lead["company"]
+        assert "technologies" in company
+        assert "linkedin_url" in company
+        assert "funding_stage" in company
+        assert isinstance(company["technologies"], list)
+        assert len(company["technologies"]) > 0
+
+        # Check contacts
+        contacts = lead["contacts"]
+        assert isinstance(contacts, list)
+        assert len(contacts) > 0
+        for contact in contacts:
+            assert "name" in contact
+            assert "title" in contact
+            assert "email" in contact
+            assert "seniority" in contact
+            assert "department" in contact
+
+        # Check scoring
+        assert isinstance(lead["fit_score"], float)
+        assert 0 <= lead["fit_score"] <= 100
+        assert isinstance(lead["fit_reasons"], list)
+        assert isinstance(lead["gaps"], list)
+
+        # Check source
+        assert lead["source"] == "hunter_pro"
+
+    # Verify exclusions were filtered
+    domains = [lead["company"]["domain"] for lead in leads]
+    assert "bioinnovatelabs.com" not in domains
+
+
+@pytest.mark.asyncio
+async def test_hunter_agent_handles_validation_failure() -> None:
+    """Test that invalid input returns failed result with validation error.
+
+    Verifies that when validate_input returns False:
+    - Agent status transitions to FAILED
+    - AgentResult has success=False
+    - Error message indicates validation failure
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test with missing required field (no icp)
+    invalid_task = {
+        "target_count": 5,
+    }
+
+    result = await agent.run(invalid_task)
+
+    # Verify failure state
+    assert agent.status == AgentStatus.FAILED
+    assert result.success is False
+    assert result.error == "Input validation failed"
+    assert result.data is None
+
+
+@pytest.mark.asyncio
+async def test_hunter_agent_caches_enrichment() -> None:
+    """Test that company enrichment cache is populated and reused across runs.
+
+    Verifies:
+    - Cache is empty before first enrichment
+    - Cache is populated after first enrichment
+    - Same enriched company object is returned on cache hit
+    - Cache works across multiple execute calls
+    """
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify cache starts empty
+    assert agent._company_cache == {}
+
+    # Execute task - should populate cache
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result1 = await agent.execute(task)
+    assert result1.success is True
+
+    # Cache should now contain entries for the companies
+    # Note: mock_companies has domains gentechbio.com, pharmacorpsolutions.com, bioinnovatelabs.com
+    # With target_count=2, we might get up to 2 companies cached
+    assert len(agent._company_cache) > 0
+
+    # Get the first cached company for verification
+    first_domain = list(agent._company_cache.keys())[0]
+    first_cached = agent._company_cache[first_domain]
+
+    # Execute again with same task
+    result2 = await agent.execute(task)
+    assert result2.success is True
+
+    # Cache should still contain the same entries
+    assert len(agent._company_cache) > 0
+    assert first_domain in agent._company_cache
+
+    # Verify the cached object is the same (identity check)
+    # This proves cache is being reused, not re-enriched
+    assert agent._company_cache[first_domain] is first_cached
+
+    # Verify enrichment fields are present in cached data
+    assert "technologies" in first_cached
+    assert "linkedin_url" in first_cached
+    assert "funding_stage" in first_cached
