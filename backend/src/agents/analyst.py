@@ -6,6 +6,7 @@ including PubMed, ClinicalTrials.gov, FDA, and ChEMBL.
 
 import asyncio
 import logging
+from datetime import UTC
 from typing import Any, cast
 
 import httpx
@@ -104,18 +105,105 @@ class AnalystAgent(BaseAgent):
             self._http_client = httpx.AsyncClient(timeout=30.0)
         return self._http_client
 
-    async def execute(self, _task: dict[str, Any] | None = None) -> Any:
-        """Execute the analyst agent's primary task.
+    async def execute(self, _task: dict[str, Any]) -> Any:
+        """Execute the analyst agent's primary research task.
 
         Args:
-            task: Task specification with parameters.
+            _task: Task specification with:
+                - query: Research question (required)
+                - depth: Research depth - "quick", "standard", or "comprehensive" (optional)
 
         Returns:
-            AgentResult with success status and output data.
+            AgentResult with structured research report.
         """
+        from datetime import datetime
+
         from src.agents.base import AgentResult
 
-        return AgentResult(success=True, data={})
+        query = _task["query"]
+        depth = _task.get("depth", "standard")
+
+        report: dict[str, Any] = {
+            "query": query,
+            "depth": depth,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        # Always search PubMed
+        pubmed_result = await self._pubmed_search(query=query, max_results=20)
+        report["pubmed_search"] = {
+            "count": pubmed_result.get("count", 0),
+            "pmids": pubmed_result.get("pmids", []),
+        }
+
+        # Fetch article details
+        if pubmed_result.get("pmids"):
+            details = await self._pubmed_fetch_details(pubmed_result["pmids"])
+            report["pubmed_articles"] = details
+        else:
+            report["pubmed_articles"] = {}
+
+        # Search other databases based on depth
+        if depth in ("standard", "comprehensive"):
+            # ClinicalTrials.gov
+            trials_result = await self._clinical_trials_search(query=query)
+            report["clinical_trials"] = trials_result
+
+            # FDA
+            fda_result = await self._fda_drug_search(drug_name=query, search_type="brand")
+            report["fda_products"] = fda_result
+
+        if depth == "comprehensive":
+            # ChEMBL for molecule data
+            chembl_result = await self._chembl_search(query=query)
+            report["chembl_molecules"] = chembl_result
+
+        return AgentResult(success=True, data=report)
+
+    def format_output(self, data: Any) -> Any:
+        """Format output data with summary statistics.
+
+        Args:
+            data: Raw research report data.
+
+        Returns:
+            Formatted research report with summary section.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        summary = {
+            "total_sources": 0,
+            "pubmed_article_count": 0,
+            "clinical_trials_count": 0,
+            "fda_products_count": 0,
+            "chembl_molecules_count": 0,
+        }
+
+        # Count PubMed articles
+        if "pubmed_search" in data:
+            summary["pubmed_article_count"] = data["pubmed_search"].get("count", 0)
+            summary["total_sources"] += 1
+
+        # Count clinical trials
+        if "clinical_trials" in data:
+            summary["clinical_trials_count"] = data["clinical_trials"].get("total_count", 0)
+            summary["total_sources"] += 1
+
+        # Count FDA products
+        if "fda_products" in data:
+            summary["fda_products_count"] = data["fda_products"].get("total", 0)
+            summary["total_sources"] += 1
+
+        # Count ChEMBL molecules
+        if "chembl_molecules" in data:
+            summary["chembl_molecules_count"] = data["chembl_molecules"].get("total_count", 0)
+            summary["total_sources"] += 1
+
+        # Add summary to data
+        data["summary"] = summary
+
+        return data
 
     async def _pubmed_search(
         self,

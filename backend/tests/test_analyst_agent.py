@@ -1,8 +1,9 @@
 """Tests for AnalystAgent module."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.mark.asyncio
@@ -17,10 +18,7 @@ async def test_pubmed_search_returns_articles() -> None:
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "esearchresult": {
-            "idlist": ["12345", "67890"],
-            "count": "2"
-        }
+        "esearchresult": {"idlist": ["12345", "67890"], "count": "2"}
     }
 
     mock_client = AsyncMock()
@@ -105,6 +103,7 @@ def test_analyst_agent_registers_four_tools() -> None:
 
 # Task 5: PubMed article details fetcher tests
 
+
 @pytest.mark.asyncio
 async def test_pubmed_fetch_details_returns_article_metadata() -> None:
     """Test _pubmed_fetch_details returns article metadata."""
@@ -152,6 +151,7 @@ async def test_pubmed_fetch_details_handles_empty_pmids() -> None:
 
 
 # Task 6: ClinicalTrials.gov search tests
+
 
 @pytest.mark.asyncio
 async def test_clinical_trials_search_returns_studies() -> None:
@@ -217,6 +217,7 @@ async def test_clinical_trials_search_handles_empty_results() -> None:
 
 
 # Task 7: FDA drug/device search tests
+
 
 @pytest.mark.asyncio
 async def test_fda_drug_search_returns_products() -> None:
@@ -288,6 +289,7 @@ async def test_fda_drug_search_handles_device_search() -> None:
 
 # Task 8: ChEMBL search tests
 
+
 @pytest.mark.asyncio
 async def test_chembl_search_returns_molecules() -> None:
     """Test _chembl_search returns molecules from ChEMBL API."""
@@ -353,3 +355,163 @@ def test_analyst_agent_validates_depth_level() -> None:
 
     # Invalid depth level
     assert agent.validate_input({"query": "test", "depth": "invalid"}) is False
+
+
+# Task 10: Execute method tests
+
+
+@pytest.mark.asyncio
+async def test_analyst_execute_generates_research_report() -> None:
+    """Test execute generates structured research report."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Mock the tools
+    agent._pubmed_search = AsyncMock(return_value={"count": 2, "pmids": ["12345", "67890"]})
+    agent._pubmed_fetch_details = AsyncMock(
+        return_value={"12345": {"title": "Article 1"}, "67890": {"title": "Article 2"}}
+    )
+    agent._clinical_trials_search = AsyncMock(
+        return_value={"total_count": 1, "studies": [{"nct_id": "NCT001", "status": "Recruiting"}]}
+    )
+    agent._fda_drug_search = AsyncMock(return_value={"total": 1, "products": [{"brand_name": "TestDrug"}]})
+    agent._chembl_search = AsyncMock(return_value={"total_count": 1, "molecules": [{"molecule_chembl_id": "CHEMBL001"}]})
+
+    task = {"query": "cancer immunotherapy", "depth": "comprehensive"}
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert "query" in result.data
+    assert result.data["query"] == "cancer immunotherapy"
+    assert "pubmed_articles" in result.data
+    assert "clinical_trials" in result.data
+    assert "fda_products" in result.data
+    assert "chembl_molecules" in result.data
+    assert "timestamp" in result.data
+
+
+@pytest.mark.asyncio
+async def test_analyst_execute_with_quick_depth_skips_databases() -> None:
+    """Test execute with 'quick' depth only searches PubMed."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    agent._pubmed_search = AsyncMock(return_value={"count": 1, "pmids": ["123"]})
+    agent._pubmed_fetch_details = AsyncMock(return_value={"123": {"title": "Test"}})
+    agent._clinical_trials_search = AsyncMock()
+    agent._fda_drug_search = AsyncMock()
+    agent._chembl_search = AsyncMock()
+
+    task = {"query": "test query", "depth": "quick"}
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    agent._pubmed_search.assert_called_once()
+    # Other tools should not be called for quick depth
+    agent._clinical_trials_search.assert_not_awaited()
+    agent._fda_drug_search.assert_not_awaited()
+    agent._chembl_search.assert_not_awaited()
+
+
+# Task 11: format_output tests
+
+
+def test_analyst_format_output_adds_summary() -> None:
+    """Test format_output adds summary statistics to report."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    data = {
+        "query": "test query",
+        "pubmed_search": {"count": 10, "pmids": ["1", "2"]},
+        "pubmed_articles": {"1": {"title": "A1"}, "2": {"title": "A2"}},
+        "clinical_trials": {"total_count": 5, "studies": [{"nct_id": "NCT1"}]},
+        "fda_products": {"total": 3, "products": [{"brand_name": "D1"}]},
+        "chembl_molecules": {"total_count": 2, "molecules": [{"molecule_chembl_id": "C1"}]},
+    }
+
+    formatted = agent.format_output(data)
+
+    assert "summary" in formatted
+    assert formatted["summary"]["total_sources"] == 4
+    assert formatted["summary"]["pubmed_article_count"] == 10
+    assert formatted["summary"]["clinical_trials_count"] == 5
+    assert formatted["summary"]["fda_products_count"] == 3
+    assert formatted["summary"]["chembl_molecules_count"] == 2
+
+
+# Task 12: Module export tests
+
+
+def test_analyst_agent_exported_from_agents_module() -> None:
+    """Test AnalystAgent is exported from agents module."""
+    from src.agents import AnalystAgent
+
+    assert AnalystAgent.name == "Analyst"
+
+
+# Task 13: Integration tests
+
+
+@pytest.mark.asyncio
+async def test_full_analyst_agent_lifecycle_with_real_execution() -> None:
+    """Integration test demonstrating complete Analyst agent lifecycle."""
+    from src.agents import AnalystAgent
+    from src.agents.base import AgentStatus
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Mock tools
+    agent._pubmed_search = AsyncMock(return_value={"count": 1, "pmids": ["12345"]})
+    agent._pubmed_fetch_details = AsyncMock(
+        return_value={
+            "12345": {
+                "title": "Advances in Cancer Immunotherapy",
+                "authors": [{"name": "Smith J"}],
+                "pubdate": "2023 Jan",
+            }
+        }
+    )
+    agent._clinical_trials_search = AsyncMock(
+        return_value={"total_count": 1, "studies": [{"nct_id": "NCT001", "status": "Recruiting"}]}
+    )
+    agent._fda_drug_search = AsyncMock(return_value={"total": 0, "products": []})
+    agent._chembl_search = AsyncMock(return_value={"total_count": 0, "molecules": []})
+
+    # Initial state
+    assert agent.is_idle
+    assert agent.total_tokens_used == 0
+
+    # Run the agent
+    task = {"query": "cancer immunotherapy", "depth": "standard"}
+    result = await agent.run(task)
+
+    # Verify successful execution
+    assert result.success is True
+    assert agent.is_complete
+    assert result.execution_time_ms >= 0
+
+    # Verify output structure
+    assert "summary" in result.data
+    assert result.data["query"] == "cancer immunotherapy"
+    assert result.data["summary"]["pubmed_article_count"] == 1
+    assert result.data["summary"]["clinical_trials_count"] == 1
+
+    # Verify tools were called
+    agent._pubmed_search.assert_called_once()
+    agent._pubmed_fetch_details.assert_called_once_with(["12345"])
+
+    # Test validation failure
+    agent.status = AgentStatus.IDLE
+    invalid_result = await agent.run({"no_query": "field"})
+    assert invalid_result.success is False
+    assert "validation" in (invalid_result.error or "").lower()
