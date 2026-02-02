@@ -98,6 +98,19 @@ class BaseAgent(ABC):
         """
         return True
 
+    def format_output(self, data: Any) -> Any:  # noqa: ARG002
+        """Format output data before returning.
+
+        Subclasses can override to transform or enrich output.
+
+        Args:
+            data: Raw output data from execution.
+
+        Returns:
+            Formatted output data.
+        """
+        return data
+
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the agent's primary task.

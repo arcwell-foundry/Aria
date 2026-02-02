@@ -201,3 +201,53 @@ def test_base_agent_validate_input_can_be_overridden() -> None:
     assert agent.validate_input({"query": "search term"}) is True
     assert agent.validate_input({"other": "field"}) is False
     assert agent.validate_input({}) is False
+
+
+def test_base_agent_format_output_returns_data_unchanged_by_default() -> None:
+    """Test format_output returns data as-is by default."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    data = {"results": [1, 2, 3], "count": 3}
+    formatted = agent.format_output(data)
+
+    assert formatted == data
+
+
+def test_base_agent_format_output_can_be_overridden() -> None:
+    """Test subclass can override format_output with custom logic."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class FormattingAgent(BaseAgent):
+        name = "Formatting Agent"
+        description = "Agent with custom formatting"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        def format_output(self, data: Any) -> Any:
+            # Add metadata wrapper
+            return {"formatted": True, "data": data}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = FormattingAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = agent.format_output({"raw": "data"})
+
+    assert result["formatted"] is True
+    assert result["data"] == {"raw": "data"}
