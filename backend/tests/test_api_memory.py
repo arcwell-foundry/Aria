@@ -69,3 +69,55 @@ def test_memory_query_returns_effective_confidence(
     expected = 0.75 - ((60 - 7) * 0.05 / 30)
     assert len(data["items"]) == 1
     assert data["items"][0]["confidence"] == pytest.approx(expected, rel=0.05)
+
+
+def test_memory_query_filters_by_min_confidence(
+    test_client: TestClient,
+) -> None:
+    """Test that memory query filters out low-confidence facts."""
+    from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
+
+    now = datetime.now(UTC)
+
+    # High confidence fact
+    high_conf_fact = SemanticFact(
+        id="fact-high",
+        user_id="test-user-123",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=5),
+        last_confirmed_at=now,
+        corroborating_sources=[],
+    )
+
+    # Low confidence fact (will decay below threshold)
+    low_conf_fact = SemanticFact(
+        id="fact-low",
+        user_id="test-user-123",
+        subject="Jane",
+        predicate="works_at",
+        object="Other Corp",
+        confidence=0.40,
+        source=FactSource.INFERRED,
+        valid_from=now - timedelta(days=365),
+        last_confirmed_at=None,
+        corroborating_sources=[],
+    )
+
+    with patch.object(SemanticMemory, "search_facts", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = [high_conf_fact, low_conf_fact]
+
+        response = test_client.get(
+            "/api/v1/memory/query",
+            params={"q": "works", "types": ["semantic"], "min_confidence": 0.5},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Only high confidence fact should be returned
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == "fact-high"

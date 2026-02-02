@@ -215,6 +215,7 @@ class MemoryQueryService:
         memory_types: list[str],
         start_date: datetime | None,
         end_date: datetime | None,
+        min_confidence: float | None,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
@@ -226,6 +227,7 @@ class MemoryQueryService:
             memory_types: List of memory types to search.
             start_date: Optional start of time range filter.
             end_date: Optional end of time range filter.
+            min_confidence: Minimum confidence threshold for semantic results.
             limit: Maximum results to return.
             offset: Number of results to skip.
 
@@ -237,7 +239,7 @@ class MemoryQueryService:
         if "episodic" in memory_types:
             tasks.append(self._query_episodic(user_id, query, start_date, end_date, limit))
         if "semantic" in memory_types:
-            tasks.append(self._query_semantic(user_id, query, limit))
+            tasks.append(self._query_semantic(user_id, query, limit, min_confidence))
         if "procedural" in memory_types:
             tasks.append(self._query_procedural(user_id, query, limit))
         if "prospective" in memory_types:
@@ -304,6 +306,7 @@ class MemoryQueryService:
         user_id: str,
         query: str,
         limit: int,
+        min_confidence: float | None = None,
     ) -> list[dict[str, Any]]:
         """Query semantic memory."""
         from src.memory.semantic import SemanticMemory
@@ -313,11 +316,16 @@ class MemoryQueryService:
 
         results = []
         for fact in facts:
+            # Calculate effective confidence with decay and boosts
+            effective_confidence = memory.get_effective_confidence(fact)
+
+            # Filter by minimum confidence threshold
+            if min_confidence is not None and effective_confidence < min_confidence:
+                continue
+
             relevance = self._calculate_text_relevance(
                 query, f"{fact.subject} {fact.predicate} {fact.object}"
             )
-            # Use effective confidence (with decay and boosts) instead of stored confidence
-            effective_confidence = memory.get_effective_confidence(fact)
             results.append(
                 {
                     "id": fact.id,
@@ -428,6 +436,9 @@ async def query_memory(
     ),
     start_date: datetime | None = Query(None, description="Start of time range filter"),
     end_date: datetime | None = Query(None, description="End of time range filter"),
+    min_confidence: float | None = Query(
+        None, ge=0.0, le=1.0, description="Minimum confidence threshold for semantic results"
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Results per page"),
 ) -> MemoryQueryResponse:
@@ -474,6 +485,7 @@ async def query_memory(
         memory_types=requested_types,
         start_date=start_date,
         end_date=end_date,
+        min_confidence=min_confidence,
         limit=page_size + 1,  # Get one extra to check has_more
         offset=offset,
     )
