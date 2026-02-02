@@ -141,8 +141,8 @@ class ScoutAgent(BaseAgent):
 
     async def _news_search(
         self,
-        query: str,  # noqa: ARG002
-        limit: int = 10,  # noqa: ARG002
+        query: str,
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Search news sources for relevant articles.
 
@@ -152,14 +152,52 @@ class ScoutAgent(BaseAgent):
 
         Returns:
             List of news articles with title, url, source, published_at.
+
+        Raises:
+            ValueError: If limit is less than or equal to zero.
         """
-        # Implementation in later tasks
-        return []
+        # Return empty list for empty or whitespace-only queries
+        if not query or query.strip() == "":
+            return []
+
+        # Validate limit
+        if limit <= 0:
+            raise ValueError(f"limit must be greater than 0, got {limit}")
+
+        logger.info(
+            f"News search with query='{query}', limit={limit}",
+        )
+
+        # Mock news search results
+        from datetime import datetime, timezone
+
+        mock_articles = [
+            {
+                "title": "Acme Corp Raises $50M in Series B Funding",
+                "url": "https://techcrunch.com/2024/01/15/acme-corp-series-b",
+                "source": "TechCrunch",
+                "published_at": datetime(2024, 1, 15, tzinfo=timezone.utc).isoformat(),
+            },
+            {
+                "title": "Acme Corp Expands to European Markets",
+                "url": "https://reuters.com/2024/01/10/acme-corp-europe",
+                "source": "Reuters",
+                "published_at": datetime(2024, 1, 10, tzinfo=timezone.utc).isoformat(),
+            },
+            {
+                "title": "Acme Corp CEO Named to Top 40 Under 40",
+                "url": "https://forbes.com/2024/01/05/acme-corp-ceo",
+                "source": "Forbes",
+                "published_at": datetime(2024, 1, 5, tzinfo=timezone.utc).isoformat(),
+            },
+        ]
+
+        return mock_articles[:limit]
 
     async def _social_monitor(
         self,
-        entity: str,  # noqa: ARG002
-        limit: int = 10,  # noqa: ARG002
+        entity: str,
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Monitor social media for entity mentions.
 
@@ -169,14 +207,50 @@ class ScoutAgent(BaseAgent):
 
         Returns:
             List of social mentions with content, author, platform, url.
+
+        Raises:
+            ValueError: If limit is less than or equal to zero.
         """
-        # Implementation in later tasks
-        return []
+        # Return empty list for empty or whitespace-only entity
+        if not entity or entity.strip() == "":
+            return []
+
+        # Validate limit
+        if limit <= 0:
+            raise ValueError(f"limit must be greater than 0, got {limit}")
+
+        logger.info(
+            f"Social monitoring for entity='{entity}', limit={limit}",
+        )
+
+        # Mock social media mentions
+        mock_mentions = [
+            {
+                "content": f"Just heard about {entity}'s new product launch! Excited to see what they've built.",
+                "author": "@industrywatcher",
+                "platform": "twitter",
+                "url": "https://twitter.com/industrywatcher/status/1234567890",
+            },
+            {
+                "content": f"{entity} is hiring for senior engineering roles. Great opportunity!",
+                "author": "Jane Smith",
+                "platform": "linkedin",
+                "url": "https://linkedin.com/posts/jane-smith-123",
+            },
+            {
+                "content": f"Anyone else following {entity}'s growth? They're disrupting the industry.",
+                "author": "u/techenthusiast",
+                "platform": "reddit",
+                "url": "https://reddit.com/r/technology/comments/abc123",
+            },
+        ]
+
+        return mock_mentions[:limit]
 
     async def _detect_signals(
         self,
-        entities: list[str],  # noqa: ARG002
-        signal_types: list[str] | None = None,  # noqa: ARG002
+        entities: list[str],
+        signal_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Detect market signals for monitored entities.
 
@@ -187,12 +261,76 @@ class ScoutAgent(BaseAgent):
         Returns:
             List of detected signals with relevance scores.
         """
-        # Implementation in later tasks
-        return []
+        # Return empty list for empty entities
+        if not entities:
+            return []
+
+        logger.info(
+            f"Detecting signals for entities={entities}, signal_types={signal_types}",
+        )
+
+        # Mock signals database
+        all_signals = [
+            {
+                "company_name": "Acme Corp",
+                "signal_type": "funding",
+                "headline": "Acme Corp raises $50M Series B",
+                "summary": "Acme Corp announced a $50M Series B funding round led by Sequoia Capital.",
+                "source_url": "https://techcrunch.com/acme-series-b",
+                "source_name": "TechCrunch",
+                "relevance_score": 0.92,
+                "detected_at": "2024-01-15T10:00:00Z",
+            },
+            {
+                "company_name": "Acme Corp",
+                "signal_type": "hiring",
+                "headline": "Acme Corp hiring 50 engineers",
+                "summary": "Acme Corp is expanding its engineering team with 50 new positions.",
+                "source_url": "https://linkedin.com/company/acme-corp/jobs",
+                "source_name": "LinkedIn",
+                "relevance_score": 0.78,
+                "detected_at": "2024-01-14T10:00:00Z",
+            },
+            {
+                "company_name": "Beta Inc",
+                "signal_type": "leadership",
+                "headline": "Beta Inc appoints new CEO",
+                "summary": "Beta Inc has appointed Jane Smith as its new Chief Executive Officer.",
+                "source_url": "https://reuters.com/beta-new-ceo",
+                "source_name": "Reuters",
+                "relevance_score": 0.85,
+                "detected_at": "2024-01-13T10:00:00Z",
+            },
+            {
+                "company_name": "Beta Inc",
+                "signal_type": "funding",
+                "headline": "Beta Inc secures $25M in debt financing",
+                "summary": "Beta Inc has secured $25M in debt financing to expand operations.",
+                "source_url": "https://bloomberg.com/beta-financing",
+                "source_name": "Bloomberg",
+                "relevance_score": 0.73,
+                "detected_at": "2024-01-12T10:00:00Z",
+            },
+        ]
+
+        # Filter by entities
+        filtered_signals = [
+            s for s in all_signals
+            if s["company_name"] in entities
+        ]
+
+        # Filter by signal types if provided
+        if signal_types:
+            filtered_signals = [
+                s for s in filtered_signals
+                if s["signal_type"] in signal_types
+            ]
+
+        return filtered_signals
 
     async def _deduplicate_signals(
         self,
-        signals: list[dict[str, Any]],  # noqa: ARG002
+        signals: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Remove duplicate signals based on content similarity.
 
@@ -202,5 +340,80 @@ class ScoutAgent(BaseAgent):
         Returns:
             Deduplicated list of signals.
         """
-        # Implementation in later tasks
-        return []
+        if not signals:
+            return []
+
+        logger.info(f"Deduplicating {len(signals)} signals")
+
+        seen_urls: set[str] = set()
+        seen_headlines: set[str] = set()
+        deduplicated: list[dict[str, Any]] = []
+
+        # First pass: remove exact duplicates (same URL)
+        for signal in signals:
+            url = signal.get("source_url", "")
+            if url and url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            # Check for similar headlines (simple word-based similarity)
+            headline = signal.get("headline", "")
+            headline_lower = headline.lower().strip()
+
+            # Check if headline is too similar to any seen headline
+            is_duplicate = False
+            for seen_headline in seen_headlines:
+                if self._headlines_are_similar(headline_lower, seen_headline):
+                    is_duplicate = True
+                    # Keep the one with higher relevance score
+                    existing = next(
+                        (s for s in deduplicated if s.get("headline", "").lower() == seen_headline),
+                        None
+                    )
+                    if existing:
+                        existing_relevance = existing.get("relevance_score", 0)
+                        new_relevance = signal.get("relevance_score", 0)
+                        if new_relevance > existing_relevance:
+                            # Replace with higher relevance signal
+                            deduplicated.remove(existing)
+                            deduplicated.append(signal)
+                    break
+
+            if not is_duplicate:
+                seen_headlines.add(headline_lower)
+                deduplicated.append(signal)
+
+        logger.info(f"After deduplication: {len(deduplicated)} signals")
+
+        return deduplicated
+
+    def _headlines_are_similar(
+        self,
+        headline1: str,
+        headline2: str,
+        threshold: float = 0.7,
+    ) -> bool:
+        """Check if two headlines are similar using word overlap.
+
+        Args:
+            headline1: First headline (lowercase).
+            headline2: Second headline (lowercase).
+            threshold: Similarity threshold (0-1).
+
+        Returns:
+            True if headlines are similar above threshold.
+        """
+        # Split into words
+        words1 = set(headline1.split())
+        words2 = set(headline2.split())
+
+        if not words1 or not words2:
+            return False
+
+        # Calculate Jaccard similarity
+        intersection = words1 & words2
+        union = words1 | words2
+
+        similarity = len(intersection) / len(union) if union else 0
+
+        return similarity >= threshold
