@@ -121,3 +121,65 @@ def test_memory_query_filters_by_min_confidence(
     # Only high confidence fact should be returned
     assert len(data["items"]) == 1
     assert data["items"][0]["id"] == "fact-high"
+
+
+def test_audit_log_endpoint_returns_entries(
+    test_client: TestClient,
+) -> None:
+    """Test that audit log endpoint returns entries for current user."""
+    from src.memory.audit import MemoryAuditLogger
+
+    with patch.object(MemoryAuditLogger, "query", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = [
+            {
+                "id": "audit-1",
+                "user_id": "test-user-123",
+                "operation": "create",
+                "memory_type": "semantic",
+                "memory_id": "fact-123",
+                "metadata": {},
+                "created_at": "2026-02-02T00:00:00+00:00",
+            }
+        ]
+
+        response = test_client.get("/api/v1/memory/audit")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == "audit-1"
+
+
+def test_audit_log_endpoint_filters_by_operation(
+    test_client: TestClient,
+) -> None:
+    """Test that audit log endpoint accepts operation filter."""
+    from src.memory.audit import MemoryAuditLogger, MemoryOperation
+
+    with patch.object(MemoryAuditLogger, "query", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = []
+
+        response = test_client.get("/api/v1/memory/audit?operation=create")
+
+    assert response.status_code == 200
+    # Verify the filter was passed to query
+    mock_query.assert_called_once()
+    call_kwargs = mock_query.call_args.kwargs
+    assert call_kwargs["operation"] == MemoryOperation.CREATE
+
+
+def test_audit_log_endpoint_filters_by_memory_type(
+    test_client: TestClient,
+) -> None:
+    """Test that audit log endpoint accepts memory_type filter."""
+    from src.memory.audit import MemoryAuditLogger, MemoryType
+
+    with patch.object(MemoryAuditLogger, "query", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = []
+
+        response = test_client.get("/api/v1/memory/audit?memory_type=semantic")
+
+    assert response.status_code == 200
+    call_kwargs = mock_query.call_args.kwargs
+    assert call_kwargs["memory_type"] == MemoryType.SEMANTIC

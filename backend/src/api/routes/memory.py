@@ -17,6 +17,7 @@ from src.core.exceptions import (
     ProspectiveMemoryError,
     SemanticMemoryError,
 )
+from src.memory.audit import MemoryAuditLogger, MemoryOperation, MemoryType
 from src.memory.digital_twin import DigitalTwin
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
@@ -203,6 +204,29 @@ class ScoreStyleMatchResponse(BaseModel):
     """Response body for style match score."""
 
     score: float = Field(..., ge=0.0, le=1.0)
+
+
+# Audit Log Models
+class AuditLogEntry(BaseModel):
+    """A single audit log entry."""
+
+    id: str
+    user_id: str
+    operation: str
+    memory_type: str
+    memory_id: str | None
+    metadata: dict[str, Any]
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    """Paginated response for audit log queries."""
+
+    items: list[AuditLogEntry]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
 
 
 class MemoryQueryService:
@@ -910,3 +934,85 @@ async def score_style_match(
         raise HTTPException(status_code=503, detail="Digital twin service unavailable") from None
 
     return ScoreStyleMatchResponse(score=score)
+
+
+# Audit Log Endpoints
+
+
+@router.get("/audit", response_model=AuditLogResponse)
+async def query_audit_log(
+    current_user: CurrentUser,
+    operation: Literal["create", "update", "delete", "query", "invalidate"] | None = Query(
+        None, description="Filter by operation type"
+    ),
+    memory_type: Literal["episodic", "semantic", "procedural", "prospective"] | None = Query(
+        None, description="Filter by memory type"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Results per page"),
+) -> AuditLogResponse:
+    """Query the memory audit log.
+
+    Returns audit log entries for the current user. Admins can see
+    all entries via the admin audit endpoint.
+
+    Args:
+        current_user: Authenticated user.
+        operation: Optional filter by operation type.
+        memory_type: Optional filter by memory type.
+        page: Page number (1-indexed).
+        page_size: Number of results per page.
+
+    Returns:
+        Paginated audit log entries.
+    """
+    offset = (page - 1) * page_size
+
+    audit_logger = MemoryAuditLogger()
+
+    # Convert string filters to enums
+    op_filter = MemoryOperation(operation) if operation else None
+    mt_filter = MemoryType(memory_type) if memory_type else None
+
+    # Query with one extra to determine has_more
+    results = await audit_logger.query(
+        user_id=current_user.id,
+        operation=op_filter,
+        memory_type=mt_filter,
+        limit=page_size + 1,
+        offset=offset,
+    )
+
+    has_more = len(results) > page_size
+    results = results[:page_size]
+
+    items = [
+        AuditLogEntry(
+            id=r["id"],
+            user_id=r["user_id"],
+            operation=r["operation"],
+            memory_type=r["memory_type"],
+            memory_id=r.get("memory_id"),
+            metadata=r.get("metadata") or {},
+            created_at=datetime.fromisoformat(r["created_at"]),
+        )
+        for r in results
+    ]
+
+    logger.info(
+        "Audit log queried",
+        extra={
+            "user_id": current_user.id,
+            "operation_filter": operation,
+            "memory_type_filter": memory_type,
+            "results_count": len(items),
+        },
+    )
+
+    return AuditLogResponse(
+        items=items,
+        total=len(items),
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+    )
