@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 
 def test_corporate_fact_source_enum() -> None:
     """Test CorporateFactSource enum values."""
@@ -104,3 +102,97 @@ def test_corporate_memory_class_exists() -> None:
 
     memory = CorporateMemory()
     assert memory is not None
+
+
+# Isolation and Privacy Tests (Task 6)
+
+
+def test_graphiti_episode_name_includes_company_namespace() -> None:
+    """Test that Graphiti episode names use company namespace for isolation."""
+    from src.memory.corporate import CorporateMemory
+
+    memory = CorporateMemory()
+    episode_name = memory._get_graphiti_episode_name("company-abc", "fact-123")
+
+    # Should use corp: prefix with company_id for namespace isolation
+    assert episode_name == "corp:company-abc:fact-123"
+    assert "company-abc" in episode_name
+
+
+def test_corporate_fact_excludes_user_identifiable_data() -> None:
+    """Test that CorporateFact can be created without user-identifiable info."""
+    from src.memory.corporate import CorporateFact, CorporateFactSource
+
+    now = datetime.now(UTC)
+
+    # Create fact without any user ID
+    fact = CorporateFact(
+        id="test-id",
+        company_id="company-123",
+        subject="Market Trend",
+        predicate="shows_growth",
+        object="15% YoY",
+        confidence=0.8,
+        source=CorporateFactSource.AGGREGATED,
+        is_active=True,
+        created_by=None,  # System-generated, no user
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Fact should not require user_id
+    assert fact.created_by is None
+
+    # to_dict should not include any user_id field
+    data = fact.to_dict()
+    assert "user_id" not in data
+
+
+def test_fact_body_does_not_contain_user_info() -> None:
+    """Test that Graphiti fact body excludes user-identifiable data."""
+    from src.memory.corporate import CorporateFact, CorporateFactSource, CorporateMemory
+
+    memory = CorporateMemory()
+    now = datetime.now(UTC)
+
+    fact = CorporateFact(
+        id="test-id",
+        company_id="company-123",
+        subject="Industry Trend",
+        predicate="affects",
+        object="Market Size",
+        confidence=0.75,
+        source=CorporateFactSource.EXTRACTED,
+        is_active=True,
+        created_by="user-456",  # Even if created_by is set
+        created_at=now,
+        updated_at=now,
+    )
+
+    body = memory._build_fact_body(fact)
+
+    # Body should contain company_id (needed for namespace)
+    assert "company-123" in body
+
+    # Body should NOT contain user_id or created_by
+    assert "user-456" not in body
+    assert "created_by" not in body.lower()
+    assert "user_id" not in body.lower()
+
+
+def test_corporate_source_confidence_defaults() -> None:
+    """Test that corporate fact sources have appropriate default confidence."""
+    from src.memory.corporate import CORPORATE_SOURCE_CONFIDENCE, CorporateFactSource
+
+    # Admin-stated should have highest confidence
+    assert CORPORATE_SOURCE_CONFIDENCE[CorporateFactSource.ADMIN_STATED] >= 0.9
+
+    # Aggregated should be higher than extracted (more data points)
+    assert (
+        CORPORATE_SOURCE_CONFIDENCE[CorporateFactSource.AGGREGATED]
+        > CORPORATE_SOURCE_CONFIDENCE[CorporateFactSource.EXTRACTED]
+    )
+
+    # All confidence values should be in valid range
+    for source, confidence in CORPORATE_SOURCE_CONFIDENCE.items():
+        assert 0.0 <= confidence <= 1.0, f"Invalid confidence for {source}"
