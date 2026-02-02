@@ -1709,3 +1709,687 @@ class TestStoreWorkflowEndpoint:
             assert response.status_code == 503
             data = response.json()
             assert data["detail"] == "Memory storage unavailable"
+
+
+# Digital Twin Endpoint Tests
+
+
+class TestFingerprintResponseModel:
+    """Tests for FingerprintResponse Pydantic model."""
+
+    def test_fingerprint_response_valid(self) -> None:
+        """Test creating a valid fingerprint response."""
+        from src.api.routes.memory import FingerprintResponse
+
+        response = FingerprintResponse(
+            id="fp-123",
+            user_id="user-456",
+            average_sentence_length=15.5,
+            vocabulary_level="moderate",
+            formality_score=0.7,
+            common_phrases=["looking forward to", "best regards"],
+            greeting_style="Hi",
+            sign_off_style="Best",
+            emoji_usage=False,
+            punctuation_patterns={".": 0.6, ",": 0.3, "!": 0.1},
+            samples_analyzed=10,
+            confidence=0.85,
+            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+            updated_at=datetime(2024, 6, 15, 14, 0, 0, tzinfo=UTC),
+        )
+
+        assert response.id == "fp-123"
+        assert response.user_id == "user-456"
+        assert response.average_sentence_length == 15.5
+        assert response.vocabulary_level == "moderate"
+        assert response.formality_score == 0.7
+        assert len(response.common_phrases) == 2
+        assert response.emoji_usage is False
+        assert response.samples_analyzed == 10
+        assert response.confidence == 0.85
+
+    def test_fingerprint_response_formality_bounds(self) -> None:
+        """Test that formality_score must be between 0 and 1."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import FingerprintResponse
+
+        with pytest.raises(ValidationError):
+            FingerprintResponse(
+                id="fp-123",
+                user_id="user-456",
+                average_sentence_length=15.0,
+                vocabulary_level="simple",
+                formality_score=1.5,  # Invalid: > 1.0
+                common_phrases=[],
+                greeting_style="Hi",
+                sign_off_style="Thanks",
+                emoji_usage=True,
+                punctuation_patterns={},
+                samples_analyzed=1,
+                confidence=0.5,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+    def test_fingerprint_response_confidence_bounds(self) -> None:
+        """Test that confidence must be between 0 and 1."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import FingerprintResponse
+
+        with pytest.raises(ValidationError):
+            FingerprintResponse(
+                id="fp-123",
+                user_id="user-456",
+                average_sentence_length=15.0,
+                vocabulary_level="simple",
+                formality_score=0.5,
+                common_phrases=[],
+                greeting_style="Hi",
+                sign_off_style="Thanks",
+                emoji_usage=True,
+                punctuation_patterns={},
+                samples_analyzed=1,
+                confidence=-0.1,  # Invalid: < 0.0
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+
+class TestAnalyzeSampleRequestModel:
+    """Tests for AnalyzeSampleRequest Pydantic model."""
+
+    def test_analyze_sample_request_valid(self) -> None:
+        """Test creating a valid analyze sample request."""
+        from src.api.routes.memory import AnalyzeSampleRequest
+
+        request = AnalyzeSampleRequest(
+            text="Hi John, I wanted to follow up on our meeting yesterday.",
+            text_type="email",
+        )
+
+        assert len(request.text) > 10
+        assert request.text_type == "email"
+
+    def test_analyze_sample_request_default_text_type(self) -> None:
+        """Test that text_type defaults to email."""
+        from src.api.routes.memory import AnalyzeSampleRequest
+
+        request = AnalyzeSampleRequest(
+            text="This is a sample text to analyze for writing style.",
+        )
+
+        assert request.text_type == "email"
+
+    def test_analyze_sample_request_text_too_short(self) -> None:
+        """Test that text must be at least 10 characters."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import AnalyzeSampleRequest
+
+        with pytest.raises(ValidationError):
+            AnalyzeSampleRequest(
+                text="short",  # Less than 10 characters
+                text_type="email",
+            )
+
+    def test_analyze_sample_request_invalid_text_type(self) -> None:
+        """Test that invalid text_type raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import AnalyzeSampleRequest
+
+        with pytest.raises(ValidationError):
+            AnalyzeSampleRequest(
+                text="This is a valid text sample for analysis.",
+                text_type="invalid_type",
+            )
+
+    def test_analyze_sample_request_all_text_types(self) -> None:
+        """Test that all valid text_types are accepted."""
+        from src.api.routes.memory import AnalyzeSampleRequest
+
+        for text_type in ["email", "message", "document"]:
+            request = AnalyzeSampleRequest(
+                text="This is a sample text to analyze for writing style.",
+                text_type=text_type,  # type: ignore[arg-type]
+            )
+            assert request.text_type == text_type
+
+
+class TestScoreStyleMatchRequestModel:
+    """Tests for ScoreStyleMatchRequest Pydantic model."""
+
+    def test_score_style_match_request_valid(self) -> None:
+        """Test creating a valid score style match request."""
+        from src.api.routes.memory import ScoreStyleMatchRequest
+
+        request = ScoreStyleMatchRequest(
+            text="Hi, I hope this message finds you well.",
+        )
+
+        assert len(request.text) > 0
+
+    def test_score_style_match_request_empty_text_fails(self) -> None:
+        """Test that empty text raises validation error."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import ScoreStyleMatchRequest
+
+        with pytest.raises(ValidationError):
+            ScoreStyleMatchRequest(
+                text="",
+            )
+
+
+class TestScoreStyleMatchResponseModel:
+    """Tests for ScoreStyleMatchResponse Pydantic model."""
+
+    def test_score_style_match_response_valid(self) -> None:
+        """Test creating a valid score response."""
+        from src.api.routes.memory import ScoreStyleMatchResponse
+
+        response = ScoreStyleMatchResponse(score=0.85)
+
+        assert response.score == 0.85
+
+    def test_score_style_match_response_bounds(self) -> None:
+        """Test that score must be between 0 and 1."""
+        from pydantic import ValidationError
+
+        from src.api.routes.memory import ScoreStyleMatchResponse
+
+        with pytest.raises(ValidationError):
+            ScoreStyleMatchResponse(score=1.5)
+
+        with pytest.raises(ValidationError):
+            ScoreStyleMatchResponse(score=-0.1)
+
+
+class TestGetFingerprintEndpoint:
+    """Tests for GET /api/v1/memory/fingerprint endpoint."""
+
+    def test_get_fingerprint_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.get("/api/v1/memory/fingerprint")
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_digital_twin(self) -> Any:
+        """Fixture to mock DigitalTwin."""
+        with patch("src.api.routes.memory.DigitalTwin") as mock_class:
+            mock_instance = MagicMock()
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_get_fingerprint_success(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test successful fingerprint retrieval."""
+        from src.memory.digital_twin import WritingStyleFingerprint
+
+        mock_fingerprint = WritingStyleFingerprint(
+            id="fp-123",
+            user_id="test-user-123",
+            average_sentence_length=15.5,
+            vocabulary_level="moderate",
+            formality_score=0.7,
+            common_phrases=["looking forward to"],
+            greeting_style="Hi",
+            sign_off_style="Best",
+            emoji_usage=False,
+            punctuation_patterns={".": 0.6, ",": 0.4},
+            samples_analyzed=10,
+            confidence=0.85,
+            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+            updated_at=datetime(2024, 6, 15, 14, 0, 0, tzinfo=UTC),
+        )
+        mock_digital_twin.get_fingerprint = AsyncMock(return_value=mock_fingerprint)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == "fp-123"
+        assert data["average_sentence_length"] == 15.5
+        assert data["vocabulary_level"] == "moderate"
+        assert data["formality_score"] == 0.7
+        assert data["samples_analyzed"] == 10
+
+    def test_get_fingerprint_not_found(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test 404 when fingerprint doesn't exist."""
+        mock_digital_twin.get_fingerprint = AsyncMock(return_value=None)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 404
+        data = response.json()
+        assert data["detail"] == "No fingerprint found for user"
+
+    def test_get_fingerprint_service_unavailable(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test 503 when DigitalTwin service fails."""
+        from src.core.exceptions import DigitalTwinError
+
+        mock_digital_twin.get_fingerprint = AsyncMock(
+            side_effect=DigitalTwinError("Graphiti connection failed")
+        )
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"] == "Digital twin service unavailable"
+
+
+class TestAnalyzeSampleEndpoint:
+    """Tests for POST /api/v1/memory/fingerprint/analyze endpoint."""
+
+    def test_analyze_sample_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "This is a sample text to analyze for writing style.",
+                "text_type": "email",
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_digital_twin(self) -> Any:
+        """Fixture to mock DigitalTwin."""
+        with patch("src.api.routes.memory.DigitalTwin") as mock_class:
+            mock_instance = MagicMock()
+            mock_instance.analyze_sample = AsyncMock(return_value=None)
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_analyze_sample_success(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test successful sample analysis."""
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "Hi John, I wanted to follow up on our meeting yesterday.",
+                "text_type": "email",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["message"] == "Sample analyzed successfully"
+
+        # Verify analyze_sample was called with correct args
+        mock_digital_twin.analyze_sample.assert_called_once_with(
+            user_id="test-user-123",
+            text="Hi John, I wanted to follow up on our meeting yesterday.",
+            text_type="email",
+        )
+
+    def test_analyze_sample_with_message_type(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test sample analysis with message text type."""
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "Hey! Quick question about the project timeline.",
+                "text_type": "message",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+
+        # Verify text_type was passed correctly
+        mock_digital_twin.analyze_sample.assert_called_once()
+        call_args = mock_digital_twin.analyze_sample.call_args
+        assert call_args.kwargs["text_type"] == "message"
+
+    def test_analyze_sample_validation_error_text_too_short(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that text too short returns 422."""
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "short",  # Less than 10 characters
+                "text_type": "email",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_analyze_sample_validation_error_invalid_text_type(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that invalid text_type returns 422."""
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "This is a valid text sample for analysis.",
+                "text_type": "invalid_type",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_analyze_sample_service_unavailable(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test 503 when DigitalTwin service fails."""
+        from src.core.exceptions import DigitalTwinError
+
+        mock_digital_twin.analyze_sample = AsyncMock(
+            side_effect=DigitalTwinError("Graphiti connection failed")
+        )
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/analyze",
+            json={
+                "text": "This is a sample text to analyze for writing style.",
+                "text_type": "email",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"] == "Digital twin service unavailable"
+
+
+class TestGetStyleGuidelinesEndpoint:
+    """Tests for GET /api/v1/memory/fingerprint/guidelines endpoint."""
+
+    def test_get_guidelines_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.get("/api/v1/memory/fingerprint/guidelines")
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_digital_twin(self) -> Any:
+        """Fixture to mock DigitalTwin."""
+        with patch("src.api.routes.memory.DigitalTwin") as mock_class:
+            mock_instance = MagicMock()
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_get_guidelines_success(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test successful guidelines retrieval."""
+        guidelines = (
+            "Start messages with greetings like 'Hi'.\n"
+            "End messages with sign-offs like 'Best'.\n"
+            "Use moderate vocabulary."
+        )
+        mock_digital_twin.get_style_guidelines = AsyncMock(return_value=guidelines)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint/guidelines",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "guidelines" in data
+        assert "Hi" in data["guidelines"]
+        assert "Best" in data["guidelines"]
+
+    def test_get_guidelines_default_when_no_fingerprint(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test that default guidelines are returned when no fingerprint exists."""
+        default_guidelines = (
+            "Write in a clear, professional tone.\n"
+            "Use straightforward language.\n"
+            "Keep sentences concise and readable."
+        )
+        mock_digital_twin.get_style_guidelines = AsyncMock(return_value=default_guidelines)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint/guidelines",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "professional" in data["guidelines"]
+
+    def test_get_guidelines_service_unavailable(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test 503 when DigitalTwin service fails."""
+        from src.core.exceptions import DigitalTwinError
+
+        mock_digital_twin.get_style_guidelines = AsyncMock(
+            side_effect=DigitalTwinError("Graphiti connection failed")
+        )
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.get(
+            "/api/v1/memory/fingerprint/guidelines",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"] == "Digital twin service unavailable"
+
+
+class TestScoreStyleMatchEndpoint:
+    """Tests for POST /api/v1/memory/fingerprint/score endpoint."""
+
+    def test_score_style_match_requires_authentication(self) -> None:
+        """Test that endpoint requires authentication."""
+        from src.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/memory/fingerprint/score",
+            json={"text": "This is a test message."},
+        )
+
+        assert response.status_code == 401
+
+    @pytest.fixture
+    def mock_user(self) -> Any:
+        """Create a mock user object."""
+        user = MagicMock()
+        user.id = "test-user-123"
+        return user
+
+    @pytest.fixture
+    def app_with_mocked_auth(self, mock_user: Any) -> Any:
+        """Fixture to create app with mocked authentication."""
+        from src.api.deps import get_current_user
+        from src.main import app
+
+        async def mock_get_current_user() -> Any:
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+        yield app
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def mock_digital_twin(self) -> Any:
+        """Fixture to mock DigitalTwin."""
+        with patch("src.api.routes.memory.DigitalTwin") as mock_class:
+            mock_instance = MagicMock()
+            mock_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_score_style_match_success(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test successful style match scoring."""
+        mock_digital_twin.score_style_match = AsyncMock(return_value=0.85)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/score",
+            json={"text": "Hi, I hope this message finds you well. Best regards."},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["score"] == 0.85
+
+        # Verify score_style_match was called with correct args
+        mock_digital_twin.score_style_match.assert_called_once_with(
+            user_id="test-user-123",
+            generated_text="Hi, I hope this message finds you well. Best regards.",
+        )
+
+    def test_score_style_match_zero_when_no_fingerprint(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test that 0.0 is returned when no fingerprint exists."""
+        mock_digital_twin.score_style_match = AsyncMock(return_value=0.0)
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/score",
+            json={"text": "This is some test text."},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["score"] == 0.0
+
+    def test_score_style_match_validation_error_empty_text(
+        self, app_with_mocked_auth: Any
+    ) -> None:
+        """Test that empty text returns 422."""
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/score",
+            json={"text": ""},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 422
+
+    def test_score_style_match_service_unavailable(
+        self, app_with_mocked_auth: Any, mock_digital_twin: Any
+    ) -> None:
+        """Test 503 when DigitalTwin service fails."""
+        from src.core.exceptions import DigitalTwinError
+
+        mock_digital_twin.score_style_match = AsyncMock(
+            side_effect=DigitalTwinError("Graphiti connection failed")
+        )
+
+        client = TestClient(app_with_mocked_auth)
+        response = client.post(
+            "/api/v1/memory/fingerprint/score",
+            json={"text": "This is a test message."},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"] == "Digital twin service unavailable"

@@ -11,11 +11,13 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.core.exceptions import (
+    DigitalTwinError,
     EpisodicMemoryError,
     ProceduralMemoryError,
     ProspectiveMemoryError,
     SemanticMemoryError,
 )
+from src.memory.digital_twin import DigitalTwin
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -150,6 +152,57 @@ class CreateWorkflowResponse(BaseModel):
 
     id: str
     message: str = "Workflow created successfully"
+
+
+# Digital Twin Models
+class FingerprintResponse(BaseModel):
+    """Response body for fingerprint retrieval."""
+
+    id: str
+    user_id: str
+    average_sentence_length: float
+    vocabulary_level: str
+    formality_score: float = Field(..., ge=0.0, le=1.0)
+    common_phrases: list[str]
+    greeting_style: str
+    sign_off_style: str
+    emoji_usage: bool
+    punctuation_patterns: dict[str, float]
+    samples_analyzed: int
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class AnalyzeSampleRequest(BaseModel):
+    """Request body for analyzing a text sample."""
+
+    text: str = Field(..., min_length=10, description="Text sample to analyze")
+    text_type: Literal["email", "message", "document"] = Field("email", description="Type of text")
+
+
+class AnalyzeSampleResponse(BaseModel):
+    """Response body for sample analysis."""
+
+    message: str = "Sample analyzed successfully"
+
+
+class StyleGuidelinesResponse(BaseModel):
+    """Response body for style guidelines."""
+
+    guidelines: str
+
+
+class ScoreStyleMatchRequest(BaseModel):
+    """Request body for scoring style match."""
+
+    text: str = Field(..., min_length=1, description="Text to score")
+
+
+class ScoreStyleMatchResponse(BaseModel):
+    """Response body for style match score."""
+
+    score: float = Field(..., ge=0.0, le=1.0)
 
 
 class MemoryQueryService:
@@ -687,3 +740,159 @@ async def store_workflow(
     )
 
     return CreateWorkflowResponse(id=workflow_id)
+
+
+# Digital Twin Endpoints
+
+
+@router.get("/fingerprint", response_model=FingerprintResponse)
+async def get_fingerprint(
+    current_user: CurrentUser,
+) -> FingerprintResponse:
+    """Get the user's writing style fingerprint.
+
+    Retrieves the accumulated writing style fingerprint for the current user,
+    built from analyzed text samples.
+
+    Args:
+        current_user: Authenticated user.
+
+    Returns:
+        User's writing style fingerprint.
+
+    Raises:
+        HTTPException: 404 if no fingerprint exists.
+    """
+    twin = DigitalTwin()
+    try:
+        fingerprint = await twin.get_fingerprint(user_id=current_user.id)
+    except DigitalTwinError as e:
+        logger.error(
+            "Failed to get fingerprint",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Digital twin service unavailable") from None
+
+    if fingerprint is None:
+        raise HTTPException(status_code=404, detail="No fingerprint found for user")
+
+    return FingerprintResponse(
+        id=fingerprint.id,
+        user_id=fingerprint.user_id,
+        average_sentence_length=fingerprint.average_sentence_length,
+        vocabulary_level=fingerprint.vocabulary_level,
+        formality_score=fingerprint.formality_score,
+        common_phrases=fingerprint.common_phrases,
+        greeting_style=fingerprint.greeting_style,
+        sign_off_style=fingerprint.sign_off_style,
+        emoji_usage=fingerprint.emoji_usage,
+        punctuation_patterns=fingerprint.punctuation_patterns,
+        samples_analyzed=fingerprint.samples_analyzed,
+        confidence=fingerprint.confidence,
+        created_at=fingerprint.created_at,
+        updated_at=fingerprint.updated_at,
+    )
+
+
+@router.post("/fingerprint/analyze", response_model=AnalyzeSampleResponse)
+async def analyze_sample(
+    current_user: CurrentUser,
+    request: AnalyzeSampleRequest,
+) -> AnalyzeSampleResponse:
+    """Analyze a text sample to update the user's writing style fingerprint.
+
+    Extracts writing style features from the provided text and updates
+    the user's fingerprint with an incremental weighted average.
+
+    Args:
+        current_user: Authenticated user.
+        request: Analysis request with text sample.
+
+    Returns:
+        Success confirmation.
+    """
+    twin = DigitalTwin()
+    try:
+        await twin.analyze_sample(
+            user_id=current_user.id,
+            text=request.text,
+            text_type=request.text_type,
+        )
+    except DigitalTwinError as e:
+        logger.error(
+            "Failed to analyze sample",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Digital twin service unavailable") from None
+
+    logger.info(
+        "Analyzed text sample",
+        extra={
+            "user_id": current_user.id,
+            "text_type": request.text_type,
+            "text_length": len(request.text),
+        },
+    )
+
+    return AnalyzeSampleResponse()
+
+
+@router.get("/fingerprint/guidelines", response_model=StyleGuidelinesResponse)
+async def get_style_guidelines(
+    current_user: CurrentUser,
+) -> StyleGuidelinesResponse:
+    """Get style guidelines for generating text in the user's voice.
+
+    Returns prompt-ready instructions that can be used with an LLM
+    to generate text matching the user's writing style.
+
+    Args:
+        current_user: Authenticated user.
+
+    Returns:
+        Style guidelines string.
+    """
+    twin = DigitalTwin()
+    try:
+        guidelines = await twin.get_style_guidelines(user_id=current_user.id)
+    except DigitalTwinError as e:
+        logger.error(
+            "Failed to get style guidelines",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Digital twin service unavailable") from None
+
+    return StyleGuidelinesResponse(guidelines=guidelines)
+
+
+@router.post("/fingerprint/score", response_model=ScoreStyleMatchResponse)
+async def score_style_match(
+    current_user: CurrentUser,
+    request: ScoreStyleMatchRequest,
+) -> ScoreStyleMatchResponse:
+    """Score how well text matches the user's writing style.
+
+    Compares the provided text against the user's fingerprint and
+    returns a similarity score from 0.0 to 1.0.
+
+    Args:
+        current_user: Authenticated user.
+        request: Score request with text to evaluate.
+
+    Returns:
+        Style match score.
+    """
+    twin = DigitalTwin()
+    try:
+        score = await twin.score_style_match(
+            user_id=current_user.id,
+            generated_text=request.text,
+        )
+    except DigitalTwinError as e:
+        logger.error(
+            "Failed to score style match",
+            extra={"error": str(e), "user_id": current_user.id},
+        )
+        raise HTTPException(status_code=503, detail="Digital twin service unavailable") from None
+
+    return ScoreStyleMatchResponse(score=score)
