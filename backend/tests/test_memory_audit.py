@@ -1,8 +1,6 @@
 """Tests for memory audit logging module."""
 
-from datetime import UTC, datetime
-from enum import Enum
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -131,9 +129,11 @@ async def test_log_handles_database_error() -> None:
     mock_client = MagicMock()
     mock_client.table.return_value.insert.return_value.execute.side_effect = Exception("DB Error")
 
-    with patch("src.memory.audit.SupabaseClient.get_client", return_value=mock_client):
-        with pytest.raises(AuditLogError):
-            await logger.log(entry)
+    with (
+        patch("src.memory.audit.SupabaseClient.get_client", return_value=mock_client),
+        pytest.raises(AuditLogError),
+    ):
+        await logger.log(entry)
 
 
 @pytest.mark.asyncio
@@ -199,3 +199,45 @@ async def test_query_with_filters() -> None:
     assert any("user_id" in str(c) for c in calls)
     assert any("operation" in str(c) or "create" in str(c) for c in calls)
     assert any("memory_type" in str(c) or "semantic" in str(c) for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_log_memory_operation_convenience_function() -> None:
+    """Test log_memory_operation convenience function."""
+    from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = [{"id": "audit-convenience"}]
+    mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+    with patch("src.memory.audit.SupabaseClient.get_client", return_value=mock_client):
+        result = await log_memory_operation(
+            user_id="user-123",
+            operation=MemoryOperation.CREATE,
+            memory_type=MemoryType.SEMANTIC,
+            memory_id="fact-789",
+            metadata={"test": True},
+        )
+
+    assert result == "audit-convenience"
+
+
+@pytest.mark.asyncio
+async def test_log_memory_operation_suppresses_errors() -> None:
+    """Test log_memory_operation does not raise on failure when suppress=True."""
+    from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
+
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.side_effect = Exception("DB down")
+
+    with patch("src.memory.audit.SupabaseClient.get_client", return_value=mock_client):
+        # Should not raise, returns None
+        result = await log_memory_operation(
+            user_id="user-123",
+            operation=MemoryOperation.CREATE,
+            memory_type=MemoryType.SEMANTIC,
+            suppress_errors=True,
+        )
+
+    assert result is None

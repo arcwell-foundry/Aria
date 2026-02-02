@@ -153,3 +153,54 @@ class MemoryAuditLogger:
         except Exception as e:
             logger.exception("Failed to query audit log")
             raise AuditLogError(str(e)) from e
+
+
+async def log_memory_operation(
+    user_id: str,
+    operation: MemoryOperation,
+    memory_type: MemoryType,
+    memory_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    suppress_errors: bool = False,
+) -> str | None:
+    """Convenience function to log a memory operation.
+
+    Provides a simpler interface than using MemoryAuditLogger directly.
+    Can optionally suppress errors to prevent audit failures from
+    breaking the main operation.
+
+    Args:
+        user_id: The user performing the operation.
+        operation: The type of operation.
+        memory_type: The type of memory being accessed.
+        memory_id: Optional ID of the affected memory.
+        metadata: Optional additional context.
+        suppress_errors: If True, log errors but don't raise.
+
+    Returns:
+        Audit log entry ID, or None if suppressed error occurred.
+    """
+    entry = AuditLogEntry(
+        user_id=user_id,
+        operation=operation,
+        memory_type=memory_type,
+        memory_id=memory_id,
+        metadata=metadata or {},
+    )
+
+    audit_logger = MemoryAuditLogger()
+
+    try:
+        return await audit_logger.log(entry)
+    except AuditLogError:
+        if suppress_errors:
+            logger.warning(
+                "Audit log failed (suppressed)",
+                extra={
+                    "user_id": user_id,
+                    "operation": operation.value,
+                    "memory_type": memory_type.value,
+                },
+            )
+            return None
+        raise
