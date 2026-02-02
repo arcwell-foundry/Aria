@@ -760,3 +760,89 @@ class SemanticMemory:
         except Exception as e:
             logger.exception("Failed to delete fact", extra={"fact_id": fact_id})
             raise SemanticMemoryError(f"Failed to delete fact: {e}") from e
+
+    async def confirm_fact(
+        self,
+        user_id: str,
+        fact_id: str,
+        confirming_source: str,
+    ) -> None:
+        """Confirm a fact, updating last_confirmed_at and adding corroboration.
+
+        This method is used when an external source corroborates an existing fact.
+        It refreshes the decay clock and adds the source to corroborating_sources.
+
+        Args:
+            user_id: The user who owns the fact.
+            fact_id: The fact ID to confirm.
+            confirming_source: Identifier for the confirming source (e.g., "crm_import:123").
+
+        Raises:
+            FactNotFoundError: If fact doesn't exist.
+            SemanticMemoryError: If confirmation fails.
+        """
+        try:
+            # Get existing fact
+            fact = await self.get_fact(user_id, fact_id)
+
+            # Update confirmation timestamp
+            fact.last_confirmed_at = datetime.now(UTC)
+
+            # Add corroborating source if not already present
+            if fact.corroborating_sources is None:
+                fact.corroborating_sources = []
+            if confirming_source not in fact.corroborating_sources:
+                fact.corroborating_sources.append(confirming_source)
+
+            # Re-store the updated fact
+            client = await self._get_graphiti_client()
+
+            # Delete old version
+            await self._delete_episode(client, fact_id)
+
+            # Store updated version
+            fact_body = self._build_fact_body(fact)
+
+            from graphiti_core.nodes import EpisodeType
+
+            await client.add_episode(
+                name=f"fact:{fact_id}",
+                episode_body=fact_body,
+                source=EpisodeType.text,
+                source_description=f"semantic_memory:{user_id}:{fact.predicate}:confirmed",
+                reference_time=fact.valid_from,
+            )
+
+            logger.info(
+                "Confirmed fact",
+                extra={
+                    "fact_id": fact_id,
+                    "user_id": user_id,
+                    "confirming_source": confirming_source,
+                },
+            )
+
+        except FactNotFoundError:
+            raise
+        except SemanticMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to confirm fact", extra={"fact_id": fact_id})
+            raise SemanticMemoryError(f"Failed to confirm fact: {e}") from e
+
+    async def _delete_episode(self, client: "Graphiti", fact_id: str) -> None:
+        """Delete an episode by fact ID (helper for updates).
+
+        Args:
+            client: The Graphiti client.
+            fact_id: The fact ID to delete.
+        """
+        query = """
+        MATCH (e:Episode)
+        WHERE e.name = $fact_name
+        DETACH DELETE e
+        """
+        await client.driver.execute_query(
+            query,
+            fact_name=f"fact:{fact_id}",
+        )

@@ -715,3 +715,69 @@ Corroborating Sources: source:1,source:2"""
     assert fact is not None
     assert fact.last_confirmed_at == confirmed
     assert fact.corroborating_sources == ["source:1", "source:2"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_fact_updates_last_confirmed_at() -> None:
+    """Test confirm_fact updates the last_confirmed_at timestamp."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    # Setup mock to return a fact
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = f"Subject: John\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: {now.isoformat()}"
+    mock_node.created_at = now
+    mock_record = {"e": mock_node}
+    mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
+    mock_client.driver = mock_driver
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="updated-fact"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await memory.confirm_fact(
+            user_id="user-456",
+            fact_id="fact-123",
+            confirming_source="crm_import:789",
+        )
+
+        # Should have called add_episode to update the fact
+        assert mock_client.add_episode.called
+
+
+@pytest.mark.asyncio
+async def test_confirm_fact_adds_corroborating_source() -> None:
+    """Test confirm_fact adds the confirming source to corroborating_sources."""
+    now = datetime.now(UTC)
+    memory = SemanticMemory()
+    mock_client = MagicMock()
+
+    # Existing fact with one corroborating source
+    existing_sources = "Corroborating Sources: source:existing"
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = f"Subject: John\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: {now.isoformat()}\n{existing_sources}"
+    mock_node.created_at = now
+    mock_record = {"e": mock_node}
+    mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
+    mock_client.driver = mock_driver
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="updated-fact"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await memory.confirm_fact(
+            user_id="user-456",
+            fact_id="fact-123",
+            confirming_source="crm_import:new",
+        )
+
+        # Verify the episode body contains both sources
+        call_args = mock_client.add_episode.call_args
+        episode_body = call_args.kwargs.get("episode_body", "")
+        assert "source:existing" in episode_body
+        assert "crm_import:new" in episode_body
