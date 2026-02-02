@@ -1,7 +1,8 @@
 """Tests for StrategistAgent module."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def test_strategist_agent_has_name_and_description() -> None:
@@ -591,3 +592,166 @@ async def test_create_timeline_calculates_dates() -> None:
         # Simple check that target_date looks like ISO date
         assert len(milestone["target_date"]) == 10  # YYYY-MM-DD
         assert "-" in milestone["target_date"]
+
+
+# Task 6: execute method tests
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_agent_result() -> None:
+    """Test execute returns AgentResult with strategy data."""
+    from src.agents.base import AgentResult
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {
+            "title": "Close deal with Acme Corp",
+            "type": "close",
+            "target_company": "Acme Corp",
+        },
+        "resources": {
+            "available_agents": ["Hunter", "Analyst", "Scribe"],
+            "time_horizon_days": 90,
+        },
+    }
+
+    result = await agent.execute(task)
+
+    assert isinstance(result, AgentResult)
+    assert result.success is True
+    assert isinstance(result.data, dict)
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_complete_strategy() -> None:
+    """Test execute returns complete strategy with all components."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {
+            "title": "Lead generation campaign",
+            "type": "lead_gen",
+        },
+        "resources": {
+            "available_agents": ["Hunter"],
+            "time_horizon_days": 30,
+        },
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    # Should have analysis
+    assert "analysis" in data
+
+    # Should have strategy
+    assert "strategy" in data
+    assert "phases" in data["strategy"]
+    assert "agent_tasks" in data["strategy"]
+    assert "risks" in data["strategy"]
+    assert "success_criteria" in data["strategy"]
+
+    # Should have timeline
+    assert "timeline" in data
+    assert "milestones" in data["timeline"]
+    assert "schedule" in data["timeline"]
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_context_for_analysis() -> None:
+    """Test execute uses provided context for analysis."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {
+            "title": "Close deal",
+            "type": "close",
+            "target_company": "Acme Corp",
+        },
+        "resources": {
+            "available_agents": ["Hunter", "Scribe"],
+            "time_horizon_days": 60,
+        },
+        "context": {
+            "competitive_landscape": {
+                "competitors": ["Competitor A"],
+                "our_strengths": ["Price"],
+            },
+            "stakeholder_map": {
+                "decision_makers": [{"name": "CEO John", "role": "CEO"}],
+            },
+        },
+    }
+
+    result = await agent.execute(task)
+    analysis = result.data["analysis"]
+
+    # Should include competitive analysis
+    assert "competitive_analysis" in analysis
+
+    # Should include stakeholder analysis
+    assert "stakeholder_analysis" in analysis
+
+
+@pytest.mark.asyncio
+async def test_execute_respects_constraints() -> None:
+    """Test execute respects provided constraints."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {
+            "title": "Quick outreach",
+            "type": "outreach",
+        },
+        "resources": {
+            "available_agents": ["Scribe"],
+            "time_horizon_days": 30,
+        },
+        "constraints": {
+            "deadline": "2026-02-15",
+        },
+    }
+
+    result = await agent.execute(task)
+    timeline = result.data["timeline"]
+
+    # Timeline should respect deadline
+    assert timeline.get("deadline") == "2026-02-15"
+
+
+@pytest.mark.asyncio
+async def test_execute_includes_metadata() -> None:
+    """Test execute includes metadata in result."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {
+            "title": "Research project",
+            "type": "research",
+        },
+        "resources": {
+            "available_agents": ["Analyst"],
+            "time_horizon_days": 14,
+        },
+    }
+
+    result = await agent.execute(task)
+
+    # Should have metadata
+    assert "created_at" in result.data
+    assert "goal_id" in result.data

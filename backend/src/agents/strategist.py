@@ -5,6 +5,7 @@ creating actionable strategies with phases, milestones, and agent tasks.
 """
 
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -93,16 +94,72 @@ class StrategistAgent(BaseAgent):
         time_horizon = resources["time_horizon_days"]
         return isinstance(time_horizon, int) and time_horizon > 0
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the strategist agent's primary task.
+
+        Orchestrates the full strategy generation workflow:
+        1. Extract goal, resources, constraints, context from task
+        2. Analyze account context
+        3. Generate pursuit strategy
+        4. Create timeline with milestones
 
         Args:
             task: Task specification with parameters.
 
         Returns:
-            AgentResult with success status and output data.
+            AgentResult with complete strategy data including analysis,
+            strategy, timeline, and metadata.
         """
-        return AgentResult(success=True, data={})
+        # Extract task components
+        goal = task.get("goal", {})
+        resources = task.get("resources", {})
+        constraints = task.get("constraints", {})
+        context = task.get("context", {})
+
+        logger.info(
+            f"Executing strategy generation for goal: {goal.get('title')}",
+            extra={"user_id": self.user_id, "goal_type": goal.get("type")},
+        )
+
+        # Step 1: Analyze account context
+        analysis = await self._analyze_account(goal=goal, context=context)
+
+        # Step 2: Generate pursuit strategy
+        strategy = await self._generate_strategy(
+            goal=goal,
+            analysis=analysis,
+            resources=resources,
+            constraints=constraints,
+        )
+
+        # Step 3: Create timeline with milestones
+        time_horizon_days = resources.get("time_horizon_days", 90)
+        deadline = constraints.get("deadline")
+        timeline = await self._create_timeline(
+            strategy=strategy,
+            time_horizon_days=time_horizon_days,
+            deadline=deadline,
+        )
+
+        # Build complete result data
+        result_data: dict[str, Any] = {
+            "goal_id": str(uuid.uuid4()),
+            "created_at": datetime.now().isoformat(),
+            "analysis": analysis,
+            "strategy": strategy,
+            "timeline": timeline,
+        }
+
+        logger.info(
+            f"Strategy generation complete for goal: {goal.get('title')}",
+            extra={
+                "user_id": self.user_id,
+                "phases": len(strategy.get("phases", [])),
+                "tasks": len(strategy.get("agent_tasks", [])),
+            },
+        )
+
+        return AgentResult(success=True, data=result_data)
 
     async def _analyze_account(
         self,
