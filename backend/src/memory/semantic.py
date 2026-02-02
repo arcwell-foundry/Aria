@@ -21,6 +21,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import FactNotFoundError, SemanticMemoryError  # noqa: F401
+from src.memory.confidence import ConfidenceScorer
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -845,4 +846,30 @@ class SemanticMemory:
         await client.driver.execute_query(
             query,
             fact_name=f"fact:{fact_id}",
+        )
+
+    def get_effective_confidence(
+        self,
+        fact: SemanticFact,
+        as_of: datetime | None = None,
+    ) -> float:
+        """Calculate the effective confidence for a fact.
+
+        Applies time-based decay and corroboration boosts to get the
+        current confidence value for the fact.
+
+        Args:
+            fact: The SemanticFact to calculate confidence for.
+            as_of: Point in time to calculate for. Defaults to now.
+
+        Returns:
+            Effective confidence score between 0.3 and 0.99.
+        """
+        scorer = ConfidenceScorer()
+        return scorer.get_effective_confidence(
+            original_confidence=fact.confidence,
+            created_at=fact.valid_from,
+            last_confirmed_at=fact.last_confirmed_at,
+            corroborating_source_count=len(fact.corroborating_sources or []),
+            as_of=as_of,
         )

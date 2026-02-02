@@ -781,3 +781,54 @@ async def test_confirm_fact_adds_corroborating_source() -> None:
         episode_body = call_args.kwargs.get("episode_body", "")
         assert "source:existing" in episode_body
         assert "crm_import:new" in episode_body
+
+
+def test_get_effective_confidence_for_fact() -> None:
+    """Test get_effective_confidence returns scorer result for a fact."""
+    now = datetime.now(UTC)
+    confirmed = now - timedelta(days=3)
+
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now - timedelta(days=30),
+        last_confirmed_at=confirmed,
+        corroborating_sources=["source:1", "source:2"],
+    )
+
+    memory = SemanticMemory()
+    result = memory.get_effective_confidence(fact, as_of=now)
+
+    # Should be original confidence (confirmed within 7 days) + 2 boosts
+    # 0.95 + 0.20 = 1.15, capped at 0.99
+    assert result == pytest.approx(0.99)
+
+
+def test_get_effective_confidence_with_decay() -> None:
+    """Test get_effective_confidence applies decay for old facts."""
+    now = datetime.now(UTC)
+
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="works_at",
+        object="Acme",
+        confidence=0.75,
+        source=FactSource.EXTRACTED,
+        valid_from=now - timedelta(days=60),
+        last_confirmed_at=None,
+        corroborating_sources=[],
+    )
+
+    memory = SemanticMemory()
+    result = memory.get_effective_confidence(fact, as_of=now)
+
+    # 0.75 - ((60-7) * 0.05/30) = 0.75 - 0.0883 = 0.6617
+    expected = 0.75 - ((60 - 7) * 0.05 / 30)
+    assert result == pytest.approx(expected, rel=0.01)
