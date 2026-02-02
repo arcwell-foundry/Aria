@@ -357,3 +357,189 @@ async def test_crm_read_filters_by_id() -> None:
 
     assert result["record_type"] == "leads"
     assert result.get("record_id") == "lead-123"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_by_single_filter() -> None:
+    """Test crm_read applies single filter parameter correctly."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        filters={"status": "qualified"},
+    )
+
+    assert result["record_type"] == "leads"
+    assert result["total_count"] == 1
+    assert result["records"][0]["status"] == "qualified"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_by_multiple_filters() -> None:
+    """Test crm_read applies multiple filter parameters correctly."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        filters={"status": "prospecting", "source": "referral"},
+    )
+
+    assert result["record_type"] == "leads"
+    assert result["total_count"] == 1
+    assert result["records"][0]["status"] == "prospecting"
+    assert result["records"][0]["source"] == "referral"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_with_no_matches() -> None:
+    """Test crm_read returns empty list when filters match no records."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        filters={"status": "nonexistent_status"},
+    )
+
+    assert result["record_type"] == "leads"
+    assert result["total_count"] == 0
+    assert result["records"] == []
+
+
+@pytest.mark.asyncio
+async def test_crm_read_invalid_record_type_returns_empty() -> None:
+    """Test crm_read returns empty records for invalid record_type."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="invalid_type",
+    )
+
+    assert result["record_type"] == "invalid_type"
+    assert result["total_count"] == 0
+    assert result["records"] == []
+
+
+@pytest.mark.asyncio
+async def test_crm_read_nonexistent_record_id_returns_empty() -> None:
+    """Test crm_read returns empty list when record_id doesn't exist."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        record_id="nonexistent-id",
+    )
+
+    assert result["record_type"] == "leads"
+    assert result["record_id"] == "nonexistent-id"
+    assert result["total_count"] == 0
+    assert result["records"] == []
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_combined_with_record_id() -> None:
+    """Test crm_read applies both record_id and additional filters."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        record_id="lead-001",
+        filters={"status": "qualified"},
+    )
+
+    # Should return lead-001 since it matches the status filter
+    assert result["total_count"] == 1
+    assert result["records"][0]["id"] == "lead-001"
+    assert result["records"][0]["status"] == "qualified"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_mismatch_with_record_id() -> None:
+    """Test crm_read returns empty when record_id exists but filters don't match."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        record_id="lead-001",
+        filters={"status": "prospecting"},  # lead-001 has status "qualified"
+    )
+
+    # lead-001 exists but doesn't match the status filter
+    assert result["total_count"] == 0
+    assert result["records"] == []
+
+
+@pytest.mark.asyncio
+async def test_crm_read_empty_filters_dict() -> None:
+    """Test crm_read with empty filters dict returns all records."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        filters={},
+    )
+
+    # Empty filters should not filter anything
+    assert result["total_count"] == 2
+    assert len(result["records"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_crm_read_contacts_filters() -> None:
+    """Test crm_read filters work correctly for contacts."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="contacts",
+        filters={"company": "Acme Corp"},
+    )
+
+    assert result["record_type"] == "contacts"
+    assert result["total_count"] == 1
+    assert result["records"][0]["name"] == "John Smith"
+    assert result["records"][0]["company"] == "Acme Corp"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_accounts_filters() -> None:
+    """Test crm_read filters work correctly for accounts."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="accounts",
+        filters={"industry": "Technology"},
+    )
+
+    assert result["record_type"] == "accounts"
+    assert result["total_count"] == 1
+    assert result["records"][0]["name"] == "Acme Corp"
+    assert result["records"][0]["industry"] == "Technology"
