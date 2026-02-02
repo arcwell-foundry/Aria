@@ -15,10 +15,13 @@ Each phase is logged for transparency and debugging.
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from src.core.exceptions import OODABlockedError, OODAMaxIterationsError
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -120,6 +123,7 @@ class OODAState:
     is_complete: bool = False
     is_blocked: bool = False
     blocked_reason: str | None = None
+    total_tokens_used: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize state to dictionary.
@@ -140,6 +144,7 @@ class OODAState:
             "is_complete": self.is_complete,
             "is_blocked": self.is_blocked,
             "blocked_reason": self.blocked_reason,
+            "total_tokens_used": self.total_tokens_used,
         }
 
     @classmethod
@@ -164,6 +169,7 @@ class OODAState:
             is_complete=data.get("is_complete", False),
             is_blocked=data.get("is_blocked", False),
             blocked_reason=data.get("blocked_reason"),
+            total_tokens_used=data.get("total_tokens_used", 0),
         )
 
         # Restore phase logs
@@ -293,6 +299,13 @@ class OODALoop:
         state.observations = observations
         state.current_phase = OODAPhase.ORIENT
 
+        # Estimate tokens used based on observations data size
+        # Rough estimate: 4 characters per token
+        import json as json_module
+
+        observations_str = json_module.dumps(observations, default=str)
+        estimated_tokens = len(observations_str) // 4
+
         # Log phase execution
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         state.phase_logs.append(
@@ -301,6 +314,7 @@ class OODALoop:
                 iteration=state.iteration,
                 input_summary=f"Goal: {goal.get('title', 'Unknown')}",
                 output_summary=f"Gathered {len(observations)} observations",
+                tokens_used=estimated_tokens,
                 duration_ms=duration_ms,
             )
         )
@@ -360,6 +374,7 @@ Observations:
 Analyze these observations and identify patterns, opportunities, and threats relevant to achieving the goal."""
 
         # Call LLM for analysis
+        estimated_tokens = 0
         try:
             response = await self.llm.generate_response(
                 messages=[{"role": "user", "content": user_prompt}],
@@ -367,6 +382,12 @@ Analyze these observations and identify patterns, opportunities, and threats rel
                 max_tokens=self.config.orient_budget,
                 temperature=0.3,  # Lower temperature for more focused analysis
             )
+
+            # Estimate tokens: input (prompt) + output (response)
+            # Rough estimate: 4 characters per token
+            input_chars = len(system_prompt) + len(user_prompt)
+            output_chars = len(response)
+            estimated_tokens = (input_chars + output_chars) // 4
 
             # Parse JSON response
             try:
@@ -403,6 +424,7 @@ Analyze these observations and identify patterns, opportunities, and threats rel
                 iteration=state.iteration,
                 input_summary=f"Analyzed {len(state.observations)} observations",
                 output_summary=f"Focus: {orientation.get('recommended_focus', 'Unknown')}",
+                tokens_used=estimated_tokens,
                 duration_ms=duration_ms,
             )
         )
@@ -476,6 +498,7 @@ Previous action result: {state.action_result if state.action_result else "No pre
 Select the best action to make progress toward the goal."""
 
         # Call LLM for decision
+        estimated_tokens = 0
         try:
             response = await self.llm.generate_response(
                 messages=[{"role": "user", "content": user_prompt}],
@@ -483,6 +506,12 @@ Select the best action to make progress toward the goal."""
                 max_tokens=self.config.decide_budget,
                 temperature=0.2,  # Low temperature for more deterministic decisions
             )
+
+            # Estimate tokens: input (prompt) + output (response)
+            # Rough estimate: 4 characters per token
+            input_chars = len(system_prompt) + len(user_prompt)
+            output_chars = len(response)
+            estimated_tokens = (input_chars + output_chars) // 4
 
             # Parse JSON response
             try:
@@ -526,6 +555,7 @@ Select the best action to make progress toward the goal."""
                 iteration=state.iteration,
                 input_summary=f"Focus: {state.orientation.get('recommended_focus', 'Unknown')}",
                 output_summary=f"Decision: {decision.get('action', 'Unknown')}",
+                tokens_used=estimated_tokens,
                 duration_ms=duration_ms,
             )
         )
@@ -612,6 +642,11 @@ Select the best action to make progress toward the goal."""
         state.current_phase = OODAPhase.OBSERVE
         state.iteration += 1
 
+        # Estimate tokens based on action result size
+        # Rough estimate: 4 characters per token
+        result_str = str(state.action_result) if state.action_result else ""
+        estimated_tokens = len(result_str) // 4
+
         # Log phase execution
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         success = state.action_result.get("success", False) if state.action_result else False
@@ -621,6 +656,7 @@ Select the best action to make progress toward the goal."""
                 iteration=state.iteration - 1,  # Log for previous iteration
                 input_summary=f"Action: {action}, Agent: {agent}",
                 output_summary=f"Success: {success}",
+                tokens_used=estimated_tokens,
                 duration_ms=duration_ms,
             )
         )
@@ -638,3 +674,140 @@ Select the best action to make progress toward the goal."""
         )
 
         return state
+
+    async def run(self, goal: str) -> OODAState:
+        """Execute OODA loop until goal achieved, blocked, or limit exceeded.
+
+        Runs full OODA cycles (observe -> orient -> decide -> act) until:
+        - Goal is complete (state.is_complete is True)
+        - Goal is blocked (raises OODABlockedError)
+        - Max iterations exceeded (raises OODAMaxIterationsError)
+        - Token budget exceeded (raises OODAMaxIterationsError)
+
+        Args:
+            goal: The goal description to achieve.
+
+        Returns:
+            Final OODAState on successful completion.
+
+        Raises:
+            OODABlockedError: When the loop cannot proceed.
+            OODAMaxIterationsError: When iterations or token budget exceeded.
+        """
+        # Generate a unique goal ID for this run
+        goal_id = str(uuid.uuid4())
+
+        # Create initial state
+        state = OODAState(
+            goal_id=goal_id,
+            max_iterations=self.config.max_iterations,
+        )
+
+        # Build goal dict for phase methods
+        goal_dict = {"id": goal_id, "title": goal, "description": goal}
+
+        logger.info(
+            "OODA loop starting",
+            extra={
+                "goal_id": goal_id,
+                "goal": goal,
+                "max_iterations": self.config.max_iterations,
+                "total_budget": self.config.total_budget,
+            },
+        )
+
+        while True:
+            # Check iteration limit before starting cycle
+            if state.iteration >= self.config.max_iterations:
+                logger.warning(
+                    "OODA loop max iterations exceeded",
+                    extra={
+                        "goal_id": goal_id,
+                        "iterations": state.iteration,
+                    },
+                )
+                raise OODAMaxIterationsError(
+                    goal_id=goal_id,
+                    iterations=state.iteration,
+                )
+
+            # Check token budget
+            if state.total_tokens_used >= self.config.total_budget:
+                logger.warning(
+                    "OODA loop token budget exceeded",
+                    extra={
+                        "goal_id": goal_id,
+                        "tokens_used": state.total_tokens_used,
+                        "budget": self.config.total_budget,
+                    },
+                )
+                raise OODAMaxIterationsError(
+                    goal_id=goal_id,
+                    iterations=state.iteration,
+                )
+
+            logger.info(
+                "OODA loop iteration starting",
+                extra={
+                    "goal_id": goal_id,
+                    "iteration": state.iteration,
+                    "tokens_used": state.total_tokens_used,
+                },
+            )
+
+            # Execute OODA cycle: observe -> orient -> decide -> act
+            state = await self.observe(state, goal_dict)
+            self._update_token_count(state)
+
+            state = await self.orient(state, goal_dict)
+            self._update_token_count(state)
+
+            state = await self.decide(state, goal_dict)
+            self._update_token_count(state)
+
+            # Check if blocked after decide
+            if state.is_blocked:
+                logger.warning(
+                    "OODA loop blocked",
+                    extra={
+                        "goal_id": goal_id,
+                        "reason": state.blocked_reason,
+                    },
+                )
+                raise OODABlockedError(
+                    goal_id=goal_id,
+                    reason=state.blocked_reason or "Unknown reason",
+                )
+
+            # Check if complete after decide
+            if state.is_complete:
+                logger.info(
+                    "OODA loop completed successfully",
+                    extra={
+                        "goal_id": goal_id,
+                        "iterations": state.iteration,
+                        "tokens_used": state.total_tokens_used,
+                    },
+                )
+                return state
+
+            # Execute action (only if not complete/blocked)
+            state = await self.act(state, goal_dict)
+            self._update_token_count(state)
+
+            logger.info(
+                "OODA loop iteration complete",
+                extra={
+                    "goal_id": goal_id,
+                    "iteration": state.iteration,
+                    "tokens_used": state.total_tokens_used,
+                },
+            )
+
+    def _update_token_count(self, state: OODAState) -> None:
+        """Update total token count from phase logs.
+
+        Args:
+            state: The current OODA state.
+        """
+        state.total_tokens_used = sum(log.tokens_used for log in state.phase_logs)

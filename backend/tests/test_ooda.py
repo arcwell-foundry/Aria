@@ -1,5 +1,9 @@
 """Tests for OODA loop cognitive processing module."""
 
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 
 def test_ooda_phase_enum_has_four_phases() -> None:
     """Test OODAPhase enum has observe, orient, decide, act."""
@@ -162,14 +166,10 @@ def test_ooda_config_to_dict() -> None:
     assert "total_budget" in result
 
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-
 @pytest.mark.asyncio
 async def test_ooda_loop_observe_gathers_memory_context() -> None:
     """Test observe phase queries episodic and semantic memory."""
-    from src.core.ooda import OODALoop, OODAState, OODAConfig
+    from src.core.ooda import OODALoop, OODAState
 
     # Mock dependencies
     mock_llm = MagicMock()
@@ -207,7 +207,11 @@ async def test_ooda_loop_observe_gathers_memory_context() -> None:
     )
 
     state = OODAState(goal_id="goal-123")
-    goal = {"id": "goal-123", "title": "Prepare budget meeting", "description": "Get ready for Q3 budget review"}
+    goal = {
+        "id": "goal-123",
+        "title": "Prepare budget meeting",
+        "description": "Get ready for Q3 budget review",
+    }
 
     new_state = await loop.observe(state, goal)
 
@@ -225,7 +229,7 @@ async def test_ooda_loop_observe_gathers_memory_context() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_observe_logs_phase_execution() -> None:
     """Test observe phase logs its execution."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = MagicMock()
     mock_episodic = AsyncMock()
@@ -291,7 +295,7 @@ async def test_ooda_loop_observe_handles_memory_errors_gracefully() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_orient_analyzes_observations() -> None:
     """Test orient phase uses LLM to analyze observations."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = AsyncMock()
     mock_llm.generate_response.return_value = """{
@@ -315,8 +319,16 @@ async def test_ooda_loop_orient_analyzes_observations() -> None:
 
     state = OODAState(goal_id="goal-123")
     state.observations = [
-        {"source": "episodic", "type": "episode", "data": {"content": "Q3 budget meeting scheduled"}},
-        {"source": "semantic", "type": "fact", "data": {"subject": "John", "predicate": "is", "object": "CFO"}},
+        {
+            "source": "episodic",
+            "type": "episode",
+            "data": {"content": "Q3 budget meeting scheduled"},
+        },
+        {
+            "source": "semantic",
+            "type": "fact",
+            "data": {"subject": "John", "predicate": "is", "object": "CFO"},
+        },
     ]
     goal = {"id": "goal-123", "title": "Prepare budget meeting"}
 
@@ -334,10 +346,12 @@ async def test_ooda_loop_orient_analyzes_observations() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_orient_logs_phase_execution() -> None:
     """Test orient phase logs its execution."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = AsyncMock()
-    mock_llm.generate_response.return_value = '{"patterns": [], "opportunities": [], "threats": [], "recommended_focus": "test"}'
+    mock_llm.generate_response.return_value = (
+        '{"patterns": [], "opportunities": [], "threats": [], "recommended_focus": "test"}'
+    )
 
     mock_episodic = AsyncMock()
     mock_semantic = AsyncMock()
@@ -395,7 +409,7 @@ async def test_ooda_loop_orient_handles_invalid_llm_response() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_decide_selects_action() -> None:
     """Test decide phase uses LLM to select best action."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = AsyncMock()
     mock_llm.generate_response.return_value = """{
@@ -511,7 +525,7 @@ async def test_ooda_loop_decide_can_mark_blocked() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_act_executes_decision() -> None:
     """Test act phase executes the decided action."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = MagicMock()
     mock_episodic = AsyncMock()
@@ -588,7 +602,7 @@ async def test_ooda_loop_act_skips_complete_state() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_act_handles_execution_failure() -> None:
     """Test act phase handles agent execution failure."""
-    from src.core.ooda import OODALoop, OODAState, OODAPhase
+    from src.core.ooda import OODALoop, OODAPhase, OODAState
 
     mock_llm = MagicMock()
     mock_episodic = AsyncMock()
@@ -622,3 +636,206 @@ async def test_ooda_loop_act_handles_execution_failure() -> None:
     assert new_state.action_result["success"] is False
     assert "error" in new_state.action_result
     assert new_state.current_phase == OODAPhase.OBSERVE  # Still loops back
+
+
+# Tests for OODALoop.run() method
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_run_completes_on_success() -> None:
+    """Test run() returns final state when goal is achieved."""
+    from src.core.ooda import OODAConfig, OODALoop
+
+    mock_llm = AsyncMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Setup mocks
+    mock_episodic.semantic_search.return_value = []
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    # First iteration: orient gives analysis, decide selects action, act succeeds
+    # Second iteration: decide returns "complete"
+    orient_responses = [
+        '{"patterns": ["data found"], "opportunities": [], "threats": [], "recommended_focus": "analyze"}',
+        '{"patterns": ["complete"], "opportunities": [], "threats": [], "recommended_focus": "done"}',
+    ]
+    decide_responses = [
+        '{"action": "research", "agent": "analyst", "parameters": {}, "reasoning": "need data"}',
+        '{"action": "complete", "agent": null, "parameters": {}, "reasoning": "goal achieved"}',
+    ]
+    mock_llm.generate_response.side_effect = orient_responses + decide_responses
+
+    # Need to track call count to return appropriate responses
+    call_count = 0
+
+    async def mock_generate(**kwargs: object) -> str:
+        nonlocal call_count
+        system_prompt = str(kwargs.get("system_prompt", ""))
+        # Alternate between orient and decide responses
+        if "analyze" in system_prompt.lower() or "patterns" in system_prompt.lower():
+            idx = min(call_count // 2, len(orient_responses) - 1)
+            response = orient_responses[idx]
+        else:
+            idx = min(call_count // 2, len(decide_responses) - 1)
+            response = decide_responses[idx]
+        call_count += 1
+        return response
+
+    mock_llm.generate_response = mock_generate
+
+    mock_executor = AsyncMock()
+    mock_executor.return_value = {"success": True, "data": {}}
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+        config=OODAConfig(max_iterations=5),
+    )
+    loop.agent_executor = mock_executor
+
+    final_state = await loop.run(goal="Prepare budget meeting")
+
+    assert final_state.is_complete is True
+    assert final_state.is_blocked is False
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_run_raises_on_blocked() -> None:
+    """Test run() raises OODABlockedError when loop becomes blocked."""
+    from src.core.exceptions import OODABlockedError
+    from src.core.ooda import OODAConfig, OODALoop
+
+    mock_llm = AsyncMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Setup mocks
+    mock_episodic.semantic_search.return_value = []
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    # Immediately return blocked decision
+    async def mock_generate(**kwargs: object) -> str:
+        system_prompt = str(kwargs.get("system_prompt", ""))
+        if "analyze" in system_prompt.lower() or "patterns" in system_prompt.lower():
+            return '{"patterns": [], "opportunities": [], "threats": ["blocked"], "recommended_focus": "blocked"}'
+        else:
+            return '{"action": "blocked", "agent": null, "parameters": {}, "reasoning": "missing permissions"}'
+
+    mock_llm.generate_response = mock_generate
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+        config=OODAConfig(max_iterations=5),
+    )
+
+    with pytest.raises(OODABlockedError) as exc_info:
+        await loop.run(goal="Blocked goal")
+
+    assert "blocked" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_run_raises_on_max_iterations() -> None:
+    """Test run() raises OODAMaxIterationsError when max iterations exceeded."""
+    from src.core.exceptions import OODAMaxIterationsError
+    from src.core.ooda import OODAConfig, OODALoop
+
+    mock_llm = AsyncMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Setup mocks
+    mock_episodic.semantic_search.return_value = []
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    # Never complete - always return an action
+    async def mock_generate(**kwargs: object) -> str:
+        system_prompt = str(kwargs.get("system_prompt", ""))
+        if "analyze" in system_prompt.lower() or "patterns" in system_prompt.lower():
+            return '{"patterns": [], "opportunities": [], "threats": [], "recommended_focus": "continue"}'
+        else:
+            return '{"action": "research", "agent": "analyst", "parameters": {}, "reasoning": "need more data"}'
+
+    mock_llm.generate_response = mock_generate
+
+    mock_executor = AsyncMock()
+    mock_executor.return_value = {"success": True, "data": {}}
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+        config=OODAConfig(max_iterations=3),  # Low limit for test
+    )
+    loop.agent_executor = mock_executor
+
+    with pytest.raises(OODAMaxIterationsError) as exc_info:
+        await loop.run(goal="Never-ending goal")
+
+    assert exc_info.value.details["iterations"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_run_raises_on_budget_exceeded() -> None:
+    """Test run() raises OODAMaxIterationsError when token budget exceeded."""
+    from src.core.exceptions import OODAMaxIterationsError
+    from src.core.ooda import OODAConfig, OODALoop
+
+    mock_llm = AsyncMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Setup mocks
+    mock_episodic.semantic_search.return_value = []
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    # Return non-completing responses but track tokens
+    async def mock_generate(**kwargs: object) -> str:
+        system_prompt = str(kwargs.get("system_prompt", ""))
+        if "analyze" in system_prompt.lower() or "patterns" in system_prompt.lower():
+            return '{"patterns": [], "opportunities": [], "threats": [], "recommended_focus": "continue"}'
+        else:
+            return '{"action": "research", "agent": "analyst", "parameters": {}, "reasoning": "need more data"}'
+
+    mock_llm.generate_response = mock_generate
+
+    mock_executor = AsyncMock()
+    mock_executor.return_value = {"success": True, "data": {}}
+
+    # Very low token budget to trigger budget exceeded
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+        config=OODAConfig(max_iterations=100, total_budget=100),  # Very low budget
+    )
+    loop.agent_executor = mock_executor
+
+    with pytest.raises(OODAMaxIterationsError) as exc_info:
+        await loop.run(goal="Budget exceeding goal")
+
+    # Should mention budget in the error
+    assert (
+        "budget" in str(exc_info.value).lower()
+        or exc_info.value.details.get("iterations") is not None
+    )
