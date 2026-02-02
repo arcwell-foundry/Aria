@@ -116,3 +116,47 @@ def test_ooda_phase_log_entry_to_dict() -> None:
     assert result["iteration"] == 2
     assert result["tokens_used"] == 200
     assert "timestamp" in result
+
+
+def test_ooda_config_has_default_budgets() -> None:
+    """Test OODAConfig has sensible default token budgets."""
+    from src.core.ooda import OODAConfig
+
+    config = OODAConfig()
+
+    assert config.observe_budget == 2000
+    assert config.orient_budget == 3000
+    assert config.decide_budget == 2000
+    assert config.act_budget == 1000
+    assert config.max_iterations == 10
+    assert config.total_budget == 50000
+
+
+def test_ooda_config_custom_budgets() -> None:
+    """Test OODAConfig accepts custom token budgets."""
+    from src.core.ooda import OODAConfig
+
+    config = OODAConfig(
+        observe_budget=1000,
+        orient_budget=1500,
+        decide_budget=1000,
+        act_budget=500,
+        max_iterations=5,
+        total_budget=20000,
+    )
+
+    assert config.observe_budget == 1000
+    assert config.orient_budget == 1500
+    assert config.max_iterations == 5
+
+
+def test_ooda_config_to_dict() -> None:
+    """Test OODAConfig serializes correctly."""
+    from src.core.ooda import OODAConfig
+
+    config = OODAConfig(max_iterations=3)
+    result = config.to_dict()
+
+    assert result["max_iterations"] == 3
+    assert "observe_budget" in result
+    assert "total_budget" in result

@@ -32,6 +32,36 @@ class OODAPhase(Enum):
 
 
 @dataclass
+class OODAConfig:
+    """Configuration for OODA loop execution.
+
+    Controls token budgets per phase and overall constraints.
+    """
+
+    observe_budget: int = 2000  # Max tokens for observation phase
+    orient_budget: int = 3000  # Max tokens for orientation phase
+    decide_budget: int = 2000  # Max tokens for decision phase
+    act_budget: int = 1000  # Max tokens for action phase
+    max_iterations: int = 10  # Maximum OODA cycles before stopping
+    total_budget: int = 50000  # Total token budget across all iterations
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary.
+
+        Returns:
+            Dictionary representation.
+        """
+        return {
+            "observe_budget": self.observe_budget,
+            "orient_budget": self.orient_budget,
+            "decide_budget": self.decide_budget,
+            "act_budget": self.act_budget,
+            "max_iterations": self.max_iterations,
+            "total_budget": self.total_budget,
+        }
+
+
+@dataclass
 class OODAPhaseLogEntry:
     """Log entry for a single OODA phase execution.
 
