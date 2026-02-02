@@ -132,3 +132,43 @@ class ConfidenceScorer:
         boosted = base_confidence + boost
 
         return min(self.max_confidence, boosted)
+
+    def get_effective_confidence(
+        self,
+        original_confidence: float,
+        created_at: datetime,
+        last_confirmed_at: datetime | None = None,
+        corroborating_source_count: int = 0,
+        as_of: datetime | None = None,
+    ) -> float:
+        """Calculate effective confidence combining decay and corroboration.
+
+        Order of operations:
+        1. Apply time-based decay (with floor)
+        2. Apply corroboration boost (with ceiling)
+
+        This order ensures that old facts can be revived by corroboration.
+
+        Args:
+            original_confidence: Initial confidence score (0.0-1.0).
+            created_at: When the fact was created.
+            last_confirmed_at: When the fact was last confirmed/refreshed.
+            corroborating_source_count: Number of independent corroborating sources.
+            as_of: Point in time to calculate for. Defaults to now.
+
+        Returns:
+            Effective confidence score between min_threshold and max_confidence.
+        """
+        # Step 1: Apply decay
+        decayed_confidence = self.calculate_current_confidence(
+            original_confidence=original_confidence,
+            created_at=created_at,
+            last_confirmed_at=last_confirmed_at,
+            as_of=as_of,
+        )
+
+        # Step 2: Apply corroboration boost
+        return self.apply_corroboration_boost(
+            base_confidence=decayed_confidence,
+            corroborating_source_count=corroborating_source_count,
+        )

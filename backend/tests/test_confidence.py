@@ -197,3 +197,49 @@ def test_apply_corroboration_boost_zero_sources() -> None:
     )
 
     assert result == pytest.approx(0.75)
+
+
+def test_get_effective_confidence_combines_decay_and_boost() -> None:
+    """Effective confidence should apply both decay and corroboration."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+    now = datetime.now(UTC)
+
+    # Fact: 60 days old, never confirmed, 2 corroborating sources
+    result = scorer.get_effective_confidence(
+        original_confidence=0.75,
+        created_at=now - timedelta(days=60),
+        last_confirmed_at=None,
+        corroborating_source_count=2,
+        as_of=now,
+    )
+
+    # Decay: 0.75 - ((60-7) * 0.05/30) = 0.75 - 0.0883 = 0.6617
+    # Then boost: 0.6617 + 0.20 = 0.8617
+    expected_after_decay = 0.75 - ((60 - 7) * 0.05 / 30)
+    expected = expected_after_decay + 0.20
+    assert result == pytest.approx(expected, rel=0.01)
+
+
+def test_get_effective_confidence_decay_then_boost_order() -> None:
+    """Decay should be applied before boost."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+    now = datetime.now(UTC)
+
+    # Old fact with high original confidence, boosted by corroboration
+    result = scorer.get_effective_confidence(
+        original_confidence=0.95,
+        created_at=now - timedelta(days=180),
+        last_confirmed_at=None,
+        corroborating_source_count=1,
+        as_of=now,
+    )
+
+    # Decay from 0.95 over 173 effective days, then +0.10 boost
+    decay = (180 - 7) * 0.05 / 30
+    decayed = max(0.3, 0.95 - decay)  # Floored at min
+    boosted = min(0.99, decayed + 0.10)
+    assert result == pytest.approx(boosted, rel=0.01)
