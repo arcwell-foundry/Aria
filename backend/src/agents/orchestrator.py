@@ -4,7 +4,9 @@ Coordinates multiple agents for complex goal execution with parallel
 and sequential execution modes.
 """
 
+import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -151,3 +153,71 @@ class AgentOrchestrator:
                     f"Cleaned up agent {agent_id}",
                     extra={"agent_id": agent_id},
                 )
+
+    async def execute_parallel(
+        self,
+        tasks: list[tuple[type[BaseAgent], dict[str, Any]]],
+    ) -> OrchestrationResult:
+        """Execute multiple agents in parallel.
+
+        All tasks run concurrently. Failures in one task do not affect others.
+
+        Args:
+            tasks: List of (agent_class, task) tuples to execute.
+
+        Returns:
+            OrchestrationResult with all agent results.
+        """
+        if not tasks:
+            return OrchestrationResult(
+                results=[],
+                total_tokens=0,
+                total_execution_time_ms=0,
+            )
+
+        start_time = time.perf_counter()
+
+        logger.info(
+            f"Starting parallel execution of {len(tasks)} agents",
+            extra={"task_count": len(tasks), "user_id": self.user_id},
+        )
+
+        # Create coroutines for all tasks
+        coros = [self.spawn_and_execute(agent_class, task) for agent_class, task in tasks]
+
+        # Execute all concurrently - return_exceptions=True ensures failures don't abort
+        raw_results = await asyncio.gather(*coros, return_exceptions=True)
+
+        # Convert exceptions to failed AgentResults
+        results: list[AgentResult] = []
+        for raw in raw_results:
+            if isinstance(raw, BaseException):
+                results.append(
+                    AgentResult(
+                        success=False,
+                        data=None,
+                        error=str(raw),
+                    )
+                )
+            else:
+                results.append(raw)
+
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        total_tokens = sum(r.tokens_used for r in results)
+
+        logger.info(
+            "Parallel execution complete",
+            extra={
+                "task_count": len(tasks),
+                "success_count": sum(1 for r in results if r.success),
+                "failed_count": sum(1 for r in results if not r.success),
+                "total_tokens": total_tokens,
+                "execution_time_ms": elapsed_ms,
+            },
+        )
+
+        return OrchestrationResult(
+            results=results,
+            total_tokens=total_tokens,
+            total_execution_time_ms=elapsed_ms,
+        )

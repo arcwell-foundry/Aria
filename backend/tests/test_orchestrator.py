@@ -264,3 +264,93 @@ async def test_spawn_and_execute_accumulates_token_usage() -> None:
 
     # Token usage should be tracked (even if 0 for mock agents)
     assert orchestrator._total_tokens_used >= initial_tokens
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_runs_multiple_agents() -> None:
+    """Test execute_parallel runs multiple agents concurrently."""
+    from unittest.mock import MagicMock
+
+    from src.agents.operator import OperatorAgent
+    from src.agents.orchestrator import AgentOrchestrator, OrchestrationResult
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    tasks: list[tuple[type, dict]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (
+            OperatorAgent,
+            {"operation_type": "calendar_read", "parameters": {"start_date": "2024-01-01"}},
+        ),
+    ]
+
+    result = await orchestrator.execute_parallel(tasks)
+
+    assert isinstance(result, OrchestrationResult)
+    assert len(result.results) == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_returns_orchestration_result() -> None:
+    """Test execute_parallel returns OrchestrationResult with metrics."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    tasks: list[tuple[type, dict]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),
+        (ScoutAgent, {"entities": ["Beta Inc"]}),
+    ]
+
+    result = await orchestrator.execute_parallel(tasks)
+
+    assert result.total_tokens >= 0
+    assert result.total_execution_time_ms >= 0
+    assert result.success_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_handles_empty_tasks() -> None:
+    """Test execute_parallel handles empty task list gracefully."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    result = await orchestrator.execute_parallel([])
+
+    assert len(result.results) == 0
+    assert result.all_succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_continues_on_failure() -> None:
+    """Test execute_parallel continues executing even if one agent fails."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # First task is valid, second has invalid input (will fail validation)
+    tasks: list[tuple[type, dict]] = [
+        (ScoutAgent, {"entities": ["Acme Corp"]}),  # Valid
+        (ScoutAgent, {"signal_types": ["funding"]}),  # Invalid - missing entities
+    ]
+
+    result = await orchestrator.execute_parallel(tasks)
+
+    # Both should complete (one success, one failure)
+    assert len(result.results) == 2
+    assert result.success_count == 1
+    assert result.failed_count == 1
