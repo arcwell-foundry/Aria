@@ -473,3 +473,37 @@ async def test_score_style_match_returns_zero_when_no_fingerprint() -> None:
         )
 
         assert score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_update_fingerprint_batch_updates_from_texts() -> None:
+    """Test update_fingerprint processes multiple text samples."""
+    from src.memory.digital_twin import DigitalTwin, WritingStyleFingerprint
+
+    twin = DigitalTwin()
+    now = datetime.now(UTC)
+
+    # Mock the Graphiti client
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-fp-123"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(twin, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        texts = [
+            "Hi there! Hope you're doing well.",
+            "Hi Team, quick update on the project.",
+            "Hi everyone, let's discuss the roadmap.",
+        ]
+
+        fingerprint = await twin.update_fingerprint(
+            user_id="user-123",
+            texts=texts,
+            text_type="email",
+        )
+
+        assert fingerprint is not None
+        assert fingerprint.user_id == "user-123"
+        assert fingerprint.samples_analyzed == len(texts)
+        assert fingerprint.greeting_style == "Hi"
