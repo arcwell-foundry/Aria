@@ -1,6 +1,5 @@
 """Tests for ScoutAgent module."""
 
-import pytest
 from unittest.mock import MagicMock
 
 
