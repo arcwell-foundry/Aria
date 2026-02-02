@@ -172,3 +172,39 @@ class ConfidenceScorer:
             base_confidence=decayed_confidence,
             corroborating_source_count=corroborating_source_count,
         )
+
+    def meets_threshold(
+        self,
+        original_confidence: float,
+        created_at: datetime,
+        last_confirmed_at: datetime | None = None,
+        corroborating_source_count: int = 0,
+        threshold: float | None = None,
+        as_of: datetime | None = None,
+    ) -> bool:
+        """Check if a fact meets the confidence threshold.
+
+        Useful for filtering facts before including them in responses.
+
+        Args:
+            original_confidence: Initial confidence score (0.0-1.0).
+            created_at: When the fact was created.
+            last_confirmed_at: When the fact was last confirmed/refreshed.
+            corroborating_source_count: Number of independent corroborating sources.
+            threshold: Minimum confidence required. Defaults to min_threshold.
+            as_of: Point in time to calculate for. Defaults to now.
+
+        Returns:
+            True if effective confidence meets or exceeds threshold.
+        """
+        effective_threshold = threshold if threshold is not None else self.min_threshold
+
+        effective_confidence = self.get_effective_confidence(
+            original_confidence=original_confidence,
+            created_at=created_at,
+            last_confirmed_at=last_confirmed_at,
+            corroborating_source_count=corroborating_source_count,
+            as_of=as_of,
+        )
+
+        return effective_confidence >= effective_threshold

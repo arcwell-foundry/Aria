@@ -243,3 +243,64 @@ def test_get_effective_confidence_decay_then_boost_order() -> None:
     decayed = max(0.3, 0.95 - decay)  # Floored at min
     boosted = min(0.99, decayed + 0.10)
     assert result == pytest.approx(boosted, rel=0.01)
+
+
+def test_meets_threshold_returns_true_above_threshold() -> None:
+    """Confidence above threshold should pass."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+    now = datetime.now(UTC)
+
+    result = scorer.meets_threshold(
+        original_confidence=0.95,
+        created_at=now - timedelta(days=7),
+        last_confirmed_at=None,
+        corroborating_source_count=0,
+        threshold=0.5,
+        as_of=now,
+    )
+
+    assert result is True
+
+
+def test_meets_threshold_returns_false_below_threshold() -> None:
+    """Confidence below threshold should fail."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+    now = datetime.now(UTC)
+
+    # Very old fact with low original confidence
+    result = scorer.meets_threshold(
+        original_confidence=0.40,
+        created_at=now - timedelta(days=365),
+        last_confirmed_at=None,
+        corroborating_source_count=0,
+        threshold=0.5,
+        as_of=now,
+    )
+
+    # Should be at floor (0.3), which is below 0.5 threshold
+    assert result is False
+
+
+def test_meets_threshold_uses_default_threshold() -> None:
+    """Default threshold should come from settings."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer(min_threshold=0.4)
+    now = datetime.now(UTC)
+
+    # Fact at exactly the floor should pass default threshold check
+    result = scorer.meets_threshold(
+        original_confidence=0.45,
+        created_at=now - timedelta(days=365),
+        last_confirmed_at=None,
+        corroborating_source_count=0,
+        threshold=None,  # Use default (min_threshold)
+        as_of=now,
+    )
+
+    # At floor of 0.4, equal to threshold, should pass
+    assert result is True
