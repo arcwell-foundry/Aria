@@ -316,13 +316,15 @@ class MemoryQueryService:
             relevance = self._calculate_text_relevance(
                 query, f"{fact.subject} {fact.predicate} {fact.object}"
             )
+            # Use effective confidence (with decay and boosts) instead of stored confidence
+            effective_confidence = memory.get_effective_confidence(fact)
             results.append(
                 {
                     "id": fact.id,
                     "memory_type": "semantic",
                     "content": f"{fact.subject} {fact.predicate} {fact.object}",
                     "relevance_score": relevance,
-                    "confidence": fact.confidence,
+                    "confidence": effective_confidence,
                     "timestamp": fact.valid_from,
                 }
             )
