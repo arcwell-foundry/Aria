@@ -1,5 +1,6 @@
 """Tests for StrategistAgent module."""
 
+import pytest
 from unittest.mock import MagicMock
 
 
@@ -206,3 +207,101 @@ def test_validate_input_allows_optional_constraints() -> None:
     }
 
     assert agent.validate_input(task_with_constraints) is True
+
+
+# Task 3: _analyze_account tests
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_returns_analysis_dict() -> None:
+    """Test _analyze_account returns analysis dictionary."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Close deal with Acme Corp",
+        "type": "close",
+        "target_company": "Acme Corp",
+    }
+
+    result = await agent._analyze_account(goal=goal)
+
+    assert isinstance(result, dict)
+    assert "opportunities" in result
+    assert "challenges" in result
+    assert "recommendation" in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_considers_competitive_landscape() -> None:
+    """Test _analyze_account considers competitive landscape."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Close deal with Acme Corp",
+        "type": "close",
+        "target_company": "Acme Corp",
+    }
+    context = {
+        "competitive_landscape": {
+            "competitors": ["Competitor A", "Competitor B"],
+            "our_strengths": ["Price", "Support"],
+            "our_weaknesses": ["Brand recognition"],
+        },
+    }
+
+    result = await agent._analyze_account(goal=goal, context=context)
+
+    assert "competitive_analysis" in result
+    assert isinstance(result["competitive_analysis"], dict)
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_considers_stakeholder_map() -> None:
+    """Test _analyze_account considers stakeholder map."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Close deal with Acme Corp",
+        "type": "close",
+        "target_company": "Acme Corp",
+    }
+    context = {
+        "stakeholder_map": {
+            "decision_makers": [{"name": "John CEO", "role": "CEO"}],
+            "influencers": [{"name": "Jane VP", "role": "VP Sales"}],
+            "blockers": [],
+        },
+    }
+
+    result = await agent._analyze_account(goal=goal, context=context)
+
+    assert "stakeholder_analysis" in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_identifies_key_actions() -> None:
+    """Test _analyze_account identifies key actions."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Research Acme Corp pipeline",
+        "type": "research",
+        "target_company": "Acme Corp",
+    }
+
+    result = await agent._analyze_account(goal=goal)
+
+    assert "key_actions" in result
+    assert isinstance(result["key_actions"], list)
