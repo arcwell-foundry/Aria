@@ -476,3 +476,74 @@ async def test_base_agent_run_logs_execution_failure(
     assert "Execution failed" in (result.error or "")
     log_messages = [record.message for record in caplog.records]
     assert any("error" in msg.lower() or "failed" in msg.lower() for msg in log_messages)
+
+
+def test_base_agent_tracks_total_tokens_used() -> None:
+    """Test BaseAgent tracks cumulative token usage."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.total_tokens_used == 0
+
+
+@pytest.mark.asyncio
+async def test_base_agent_run_accumulates_tokens() -> None:
+    """Test run() accumulates token usage across executions."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={}, tokens_used=100)
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    await agent.run({"task": "first"})
+    assert agent.total_tokens_used == 100
+
+    await agent.run({"task": "second"})
+    assert agent.total_tokens_used == 200
+
+    await agent.run({"task": "third"})
+    assert agent.total_tokens_used == 300
+
+
+def test_base_agent_reset_token_count() -> None:
+    """Test reset_token_count clears accumulated tokens."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    agent.total_tokens_used = 500
+    agent.reset_token_count()
+
+    assert agent.total_tokens_used == 0

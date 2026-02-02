@@ -77,6 +77,7 @@ class BaseAgent(ABC):
         self.llm = llm_client
         self.user_id = user_id
         self.status = AgentStatus.IDLE
+        self.total_tokens_used = 0
         self.tools: dict[str, Callable[..., Any]] = self._register_tools()
 
     @abstractmethod
@@ -113,6 +114,10 @@ class BaseAgent(ABC):
             Formatted output data.
         """
         return data
+
+    def reset_token_count(self) -> None:
+        """Reset the accumulated token usage counter."""
+        self.total_tokens_used = 0
 
     async def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
         """Call a registered tool with error handling.
@@ -232,6 +237,9 @@ class BaseAgent(ABC):
             # Calculate execution time
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             result.execution_time_ms = elapsed_ms
+
+            # Accumulate token usage
+            self.total_tokens_used += result.tokens_used
 
             self.status = AgentStatus.COMPLETE if result.success else AgentStatus.FAILED
 
