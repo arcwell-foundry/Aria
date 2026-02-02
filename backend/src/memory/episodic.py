@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import EpisodeNotFoundError, EpisodicMemoryError
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -262,6 +263,17 @@ class EpisodicMemory:
             )
 
             logger.info(f"Stored episode {episode_id} for user {episode.user_id}")
+
+            # Audit log the creation
+            await log_memory_operation(
+                user_id=episode.user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.EPISODIC,
+                memory_id=episode.id,
+                metadata={"event_type": episode.event_type},
+                suppress_errors=True,
+            )
+
             return episode_id
 
         except EpisodicMemoryError:

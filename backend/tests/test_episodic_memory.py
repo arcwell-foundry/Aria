@@ -325,3 +325,41 @@ async def test_get_episode_raises_not_found() -> None:
         mock_get.return_value = mock_client
         with pytest.raises(EpisodeNotFoundError):
             await memory.get_episode(user_id="user-456", episode_id="nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_store_episode_logs_audit_entry() -> None:
+    """Test that store_episode logs an audit entry."""
+    from src.memory.audit import MemoryOperation, MemoryType
+    from src.memory.episodic import Episode, EpisodicMemory
+
+    now = datetime.now(UTC)
+    episode = Episode(
+        id="ep-audit-test",
+        user_id="user-456",
+        event_type="meeting",
+        content="Met with client",
+        participants=["John"],
+        occurred_at=now,
+        recorded_at=now,
+        context={},
+    )
+
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-uuid"))
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        with patch("src.memory.episodic.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-ep-123"
+
+            await memory.store_episode(episode)
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["user_id"] == "user-456"
+            assert call_kwargs["operation"] == MemoryOperation.CREATE
+            assert call_kwargs["memory_type"] == MemoryType.EPISODIC
+            assert call_kwargs["suppress_errors"] is True
