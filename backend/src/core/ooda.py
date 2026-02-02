@@ -14,10 +14,17 @@ Each phase is logged for transparency and debugging.
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.core.llm import LLMClient
+    from src.memory.episodic import EpisodicMemory
+    from src.memory.semantic import SemanticMemory
+    from src.memory.working import WorkingMemory
 
 logger = logging.getLogger(__name__)
 
@@ -172,5 +179,140 @@ class OODAState:
                     timestamp=datetime.fromisoformat(log_data["timestamp"]),
                 )
             )
+
+        return state
+
+
+class OODALoop:
+    """OODA loop cognitive processing engine.
+
+    Implements the Observe-Orient-Decide-Act cycle for systematic
+    task reasoning. Each iteration gathers context, analyzes the
+    situation, selects an action, and executes it.
+    """
+
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        episodic_memory: "EpisodicMemory",
+        semantic_memory: "SemanticMemory",
+        working_memory: "WorkingMemory",
+        config: OODAConfig | None = None,
+    ) -> None:
+        """Initialize OODA loop.
+
+        Args:
+            llm_client: LLM client for reasoning.
+            episodic_memory: Episodic memory service.
+            semantic_memory: Semantic memory service.
+            working_memory: Working memory for current context.
+            config: Optional configuration for budgets.
+        """
+        self.llm = llm_client
+        self.episodic = episodic_memory
+        self.semantic = semantic_memory
+        self.working = working_memory
+        self.config = config or OODAConfig()
+
+    async def observe(
+        self,
+        state: OODAState,
+        goal: dict[str, Any],
+    ) -> OODAState:
+        """Gather relevant information from memory and context.
+
+        Queries episodic memory for related events, semantic memory
+        for relevant facts, and working memory for current context.
+
+        Args:
+            state: Current OODA state.
+            goal: The goal being pursued.
+
+        Returns:
+            Updated state with observations.
+        """
+        start_time = time.perf_counter()
+        observations: list[dict[str, Any]] = []
+
+        # Build search query from goal
+        search_query = f"{goal.get('title', '')} {goal.get('description', '')}"
+
+        # Get user_id from working memory
+        user_id = self.working.user_id
+
+        # Query episodic memory for related events
+        try:
+            episodes = await self.episodic.semantic_search(
+                user_id=user_id,
+                query=search_query,
+                limit=5,
+            )
+            for episode in episodes:
+                observations.append(
+                    {
+                        "source": "episodic",
+                        "type": "episode",
+                        "data": episode.to_dict() if hasattr(episode, "to_dict") else str(episode),
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to query episodic memory: {e}")
+
+        # Query semantic memory for relevant facts
+        try:
+            facts = await self.semantic.search_facts(
+                user_id=user_id,
+                query=search_query,
+                limit=10,
+            )
+            for fact in facts:
+                observations.append(
+                    {
+                        "source": "semantic",
+                        "type": "fact",
+                        "data": fact.to_dict() if hasattr(fact, "to_dict") else str(fact),
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to query semantic memory: {e}")
+
+        # Get current working memory context
+        try:
+            context = self.working.get_context_for_llm()
+            observations.append(
+                {
+                    "source": "working",
+                    "type": "conversation",
+                    "data": context,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get working memory context: {e}")
+
+        # Update state
+        state.observations = observations
+        state.current_phase = OODAPhase.ORIENT
+
+        # Log phase execution
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        state.phase_logs.append(
+            OODAPhaseLogEntry(
+                phase=OODAPhase.OBSERVE,
+                iteration=state.iteration,
+                input_summary=f"Goal: {goal.get('title', 'Unknown')}",
+                output_summary=f"Gathered {len(observations)} observations",
+                duration_ms=duration_ms,
+            )
+        )
+
+        logger.info(
+            "OODA observe phase complete",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+                "observation_count": len(observations),
+                "duration_ms": duration_ms,
+            },
+        )
 
         return state

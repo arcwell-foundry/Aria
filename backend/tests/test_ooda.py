@@ -160,3 +160,129 @@ def test_ooda_config_to_dict() -> None:
     assert result["max_iterations"] == 3
     assert "observe_budget" in result
     assert "total_budget" in result
+
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_observe_gathers_memory_context() -> None:
+    """Test observe phase queries episodic and semantic memory."""
+    from src.core.ooda import OODALoop, OODAState, OODAConfig
+
+    # Mock dependencies
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Setup mock returns
+    mock_episodic.semantic_search.return_value = [
+        MagicMock(
+            id="ep-1",
+            content="Met with John about Q3 budget",
+            to_dict=lambda: {"id": "ep-1", "content": "Met with John about Q3 budget"},
+        )
+    ]
+    mock_semantic.search_facts.return_value = [
+        MagicMock(
+            id="fact-1",
+            subject="John",
+            predicate="is",
+            object="CFO",
+            to_dict=lambda: {"id": "fact-1", "subject": "John", "predicate": "is", "object": "CFO"},
+        )
+    ]
+    mock_working.get_context_for_llm.return_value = [
+        {"role": "user", "content": "Help me prepare for the budget meeting"}
+    ]
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    goal = {"id": "goal-123", "title": "Prepare budget meeting", "description": "Get ready for Q3 budget review"}
+
+    new_state = await loop.observe(state, goal)
+
+    # Verify observations were gathered
+    assert len(new_state.observations) > 0
+    assert any(obs["source"] == "episodic" for obs in new_state.observations)
+    assert any(obs["source"] == "semantic" for obs in new_state.observations)
+    assert any(obs["source"] == "working" for obs in new_state.observations)
+
+    # Verify memory was queried
+    mock_episodic.semantic_search.assert_called_once()
+    mock_semantic.search_facts.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_observe_logs_phase_execution() -> None:
+    """Test observe phase logs its execution."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    mock_episodic.semantic_search.return_value = []
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    goal = {"id": "goal-123", "title": "Test goal"}
+
+    new_state = await loop.observe(state, goal)
+
+    # Verify phase was logged
+    assert len(new_state.phase_logs) == 1
+    assert new_state.phase_logs[0].phase == OODAPhase.OBSERVE
+    assert new_state.phase_logs[0].iteration == 0
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_observe_handles_memory_errors_gracefully() -> None:
+    """Test observe phase handles memory query errors."""
+    from src.core.ooda import OODALoop, OODAState
+
+    mock_llm = MagicMock()
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+
+    # Simulate memory error
+    mock_episodic.semantic_search.side_effect = Exception("Connection failed")
+    mock_semantic.search_facts.return_value = []
+    mock_working.get_context_for_llm.return_value = []
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    goal = {"id": "goal-123", "title": "Test goal"}
+
+    # Should not raise, but continue with available data
+    new_state = await loop.observe(state, goal)
+
+    # Verify we got some observations (at least from working memory)
+    assert new_state is not None
