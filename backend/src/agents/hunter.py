@@ -4,7 +4,7 @@ Discovers and qualifies new leads based on Ideal Customer Profile (ICP).
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from src.agents.base import AgentResult, BaseAgent
 
@@ -94,7 +94,7 @@ class HunterAgent(BaseAgent):
         Returns:
             AgentResult with success status and output data.
         """
-        logger.info(f"Hunter agent starting lead discovery task")
+        logger.info("Hunter agent starting lead discovery task")
 
         # Extract task parameters
         icp = task["icp"]
@@ -111,10 +111,7 @@ class HunterAgent(BaseAgent):
 
         # Step 3: Filter out excluded companies
         if exclusions:
-            companies = [
-                c for c in companies
-                if c.get("domain") not in exclusions
-            ]
+            companies = [c for c in companies if c.get("domain") not in exclusions]
 
         # Step 4: Limit to target_count
         companies = companies[:target_count]
@@ -148,13 +145,11 @@ class HunterAgent(BaseAgent):
 
             except Exception as e:
                 # Handle per-company exceptions gracefully
-                logger.warning(
-                    f"Failed to process company '{company.get('name', 'Unknown')}': {e}"
-                )
+                logger.warning(f"Failed to process company '{company.get('name', 'Unknown')}': {e}")
                 continue
 
         # Step 6: Sort leads by fit_score descending
-        leads.sort(key=lambda l: l["fit_score"], reverse=True)
+        leads.sort(key=lambda lead: cast(float, lead["fit_score"]), reverse=True)
 
         logger.info(
             f"Hunter agent completed - found {len(leads)} leads",
@@ -280,8 +275,7 @@ class HunterAgent(BaseAgent):
             List of contacts at the company.
         """
         logger.info(
-            f"Finding contacts for '{company_name}'"
-            + (f" with roles: {roles}" if roles else ""),
+            f"Finding contacts for '{company_name}'" + (f" with roles: {roles}" if roles else ""),
         )
 
         # Mock contact data
@@ -361,9 +355,7 @@ class HunterAgent(BaseAgent):
         icp_industry = icp.get("industry", "")
         if company_industry and icp_industry:
             # Handle string or list of strings
-            icp_industries = (
-                [icp_industry] if isinstance(icp_industry, str) else icp_industry
-            )
+            icp_industries = [icp_industry] if isinstance(icp_industry, str) else icp_industry
             if company_industry in icp_industries:
                 score += industry_weight * 100
                 fit_reasons.append(f"Industry match: {company_industry}")
@@ -400,14 +392,18 @@ class HunterAgent(BaseAgent):
         icp_techs = icp.get("technologies", [])
         if company_techs and icp_techs:
             # Calculate overlap proportion
-            company_tech_set = set(company_techs) if isinstance(company_techs, list) else {company_techs}
+            company_tech_set = (
+                set(company_techs) if isinstance(company_techs, list) else {company_techs}
+            )
             icp_tech_set = set(icp_techs) if isinstance(icp_techs, list) else {icp_techs}
             overlap = company_tech_set & icp_tech_set
             overlap_ratio = len(overlap) / len(icp_tech_set) if icp_tech_set else 0
             tech_score = tech_weight * 100 * overlap_ratio
             score += tech_score
             if overlap:
-                fit_reasons.append(f"Technology overlap: {len(overlap)}/{len(icp_tech_set)} ({', '.join(overlap)})")
+                fit_reasons.append(
+                    f"Technology overlap: {len(overlap)}/{len(icp_tech_set)} ({', '.join(overlap)})"
+                )
             missing_techs = icp_tech_set - company_tech_set
             if missing_techs:
                 gaps.append(f"Missing technologies: {', '.join(missing_techs)}")
