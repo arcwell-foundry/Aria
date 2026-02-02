@@ -35,12 +35,21 @@ class Citation(BaseModel):
     confidence: float | None = None
 
 
+class Timing(BaseModel):
+    """Performance timing information."""
+
+    memory_query_ms: float
+    llm_response_ms: float
+    total_ms: float
+
+
 class ChatResponse(BaseModel):
     """Response from chat endpoint."""
 
     message: str
     citations: list[Citation]
     conversation_id: str
+    timing: Timing | None = None
 
 
 @router.post("", response_model=ChatResponse)
@@ -86,4 +95,5 @@ async def chat(
         message=result["message"],
         citations=[Citation(**c) for c in result.get("citations", [])],
         conversation_id=result["conversation_id"],
+        timing=Timing(**result["timing"]) if result.get("timing") else None,
     )

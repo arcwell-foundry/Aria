@@ -139,3 +139,36 @@ def test_chat_endpoint_requires_authentication() -> None:
         json={"message": "Hello"},
     )
     assert response.status_code == 401
+
+
+def test_chat_endpoint_returns_timing(test_client: TestClient) -> None:
+    """Test POST /api/v1/chat returns timing information."""
+    from src.services.chat import ChatService
+
+    with patch.object(
+        ChatService,
+        "process_message",
+        new_callable=AsyncMock,
+    ) as mock_process:
+        mock_process.return_value = {
+            "message": "Response",
+            "citations": [],
+            "conversation_id": "conv-123",
+            "timing": {
+                "memory_query_ms": 45.5,
+                "llm_response_ms": 500.2,
+                "total_ms": 550.0,
+            },
+        }
+
+        response = test_client.post(
+            "/api/v1/chat",
+            json={"message": "Hello", "conversation_id": "conv-123"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "timing" in data
+    assert data["timing"]["memory_query_ms"] == 45.5
+    assert data["timing"]["llm_response_ms"] == 500.2
+    assert data["timing"]["total_ms"] == 550.0
