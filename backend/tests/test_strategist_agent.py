@@ -447,3 +447,147 @@ async def test_generate_strategy_respects_constraints() -> None:
 
     assert "constraints_applied" in result
     assert result["constraints_applied"]["has_deadline"] is True
+
+
+# Task 5: _create_timeline tests
+
+
+@pytest.mark.asyncio
+async def test_create_timeline_returns_timeline_dict() -> None:
+    """Test _create_timeline returns timeline dictionary."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    strategy = {
+        "phases": [
+            {"phase_number": 1, "name": "Discovery", "duration_days": 10},
+            {"phase_number": 2, "name": "Execution", "duration_days": 20},
+        ],
+        "agent_tasks": [
+            {"id": "task-1", "agent": "Hunter", "phase": 1},
+        ],
+    }
+
+    result = await agent._create_timeline(
+        strategy=strategy, time_horizon_days=30
+    )
+
+    assert isinstance(result, dict)
+    assert "milestones" in result
+    assert "schedule" in result
+
+
+@pytest.mark.asyncio
+async def test_create_timeline_creates_milestones() -> None:
+    """Test _create_timeline creates milestones for each phase."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    strategy = {
+        "phases": [
+            {"phase_number": 1, "name": "Discovery", "duration_days": 10, "objectives": ["Find leads"]},
+            {"phase_number": 2, "name": "Engagement", "duration_days": 20, "objectives": ["Contact leads"]},
+        ],
+        "agent_tasks": [],
+    }
+
+    result = await agent._create_timeline(
+        strategy=strategy, time_horizon_days=30
+    )
+
+    assert len(result["milestones"]) >= 2
+    for milestone in result["milestones"]:
+        assert "id" in milestone
+        assert "name" in milestone
+        assert "phase" in milestone
+        assert "target_date" in milestone
+        assert "success_criteria" in milestone
+
+
+@pytest.mark.asyncio
+async def test_create_timeline_respects_deadline() -> None:
+    """Test _create_timeline respects hard deadline."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    strategy = {
+        "phases": [
+            {"phase_number": 1, "name": "Phase 1", "duration_days": 30},
+            {"phase_number": 2, "name": "Phase 2", "duration_days": 30},
+        ],
+        "agent_tasks": [],
+    }
+
+    result = await agent._create_timeline(
+        strategy=strategy,
+        time_horizon_days=90,
+        deadline="2026-03-01",
+    )
+
+    # All milestones should be on or before deadline
+    for milestone in result["milestones"]:
+        assert milestone["target_date"] <= "2026-03-01"
+
+
+@pytest.mark.asyncio
+async def test_create_timeline_schedules_tasks() -> None:
+    """Test _create_timeline schedules agent tasks."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    strategy = {
+        "phases": [
+            {"phase_number": 1, "name": "Discovery", "duration_days": 15},
+        ],
+        "agent_tasks": [
+            {"id": "task-1", "agent": "Hunter", "phase": 1, "priority": "high"},
+            {"id": "task-2", "agent": "Analyst", "phase": 1, "priority": "medium"},
+        ],
+    }
+
+    result = await agent._create_timeline(
+        strategy=strategy, time_horizon_days=30
+    )
+
+    assert "task_schedule" in result
+    assert len(result["task_schedule"]) == 2
+    for task_entry in result["task_schedule"]:
+        assert "task_id" in task_entry
+        assert "start_date" in task_entry
+        assert "end_date" in task_entry
+
+
+@pytest.mark.asyncio
+async def test_create_timeline_calculates_dates() -> None:
+    """Test _create_timeline calculates actual dates."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    strategy = {
+        "phases": [
+            {"phase_number": 1, "name": "Phase 1", "duration_days": 7},
+        ],
+        "agent_tasks": [],
+    }
+
+    result = await agent._create_timeline(
+        strategy=strategy, time_horizon_days=30
+    )
+
+    # Should have start_date and computed milestone dates
+    assert "start_date" in result
+    # Dates should be valid ISO format
+    for milestone in result["milestones"]:
+        # Simple check that target_date looks like ISO date
+        assert len(milestone["target_date"]) == 10  # YYYY-MM-DD
+        assert "-" in milestone["target_date"]

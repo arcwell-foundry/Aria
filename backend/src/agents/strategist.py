@@ -5,6 +5,7 @@ creating actionable strategies with phases, milestones, and agent tasks.
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
@@ -838,18 +839,158 @@ class StrategistAgent(BaseAgent):
 
     async def _create_timeline(
         self,
-        strategy: dict[str, Any],  # noqa: ARG002
-        time_horizon_days: int,  # noqa: ARG002
-        deadline: str | None = None,  # noqa: ARG002
+        strategy: dict[str, Any],
+        time_horizon_days: int,
+        deadline: str | None = None,
     ) -> dict[str, Any]:
         """Create timeline with milestones.
 
+        Creates a detailed timeline by scheduling phases, milestones,
+        and agent tasks with actual dates based on the strategy.
+
         Args:
-            strategy: Generated strategy.
+            strategy: Generated strategy with phases and agent_tasks.
             time_horizon_days: Time horizon in days.
-            deadline: Optional hard deadline.
+            deadline: Optional hard deadline (ISO format YYYY-MM-DD).
 
         Returns:
-            Timeline with scheduled milestones.
+            Timeline with scheduled milestones, phase schedule, and task schedule.
         """
-        return {}
+        phases = strategy.get("phases", [])
+        agent_tasks = strategy.get("agent_tasks", [])
+
+        logger.info(
+            f"Creating timeline for {len(phases)} phases",
+            extra={"time_horizon_days": time_horizon_days, "deadline": deadline},
+        )
+
+        # Parse deadline if provided
+        deadline_date: datetime | None = None
+        if deadline:
+            deadline_date = datetime.fromisoformat(deadline)
+
+        # Calculate total duration from phases
+        total_phase_duration = sum(
+            phase.get("duration_days", 0) for phase in phases
+        )
+
+        # Determine scaling factor if phases exceed time horizon or deadline
+        start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        available_days = time_horizon_days
+
+        if deadline_date:
+            days_to_deadline = (deadline_date - start_date).days
+            available_days = min(time_horizon_days, days_to_deadline)
+
+        # Scale phase durations if total exceeds available time
+        scale_factor = 1.0
+        if total_phase_duration > available_days and total_phase_duration > 0:
+            scale_factor = available_days / total_phase_duration
+
+        # Build phase schedule with dates
+        phase_schedule: list[dict[str, Any]] = []
+        milestones: list[dict[str, Any]] = []
+        current_date = start_date
+
+        for phase in phases:
+            phase_number = phase.get("phase_number", len(phase_schedule) + 1)
+            phase_name = phase.get("name", f"Phase {phase_number}")
+            duration_days = phase.get("duration_days", 7)
+            objectives = phase.get("objectives", [])
+
+            # Scale duration
+            scaled_duration = max(1, int(duration_days * scale_factor))
+
+            phase_start = current_date
+            phase_end = current_date + timedelta(days=scaled_duration)
+
+            # Respect deadline
+            if deadline_date and phase_end > deadline_date:
+                phase_end = deadline_date
+
+            phase_schedule.append(
+                {
+                    "phase_number": phase_number,
+                    "name": phase_name,
+                    "start_date": phase_start.strftime("%Y-%m-%d"),
+                    "end_date": phase_end.strftime("%Y-%m-%d"),
+                    "duration_days": scaled_duration,
+                }
+            )
+
+            # Create milestone for phase completion
+            milestone_id = f"milestone-{phase_number}"
+            success_criteria = (
+                objectives if objectives else [f"Complete {phase_name}"]
+            )
+
+            milestones.append(
+                {
+                    "id": milestone_id,
+                    "name": f"{phase_name} Complete",
+                    "phase": phase_number,
+                    "target_date": phase_end.strftime("%Y-%m-%d"),
+                    "success_criteria": success_criteria,
+                }
+            )
+
+            current_date = phase_end
+
+        # Schedule tasks within their phases
+        task_schedule: list[dict[str, Any]] = []
+
+        for task in agent_tasks:
+            task_id = task.get("id", f"task-{len(task_schedule) + 1}")
+            task_phase = task.get("phase", 1)
+            priority = task.get("priority", "medium")
+
+            # Find the phase schedule for this task
+            phase_info = next(
+                (p for p in phase_schedule if p["phase_number"] == task_phase),
+                None,
+            )
+
+            if phase_info:
+                phase_start = datetime.strptime(
+                    phase_info["start_date"], "%Y-%m-%d"
+                )
+                phase_end = datetime.strptime(
+                    phase_info["end_date"], "%Y-%m-%d"
+                )
+                phase_duration = (phase_end - phase_start).days
+
+                # High priority tasks start at phase start
+                # Medium priority tasks start at phase midpoint
+                # Low priority tasks start at 2/3 of phase
+                if priority == "high":
+                    task_start = phase_start
+                elif priority == "medium":
+                    offset = max(0, phase_duration // 2)
+                    task_start = phase_start + timedelta(days=offset)
+                else:  # low
+                    offset = max(0, (phase_duration * 2) // 3)
+                    task_start = phase_start + timedelta(days=offset)
+
+                task_end = phase_end
+
+                task_schedule.append(
+                    {
+                        "task_id": task_id,
+                        "agent": task.get("agent", "Unknown"),
+                        "start_date": task_start.strftime("%Y-%m-%d"),
+                        "end_date": task_end.strftime("%Y-%m-%d"),
+                        "priority": priority,
+                    }
+                )
+
+        end_date = current_date if current_date > start_date else start_date
+
+        return {
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "time_horizon_days": time_horizon_days,
+            "deadline": deadline,
+            "schedule": phase_schedule,
+            "milestones": milestones,
+            "task_schedule": task_schedule,
+        }
