@@ -127,6 +127,26 @@ class AgentOrchestrator:
 
         return agent_id
 
+    @property
+    def remaining_token_budget(self) -> int:
+        """Get remaining token budget.
+
+        Returns:
+            Number of tokens remaining before reaching max_tokens limit.
+        """
+        return max(0, self.max_tokens - self._total_tokens_used)
+
+    def check_token_budget(self, estimated_tokens: int) -> bool:
+        """Check if estimated token usage is within budget.
+
+        Args:
+            estimated_tokens: Estimated tokens for the operation.
+
+        Returns:
+            True if within budget, False otherwise.
+        """
+        return (self._total_tokens_used + estimated_tokens) <= self.max_tokens
+
     async def spawn_and_execute(
         self,
         agent_class: type[BaseAgent],
@@ -230,7 +250,8 @@ class AgentOrchestrator:
     ) -> OrchestrationResult:
         """Execute multiple agents in parallel.
 
-        All tasks run concurrently. Failures in one task do not affect others.
+        All tasks run concurrently, respecting max_concurrent_agents limit.
+        Failures in one task do not affect others.
 
         Args:
             tasks: List of (agent_class, task) tuples to execute.
@@ -250,55 +271,66 @@ class AgentOrchestrator:
         total_tasks = len(tasks)
 
         logger.info(
-            f"Starting parallel execution of {total_tasks} agents",
-            extra={"task_count": total_tasks, "user_id": self.user_id},
+            f"Starting parallel execution of {total_tasks} agents "
+            f"(max concurrent: {self.max_concurrent_agents})",
+            extra={
+                "task_count": total_tasks,
+                "max_concurrent": self.max_concurrent_agents,
+                "user_id": self.user_id,
+            },
         )
 
-        # Create coroutines for all tasks with task_index and total_tasks
-        coros = [
-            self.spawn_and_execute(
-                agent_class,
-                task,
-                task_index=i,
-                total_tasks=total_tasks,
-                on_progress=on_progress,
-            )
-            for i, (agent_class, task) in enumerate(tasks)
-        ]
+        all_results: list[AgentResult] = []
 
-        # Execute all concurrently - return_exceptions=True ensures failures don't abort
-        raw_results = await asyncio.gather(*coros, return_exceptions=True)
+        # Process in batches respecting max_concurrent_agents
+        for batch_start in range(0, total_tasks, self.max_concurrent_agents):
+            batch_end = min(batch_start + self.max_concurrent_agents, total_tasks)
+            batch = tasks[batch_start:batch_end]
 
-        # Convert exceptions to failed AgentResults
-        results: list[AgentResult] = []
-        for raw in raw_results:
-            if isinstance(raw, BaseException):
-                results.append(
-                    AgentResult(
-                        success=False,
-                        data=None,
-                        error=str(raw),
-                    )
+            # Create coroutines for batch
+            coros = [
+                self.spawn_and_execute(
+                    agent_class,
+                    task,
+                    task_index=batch_start + i,
+                    total_tasks=total_tasks,
+                    on_progress=on_progress,
                 )
-            else:
-                results.append(raw)
+                for i, (agent_class, task) in enumerate(batch)
+            ]
+
+            # Execute batch concurrently - return_exceptions=True ensures failures don't abort
+            raw_results = await asyncio.gather(*coros, return_exceptions=True)
+
+            # Convert exceptions to failed AgentResults
+            for raw in raw_results:
+                if isinstance(raw, BaseException):
+                    all_results.append(
+                        AgentResult(
+                            success=False,
+                            data=None,
+                            error=str(raw),
+                        )
+                    )
+                else:
+                    all_results.append(raw)
 
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-        total_tokens = sum(r.tokens_used for r in results)
+        total_tokens = sum(r.tokens_used for r in all_results)
 
         logger.info(
             "Parallel execution complete",
             extra={
-                "task_count": len(tasks),
-                "success_count": sum(1 for r in results if r.success),
-                "failed_count": sum(1 for r in results if not r.success),
+                "task_count": total_tasks,
+                "success_count": sum(1 for r in all_results if r.success),
+                "failed_count": sum(1 for r in all_results if not r.success),
                 "total_tokens": total_tokens,
                 "execution_time_ms": elapsed_ms,
             },
         )
 
         return OrchestrationResult(
-            results=results,
+            results=all_results,
             total_tokens=total_tokens,
             total_execution_time_ms=elapsed_ms,
         )

@@ -537,3 +537,169 @@ def test_progress_update_has_required_fields() -> None:
     assert update.task_index == 0
     assert update.total_tasks == 3
     assert update.message == "Processing entities"
+
+
+# Task 8: Resource Limit Enforcement Tests
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_respects_max_concurrent_agents() -> None:
+    """Test execute_parallel limits concurrent agents."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    # Set low concurrency limit
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_concurrent_agents=2,
+    )
+
+    # Request more agents than limit
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Company1"]}),
+        (ScoutAgent, {"entities": ["Company2"]}),
+        (ScoutAgent, {"entities": ["Company3"]}),
+        (ScoutAgent, {"entities": ["Company4"]}),
+    ]
+
+    result = await orchestrator.execute_parallel(tasks)
+
+    # All should still complete (just batched)
+    assert len(result.results) == 4
+    assert result.success_count == 4
+
+
+def test_orchestrator_check_token_budget_returns_true_when_under() -> None:
+    """Test check_token_budget returns True when under limit."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+    )
+
+    assert orchestrator.check_token_budget(5000) is True
+
+
+def test_orchestrator_check_token_budget_returns_false_when_over() -> None:
+    """Test check_token_budget returns False when over limit."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+    )
+
+    # Simulate tokens already used
+    orchestrator._total_tokens_used = 8000
+
+    assert orchestrator.check_token_budget(3000) is False
+
+
+def test_orchestrator_remaining_token_budget() -> None:
+    """Test remaining_token_budget returns correct value."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+    )
+
+    orchestrator._total_tokens_used = 3500
+
+    assert orchestrator.remaining_token_budget == 6500
+
+
+def test_orchestrator_check_token_budget_at_exact_limit() -> None:
+    """Test check_token_budget returns True at exactly max_tokens."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+    )
+
+    orchestrator._total_tokens_used = 7000
+
+    # Exactly at limit should be allowed
+    assert orchestrator.check_token_budget(3000) is True
+
+
+def test_orchestrator_remaining_token_budget_when_over() -> None:
+    """Test remaining_token_budget returns 0 when over limit."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+    )
+
+    # Simulate somehow exceeding budget
+    orchestrator._total_tokens_used = 12000
+
+    # Should return 0, not negative
+    assert orchestrator.remaining_token_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_batches_tasks_correctly() -> None:
+    """Test execute_parallel processes in batches with correct indices."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator, ProgressUpdate
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_concurrent_agents=2,
+    )
+
+    progress_updates: list[ProgressUpdate] = []
+
+    def on_progress(update: ProgressUpdate) -> None:
+        progress_updates.append(update)
+
+    tasks: list[tuple[type[Any], dict[str, Any]]] = [
+        (ScoutAgent, {"entities": ["Company1"]}),
+        (ScoutAgent, {"entities": ["Company2"]}),
+        (ScoutAgent, {"entities": ["Company3"]}),
+    ]
+
+    await orchestrator.execute_parallel(tasks, on_progress=on_progress)
+
+    # Verify task indices are correct (0, 1, 2) even with batching
+    starting_updates = [u for u in progress_updates if u.status == "starting"]
+    assert len(starting_updates) == 3
+
+    task_indices = sorted(u.task_index for u in starting_updates)
+    assert task_indices == [0, 1, 2]
+
+    # All should report total_tasks=3
+    for update in starting_updates:
+        assert update.total_tasks == 3
