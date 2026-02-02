@@ -329,3 +329,87 @@ async def test_base_agent_call_tool_handles_sync_tools() -> None:
     result = await agent._call_tool("sync_tool", value=21)
 
     assert result == 42
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_with_retry_succeeds_first_try() -> None:
+    """Test _call_tool_with_retry returns on first success."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {"reliable_tool": self._reliable_tool}
+
+        async def _reliable_tool(self) -> str:
+            return "success"
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._call_tool_with_retry("reliable_tool", max_retries=3)
+
+    assert result == "success"
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_with_retry_retries_on_failure() -> None:
+    """Test _call_tool_with_retry retries on transient failures."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    call_count = 0
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {"flaky_tool": self._flaky_tool}
+
+        async def _flaky_tool(self) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ConnectionError("Temporary failure")
+            return "success after retries"
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._call_tool_with_retry("flaky_tool", max_retries=3, retry_delay=0.01)
+
+    assert result == "success after retries"
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_with_retry_raises_after_max_retries() -> None:
+    """Test _call_tool_with_retry raises after exhausting retries."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {"always_fails": self._always_fails}
+
+        async def _always_fails(self) -> str:
+            raise RuntimeError("Permanent failure")
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    with pytest.raises(RuntimeError, match="Permanent failure"):
+        await agent._call_tool_with_retry("always_fails", max_retries=2, retry_delay=0.01)

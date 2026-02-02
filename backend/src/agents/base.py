@@ -3,6 +3,7 @@
 Provides the abstract base class and common types for all specialized agents.
 """
 
+import asyncio
 import inspect
 import logging
 from abc import ABC, abstractmethod
@@ -135,6 +136,45 @@ class BaseAgent(ABC):
             return await tool(**kwargs)
         else:
             return tool(**kwargs)
+
+    async def _call_tool_with_retry(
+        self,
+        tool_name: str,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        **kwargs: Any,
+    ) -> Any:
+        """Call a tool with automatic retry on failure.
+
+        Args:
+            tool_name: Name of the tool to call.
+            max_retries: Maximum number of retry attempts.
+            retry_delay: Delay in seconds between retries.
+            **kwargs: Arguments to pass to the tool.
+
+        Returns:
+            Tool execution result.
+
+        Raises:
+            Exception: If all retries are exhausted.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                return await self._call_tool(tool_name, **kwargs)
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Tool {tool_name} failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+
+        # Re-raise the last error after exhausting retries
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"Tool {tool_name} failed with no error captured")
 
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
