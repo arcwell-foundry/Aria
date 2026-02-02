@@ -1,8 +1,5 @@
 """Tests for OperatorAgent module."""
 
-import pytest
-from unittest.mock import MagicMock
-
 
 def test_operator_agent_has_name_and_description() -> None:
     """Test OperatorAgent has correct name and description class attributes."""
