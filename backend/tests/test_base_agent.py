@@ -413,3 +413,66 @@ async def test_base_agent_call_tool_with_retry_raises_after_max_retries() -> Non
 
     with pytest.raises(RuntimeError, match="Permanent failure"):
         await agent._call_tool_with_retry("always_fails", max_retries=2, retry_delay=0.01)
+
+
+@pytest.mark.asyncio
+async def test_base_agent_run_logs_execution_start_and_end(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test run() logs execution start and completion."""
+    import logging
+
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={"result": "done"})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level(logging.INFO, logger="src.agents.base"):
+        result = await agent.run({"task": "test"})
+
+    assert result.success is True
+    # Check logs contain start and complete messages
+    log_messages = [record.message for record in caplog.records]
+    assert any("starting" in msg.lower() for msg in log_messages)
+    assert any("complete" in msg.lower() or "finished" in msg.lower() for msg in log_messages)
+
+
+@pytest.mark.asyncio
+async def test_base_agent_run_logs_execution_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test run() logs execution failure."""
+    import logging
+
+    from src.agents.base import AgentResult, BaseAgent
+
+    class FailingAgent(BaseAgent):
+        name = "Failing Agent"
+        description = "An agent that fails"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            raise RuntimeError("Execution failed")
+
+    mock_llm = MagicMock()
+    agent = FailingAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level(logging.ERROR, logger="src.agents.base"):
+        result = await agent.run({"task": "test"})
+
+    assert result.success is False
+    assert "Execution failed" in (result.error or "")
+    log_messages = [record.message for record in caplog.records]
+    assert any("error" in msg.lower() or "failed" in msg.lower() for msg in log_messages)

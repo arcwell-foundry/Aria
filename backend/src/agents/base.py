@@ -187,3 +187,85 @@ class BaseAgent(ABC):
             AgentResult with success status and output data.
         """
         pass
+
+    async def run(self, task: dict[str, Any]) -> AgentResult:
+        """Run the agent with full lifecycle management.
+
+        Handles status transitions, input validation, execution,
+        error handling, and logging.
+
+        Args:
+            task: Task specification with parameters.
+
+        Returns:
+            AgentResult with execution outcome.
+        """
+        import time
+
+        start_time = time.perf_counter()
+        self.status = AgentStatus.RUNNING
+
+        logger.info(
+            f"Agent {self.name} starting execution",
+            extra={
+                "agent": self.name,
+                "user_id": self.user_id,
+                "task_keys": list(task.keys()),
+            },
+        )
+
+        try:
+            # Validate input
+            if not self.validate_input(task):
+                self.status = AgentStatus.FAILED
+                return AgentResult(
+                    success=False,
+                    data=None,
+                    error="Input validation failed",
+                )
+
+            # Execute the task
+            result = await self.execute(task)
+
+            # Format output
+            result.data = self.format_output(result.data)
+
+            # Calculate execution time
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            result.execution_time_ms = elapsed_ms
+
+            self.status = AgentStatus.COMPLETE if result.success else AgentStatus.FAILED
+
+            logger.info(
+                f"Agent {self.name} execution complete",
+                extra={
+                    "agent": self.name,
+                    "user_id": self.user_id,
+                    "success": result.success,
+                    "execution_time_ms": elapsed_ms,
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            self.status = AgentStatus.FAILED
+
+            logger.error(
+                f"Agent {self.name} execution failed: {e}",
+                extra={
+                    "agent": self.name,
+                    "user_id": self.user_id,
+                    "error": str(e),
+                    "execution_time_ms": elapsed_ms,
+                },
+            )
+
+            return AgentResult(
+                success=False,
+                data=None,
+                error=str(e),
+                execution_time_ms=elapsed_ms,
+            )
