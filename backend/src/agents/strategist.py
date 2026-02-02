@@ -1043,3 +1043,30 @@ class StrategistAgent(BaseAgent):
             "milestones": milestones,
             "task_schedule": task_schedule,
         }
+
+    def format_output(self, data: Any) -> Any:
+        """Format output data with summary statistics.
+
+        Args:
+            data: Raw strategy output data.
+
+        Returns:
+            Formatted strategy with summary statistics.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        strategy = data.get("strategy", {})
+        timeline = data.get("timeline", {})
+
+        summary_stats = {
+            "phase_count": len(strategy.get("phases", [])),
+            "task_count": len(strategy.get("agent_tasks", [])),
+            "milestone_count": len(timeline.get("milestones", [])),
+            "risk_count": len(strategy.get("risks", [])),
+            "time_horizon_days": timeline.get("time_horizon_days", 0),
+        }
+
+        data["summary_stats"] = summary_stats
+
+        return data

@@ -755,3 +755,57 @@ async def test_execute_includes_metadata() -> None:
     # Should have metadata
     assert "created_at" in result.data
     assert "goal_id" in result.data
+
+
+# Task 7: format_output tests
+
+
+def test_format_output_adds_summary_stats() -> None:
+    """Test format_output adds summary statistics."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    data = {
+        "goal": {"title": "Test Goal", "type": "lead_gen"},
+        "strategy": {
+            "phases": [{"phase_number": 1}, {"phase_number": 2}],
+            "agent_tasks": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}],
+            "risks": [{"description": "Risk 1"}],
+        },
+        "timeline": {
+            "milestones": [{"id": "m1"}, {"id": "m2"}],
+            "time_horizon_days": 30,
+        },
+    }
+
+    formatted = agent.format_output(data)
+
+    assert "summary_stats" in formatted
+    assert formatted["summary_stats"]["phase_count"] == 2
+    assert formatted["summary_stats"]["task_count"] == 3
+    assert formatted["summary_stats"]["milestone_count"] == 2
+    assert formatted["summary_stats"]["risk_count"] == 1
+
+
+def test_format_output_preserves_original_data() -> None:
+    """Test format_output preserves all original data."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    data = {
+        "goal": {"title": "Test", "type": "research"},
+        "strategy": {"phases": []},
+        "timeline": {"milestones": []},
+        "analysis": {"opportunities": []},
+    }
+
+    formatted = agent.format_output(data)
+
+    assert formatted["goal"] == data["goal"]
+    assert formatted["strategy"] == data["strategy"]
+    assert formatted["timeline"] == data["timeline"]
+    assert formatted["analysis"] == data["analysis"]
