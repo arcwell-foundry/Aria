@@ -100,23 +100,88 @@ class ScribeAgent(BaseAgent):
 
     async def _draft_email(
         self,
-        recipient: dict[str, Any] | None = None,  # noqa: ARG002
-        context: str = "",  # noqa: ARG002
-        goal: str = "",  # noqa: ARG002
-        tone: str = "formal",  # noqa: ARG002
+        recipient: dict[str, Any] | None = None,
+        context: str = "",
+        goal: str = "",
+        tone: str = "formal",
     ) -> dict[str, Any]:
         """Draft an email.
 
+        This is a mock implementation that generates template-based emails.
+        In production, this would use the LLM with Digital Twin style.
+
         Args:
-            recipient: Recipient information.
+            recipient: Recipient information with name, title, company.
             context: Background context for the email.
             goal: What this email should achieve.
             tone: Tone of the email (formal, friendly, urgent).
 
         Returns:
-            Drafted email with subject and body.
+            Drafted email with subject, body, and metadata.
         """
-        return {}
+        recipient_name = "there"
+        recipient_company = ""
+        if recipient:
+            recipient_name = recipient.get("name", "there")
+            recipient_company = recipient.get("company", "")
+
+        logger.info(
+            f"Drafting email to {recipient_name}",
+            extra={
+                "recipient": recipient_name,
+                "tone": tone,
+                "goal": goal[:50] if goal else "",
+            },
+        )
+
+        # Generate greeting based on tone
+        if tone == "formal":
+            greeting = f"Dear {recipient_name},"
+        elif tone == "friendly":
+            greeting = f"Hi {recipient_name},"
+        else:  # urgent
+            greeting = f"Dear {recipient_name},"
+
+        # Generate subject based on tone and goal
+        if tone == "urgent":
+            subject = f"Urgent: {goal[:50]}" if goal else "Urgent: Action Required"
+        else:
+            subject = goal[:60] if goal else "Follow-up"
+
+        # Generate body
+        context_line = f"\n\n{context}" if context else ""
+
+        if tone == "urgent":
+            urgency_note = (
+                "\n\nThis requires your immediate attention. Please respond as soon as possible."
+            )
+        else:
+            urgency_note = ""
+
+        # Generate call to action
+        cta = "\n\nPlease let me know your availability to discuss further."
+
+        # Closing based on tone
+        if tone == "formal":
+            closing = "\n\nBest regards"
+        elif tone == "friendly":
+            closing = "\n\nThanks!"
+        else:  # urgent
+            closing = "\n\nThank you for your prompt attention to this matter."
+
+        body = f"{greeting}{context_line}{urgency_note}{cta}{closing}"
+
+        word_count = len(body.split())
+
+        return {
+            "subject": subject,
+            "body": body,
+            "recipient_name": recipient_name if recipient else None,
+            "recipient_company": recipient_company if recipient_company else None,
+            "tone": tone,
+            "word_count": word_count,
+            "has_call_to_action": True,
+        }
 
     async def _draft_document(
         self,

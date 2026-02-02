@@ -1,6 +1,9 @@
 """Tests for ScribeAgent module."""
 
+from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def test_scribe_agent_has_name_and_description() -> None:
@@ -178,3 +181,177 @@ def test_validate_input_defaults_tone_to_formal() -> None:
     }
 
     assert agent.validate_input(task) is True
+
+
+@pytest.mark.asyncio
+async def test_draft_email_returns_dict() -> None:
+    """Test _draft_email returns a dictionary."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "John Doe", "company": "Acme"},
+        context="Following up on our meeting",
+        goal="Schedule a call",
+        tone="formal",
+    )
+
+    assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_draft_email_has_subject_and_body() -> None:
+    """Test _draft_email returns email with subject and body."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "John Doe"},
+        context="Meeting follow-up",
+        goal="Schedule next meeting",
+        tone="formal",
+    )
+
+    assert "subject" in result
+    assert "body" in result
+    assert len(result["subject"]) > 0
+    assert len(result["body"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_draft_email_includes_recipient_name() -> None:
+    """Test _draft_email includes recipient name in body."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Sarah Johnson", "company": "TechCorp"},
+        context="Product demo follow-up",
+        goal="Get feedback on the demo",
+        tone="friendly",
+    )
+
+    assert "Sarah" in result["body"]
+
+
+@pytest.mark.asyncio
+async def test_draft_email_formal_tone() -> None:
+    """Test _draft_email with formal tone has appropriate greeting."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Dr. Smith"},
+        context="Initial outreach",
+        goal="Introduce our services",
+        tone="formal",
+    )
+
+    # Formal tone should have "Dear" greeting
+    assert "Dear" in result["body"]
+
+
+@pytest.mark.asyncio
+async def test_draft_email_friendly_tone() -> None:
+    """Test _draft_email with friendly tone has appropriate greeting."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Mike"},
+        context="Catching up",
+        goal="Check in on the project",
+        tone="friendly",
+    )
+
+    # Friendly tone should have "Hi" or "Hello" greeting
+    body = result["body"]
+    assert "Hi" in body or "Hello" in body
+
+
+@pytest.mark.asyncio
+async def test_draft_email_urgent_tone() -> None:
+    """Test _draft_email with urgent tone has urgency indicators."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Team Lead"},
+        context="Critical bug in production",
+        goal="Get immediate attention to fix the bug",
+        tone="urgent",
+    )
+
+    # Subject should indicate urgency
+    subject = result["subject"].lower()
+    body = result["body"].lower()
+    assert "urgent" in subject or "immediate" in subject or "urgent" in body or "asap" in body
+
+
+@pytest.mark.asyncio
+async def test_draft_email_includes_call_to_action() -> None:
+    """Test _draft_email includes a call to action."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "John"},
+        context="Sales follow-up",
+        goal="Schedule a demo",
+        tone="formal",
+    )
+
+    assert result.get("has_call_to_action") is True
+
+
+@pytest.mark.asyncio
+async def test_draft_email_tracks_word_count() -> None:
+    """Test _draft_email includes word count."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Jane"},
+        context="Follow up",
+        goal="Get response",
+        tone="formal",
+    )
+
+    assert "word_count" in result
+    assert isinstance(result["word_count"], int)
+    assert result["word_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_draft_email_logs_drafting(caplog: Any) -> None:
+    """Test _draft_email logs the drafting activity."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    with caplog.at_level("INFO"):
+        await agent._draft_email(
+            recipient={"name": "Test"},
+            context="Test context",
+            goal="Test goal",
+            tone="formal",
+        )
+
+    assert "Drafting email" in caplog.text
