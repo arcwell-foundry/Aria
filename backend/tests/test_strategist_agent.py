@@ -963,3 +963,13 @@ async def test_strategist_minimal_task() -> None:
     assert result.success is True
     assert "strategy" in result.data
     assert "timeline" in result.data
+
+
+# Task 9: Module export tests
+
+
+def test_strategist_agent_exported_from_module() -> None:
+    """Test StrategistAgent is exported from agents module."""
+    from src.agents import StrategistAgent
+
+    assert StrategistAgent.name == "Strategist"

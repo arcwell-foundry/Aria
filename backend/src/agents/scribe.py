@@ -274,13 +274,17 @@ class ScribeAgent(BaseAgent):
         Applies Digital Twin style parameters to the content.
         In production, this would use the LLM for more sophisticated style matching.
 
+        Currently supported style parameters:
+            - signature: str - Appended to content if not already present
+            - preferred_greeting: str - Replaces common greetings (Dear, Hello, Hi, Hey)
+
+        Future LLM-based parameters (not yet implemented):
+            - formality: "formal", "casual" - Adjusts overall tone
+            - contractions: bool - Expands/contracts phrases
+
         Args:
             content: The content to personalize.
-            style: Style parameters from Digital Twin containing:
-                - formality: "formal", "casual"
-                - contractions: bool
-                - signature: str
-                - preferred_greeting: str
+            style: Style parameters from Digital Twin.
 
         Returns:
             Personalized content matching the style.
