@@ -138,3 +138,62 @@ def test_scorer_uses_settings_defaults() -> None:
     assert scorer.max_confidence == settings.CONFIDENCE_MAX
     assert scorer.min_threshold == settings.CONFIDENCE_MIN_THRESHOLD
     assert scorer.refresh_window_days == settings.CONFIDENCE_REFRESH_WINDOW_DAYS
+
+
+def test_apply_corroboration_boost_single_source() -> None:
+    """Single corroborating source should add configured boost."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+
+    result = scorer.apply_corroboration_boost(
+        base_confidence=0.75,
+        corroborating_source_count=1,
+    )
+
+    # 0.75 + 0.10 = 0.85
+    assert result == pytest.approx(0.85)
+
+
+def test_apply_corroboration_boost_multiple_sources() -> None:
+    """Multiple corroborating sources should stack boosts."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+
+    result = scorer.apply_corroboration_boost(
+        base_confidence=0.70,
+        corroborating_source_count=3,
+    )
+
+    # 0.70 + (3 * 0.10) = 1.00, capped at 0.99
+    assert result == pytest.approx(0.99)
+
+
+def test_apply_corroboration_boost_respects_max() -> None:
+    """Boost should not exceed max confidence."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+
+    result = scorer.apply_corroboration_boost(
+        base_confidence=0.95,
+        corroborating_source_count=2,
+    )
+
+    # 0.95 + 0.20 = 1.15, capped at 0.99
+    assert result == pytest.approx(0.99)
+
+
+def test_apply_corroboration_boost_zero_sources() -> None:
+    """Zero corroborating sources should return base confidence unchanged."""
+    from src.memory.confidence import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+
+    result = scorer.apply_corroboration_boost(
+        base_confidence=0.75,
+        corroborating_source_count=0,
+    )
+
+    assert result == pytest.approx(0.75)

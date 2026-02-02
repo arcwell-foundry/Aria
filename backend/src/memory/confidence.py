@@ -107,3 +107,28 @@ class ConfidenceScorer:
 
         # Floor at minimum threshold
         return max(self.min_threshold, current_confidence)
+
+    def apply_corroboration_boost(
+        self,
+        base_confidence: float,
+        corroborating_source_count: int,
+    ) -> float:
+        """Apply corroboration boost to confidence score.
+
+        Each corroborating source adds a configurable boost to confidence,
+        up to the maximum confidence ceiling.
+
+        Args:
+            base_confidence: Starting confidence score (0.0-1.0).
+            corroborating_source_count: Number of independent corroborating sources.
+
+        Returns:
+            Boosted confidence, capped at max_confidence.
+        """
+        if corroborating_source_count <= 0:
+            return base_confidence
+
+        boost = corroborating_source_count * self.corroboration_boost
+        boosted = base_confidence + boost
+
+        return min(self.max_confidence, boosted)
