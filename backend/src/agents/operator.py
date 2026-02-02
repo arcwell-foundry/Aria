@@ -50,6 +50,29 @@ class OperatorAgent(BaseAgent):
             "crm_write": self._crm_write,
         }
 
+    def validate_input(self, task: dict[str, Any]) -> bool:
+        """Validate operator task input before execution.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Required: operation_type
+        if "operation_type" not in task:
+            return False
+
+        operation_type = task["operation_type"]
+        if operation_type not in self.VALID_OPERATION_TYPES:
+            return False
+
+        # Required: parameters (can be empty dict)
+        if "parameters" not in task:
+            return False
+
+        return isinstance(task["parameters"], dict)
+
     async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
         """Execute the operator agent's primary task.
 
