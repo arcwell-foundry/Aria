@@ -494,3 +494,46 @@ async def test_chat_service_extracts_information_from_conversation() -> None:
 
         # Verify extraction was called
         mock_extract.extract_and_store.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_service_returns_timing_metadata() -> None:
+    """Test that ChatService returns timing information."""
+    from src.services.chat import ChatService
+
+    with (
+        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+        patch("src.services.chat.LLMClient") as mock_llm_class,
+        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+        patch("src.services.chat.ExtractionService") as mock_extract_class,
+    ):
+        mock_mqs = AsyncMock()
+        mock_mqs.query = AsyncMock(return_value=[])
+        mock_mqs_class.return_value = mock_mqs
+
+        mock_llm = AsyncMock()
+        mock_llm.generate_response = AsyncMock(return_value="Response")
+        mock_llm_class.return_value = mock_llm
+
+        mock_working_memory = MagicMock()
+        mock_working_memory.get_context_for_llm.return_value = []
+        mock_wmm = MagicMock()
+        mock_wmm.get_or_create.return_value = mock_working_memory
+        mock_wmm_class.return_value = mock_wmm
+
+        mock_extract = AsyncMock()
+        mock_extract.extract_and_store = AsyncMock(return_value=[])
+        mock_extract_class.return_value = mock_extract
+
+        service = ChatService()
+        result = await service.process_message(
+            user_id="user-123",
+            conversation_id="conv-456",
+            message="Hello",
+        )
+
+        # Should include timing metadata
+        assert "timing" in result
+        assert "memory_query_ms" in result["timing"]
+        assert "llm_response_ms" in result["timing"]
+        assert "total_ms" in result["timing"]

@@ -8,6 +8,7 @@ This service handles chat interactions by:
 """
 
 import logging
+import time
 from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
@@ -63,8 +64,10 @@ class ChatService:
             memory_types: Memory types to query (default: episodic, semantic).
 
         Returns:
-            Dict containing response message and citations.
+            Dict containing response message, citations, and timing.
         """
+        total_start = time.perf_counter()
+
         if memory_types is None:
             memory_types = ["episodic", "semantic"]
 
@@ -77,12 +80,14 @@ class ChatService:
         # Add user message to working memory
         working_memory.add_message("user", message)
 
-        # Query relevant memories
+        # Query relevant memories with timing
+        memory_start = time.perf_counter()
         memories = await self._query_relevant_memories(
             user_id=user_id,
             query=message,
             memory_types=memory_types,
         )
+        memory_ms = (time.perf_counter() - memory_start) * 1000
 
         # Build system prompt with memory context
         system_prompt = self._build_system_prompt(memories)
@@ -97,14 +102,17 @@ class ChatService:
                 "conversation_id": conversation_id,
                 "memory_count": len(memories),
                 "message_count": len(conversation_messages),
+                "memory_query_ms": memory_ms,
             },
         )
 
-        # Generate response from LLM
+        # Generate response from LLM with timing
+        llm_start = time.perf_counter()
         response_text = await self._llm_client.generate_response(
             messages=conversation_messages,
             system_prompt=system_prompt,
         )
+        llm_ms = (time.perf_counter() - llm_start) * 1000
 
         # Add assistant response to working memory
         working_memory.add_message("assistant", response_text)
@@ -113,23 +121,28 @@ class ChatService:
         citations = self._build_citations(memories)
 
         # Extract and store new information (fire and forget)
-        # This runs after response is generated to not block the user
         try:
             await self._extraction_service.extract_and_store(
-                conversation=conversation_messages[-2:],  # Just the latest exchange
+                conversation=conversation_messages[-2:],
                 user_id=user_id,
             )
         except Exception as e:
-            # Log but don't fail the response
             logger.warning(
                 "Information extraction failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        total_ms = (time.perf_counter() - total_start) * 1000
+
         return {
             "message": response_text,
             "citations": citations,
             "conversation_id": conversation_id,
+            "timing": {
+                "memory_query_ms": round(memory_ms, 2),
+                "llm_response_ms": round(llm_ms, 2),
+                "total_ms": round(total_ms, 2),
+            },
         }
 
     async def _query_relevant_memories(
