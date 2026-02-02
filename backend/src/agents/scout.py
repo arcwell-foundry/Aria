@@ -76,7 +76,7 @@ class ScoutAgent(BaseAgent):
             "deduplicate_signals": self._deduplicate_signals,
         }
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the scout agent's primary task.
 
         Args:
@@ -87,8 +87,36 @@ class ScoutAgent(BaseAgent):
         """
         logger.info("Scout agent starting intelligence gathering task")
 
-        # Implementation in later tasks
-        return AgentResult(success=True, data=[])
+        # Extract task parameters
+        entities = task["entities"]
+        signal_types = task.get("signal_types")
+
+        # Step 1: Detect signals for all entities
+        signals = await self._detect_signals(
+            entities=entities,
+            signal_types=signal_types,
+        )
+
+        # Step 2: Filter noise (low relevance signals)
+        min_relevance = 0.5
+        filtered_signals = [
+            s for s in signals
+            if s.get("relevance_score", 0) >= min_relevance
+        ]
+
+        logger.info(
+            f"Filtered {len(signals)} signals to {len(filtered_signals)} "
+            f"with relevance >= {min_relevance}"
+        )
+
+        # Step 3: Deduplicate signals
+        deduplicated_signals = await self._deduplicate_signals(filtered_signals)
+
+        logger.info(
+            f"Scout agent completed - returning {len(deduplicated_signals)} signals"
+        )
+
+        return AgentResult(success=True, data=deduplicated_signals)
 
     async def _web_search(
         self,

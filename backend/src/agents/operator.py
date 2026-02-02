@@ -218,16 +218,14 @@ class OperatorAgent(BaseAgent):
             }
 
         # Handle delete
-        if action == "delete":
-            if not event_id:
-                return {"success": False, "error": "event_id required for delete"}
-            return {
-                "success": True,
-                "action": "delete",
-                "event_id": event_id,
-            }
-
-        return {"success": False, "error": "Unknown error"}
+        # action is guaranteed to be "delete" here due to validation above
+        if not event_id:
+            return {"success": False, "error": "event_id required for delete"}
+        return {
+            "success": True,
+            "action": "delete",
+            "event_id": event_id,
+        }
 
     async def _crm_read(self, **kwargs: Any) -> Any:
         """Read data from CRM system.

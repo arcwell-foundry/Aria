@@ -538,3 +538,102 @@ async def test_deduplicate_signals_keeps_highest_relevance() -> None:
 
     assert len(result) == 1
     assert result[0]["relevance_score"] == 0.92
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_agent_result() -> None:
+    """Test execute returns an AgentResult instance."""
+    from src.agents.base import AgentResult
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp"],
+        "signal_types": ["funding"],
+    }
+
+    result = await agent.execute(task)
+
+    assert isinstance(result, AgentResult)
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_signals_list() -> None:
+    """Test execute returns signals list in data."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp"],
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert isinstance(result.data, list)
+
+
+@pytest.mark.asyncio
+async def test_execute_filters_noise_from_signals() -> None:
+    """Test execute filters out low-relevance signals (noise)."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp"],
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    # All returned signals should have relevance >= 0.5
+    for signal in result.data:
+        assert signal.get("relevance_score", 0) >= 0.5
+
+
+@pytest.mark.asyncio
+async def test_execute_deduplicates_signals() -> None:
+    """Test execute returns deduplicated signals."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp", "Beta Inc"],
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    # Verify no duplicate headlines in results
+    headlines = [s.get("headline", "") for s in result.data]
+    assert len(headlines) == len(set(headlines))
+
+
+@pytest.mark.asyncio
+async def test_execute_respects_signal_types_filter() -> None:
+    """Test execute filters by signal_types when provided."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "entities": ["Acme Corp"],
+        "signal_types": ["funding"],
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    # All results should be funding type
+    for signal in result.data:
+        assert signal.get("signal_type") == "funding"
