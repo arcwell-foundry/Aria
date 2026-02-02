@@ -112,3 +112,22 @@ def test_audit_log_error_initialization() -> None:
     assert error.message == "Audit log operation failed: Failed to write audit log"
     assert error.code == "AUDIT_LOG_ERROR"
     assert error.status_code == 500
+
+
+def test_corporate_memory_error() -> None:
+    """Test CorporateMemoryError exception."""
+    from src.core.exceptions import CorporateMemoryError
+
+    error = CorporateMemoryError("Test error")
+    assert str(error) == "Corporate memory operation failed: Test error"
+    assert error.code == "CORPORATE_MEMORY_ERROR"
+    assert error.status_code == 500
+
+
+def test_corporate_fact_not_found_error() -> None:
+    """Test CorporateFactNotFoundError exception."""
+    from src.core.exceptions import CorporateFactNotFoundError
+
+    error = CorporateFactNotFoundError("abc123")
+    assert "Corporate fact" in str(error)
+    assert error.status_code == 404

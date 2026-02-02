@@ -368,3 +368,34 @@ class AuditLogError(ARIAException):
             code="AUDIT_LOG_ERROR",
             status_code=500,
         )
+
+
+class CorporateMemoryError(ARIAException):
+    """Corporate memory operation error (500).
+
+    Used for failures when storing or retrieving company-level facts.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize corporate memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Corporate memory operation failed: {message}",
+            code="CORPORATE_MEMORY_ERROR",
+            status_code=500,
+        )
+
+
+class CorporateFactNotFoundError(NotFoundError):
+    """Corporate fact not found error (404)."""
+
+    def __init__(self, fact_id: str) -> None:
+        """Initialize corporate fact not found error.
+
+        Args:
+            fact_id: The ID of the corporate fact that was not found.
+        """
+        super().__init__(resource="Corporate fact", resource_id=fact_id)
