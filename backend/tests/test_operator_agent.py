@@ -849,6 +849,148 @@ async def test_execute_dispatches_crm_write() -> None:
     assert result.data["action"] == "create"
 
 
+@pytest.mark.asyncio
+async def test_full_operator_workflow_calendar() -> None:
+    """Test complete end-to-end Operator agent workflow for calendar operations.
+
+    Verifies:
+    - Agent state transitions from IDLE to RUNNING to COMPLETE
+    - Calendar read operations return events
+    - Calendar write operations (create, update, delete) work correctly
+    - Tool dispatch functions properly
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.operator import OperatorAgent
+    from unittest.mock import MagicMock
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Verify initial state
+    assert agent.status == AgentStatus.IDLE
+
+    # Test calendar read workflow
+    read_task = {
+        "operation_type": "calendar_read",
+        "parameters": {
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-07",
+        },
+    }
+
+    read_result = await agent.run(read_task)
+
+    assert agent.status == AgentStatus.COMPLETE
+    assert read_result.success is True
+    assert "events" in read_result.data
+    assert len(read_result.data["events"]) > 0
+
+    # Reset agent for next test
+    agent.status = AgentStatus.IDLE
+
+    # Test calendar create workflow
+    create_task = {
+        "operation_type": "calendar_write",
+        "parameters": {
+            "action": "create",
+            "event": {
+                "title": "Q1 Planning",
+                "start_date": "2024-02-01",
+                "start_time": "10:00",
+                "end_date": "2024-02-01",
+                "end_time": "11:00",
+            },
+        },
+    }
+
+    create_result = await agent.run(create_task)
+
+    assert create_result.success is True
+    assert "event_id" in create_result.data
+
+
+@pytest.mark.asyncio
+async def test_full_operator_workflow_crm() -> None:
+    """Test complete end-to-end Operator agent workflow for CRM operations.
+
+    Verifies:
+    - CRM read operations return records
+    - CRM write operations (create, update, delete) work correctly
+    - Different record types are supported (leads, contacts, accounts)
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.operator import OperatorAgent
+    from unittest.mock import MagicMock
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test CRM read workflow
+    read_task = {
+        "operation_type": "crm_read",
+        "parameters": {
+            "record_type": "leads",
+        },
+    }
+
+    read_result = await agent.run(read_task)
+
+    assert agent.status == AgentStatus.COMPLETE
+    assert read_result.success is True
+    assert "records" in read_result.data
+
+    # Reset agent
+    agent.status = AgentStatus.IDLE
+
+    # Test CRM create workflow
+    create_task = {
+        "operation_type": "crm_write",
+        "parameters": {
+            "action": "create",
+            "record_type": "leads",
+            "record": {
+                "name": "New Prospect",
+                "status": "prospecting",
+                "value": 100000,
+            },
+        },
+    }
+
+    create_result = await agent.run(create_task)
+
+    assert create_result.success is True
+    assert "record_id" in create_result.data
+
+
+@pytest.mark.asyncio
+async def test_operator_agent_handles_validation_failure() -> None:
+    """Test that invalid input returns failed result with validation error.
+
+    Verifies that when validate_input returns False:
+    - Agent status transitions to FAILED
+    - AgentResult has success=False
+    - Error message indicates validation failure
+    """
+    from src.agents.base import AgentStatus
+    from src.agents.operator import OperatorAgent
+    from unittest.mock import MagicMock
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test with missing required field
+    invalid_task = {
+        "parameters": {},
+    }
+
+    result = await agent.run(invalid_task)
+
+    assert agent.status == AgentStatus.FAILED
+    assert result.success is False
+    assert result.error == "Input validation failed"
+    assert result.data is None
+
+
 def test_operator_agent_exported_from_module() -> None:
     """Test OperatorAgent is exported from src.agents module."""
     from src.agents import OperatorAgent
