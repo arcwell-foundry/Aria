@@ -69,6 +69,31 @@ class AnalystAgent(BaseAgent):
             "chembl_search": self._chembl_search,
         }
 
+    def validate_input(self, task: dict[str, Any]) -> bool:
+        """Validate research task input before execution.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Require 'query' field with research question
+        if "query" not in task:
+            return False
+
+        query = task["query"]
+        if not query or not isinstance(query, str):
+            return False
+
+        # Validate depth level if provided
+        if "depth" in task:
+            valid_depths = {"quick", "standard", "comprehensive"}
+            if task["depth"] not in valid_depths:
+                return False
+
+        return True
+
     async def _get_http_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client with timeout settings.
 

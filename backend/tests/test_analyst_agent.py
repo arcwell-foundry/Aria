@@ -321,3 +321,35 @@ async def test_chembl_search_returns_molecules() -> None:
     assert result["total_count"] == 1
     assert len(result["molecules"]) == 1
     assert result["molecules"][0]["molecule_chembl_id"] == "CHEMBL0001"
+
+
+def test_analyst_agent_validates_research_question() -> None:
+    """Test validate_input requires 'query' field."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Valid input
+    assert agent.validate_input({"query": "cancer immunotherapy"}) is True
+
+    # Invalid inputs
+    assert agent.validate_input({}) is False
+    assert agent.validate_input({"other": "field"}) is False
+    assert agent.validate_input({"depth": "deep"}) is False
+
+
+def test_analyst_agent_validates_depth_level() -> None:
+    """Test validate_input checks depth level if provided."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Valid depth levels
+    assert agent.validate_input({"query": "test", "depth": "quick"}) is True
+    assert agent.validate_input({"query": "test", "depth": "standard"}) is True
+    assert agent.validate_input({"query": "test", "depth": "comprehensive"}) is True
+
+    # Invalid depth level
+    assert agent.validate_input({"query": "test", "depth": "invalid"}) is False
