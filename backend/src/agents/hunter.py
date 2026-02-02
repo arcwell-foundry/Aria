@@ -85,7 +85,7 @@ class HunterAgent(BaseAgent):
             "score_fit": self._score_fit,
         }
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the hunter agent's primary task.
 
         Args:
@@ -94,7 +94,74 @@ class HunterAgent(BaseAgent):
         Returns:
             AgentResult with success status and output data.
         """
-        return AgentResult(success=True, data=[])
+        logger.info(f"Hunter agent starting lead discovery task")
+
+        # Extract task parameters
+        icp = task["icp"]
+        target_count = task["target_count"]
+        exclusions = task.get("exclusions", [])
+
+        # Step 1: Build search query from ICP industry
+        industry = icp.get("industry", "")
+        search_query = industry if isinstance(industry, str) else industry[0] if industry else ""
+
+        # Step 2: Search for companies (limit = target_count * 3 to have pool)
+        search_limit = target_count * 3
+        companies = await self._search_companies(query=search_query, limit=search_limit)
+
+        # Step 3: Filter out excluded companies
+        if exclusions:
+            companies = [
+                c for c in companies
+                if c.get("domain") not in exclusions
+            ]
+
+        # Step 4: Limit to target_count
+        companies = companies[:target_count]
+
+        # Step 5: Process each company - enrich, find contacts, score fit
+        leads = []
+        for company in companies:
+            try:
+                # Enrich company data
+                enriched_company = await self._enrich_company(company)
+
+                # Find contacts
+                contacts = await self._find_contacts(company_name=enriched_company["name"])
+
+                # Score fit against ICP
+                fit_score, fit_reasons, gaps = await self._score_fit(
+                    company=enriched_company,
+                    icp=icp,
+                )
+
+                # Build lead object
+                lead = {
+                    "company": enriched_company,
+                    "contacts": contacts,
+                    "fit_score": fit_score,
+                    "fit_reasons": fit_reasons,
+                    "gaps": gaps,
+                    "source": "hunter_pro",
+                }
+                leads.append(lead)
+
+            except Exception as e:
+                # Handle per-company exceptions gracefully
+                logger.warning(
+                    f"Failed to process company '{company.get('name', 'Unknown')}': {e}"
+                )
+                continue
+
+        # Step 6: Sort leads by fit_score descending
+        leads.sort(key=lambda l: l["fit_score"], reverse=True)
+
+        logger.info(
+            f"Hunter agent completed - found {len(leads)} leads",
+            extra={"lead_count": len(leads)},
+        )
+
+        return AgentResult(success=True, data=leads)
 
     async def _search_companies(
         self,

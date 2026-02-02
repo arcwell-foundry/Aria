@@ -578,3 +578,211 @@ async def test_score_fit_technology_overlap() -> None:
     assert score > 90
     assert score < 100
     assert len(gaps) == 1  # Only missing Marketo
+
+
+# Task 7: execute method tests
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_agent_result() -> None:
+    """Test execute returns an AgentResult instance."""
+    from src.agents.base import AgentResult
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert isinstance(result, AgentResult)
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_scored_leads() -> None:
+    """Test execute returns leads with fit_score in data."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert isinstance(result.data, list)
+    assert len(result.data) > 0
+    lead = result.data[0]
+    assert "fit_score" in lead
+    assert isinstance(lead["fit_score"], float)
+
+
+@pytest.mark.asyncio
+async def test_execute_respects_target_count() -> None:
+    """Test execute returns at most target_count leads."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert len(result.data) <= 2
+
+
+@pytest.mark.asyncio
+async def test_execute_filters_exclusions() -> None:
+    """Test execute filters out excluded companies."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 5,
+        "exclusions": ["gentechbio.com", "bioinnovatelabs.com"],
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    # Verify no excluded domains in results
+    for lead in result.data:
+        assert lead["company"]["domain"] not in ["gentechbio.com", "bioinnovatelabs.com"]
+
+
+@pytest.mark.asyncio
+async def test_execute_enriches_companies() -> None:
+    """Test execute enriches companies with additional data."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert len(result.data) > 0
+    company = result.data[0]["company"]
+    # Check for enrichment fields
+    assert "technologies" in company
+    assert "linkedin_url" in company
+    assert "funding_stage" in company
+
+
+@pytest.mark.asyncio
+async def test_execute_finds_contacts() -> None:
+    """Test execute finds contacts for each company."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert len(result.data) > 0
+    lead = result.data[0]
+    assert "contacts" in lead
+    assert isinstance(lead["contacts"], list)
+    assert len(lead["contacts"]) > 0
+    contact = lead["contacts"][0]
+    assert "name" in contact
+    assert "title" in contact
+    assert "email" in contact
+
+
+@pytest.mark.asyncio
+async def test_execute_scores_leads() -> None:
+    """Test execute scores leads and includes fit_reasons and gaps."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert len(result.data) > 0
+    lead = result.data[0]
+    assert "fit_score" in lead
+    assert "fit_reasons" in lead
+    assert "gaps" in lead
+    assert isinstance(lead["fit_score"], float)
+    assert isinstance(lead["fit_reasons"], list)
+    assert isinstance(lead["gaps"], list)
+
+
+@pytest.mark.asyncio
+async def test_execute_ranks_by_fit_score() -> None:
+    """Test execute returns leads sorted by fit_score descending."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 3,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    if len(result.data) >= 2:
+        # Verify scores are in descending order
+        scores = [lead["fit_score"] for lead in result.data]
+        assert scores == sorted(scores, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_execute_includes_source() -> None:
+    """Test execute includes source field in leads."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "icp": {"industry": "Biotechnology"},
+        "target_count": 2,
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert len(result.data) > 0
+    lead = result.data[0]
+    assert "source" in lead
+    assert lead["source"] == "hunter_pro"
