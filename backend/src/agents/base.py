@@ -119,6 +119,26 @@ class BaseAgent(ABC):
         """Reset the accumulated token usage counter."""
         self.total_tokens_used = 0
 
+    @property
+    def is_idle(self) -> bool:
+        """Check if agent is idle."""
+        return self.status == AgentStatus.IDLE
+
+    @property
+    def is_running(self) -> bool:
+        """Check if agent is currently running."""
+        return self.status == AgentStatus.RUNNING
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if agent completed successfully."""
+        return self.status == AgentStatus.COMPLETE
+
+    @property
+    def is_failed(self) -> bool:
+        """Check if agent failed."""
+        return self.status == AgentStatus.FAILED
+
     async def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
         """Call a registered tool with error handling.
 

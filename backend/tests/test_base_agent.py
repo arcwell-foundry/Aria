@@ -547,3 +547,91 @@ def test_base_agent_reset_token_count() -> None:
     agent.reset_token_count()
 
     assert agent.total_tokens_used == 0
+
+
+def test_base_agent_is_idle_property() -> None:
+    """Test is_idle property returns correct status."""
+    from src.agents.base import AgentResult, AgentStatus, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.is_idle is True
+    agent.status = AgentStatus.RUNNING
+    assert agent.is_idle is False
+
+
+def test_base_agent_is_running_property() -> None:
+    """Test is_running property returns correct status."""
+    from src.agents.base import AgentResult, AgentStatus, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.is_running is False
+    agent.status = AgentStatus.RUNNING
+    assert agent.is_running is True
+
+
+def test_base_agent_is_complete_property() -> None:
+    """Test is_complete property returns correct status."""
+    from src.agents.base import AgentResult, AgentStatus, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.is_complete is False
+    agent.status = AgentStatus.COMPLETE
+    assert agent.is_complete is True
+
+
+def test_base_agent_is_failed_property() -> None:
+    """Test is_failed property returns correct status."""
+    from src.agents.base import AgentResult, AgentStatus, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.is_failed is False
+    agent.status = AgentStatus.FAILED
+    assert agent.is_failed is True
