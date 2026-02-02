@@ -13,6 +13,7 @@ from typing import Any
 from src.api.routes.memory import MemoryQueryService
 from src.core.llm import LLMClient
 from src.memory.working import WorkingMemoryManager
+from src.services.extraction import ExtractionService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class ChatService:
         self._memory_service = MemoryQueryService()
         self._llm_client = LLMClient()
         self._working_memory_manager = WorkingMemoryManager()
+        self._extraction_service = ExtractionService()
 
     async def process_message(
         self,
@@ -109,6 +111,20 @@ class ChatService:
 
         # Build citations from used memories
         citations = self._build_citations(memories)
+
+        # Extract and store new information (fire and forget)
+        # This runs after response is generated to not block the user
+        try:
+            await self._extraction_service.extract_and_store(
+                conversation=conversation_messages[-2:],  # Just the latest exchange
+                user_id=user_id,
+            )
+        except Exception as e:
+            # Log but don't fail the response
+            logger.warning(
+                "Information extraction failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
 
         return {
             "message": response_text,

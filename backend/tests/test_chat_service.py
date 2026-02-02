@@ -452,3 +452,45 @@ def test_build_citations_truncates_long_content() -> None:
         # Content should be truncated with "..."
         assert len(citations[0]["content"]) == 103  # 100 + "..."
         assert citations[0]["content"].endswith("...")
+
+
+@pytest.mark.asyncio
+async def test_chat_service_extracts_information_from_conversation() -> None:
+    """Test that ChatService extracts and stores new information."""
+    from src.services.chat import ChatService
+
+    with (
+        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+        patch("src.services.chat.LLMClient") as mock_llm_class,
+        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+        patch("src.services.chat.ExtractionService") as mock_extract_class,
+    ):
+        mock_mqs = AsyncMock()
+        mock_mqs.query = AsyncMock(return_value=[])
+        mock_mqs_class.return_value = mock_mqs
+
+        mock_llm = AsyncMock()
+        mock_llm.generate_response = AsyncMock(
+            return_value="Great, I'll note that you prefer morning meetings."
+        )
+        mock_llm_class.return_value = mock_llm
+
+        mock_working_memory = MagicMock()
+        mock_working_memory.get_context_for_llm.return_value = []
+        mock_wmm = MagicMock()
+        mock_wmm.get_or_create.return_value = mock_working_memory
+        mock_wmm_class.return_value = mock_wmm
+
+        mock_extract = AsyncMock()
+        mock_extract.extract_and_store = AsyncMock(return_value=["fact-123"])
+        mock_extract_class.return_value = mock_extract
+
+        service = ChatService()
+        await service.process_message(
+            user_id="user-123",
+            conversation_id="conv-456",
+            message="I prefer morning meetings.",
+        )
+
+        # Verify extraction was called
+        mock_extract.extract_and_store.assert_called_once()
