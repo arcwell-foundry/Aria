@@ -4,6 +4,7 @@ Gathers intelligence from web search, news, social media, and filters signals.
 """
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
@@ -169,26 +170,26 @@ class ScoutAgent(BaseAgent):
         )
 
         # Mock news search results
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         mock_articles = [
             {
                 "title": "Acme Corp Raises $50M in Series B Funding",
                 "url": "https://techcrunch.com/2024/01/15/acme-corp-series-b",
                 "source": "TechCrunch",
-                "published_at": datetime(2024, 1, 15, tzinfo=timezone.utc).isoformat(),
+                "published_at": datetime(2024, 1, 15, tzinfo=UTC).isoformat(),
             },
             {
                 "title": "Acme Corp Expands to European Markets",
                 "url": "https://reuters.com/2024/01/10/acme-corp-europe",
                 "source": "Reuters",
-                "published_at": datetime(2024, 1, 10, tzinfo=timezone.utc).isoformat(),
+                "published_at": datetime(2024, 1, 10, tzinfo=UTC).isoformat(),
             },
             {
                 "title": "Acme Corp CEO Named to Top 40 Under 40",
                 "url": "https://forbes.com/2024/01/05/acme-corp-ceo",
                 "source": "Forbes",
-                "published_at": datetime(2024, 1, 5, tzinfo=timezone.utc).isoformat(),
+                "published_at": datetime(2024, 1, 5, tzinfo=UTC).isoformat(),
             },
         ]
 
@@ -314,17 +315,11 @@ class ScoutAgent(BaseAgent):
         ]
 
         # Filter by entities
-        filtered_signals = [
-            s for s in all_signals
-            if s["company_name"] in entities
-        ]
+        filtered_signals = [s for s in all_signals if s["company_name"] in entities]
 
         # Filter by signal types if provided
         if signal_types:
-            filtered_signals = [
-                s for s in filtered_signals
-                if s["signal_type"] in signal_types
-            ]
+            filtered_signals = [s for s in filtered_signals if s["signal_type"] in signal_types]
 
         return filtered_signals
 
@@ -368,7 +363,7 @@ class ScoutAgent(BaseAgent):
                     # Keep the one with higher relevance score
                     existing = next(
                         (s for s in deduplicated if s.get("headline", "").lower() == seen_headline),
-                        None
+                        None,
                     )
                     if existing:
                         existing_relevance = existing.get("relevance_score", 0)
