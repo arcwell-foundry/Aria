@@ -666,3 +666,80 @@ def test_agent_execution_error_exception() -> None:
     assert "research" in error.message
     assert error.code == "AGENT_EXECUTION_ERROR"
     assert error.details["task_type"] == "research"
+
+
+@pytest.mark.asyncio
+async def test_full_agent_lifecycle() -> None:
+    """Integration test demonstrating complete agent lifecycle."""
+    from src.agents.base import AgentResult, AgentStatus, BaseAgent
+
+    # Track tool calls for verification
+    tool_calls: list[str] = []
+
+    class ResearchAgent(BaseAgent):
+        name = "Research Agent"
+        description = "Agent that researches topics"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {
+                "search": self._search,
+                "analyze": self._analyze,
+            }
+
+        def validate_input(self, task: dict[str, Any]) -> bool:
+            return "query" in task
+
+        def format_output(self, data: Any) -> Any:
+            return {"formatted": True, "results": data}
+
+        async def _search(self, query: str) -> list[str]:
+            tool_calls.append(f"search:{query}")
+            return ["result1", "result2"]
+
+        async def _analyze(self, data: list[str]) -> str:
+            tool_calls.append(f"analyze:{len(data)}")
+            return "Analysis complete"
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            query = task["query"]
+
+            # Use tools
+            results = await self._call_tool("search", query=query)
+            analysis = await self._call_tool("analyze", data=results)
+
+            return AgentResult(
+                success=True,
+                data={"search_results": results, "analysis": analysis},
+                tokens_used=150,
+            )
+
+    mock_llm = MagicMock()
+    agent = ResearchAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Initial state
+    assert agent.is_idle
+    assert agent.total_tokens_used == 0
+
+    # Run the agent
+    result = await agent.run({"query": "AI research"})
+
+    # Verify execution
+    assert result.success is True
+    assert result.data["formatted"] is True
+    assert result.data["results"]["search_results"] == ["result1", "result2"]
+    assert result.tokens_used == 150
+    assert result.execution_time_ms >= 0  # May be 0 for very fast executions
+
+    # Verify agent state
+    assert agent.is_complete
+    assert agent.total_tokens_used == 150
+
+    # Verify tools were called
+    assert "search:AI research" in tool_calls
+    assert "analyze:2" in tool_calls
+
+    # Test validation failure
+    agent.status = AgentStatus.IDLE
+    invalid_result = await agent.run({"no_query": "field"})
+    assert invalid_result.success is False
+    assert "validation" in (invalid_result.error or "").lower()
