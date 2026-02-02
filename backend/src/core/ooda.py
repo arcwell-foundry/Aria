@@ -418,3 +418,127 @@ Analyze these observations and identify patterns, opportunities, and threats rel
         )
 
         return state
+
+    async def decide(
+        self,
+        state: OODAState,
+        goal: dict[str, Any],
+    ) -> OODAState:
+        """Select the best action to take.
+
+        Uses LLM to generate action options, evaluate them against
+        the goal, and select the highest-value action.
+
+        Args:
+            state: Current OODA state with orientation.
+            goal: The goal being pursued.
+
+        Returns:
+            Updated state with decision.
+        """
+        import json
+
+        start_time = time.perf_counter()
+
+        # Build prompt for decision
+        orientation_summary = json.dumps(state.orientation, indent=2, default=str)
+
+        system_prompt = """You are ARIA's decision module. Based on the analysis, select the best action to take.
+
+Available actions:
+- "research": Use Analyst agent to gather information
+- "search": Use Hunter agent to find leads/companies
+- "communicate": Use Scribe agent to draft communications
+- "schedule": Use Operator agent for calendar/CRM operations
+- "monitor": Use Scout agent for intelligence gathering
+- "plan": Use Strategist agent for planning
+- "complete": Goal has been achieved
+- "blocked": Cannot proceed without user intervention
+
+Output ONLY valid JSON with this structure:
+{
+    "action": "action_name",
+    "agent": "agent_type or null",
+    "parameters": {"key": "value"},
+    "reasoning": "why this action was chosen"
+}"""
+
+        user_prompt = f"""Goal: {goal.get('title', 'Unknown')}
+Description: {goal.get('description', 'No description')}
+
+Analysis:
+{orientation_summary}
+
+Iteration: {state.iteration + 1} of {state.max_iterations}
+
+Previous action result: {state.action_result if state.action_result else 'No previous action'}
+
+Select the best action to make progress toward the goal."""
+
+        # Call LLM for decision
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                max_tokens=self.config.decide_budget,
+                temperature=0.2,  # Low temperature for more deterministic decisions
+            )
+
+            # Parse JSON response
+            try:
+                decision = json.loads(response)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse LLM decision as JSON")
+                decision = {
+                    "action": "blocked",
+                    "agent": None,
+                    "parameters": {},
+                    "reasoning": "Failed to parse decision",
+                    "raw_response": response,
+                }
+
+        except Exception as e:
+            logger.error(f"LLM call failed in decide phase: {e}")
+            decision = {
+                "action": "blocked",
+                "agent": None,
+                "parameters": {},
+                "reasoning": f"Decision failed: {e}",
+                "error": str(e),
+            }
+
+        # Update state based on decision
+        state.decision = decision
+
+        if decision.get("action") == "complete":
+            state.is_complete = True
+        elif decision.get("action") == "blocked":
+            state.is_blocked = True
+            state.blocked_reason = decision.get("reasoning", "Unknown reason")
+        else:
+            state.current_phase = OODAPhase.ACT
+
+        # Log phase execution
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        state.phase_logs.append(
+            OODAPhaseLogEntry(
+                phase=OODAPhase.DECIDE,
+                iteration=state.iteration,
+                input_summary=f"Focus: {state.orientation.get('recommended_focus', 'Unknown')}",
+                output_summary=f"Decision: {decision.get('action', 'Unknown')}",
+                duration_ms=duration_ms,
+            )
+        )
+
+        logger.info(
+            "OODA decide phase complete",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+                "action": decision.get("action"),
+                "agent": decision.get("agent"),
+                "duration_ms": duration_ms,
+            },
+        )
+
+        return state

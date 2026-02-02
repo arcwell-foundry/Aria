@@ -390,3 +390,119 @@ async def test_ooda_loop_orient_handles_invalid_llm_response() -> None:
     new_state = await loop.orient(state, goal)
 
     assert new_state.orientation is not None
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_decide_selects_action() -> None:
+    """Test decide phase uses LLM to select best action."""
+    from src.core.ooda import OODALoop, OODAState, OODAPhase
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = """{
+        "action": "research",
+        "agent": "analyst",
+        "parameters": {"query": "Q3 budget data"},
+        "reasoning": "Need budget data before meeting"
+    }"""
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.orientation = {
+        "patterns": ["Budget meeting upcoming"],
+        "opportunities": ["Prepare data"],
+        "threats": ["Time pressure"],
+        "recommended_focus": "Gather budget data",
+    }
+    goal = {"id": "goal-123", "title": "Prepare budget meeting"}
+
+    new_state = await loop.decide(state, goal)
+
+    # Verify decision was made
+    assert new_state.decision is not None
+    assert "action" in new_state.decision
+    assert new_state.current_phase == OODAPhase.ACT
+
+    # Verify LLM was called
+    mock_llm.generate_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_decide_can_mark_goal_complete() -> None:
+    """Test decide phase can recognize goal is achieved."""
+    from src.core.ooda import OODALoop, OODAState
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = """{
+        "action": "complete",
+        "agent": null,
+        "parameters": {},
+        "reasoning": "All objectives have been met"
+    }"""
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.orientation = {"recommended_focus": "Review completion"}
+    goal = {"id": "goal-123", "title": "Completed goal"}
+
+    new_state = await loop.decide(state, goal)
+
+    assert new_state.decision["action"] == "complete"
+    assert new_state.is_complete is True
+
+
+@pytest.mark.asyncio
+async def test_ooda_loop_decide_can_mark_blocked() -> None:
+    """Test decide phase can recognize goal is blocked."""
+    from src.core.ooda import OODALoop, OODAState
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_response.return_value = """{
+        "action": "blocked",
+        "agent": null,
+        "parameters": {},
+        "reasoning": "Missing required permissions"
+    }"""
+
+    mock_episodic = AsyncMock()
+    mock_semantic = AsyncMock()
+    mock_working = MagicMock()
+    mock_working.user_id = "user-123"
+
+    loop = OODALoop(
+        llm_client=mock_llm,
+        episodic_memory=mock_episodic,
+        semantic_memory=mock_semantic,
+        working_memory=mock_working,
+    )
+
+    state = OODAState(goal_id="goal-123")
+    state.orientation = {"threats": ["No access"]}
+    goal = {"id": "goal-123", "title": "Blocked goal"}
+
+    new_state = await loop.decide(state, goal)
+
+    assert new_state.decision["action"] == "blocked"
+    assert new_state.is_blocked is True
+    assert "permissions" in new_state.blocked_reason.lower()
