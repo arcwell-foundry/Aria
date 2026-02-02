@@ -462,3 +462,51 @@ class OODABlockedError(ARIAException):
             status_code=400,
             details={"goal_id": goal_id, "reason": reason},
         )
+
+
+class AgentError(ARIAException):
+    """Agent operation error (500).
+
+    Used for failures in agent execution.
+    """
+
+    def __init__(self, agent_name: str, message: str = "Unknown error") -> None:
+        """Initialize agent error.
+
+        Args:
+            agent_name: Name of the agent that failed.
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Agent '{agent_name}' failed: {message}",
+            code="AGENT_ERROR",
+            status_code=500,
+            details={"agent_name": agent_name},
+        )
+
+
+class AgentExecutionError(ARIAException):
+    """Agent execution error (500).
+
+    Used for failures during task execution.
+    """
+
+    def __init__(
+        self,
+        agent_name: str,
+        task_type: str,
+        message: str = "Unknown error",
+    ) -> None:
+        """Initialize agent execution error.
+
+        Args:
+            agent_name: Name of the agent that failed.
+            task_type: Type of task being executed.
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Agent '{agent_name}' failed to execute {task_type}: {message}",
+            code="AGENT_EXECUTION_ERROR",
+            status_code=500,
+            details={"agent_name": agent_name, "task_type": task_type},
+        )

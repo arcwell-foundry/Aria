@@ -635,3 +635,34 @@ def test_base_agent_is_failed_property() -> None:
     assert agent.is_failed is False
     agent.status = AgentStatus.FAILED
     assert agent.is_failed is True
+
+
+def test_agent_error_exception_has_correct_properties() -> None:
+    """Test AgentError exception captures agent context."""
+    from src.core.exceptions import AgentError
+
+    error = AgentError(
+        agent_name="Hunter Agent",
+        message="Failed to search companies",
+    )
+
+    assert error.message == "Agent 'Hunter Agent' failed: Failed to search companies"
+    assert error.code == "AGENT_ERROR"
+    assert error.status_code == 500
+    assert error.details["agent_name"] == "Hunter Agent"
+
+
+def test_agent_execution_error_exception() -> None:
+    """Test AgentExecutionError exception for execution failures."""
+    from src.core.exceptions import AgentExecutionError
+
+    error = AgentExecutionError(
+        agent_name="Analyst Agent",
+        task_type="research",
+        message="PubMed API unavailable",
+    )
+
+    assert "Analyst Agent" in error.message
+    assert "research" in error.message
+    assert error.code == "AGENT_EXECUTION_ERROR"
+    assert error.details["task_type"] == "research"

@@ -4,7 +4,6 @@
 CREATE TABLE video_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) NOT NULL,
-    conversation_id UUID REFERENCES conversations(id),
     tavus_conversation_id TEXT NOT NULL,
     room_url TEXT,
     status TEXT DEFAULT 'created',  -- created, active, ended, error
