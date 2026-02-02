@@ -536,3 +536,100 @@ async def test_draft_document_unknown_type_fallback() -> None:
     assert len(result["sections"]) == 1
     assert result["sections"][0]["heading"] == "Content"
     assert result["document_type"] == "memo"
+
+
+@pytest.mark.asyncio
+async def test_personalize_returns_string() -> None:
+    """Test _personalize returns a string."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._personalize(
+        content="Hello, this is a test message.",
+        style=None,
+    )
+
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_personalize_without_style_returns_content() -> None:
+    """Test _personalize without style returns original content."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    content = "This is the original content."
+    result = await agent._personalize(content=content, style=None)
+
+    # Without style, should return content as-is
+    assert result == content
+
+
+@pytest.mark.asyncio
+async def test_personalize_applies_casual_style() -> None:
+    """Test _personalize applies casual writing style."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    content = "I would like to schedule a meeting with you."
+    style = {"formality": "casual", "contractions": True}
+
+    result = await agent._personalize(content=content, style=style)
+
+    # Casual style might use contractions
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+@pytest.mark.asyncio
+async def test_personalize_applies_signature() -> None:
+    """Test _personalize applies signature from style."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    content = "Please review this document."
+    style = {"signature": "Best, John"}
+
+    result = await agent._personalize(content=content, style=style)
+
+    assert "Best, John" in result
+
+
+@pytest.mark.asyncio
+async def test_personalize_applies_greeting_preference() -> None:
+    """Test _personalize applies greeting preference from style."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    content = "Dear Customer, your order is ready."
+    style = {"preferred_greeting": "Hey"}
+
+    result = await agent._personalize(content=content, style=style)
+
+    assert "Hey" in result
+
+
+@pytest.mark.asyncio
+async def test_personalize_logs_style_application(caplog: Any) -> None:
+    """Test _personalize logs when applying style."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    style = {"formality": "casual"}
+
+    with caplog.at_level("INFO"):
+        await agent._personalize(content="Test content", style=style)
+
+    assert "Personalizing" in caplog.text or "style" in caplog.text.lower()

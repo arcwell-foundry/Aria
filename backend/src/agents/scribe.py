@@ -267,18 +267,51 @@ class ScribeAgent(BaseAgent):
     async def _personalize(
         self,
         content: str,
-        style: dict[str, Any] | None = None,  # noqa: ARG002
+        style: dict[str, Any] | None = None,
     ) -> str:
         """Personalize content to match a writing style.
 
+        Applies Digital Twin style parameters to the content.
+        In production, this would use the LLM for more sophisticated style matching.
+
         Args:
             content: The content to personalize.
-            style: Style parameters from Digital Twin.
+            style: Style parameters from Digital Twin containing:
+                - formality: "formal", "casual"
+                - contractions: bool
+                - signature: str
+                - preferred_greeting: str
 
         Returns:
-            Personalized content.
+            Personalized content matching the style.
         """
-        return content
+        if not style:
+            return content
+
+        logger.info(
+            "Personalizing content with style",
+            extra={"style_keys": list(style.keys())},
+        )
+
+        result = content
+
+        # Apply greeting preference
+        if "preferred_greeting" in style:
+            preferred = style["preferred_greeting"]
+            # Replace common greetings with preferred one
+            greetings = ["Dear", "Hello", "Hi", "Hey"]
+            for greeting in greetings:
+                if result.startswith(f"{greeting} "):
+                    result = result.replace(f"{greeting} ", f"{preferred} ", 1)
+                    break
+
+        # Apply signature
+        if "signature" in style:
+            sig = style["signature"]
+            if sig not in result:
+                result = f"{result}\n\n{sig}"
+
+        return result
 
     async def _apply_template(
         self,
