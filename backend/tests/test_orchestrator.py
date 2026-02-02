@@ -72,3 +72,49 @@ def test_orchestration_result_all_succeeded_property() -> None:
         total_execution_time_ms=1000,
     )
     assert some_failed.all_succeeded is False
+
+
+def test_orchestrator_initializes_with_llm_and_user() -> None:
+    """Test AgentOrchestrator initializes with llm_client and user_id."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    assert orchestrator.llm == mock_llm
+    assert orchestrator.user_id == "user-123"
+    assert orchestrator.active_agents == {}
+
+
+def test_orchestrator_accepts_optional_resource_limits() -> None:
+    """Test AgentOrchestrator accepts optional resource limits."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(
+        llm_client=mock_llm,
+        user_id="user-123",
+        max_tokens=10000,
+        max_concurrent_agents=5,
+    )
+
+    assert orchestrator.max_tokens == 10000
+    assert orchestrator.max_concurrent_agents == 5
+
+
+def test_orchestrator_has_default_resource_limits() -> None:
+    """Test AgentOrchestrator has sensible default resource limits."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # Defaults should allow reasonable workloads
+    assert orchestrator.max_tokens > 0
+    assert orchestrator.max_concurrent_agents > 0
