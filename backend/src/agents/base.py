@@ -6,6 +6,7 @@ Provides the abstract base class and common types for all specialized agents.
 import asyncio
 import inspect
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -200,8 +201,6 @@ class BaseAgent(ABC):
         Returns:
             AgentResult with execution outcome.
         """
-        import time
-
         start_time = time.perf_counter()
         self.status = AgentStatus.RUNNING
 
