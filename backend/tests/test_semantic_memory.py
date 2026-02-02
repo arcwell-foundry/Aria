@@ -377,7 +377,10 @@ async def test_get_fact_retrieves_by_id() -> None:
 
     mock_driver = MagicMock()
     mock_node = MagicMock()
-    mock_node.content = "Subject: John\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_node.content = (
+        "Subject: John\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: "
+        + now.isoformat()
+    )
     mock_node.created_at = now
     mock_record = {"e": mock_node}
     mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
@@ -416,7 +419,10 @@ async def test_get_facts_about_returns_facts_for_subject() -> None:
     mock_client = MagicMock()
 
     mock_edge = MagicMock()
-    mock_edge.fact = "Subject: John Doe\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_edge.fact = (
+        "Subject: John Doe\nPredicate: works_at\nObject: Acme\nConfidence: 0.95\nSource: user_stated\nValid From: "
+        + now.isoformat()
+    )
     mock_edge.created_at = now
 
     mock_client.search = AsyncMock(return_value=[mock_edge])
@@ -459,7 +465,10 @@ async def test_search_facts_uses_semantic_search() -> None:
     mock_client = MagicMock()
 
     mock_edge = MagicMock()
-    mock_edge.fact = "Subject: John\nPredicate: works_at\nObject: Acme Corp\nConfidence: 0.95\nSource: user_stated\nValid From: " + now.isoformat()
+    mock_edge.fact = (
+        "Subject: John\nPredicate: works_at\nObject: Acme Corp\nConfidence: 0.95\nSource: user_stated\nValid From: "
+        + now.isoformat()
+    )
     mock_edge.created_at = now
 
     mock_client.search = AsyncMock(return_value=[mock_edge])
@@ -485,7 +494,10 @@ async def test_search_facts_filters_by_confidence() -> None:
 
     # Low confidence fact
     mock_edge = MagicMock()
-    mock_edge.fact = "Subject: John\nPredicate: works_at\nObject: Maybe Corp\nConfidence: 0.3\nSource: inferred\nValid From: " + now.isoformat()
+    mock_edge.fact = (
+        "Subject: John\nPredicate: works_at\nObject: Maybe Corp\nConfidence: 0.3\nSource: inferred\nValid From: "
+        + now.isoformat()
+    )
     mock_edge.created_at = now
 
     mock_client.search = AsyncMock(return_value=[mock_edge])
@@ -583,3 +595,71 @@ async def test_delete_fact_raises_not_found() -> None:
         mock_get.return_value = mock_client
         with pytest.raises(FactNotFoundError):
             await memory.delete_fact(user_id="user-456", fact_id="nonexistent")
+
+
+def test_semantic_fact_with_corroboration_fields() -> None:
+    """Test SemanticFact includes corroboration tracking fields."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John Doe",
+        predicate="works_at",
+        object="Acme Corp",
+        confidence=0.95,
+        source=FactSource.USER_STATED,
+        valid_from=now,
+        last_confirmed_at=now,
+        corroborating_sources=["crm_import:123", "user_stated:456"],
+    )
+
+    assert fact.last_confirmed_at == now
+    assert len(fact.corroborating_sources) == 2
+    assert "crm_import:123" in fact.corroborating_sources
+
+
+def test_semantic_fact_to_dict_includes_corroboration() -> None:
+    """Test to_dict includes corroboration fields."""
+    now = datetime.now(UTC)
+    fact = SemanticFact(
+        id="fact-123",
+        user_id="user-456",
+        subject="John",
+        predicate="title",
+        object="CEO",
+        confidence=0.90,
+        source=FactSource.CRM_IMPORT,
+        valid_from=now,
+        last_confirmed_at=now,
+        corroborating_sources=["source:1"],
+    )
+
+    data = fact.to_dict()
+
+    assert data["last_confirmed_at"] == now.isoformat()
+    assert data["corroborating_sources"] == ["source:1"]
+
+
+def test_semantic_fact_from_dict_restores_corroboration() -> None:
+    """Test from_dict restores corroboration fields."""
+    now = datetime.now(UTC)
+    data = {
+        "id": "fact-123",
+        "user_id": "user-456",
+        "subject": "Jane",
+        "predicate": "department",
+        "object": "Sales",
+        "confidence": 0.85,
+        "source": "extracted",
+        "valid_from": now.isoformat(),
+        "valid_to": None,
+        "invalidated_at": None,
+        "invalidation_reason": None,
+        "last_confirmed_at": now.isoformat(),
+        "corroborating_sources": ["source:a", "source:b"],
+    }
+
+    fact = SemanticFact.from_dict(data)
+
+    assert fact.last_confirmed_at == now
+    assert fact.corroborating_sources == ["source:a", "source:b"]

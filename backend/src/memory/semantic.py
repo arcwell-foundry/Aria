@@ -67,6 +67,13 @@ class SemanticFact:
     valid_to: datetime | None = None
     invalidated_at: datetime | None = None
     invalidation_reason: str | None = None
+    last_confirmed_at: datetime | None = None  # When fact was last confirmed
+    corroborating_sources: list[str] | None = None  # List of source IDs that corroborate
+
+    def __post_init__(self) -> None:
+        """Initialize mutable defaults."""
+        if self.corroborating_sources is None:
+            self.corroborating_sources = []
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize fact to a dictionary.
@@ -86,6 +93,10 @@ class SemanticFact:
             "valid_to": self.valid_to.isoformat() if self.valid_to else None,
             "invalidated_at": self.invalidated_at.isoformat() if self.invalidated_at else None,
             "invalidation_reason": self.invalidation_reason,
+            "last_confirmed_at": self.last_confirmed_at.isoformat()
+            if self.last_confirmed_at
+            else None,
+            "corroborating_sources": self.corroborating_sources or [],
         }
 
     @classmethod
@@ -112,6 +123,10 @@ class SemanticFact:
             if data.get("invalidated_at")
             else None,
             invalidation_reason=data.get("invalidation_reason"),
+            last_confirmed_at=datetime.fromisoformat(data["last_confirmed_at"])
+            if data.get("last_confirmed_at")
+            else None,
+            corroborating_sources=data.get("corroborating_sources") or [],
         )
 
     def is_valid(self, as_of: datetime | None = None) -> bool:
