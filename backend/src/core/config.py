@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     # CORS Configuration
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
+    # Confidence Scoring Configuration
+    CONFIDENCE_DECAY_RATE_PER_DAY: float = 0.05 / 30  # 5% per month
+    CONFIDENCE_CORROBORATION_BOOST: float = 0.10  # +10% per corroborating source
+    CONFIDENCE_MAX: float = 0.99  # Maximum confidence after boosts
+    CONFIDENCE_MIN_THRESHOLD: float = 0.3  # Minimum for inclusion in responses
+    CONFIDENCE_REFRESH_WINDOW_DAYS: int = 7  # Days before decay starts after refresh
+
     @field_validator("SUPABASE_URL")
     @classmethod
     def validate_supabase_url(cls, v: str) -> str:
