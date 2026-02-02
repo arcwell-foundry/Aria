@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 
 
-class AgentStatus(Enum):
+class AgentStatus(str, Enum):
     """Current execution status of an agent."""
 
     IDLE = "idle"
