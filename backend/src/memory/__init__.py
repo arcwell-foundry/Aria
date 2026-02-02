@@ -10,6 +10,11 @@ This module implements ARIA's cognitive memory architecture:
 - Digital Twin: User writing style fingerprinting (Graphiti)
 """
 
+from src.memory.digital_twin import (
+    DigitalTwin,
+    TextStyleAnalyzer,
+    WritingStyleFingerprint,
+)
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -24,11 +29,6 @@ from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
     count_tokens,
-)
-from src.memory.digital_twin import (
-    DigitalTwin,
-    TextStyleAnalyzer,
-    WritingStyleFingerprint,
 )
 
 __all__ = [
