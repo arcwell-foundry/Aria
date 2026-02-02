@@ -43,7 +43,7 @@ class AnalystAgent(BaseAgent):
             "chembl_search": self._chembl_search,
         }
 
-    async def execute(self, task: dict[str, Any]) -> Any:
+    async def execute(self, _task: dict[str, Any] | None = None) -> Any:
         """Execute the analyst agent's primary task.
 
         Args:

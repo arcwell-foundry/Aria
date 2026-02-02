@@ -5,9 +5,11 @@ for ARIA's task execution system.
 """
 
 from src.agents.base import AgentResult, AgentStatus, BaseAgent
+from src.agents.hunter import HunterAgent
 
 __all__ = [
     "AgentResult",
     "AgentStatus",
     "BaseAgent",
+    "HunterAgent",
 ]

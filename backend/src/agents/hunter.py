@@ -3,9 +3,12 @@
 Discovers and qualifies new leads based on Ideal Customer Profile (ICP).
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.agents.base import BaseAgent
+from src.agents.base import AgentResult, BaseAgent
+
+if TYPE_CHECKING:
+    from src.core.llm import LLMClient
 
 
 class HunterAgent(BaseAgent):
@@ -19,7 +22,7 @@ class HunterAgent(BaseAgent):
     name = "Hunter Pro"
     description = "Discovers and qualifies new leads based on ICP"
 
-    def __init__(self, llm_client: Any, user_id: str) -> None:
+    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
         """Initialize the Hunter agent.
 
         Args:
@@ -42,7 +45,7 @@ class HunterAgent(BaseAgent):
             "score_fit": self._score_fit,
         }
 
-    async def execute(self, task: dict[str, Any]) -> Any:  # noqa: ARG002
+    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
         """Execute the hunter agent's primary task.
 
         Args:
@@ -51,11 +54,9 @@ class HunterAgent(BaseAgent):
         Returns:
             AgentResult with success status and output data.
         """
-        from src.agents.base import AgentResult
-
         return AgentResult(success=True, data=[])
 
-    def _search_companies(self) -> list[Any]:
+    async def _search_companies(self) -> list[Any]:
         """Search for companies matching ICP criteria.
 
         Returns:
@@ -63,7 +64,7 @@ class HunterAgent(BaseAgent):
         """
         return []
 
-    def _enrich_company(self) -> dict[str, Any]:
+    async def _enrich_company(self) -> dict[str, Any]:
         """Enrich company data with additional information.
 
         Returns:
@@ -71,7 +72,7 @@ class HunterAgent(BaseAgent):
         """
         return {}
 
-    def _find_contacts(self) -> list[Any]:
+    async def _find_contacts(self) -> list[Any]:
         """Find contacts at a target company.
 
         Returns:
@@ -79,7 +80,7 @@ class HunterAgent(BaseAgent):
         """
         return []
 
-    def _score_fit(self) -> tuple[float, list[Any], list[Any]]:
+    async def _score_fit(self) -> tuple[float, list[Any], list[Any]]:
         """Score company fit against ICP.
 
         Returns:
