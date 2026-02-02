@@ -118,3 +118,72 @@ def test_orchestrator_has_default_resource_limits() -> None:
     # Defaults should allow reasonable workloads
     assert orchestrator.max_tokens > 0
     assert orchestrator.max_concurrent_agents > 0
+
+
+def test_spawn_agent_creates_agent_instance() -> None:
+    """Test spawn_agent creates an agent and returns its ID."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    agent_id = orchestrator.spawn_agent(ScoutAgent)
+
+    assert agent_id is not None
+    assert isinstance(agent_id, str)
+    assert len(agent_id) > 0
+
+
+def test_spawn_agent_adds_to_active_agents() -> None:
+    """Test spawn_agent adds agent to active_agents dict."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    agent_id = orchestrator.spawn_agent(ScoutAgent)
+
+    assert agent_id in orchestrator.active_agents
+    assert isinstance(orchestrator.active_agents[agent_id], ScoutAgent)
+
+
+def test_spawn_agent_initializes_agent_with_correct_params() -> None:
+    """Test spawn_agent passes llm_client and user_id to agent."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-456")
+
+    agent_id = orchestrator.spawn_agent(ScoutAgent)
+    agent = orchestrator.active_agents[agent_id]
+
+    assert agent.llm == mock_llm
+    assert agent.user_id == "user-456"
+
+
+def test_spawn_agent_generates_unique_ids() -> None:
+    """Test spawn_agent generates unique IDs for each agent."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    id1 = orchestrator.spawn_agent(ScoutAgent)
+    id2 = orchestrator.spawn_agent(ScoutAgent)
+    id3 = orchestrator.spawn_agent(ScoutAgent)
+
+    assert id1 != id2
+    assert id2 != id3
+    assert id1 != id3

@@ -5,6 +5,7 @@ and sequential execution modes.
 """
 
 import logging
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -83,3 +84,27 @@ class AgentOrchestrator:
         self.max_concurrent_agents = max_concurrent_agents
         self.active_agents: dict[str, BaseAgent] = {}
         self._total_tokens_used = 0
+
+    def spawn_agent(self, agent_class: type[BaseAgent]) -> str:
+        """Spawn an agent and return its ID.
+
+        Args:
+            agent_class: The agent class to instantiate.
+
+        Returns:
+            Unique identifier for the spawned agent.
+        """
+        agent = agent_class(llm_client=self.llm, user_id=self.user_id)
+        agent_id = str(uuid.uuid4())
+        self.active_agents[agent_id] = agent
+
+        logger.info(
+            f"Spawned {agent.name} agent",
+            extra={
+                "agent_id": agent_id,
+                "agent_name": agent.name,
+                "user_id": self.user_id,
+            },
+        )
+
+        return agent_id
