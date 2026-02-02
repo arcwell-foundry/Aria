@@ -9,15 +9,25 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.api.deps import CurrentUser
+from src.api.deps import AdminUser, CurrentUser
 from src.core.exceptions import (
+    CorporateFactNotFoundError,
+    CorporateMemoryError,
     DigitalTwinError,
     EpisodicMemoryError,
+    NotFoundError,
     ProceduralMemoryError,
     ProspectiveMemoryError,
     SemanticMemoryError,
 )
+from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryAuditLogger, MemoryOperation, MemoryType
+from src.memory.corporate import (
+    CORPORATE_SOURCE_CONFIDENCE,
+    CorporateFact,
+    CorporateFactSource,
+    CorporateMemory,
+)
 from src.memory.digital_twin import DigitalTwin
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
@@ -227,6 +237,60 @@ class AuditLogResponse(BaseModel):
     page: int
     page_size: int
     has_more: bool
+
+
+# Corporate Memory Models
+class CreateCorporateFactRequest(BaseModel):
+    """Request body for creating a new corporate fact."""
+
+    subject: str = Field(..., min_length=1, description="Entity the fact is about")
+    predicate: str = Field(..., min_length=1, description="Relationship type")
+    object: str = Field(..., min_length=1, description="Value or related entity")
+    source: Literal["extracted", "aggregated", "admin_stated"] | None = Field(
+        None, description="Source of the fact"
+    )
+    confidence: float | None = Field(None, ge=0.0, le=1.0, description="Confidence score")
+
+
+class CreateCorporateFactResponse(BaseModel):
+    """Response body for corporate fact creation."""
+
+    id: str
+    message: str = "Corporate fact created successfully"
+
+
+class CorporateFactResponse(BaseModel):
+    """Response body for a single corporate fact."""
+
+    id: str
+    company_id: str
+    subject: str
+    predicate: str
+    object: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    source: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None = None
+    invalidated_at: datetime | None = None
+    invalidation_reason: str | None = None
+
+
+class CorporateFactsResponse(BaseModel):
+    """Paginated response for corporate facts queries."""
+
+    items: list[CorporateFactResponse]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
+class InvalidateCorporateFactRequest(BaseModel):
+    """Request body for invalidating a corporate fact."""
+
+    reason: str = Field(..., min_length=1, description="Reason for invalidation")
 
 
 class MemoryQueryService:
@@ -1010,6 +1074,430 @@ async def query_audit_log(
     )
 
     return AuditLogResponse(
+        items=items,
+        total=len(items),
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+    )
+
+
+# Corporate Memory Endpoints
+
+
+async def _get_user_company_id(user_id: str) -> str:
+    """Get the user's company_id from their profile.
+
+    Args:
+        user_id: The user's UUID.
+
+    Returns:
+        The company_id from the user's profile.
+
+    Raises:
+        HTTPException: If user profile not found or no company_id.
+    """
+    try:
+        profile = await SupabaseClient.get_user_by_id(user_id)
+        company_id = profile.get("company_id")
+        if not company_id:
+            raise HTTPException(
+                status_code=400,
+                detail="User must be associated with a company to access corporate memory",
+            )
+        return cast(str, company_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="User profile not found") from None
+
+
+async def _check_user_is_admin(user_id: str) -> bool:
+    """Check if user has admin role.
+
+    Args:
+        user_id: The user's UUID.
+
+    Returns:
+        True if user has admin role, False otherwise.
+    """
+    try:
+        profile = await SupabaseClient.get_user_by_id(user_id)
+        return profile.get("role") == "admin"
+    except NotFoundError:
+        return False
+
+
+@router.post("/corporate/fact", response_model=CreateCorporateFactResponse, status_code=201)
+async def create_corporate_fact(
+    admin_user: AdminUser,
+    request: CreateCorporateFactRequest,
+) -> CreateCorporateFactResponse:
+    """Create a new corporate fact (admin only).
+
+    Creates a company-level fact that is shared across all users in the company.
+    Only admins can create corporate facts.
+
+    Args:
+        admin_user: Authenticated admin user.
+        request: Corporate fact creation request body.
+
+    Returns:
+        Created corporate fact with ID.
+    """
+    company_id = await _get_user_company_id(admin_user.id)
+
+    # Determine source and confidence
+    source = (
+        CorporateFactSource(request.source) if request.source else CorporateFactSource.ADMIN_STATED
+    )
+    confidence = (
+        request.confidence
+        if request.confidence is not None
+        else CORPORATE_SOURCE_CONFIDENCE[source]
+    )
+
+    # Build fact from request
+    now = datetime.now(UTC)
+    fact = CorporateFact(
+        id=str(uuid.uuid4()),
+        company_id=company_id,
+        subject=request.subject,
+        predicate=request.predicate,
+        object=request.object,
+        confidence=confidence,
+        source=source,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+        created_by=admin_user.id,
+    )
+
+    # Store fact
+    memory = CorporateMemory()
+    try:
+        fact_id = await memory.add_fact(fact)
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to store corporate fact",
+            extra={"error": str(e), "user_id": admin_user.id, "company_id": company_id},
+        )
+        raise HTTPException(
+            status_code=503, detail="Corporate memory storage unavailable"
+        ) from None
+
+    logger.info(
+        "Stored corporate fact via API",
+        extra={
+            "fact_id": fact_id,
+            "user_id": admin_user.id,
+            "company_id": company_id,
+            "subject": request.subject,
+            "predicate": request.predicate,
+        },
+    )
+
+    return CreateCorporateFactResponse(id=fact_id)
+
+
+@router.get("/corporate/facts", response_model=CorporateFactsResponse)
+async def list_corporate_facts(
+    current_user: CurrentUser,
+    subject: str | None = Query(None, description="Filter by subject entity"),
+    predicate: str | None = Query(None, description="Filter by predicate type"),
+    include_inactive: bool = Query(False, description="Include invalidated facts"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+) -> CorporateFactsResponse:
+    """List corporate facts for the user's company.
+
+    Returns company-level facts shared across all users.
+    All authenticated users can read their company's facts.
+
+    Args:
+        current_user: Authenticated user.
+        subject: Optional filter by subject entity.
+        predicate: Optional filter by predicate type.
+        include_inactive: Whether to include invalidated facts.
+        page: Page number (1-indexed).
+        page_size: Number of results per page.
+
+    Returns:
+        Paginated corporate facts.
+    """
+    company_id = await _get_user_company_id(current_user.id)
+
+    memory = CorporateMemory()
+    try:
+        # Get extra to determine has_more
+        facts = await memory.get_facts_for_company(
+            company_id=company_id,
+            subject=subject,
+            predicate=predicate,
+            active_only=not include_inactive,
+            limit=page_size + 1,
+        )
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to list corporate facts",
+            extra={"error": str(e), "user_id": current_user.id, "company_id": company_id},
+        )
+        raise HTTPException(status_code=503, detail="Corporate memory unavailable") from None
+
+    has_more = len(facts) > page_size
+    facts = facts[:page_size]
+
+    items = [
+        CorporateFactResponse(
+            id=f.id,
+            company_id=f.company_id,
+            subject=f.subject,
+            predicate=f.predicate,
+            object=f.object,
+            confidence=f.confidence,
+            source=f.source.value,
+            is_active=f.is_active,
+            created_at=f.created_at,
+            updated_at=f.updated_at,
+            created_by=f.created_by,
+            invalidated_at=f.invalidated_at,
+            invalidation_reason=f.invalidation_reason,
+        )
+        for f in facts
+    ]
+
+    logger.info(
+        "Listed corporate facts",
+        extra={
+            "user_id": current_user.id,
+            "company_id": company_id,
+            "results_count": len(items),
+        },
+    )
+
+    return CorporateFactsResponse(
+        items=items,
+        total=len(items),
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+    )
+
+
+@router.get("/corporate/facts/{fact_id}", response_model=CorporateFactResponse)
+async def get_corporate_fact(
+    current_user: CurrentUser,
+    fact_id: str,
+) -> CorporateFactResponse:
+    """Get a specific corporate fact.
+
+    Retrieves a single corporate fact by ID. All authenticated users
+    can read their company's facts.
+
+    Args:
+        current_user: Authenticated user.
+        fact_id: The ID of the fact to retrieve.
+
+    Returns:
+        The requested corporate fact.
+
+    Raises:
+        HTTPException: 404 if fact not found.
+    """
+    company_id = await _get_user_company_id(current_user.id)
+
+    memory = CorporateMemory()
+    try:
+        fact = await memory.get_fact(company_id=company_id, fact_id=fact_id)
+    except CorporateFactNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Corporate fact {fact_id} not found") from None
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to get corporate fact",
+            extra={"error": str(e), "user_id": current_user.id, "fact_id": fact_id},
+        )
+        raise HTTPException(status_code=503, detail="Corporate memory unavailable") from None
+
+    return CorporateFactResponse(
+        id=fact.id,
+        company_id=fact.company_id,
+        subject=fact.subject,
+        predicate=fact.predicate,
+        object=fact.object,
+        confidence=fact.confidence,
+        source=fact.source.value,
+        is_active=fact.is_active,
+        created_at=fact.created_at,
+        updated_at=fact.updated_at,
+        created_by=fact.created_by,
+        invalidated_at=fact.invalidated_at,
+        invalidation_reason=fact.invalidation_reason,
+    )
+
+
+@router.post("/corporate/facts/{fact_id}/invalidate", status_code=204)
+async def invalidate_corporate_fact(
+    admin_user: AdminUser,
+    fact_id: str,
+    request: InvalidateCorporateFactRequest,
+) -> None:
+    """Invalidate a corporate fact (admin only).
+
+    Soft deletes a corporate fact by marking it as inactive.
+    The fact remains in the database but won't appear in queries
+    unless include_inactive=True is specified.
+
+    Args:
+        admin_user: Authenticated admin user.
+        fact_id: The ID of the fact to invalidate.
+        request: Invalidation request with reason.
+
+    Raises:
+        HTTPException: 404 if fact not found, 403 if not admin.
+    """
+    company_id = await _get_user_company_id(admin_user.id)
+
+    memory = CorporateMemory()
+    try:
+        await memory.invalidate_fact(
+            company_id=company_id,
+            fact_id=fact_id,
+            reason=request.reason,
+            invalidated_by=admin_user.id,
+        )
+    except CorporateFactNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Corporate fact {fact_id} not found") from None
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to invalidate corporate fact",
+            extra={"error": str(e), "user_id": admin_user.id, "fact_id": fact_id},
+        )
+        raise HTTPException(status_code=503, detail="Corporate memory unavailable") from None
+
+    logger.info(
+        "Invalidated corporate fact",
+        extra={
+            "fact_id": fact_id,
+            "user_id": admin_user.id,
+            "company_id": company_id,
+            "reason": request.reason,
+        },
+    )
+
+
+@router.delete("/corporate/facts/{fact_id}", status_code=204)
+async def delete_corporate_fact(
+    admin_user: AdminUser,
+    fact_id: str,
+) -> None:
+    """Permanently delete a corporate fact (admin only).
+
+    Hard deletes a corporate fact from both Supabase and Graphiti.
+    This action cannot be undone. Use invalidate for soft delete.
+
+    Args:
+        admin_user: Authenticated admin user.
+        fact_id: The ID of the fact to delete.
+
+    Raises:
+        HTTPException: 404 if fact not found, 403 if not admin.
+    """
+    company_id = await _get_user_company_id(admin_user.id)
+
+    memory = CorporateMemory()
+    try:
+        await memory.delete_fact(company_id=company_id, fact_id=fact_id)
+    except CorporateFactNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Corporate fact {fact_id} not found") from None
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to delete corporate fact",
+            extra={"error": str(e), "user_id": admin_user.id, "fact_id": fact_id},
+        )
+        raise HTTPException(status_code=503, detail="Corporate memory unavailable") from None
+
+    logger.info(
+        "Deleted corporate fact",
+        extra={
+            "fact_id": fact_id,
+            "user_id": admin_user.id,
+            "company_id": company_id,
+        },
+    )
+
+
+@router.get("/corporate/search", response_model=CorporateFactsResponse)
+async def search_corporate_facts(
+    current_user: CurrentUser,
+    q: str = Query(..., min_length=1, description="Search query string"),
+    min_confidence: float = Query(0.5, ge=0.0, le=1.0, description="Minimum confidence threshold"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+) -> CorporateFactsResponse:
+    """Search corporate facts using semantic search.
+
+    Searches company-level facts using Graphiti semantic search.
+    All authenticated users can search their company's facts.
+
+    Args:
+        current_user: Authenticated user.
+        q: Search query string.
+        min_confidence: Minimum confidence threshold.
+        page: Page number (1-indexed).
+        page_size: Number of results per page.
+
+    Returns:
+        Paginated search results.
+    """
+    company_id = await _get_user_company_id(current_user.id)
+
+    memory = CorporateMemory()
+    try:
+        # Get extra to determine has_more
+        facts = await memory.search_facts(
+            company_id=company_id,
+            query=q,
+            min_confidence=min_confidence,
+            limit=page_size + 1,
+        )
+    except CorporateMemoryError as e:
+        logger.error(
+            "Failed to search corporate facts",
+            extra={"error": str(e), "user_id": current_user.id, "company_id": company_id},
+        )
+        raise HTTPException(status_code=503, detail="Corporate memory search unavailable") from None
+
+    has_more = len(facts) > page_size
+    facts = facts[:page_size]
+
+    items = [
+        CorporateFactResponse(
+            id=f.id,
+            company_id=f.company_id,
+            subject=f.subject,
+            predicate=f.predicate,
+            object=f.object,
+            confidence=f.confidence,
+            source=f.source.value,
+            is_active=f.is_active,
+            created_at=f.created_at,
+            updated_at=f.updated_at,
+            created_by=f.created_by,
+            invalidated_at=f.invalidated_at,
+            invalidation_reason=f.invalidation_reason,
+        )
+        for f in facts
+    ]
+
+    logger.info(
+        "Searched corporate facts",
+        extra={
+            "user_id": current_user.id,
+            "company_id": company_id,
+            "query": q,
+            "results_count": len(items),
+        },
+    )
+
+    return CorporateFactsResponse(
         items=items,
         total=len(items),
         page=page,
