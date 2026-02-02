@@ -183,3 +183,36 @@ def test_audit_log_endpoint_filters_by_memory_type(
     assert response.status_code == 200
     call_kwargs = mock_query.call_args.kwargs
     assert call_kwargs["memory_type"] == MemoryType.SEMANTIC
+
+
+def test_query_memory_accepts_as_of_parameter(
+    test_client: TestClient,
+) -> None:
+    """Test query_memory endpoint accepts as_of parameter."""
+    from src.api.routes.memory import MemoryQueryService
+
+    now = datetime.now(UTC)
+    as_of = now - timedelta(days=30)
+
+    with patch.object(MemoryQueryService, "query", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = []
+
+        response = test_client.get(
+            "/api/v1/memory/query",
+            params={
+                "q": "test query",
+                "types": ["episodic", "semantic"],
+                "as_of": as_of.isoformat(),
+            },
+        )
+
+        # Should accept the parameter and succeed
+        assert response.status_code == 200
+
+        # Verify as_of was passed to the service
+        mock_query.assert_called_once()
+        call_kwargs = mock_query.call_args.kwargs
+        assert "as_of" in call_kwargs
+        # The datetime should match (allowing for some parsing variance)
+        assert call_kwargs["as_of"] is not None
+        assert abs((call_kwargs["as_of"] - as_of).total_seconds()) < 1

@@ -306,6 +306,7 @@ class MemoryQueryService:
         min_confidence: float | None,
         limit: int,
         offset: int,
+        as_of: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Query across specified memory types.
 
@@ -318,6 +319,7 @@ class MemoryQueryService:
             min_confidence: Minimum confidence threshold for semantic results.
             limit: Maximum results to return.
             offset: Number of results to skip.
+            as_of: Point in time for temporal query. Returns memories as known at this date.
 
         Returns:
             List of memory results sorted by relevance.
@@ -325,9 +327,9 @@ class MemoryQueryService:
         tasks = []
 
         if "episodic" in memory_types:
-            tasks.append(self._query_episodic(user_id, query, start_date, end_date, limit))
+            tasks.append(self._query_episodic(user_id, query, start_date, end_date, limit, as_of))
         if "semantic" in memory_types:
-            tasks.append(self._query_semantic(user_id, query, limit, min_confidence))
+            tasks.append(self._query_semantic(user_id, query, limit, min_confidence, as_of))
         if "procedural" in memory_types:
             tasks.append(self._query_procedural(user_id, query, limit))
         if "prospective" in memory_types:
@@ -359,11 +361,20 @@ class MemoryQueryService:
         _start_date: datetime | None,
         _end_date: datetime | None,
         limit: int,
+        as_of: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Query episodic memory.
 
         Note: _start_date and _end_date are accepted for API consistency but
         date filtering is not yet implemented in EpisodicMemory.semantic_search().
+
+        Args:
+            user_id: The user ID to query memories for.
+            query: The search query string.
+            _start_date: Reserved for future date filtering.
+            _end_date: Reserved for future date filtering.
+            limit: Maximum results to return.
+            as_of: Point in time filter. Only includes episodes recorded on or before this date.
         """
         # TODO: Add date filtering when EpisodicMemory.semantic_search supports it
         from src.memory.episodic import EpisodicMemory
@@ -371,7 +382,7 @@ class MemoryQueryService:
         # Note: Creating memory instance per request is acceptable - classes are
         # lightweight and stateless. Could optimize with DI if needed in future.
         memory = EpisodicMemory()
-        episodes = await memory.semantic_search(user_id, query, limit=limit)
+        episodes = await memory.semantic_search(user_id, query, limit=limit, as_of=as_of)
 
         results = []
         for episode in episodes:
@@ -395,17 +406,28 @@ class MemoryQueryService:
         query: str,
         limit: int,
         min_confidence: float | None = None,
+        as_of: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        """Query semantic memory."""
+        """Query semantic memory.
+
+        Args:
+            user_id: The user ID to query memories for.
+            query: The search query string.
+            limit: Maximum results to return.
+            min_confidence: Minimum confidence threshold for filtering.
+            as_of: Point in time for temporal validity and confidence calculation.
+        """
         from src.memory.semantic import SemanticMemory
 
         memory = SemanticMemory()
-        facts = await memory.search_facts(user_id, query, min_confidence=0.0, limit=limit)
+        facts = await memory.search_facts(
+            user_id, query, min_confidence=0.0, limit=limit, as_of=as_of
+        )
 
         results = []
         for fact in facts:
-            # Calculate effective confidence with decay and boosts
-            effective_confidence = memory.get_effective_confidence(fact)
+            # Calculate effective confidence with decay and boosts at the as_of time
+            effective_confidence = memory.get_effective_confidence(fact, as_of=as_of)
 
             # Filter by minimum confidence threshold
             if min_confidence is not None and effective_confidence < min_confidence:
@@ -527,6 +549,10 @@ async def query_memory(
     min_confidence: float | None = Query(
         None, ge=0.0, le=1.0, description="Minimum confidence threshold for semantic results"
     ),
+    as_of: datetime | None = Query(
+        None,
+        description="Point in time for temporal query. Returns memories as known at this date.",
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Results per page"),
 ) -> MemoryQueryResponse:
@@ -542,6 +568,7 @@ async def query_memory(
         types: List of memory types to search.
         start_date: Optional start of time range filter.
         end_date: Optional end of time range filter.
+        as_of: Point in time for temporal query. Returns memories as known at this date.
         page: Page number (1-indexed).
         page_size: Number of results per page.
 
@@ -576,6 +603,7 @@ async def query_memory(
         min_confidence=min_confidence,
         limit=page_size + 1,  # Get one extra to check has_more
         offset=offset,
+        as_of=as_of,
     )
 
     # Check if there are more results
