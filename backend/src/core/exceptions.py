@@ -399,3 +399,66 @@ class CorporateFactNotFoundError(NotFoundError):
             fact_id: The ID of the corporate fact that was not found.
         """
         super().__init__(resource="Corporate fact", resource_id=fact_id)
+
+
+class OODALoopError(ARIAException):
+    """OODA loop processing error (500).
+
+    Used for failures during OODA loop execution phases.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize OODA loop error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"OODA loop error: {message}",
+            code="OODA_LOOP_ERROR",
+            status_code=500,
+        )
+
+
+class OODAMaxIterationsError(ARIAException):
+    """OODA loop exceeded maximum iterations (400).
+
+    Raised when the OODA loop cannot achieve the goal within
+    the configured maximum number of iterations.
+    """
+
+    def __init__(self, goal_id: str, iterations: int) -> None:
+        """Initialize max iterations error.
+
+        Args:
+            goal_id: The goal that could not be achieved.
+            iterations: Number of iterations attempted.
+        """
+        super().__init__(
+            message=f"OODA loop for goal '{goal_id}' exceeded maximum iterations ({iterations})",
+            code="OODA_MAX_ITERATIONS",
+            status_code=400,
+            details={"goal_id": goal_id, "iterations": iterations},
+        )
+
+
+class OODABlockedError(ARIAException):
+    """OODA loop is blocked and cannot proceed (400).
+
+    Raised when the OODA loop cannot find any viable actions
+    to take toward the goal.
+    """
+
+    def __init__(self, goal_id: str, reason: str) -> None:
+        """Initialize blocked error.
+
+        Args:
+            goal_id: The goal that is blocked.
+            reason: Why the loop is blocked.
+        """
+        super().__init__(
+            message=f"OODA loop for goal '{goal_id}' is blocked: {reason}",
+            code="OODA_BLOCKED",
+            status_code=400,
+            details={"goal_id": goal_id, "reason": reason},
+        )

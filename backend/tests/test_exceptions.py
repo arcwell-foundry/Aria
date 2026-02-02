@@ -131,3 +131,39 @@ def test_corporate_fact_not_found_error() -> None:
     error = CorporateFactNotFoundError("abc123")
     assert "Corporate fact" in str(error)
     assert error.status_code == 404
+
+
+def test_ooda_loop_error_initializes_correctly() -> None:
+    """Test OODALoopError initializes with proper attributes."""
+    from src.core.exceptions import OODALoopError
+
+    error = OODALoopError("Observation failed")
+    assert error.message == "OODA loop error: Observation failed"
+    assert error.code == "OODA_LOOP_ERROR"
+    assert error.status_code == 500
+
+
+def test_ooda_max_iterations_error_initializes_correctly() -> None:
+    """Test OODAMaxIterationsError initializes with iteration count."""
+    from src.core.exceptions import OODAMaxIterationsError
+
+    error = OODAMaxIterationsError(goal_id="goal-123", iterations=10)
+    assert "goal-123" in error.message
+    assert "10" in error.message
+    assert error.code == "OODA_MAX_ITERATIONS"
+    assert error.status_code == 400
+    assert error.details["goal_id"] == "goal-123"
+    assert error.details["iterations"] == 10
+
+
+def test_ooda_blocked_error_initializes_correctly() -> None:
+    """Test OODABlockedError initializes with reason."""
+    from src.core.exceptions import OODABlockedError
+
+    error = OODABlockedError(goal_id="goal-123", reason="No available actions")
+    assert "goal-123" in error.message
+    assert "No available actions" in error.message
+    assert error.code == "OODA_BLOCKED"
+    assert error.status_code == 400
+    assert error.details["goal_id"] == "goal-123"
+    assert error.details["reason"] == "No available actions"
