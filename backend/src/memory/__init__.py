@@ -10,6 +10,13 @@ This module implements ARIA's cognitive memory architecture:
 - Digital Twin: User writing style fingerprinting (Graphiti)
 """
 
+from src.memory.audit import (
+    AuditLogEntry,
+    MemoryAuditLogger,
+    MemoryOperation,
+    MemoryType,
+    log_memory_operation,
+)
 from src.memory.confidence import ConfidenceScorer
 from src.memory.digital_twin import (
     DigitalTwin,
@@ -33,6 +40,12 @@ from src.memory.working import (
 )
 
 __all__ = [
+    # Memory Audit
+    "AuditLogEntry",
+    "MemoryAuditLogger",
+    "MemoryOperation",
+    "MemoryType",
+    "log_memory_operation",
     # Confidence Scoring
     "ConfidenceScorer",
     # Working Memory
