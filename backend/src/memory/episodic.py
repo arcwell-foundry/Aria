@@ -10,6 +10,7 @@ Episodes are stored in Graphiti (Neo4j) for temporal querying and
 semantic search capabilities.
 """
 
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -151,6 +152,8 @@ class EpisodicMemory:
             event_type = "unknown"
             content = ""
             participants: list[str] = []
+            occurred_at: datetime | None = None
+            recorded_at: datetime | None = None
 
             for line in lines:
                 if line.startswith("Event Type:"):
@@ -160,6 +163,22 @@ class EpisodicMemory:
                 elif line.startswith("Participants:"):
                     participants_str = line.replace("Participants:", "").strip()
                     participants = [p.strip() for p in participants_str.split(",") if p.strip()]
+                elif line.startswith("Occurred At:"):
+                    occurred_at_str = line.replace("Occurred At:", "").strip()
+                    with contextlib.suppress(ValueError):
+                        occurred_at = datetime.fromisoformat(occurred_at_str)
+                elif line.startswith("Recorded At:"):
+                    recorded_at_str = line.replace("Recorded At:", "").strip()
+                    with contextlib.suppress(ValueError):
+                        recorded_at = datetime.fromisoformat(recorded_at_str)
+
+            # Fall back to edge created_at for occurred_at if not parsed
+            if occurred_at is None:
+                occurred_at = created_at if isinstance(created_at, datetime) else datetime.now(UTC)
+
+            # Fall back to now for recorded_at if not parsed
+            if recorded_at is None:
+                recorded_at = datetime.now(UTC)
 
             return Episode(
                 id=edge_uuid,
@@ -167,8 +186,8 @@ class EpisodicMemory:
                 event_type=event_type,
                 content=content.strip(),
                 participants=participants,
-                occurred_at=created_at if isinstance(created_at, datetime) else datetime.now(UTC),
-                recorded_at=datetime.now(UTC),
+                occurred_at=occurred_at,
+                recorded_at=recorded_at,
                 context={},
             )
         except Exception as e:
