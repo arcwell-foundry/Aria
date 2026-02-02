@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: "home" },
-  { name: "ARIA Chat", href: "/chat", icon: "chat" },
+  { name: "ARIA Chat", href: "/dashboard/aria", icon: "chat" },
   { name: "Goals", href: "/goals", icon: "target" },
   { name: "Lead Memory", href: "/leads", icon: "users" },
   { name: "Daily Briefing", href: "/briefing", icon: "calendar" },
