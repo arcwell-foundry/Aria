@@ -1,6 +1,59 @@
 """Tests for AnalystAgent module."""
 
-from unittest.mock import MagicMock
+import httpx
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_returns_articles() -> None:
+    """Test _pubmed_search returns list of articles from PubMed API."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Mock httpx client response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "esearchresult": {
+            "idlist": ["12345", "67890"],
+            "count": "2"
+        }
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await agent._pubmed_search(query="cancer immunotherapy", max_results=10)
+
+    assert result["count"] == 2
+    assert len(result["pmids"]) == 2
+    assert "12345" in result["pmids"]
+    assert "67890" in result["pmids"]
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_handles_api_error() -> None:
+    """Test _pubmed_search handles API errors gracefully."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Mock httpx to raise an error
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = httpx.HTTPStatusError(
+        "Server error", request=MagicMock(), response=MagicMock()
+    )
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await agent._pubmed_search(query="test query")
+
+    assert "error" in result
+    assert result["pmids"] == []
 
 
 def test_analyst_agent_has_name_and_description() -> None:
