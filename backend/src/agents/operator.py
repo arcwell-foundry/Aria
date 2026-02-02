@@ -73,19 +73,42 @@ class OperatorAgent(BaseAgent):
 
         return isinstance(task["parameters"], dict)
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the operator agent's primary task.
 
+        Dispatches to the appropriate tool based on operation_type.
+
         Args:
-            task: Task specification with parameters.
+            task: Task specification with operation_type and parameters.
 
         Returns:
             AgentResult with success status and output data.
         """
-        logger.info("Operator agent starting system operation task")
+        operation_type = task["operation_type"]
+        parameters = task["parameters"]
 
-        # Placeholder implementation - will be implemented in Task 7
-        return AgentResult(success=True, data=None)
+        logger.info(
+            f"Operator agent executing: {operation_type}",
+            extra={"user_id": self.user_id, "operation_type": operation_type},
+        )
+
+        # Dispatch to appropriate tool
+        if operation_type == "calendar_read":
+            result_data = await self._calendar_read(**parameters)
+        elif operation_type == "calendar_write":
+            result_data = await self._calendar_write(**parameters)
+        elif operation_type == "crm_read":
+            result_data = await self._crm_read(**parameters)
+        elif operation_type == "crm_write":
+            result_data = await self._crm_write(**parameters)
+        else:
+            return AgentResult(
+                success=False,
+                data=None,
+                error=f"Unknown operation_type: {operation_type}",
+            )
+
+        return AgentResult(success=True, data=result_data)
 
     async def _calendar_read(
         self,

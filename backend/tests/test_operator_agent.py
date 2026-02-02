@@ -711,3 +711,140 @@ async def test_crm_write_validates_record_type() -> None:
     assert result["success"] is False
     assert "error" in result
     assert "Invalid record_type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_agent_result() -> None:
+    """Test execute returns an AgentResult instance."""
+    from src.agents.base import AgentResult
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "operation_type": "calendar_read",
+        "parameters": {"start_date": "2024-01-01"},
+    }
+
+    result = await agent.execute(task)
+
+    assert isinstance(result, AgentResult)
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_to_correct_tool() -> None:
+    """Test execute dispatches to correct tool based on operation_type."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test calendar_read
+    calendar_task = {
+        "operation_type": "calendar_read",
+        "parameters": {"start_date": "2024-01-01"},
+    }
+    calendar_result = await agent.execute(calendar_task)
+    assert calendar_result.success is True
+    assert "events" in calendar_result.data
+
+    # Test crm_read
+    crm_task = {
+        "operation_type": "crm_read",
+        "parameters": {"record_type": "leads"},
+    }
+    crm_result = await agent.execute(crm_task)
+    assert crm_result.success is True
+    assert "records" in crm_result.data
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_parameters() -> None:
+    """Test execute passes parameters through to the tool."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "operation_type": "crm_read",
+        "parameters": {
+            "record_type": "contacts",
+            "record_id": "contact-001",
+        },
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert result.data["record_id"] == "contact-001"
+
+
+@pytest.mark.asyncio
+async def test_execute_handles_unknown_operation_type() -> None:
+    """Test execute returns error for unknown operation_type."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "operation_type": "unknown_operation",
+        "parameters": {},
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "Unknown operation_type" in result.error
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_calendar_write() -> None:
+    """Test execute dispatches to calendar_write tool."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "operation_type": "calendar_write",
+        "parameters": {
+            "action": "create",
+            "event": {"title": "Test Event"},
+        },
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert result.data["success"] is True
+    assert result.data["action"] == "create"
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_crm_write() -> None:
+    """Test execute dispatches to crm_write tool."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "operation_type": "crm_write",
+        "parameters": {
+            "action": "create",
+            "record_type": "leads",
+            "record": {"name": "New Lead"},
+        },
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert result.data["success"] is True
+    assert result.data["action"] == "create"
+
