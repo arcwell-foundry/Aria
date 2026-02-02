@@ -268,3 +268,208 @@ def test_text_style_analyzer_extract_sign_off_style() -> None:
     result = analyzer.extract_sign_off_style(texts)
 
     assert result == "Best"
+
+
+# DigitalTwin Service Tests
+
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def test_digital_twin_has_required_methods() -> None:
+    """Test DigitalTwin class has required interface methods."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+
+    assert hasattr(twin, "analyze_sample")
+    assert hasattr(twin, "get_fingerprint")
+    assert hasattr(twin, "get_style_guidelines")
+    assert hasattr(twin, "score_style_match")
+    assert hasattr(twin, "update_fingerprint")
+
+
+@pytest.mark.asyncio
+async def test_analyze_sample_extracts_style_features() -> None:
+    """Test analyze_sample extracts style features from text."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-fp-123"))
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(twin, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await twin.analyze_sample(
+            user_id="user-123",
+            text="Hi there! How are you doing today? Looking forward to catching up soon.",
+            text_type="email",
+        )
+
+        mock_client.add_episode.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_fingerprint_retrieves_by_user_id() -> None:
+    """Test get_fingerprint retrieves fingerprint for user."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    mock_edge = MagicMock()
+    mock_edge.fact = (
+        f"average_sentence_length: 12.0\n"
+        f"vocabulary_level: moderate\n"
+        f"formality_score: 0.6\n"
+        f"common_phrases: best regards, looking forward\n"
+        f"greeting_style: Hi\n"
+        f"sign_off_style: Best\n"
+        f"emoji_usage: False\n"
+        f"punctuation_patterns: .=0.7,!=0.2,?=0.1\n"
+        f"samples_analyzed: 10\n"
+        f"confidence: 0.8\n"
+        f"created_at: {now.isoformat()}\n"
+        f"updated_at: {now.isoformat()}"
+    )
+    mock_edge.uuid = "fp-123"
+    mock_edge.created_at = now
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(twin, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        fingerprint = await twin.get_fingerprint(user_id="user-123")
+
+        assert fingerprint is not None
+        assert fingerprint.user_id == "user-123"
+        mock_client.search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_fingerprint_returns_none_when_not_found() -> None:
+    """Test get_fingerprint returns None when no fingerprint exists."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+    mock_client = MagicMock()
+    mock_client.search = AsyncMock(return_value=[])
+
+    with patch.object(twin, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        fingerprint = await twin.get_fingerprint(user_id="user-123")
+
+        assert fingerprint is None
+
+
+@pytest.mark.asyncio
+async def test_get_style_guidelines_returns_prompt_instructions() -> None:
+    """Test get_style_guidelines returns prompt-ready instructions."""
+    from src.memory.digital_twin import DigitalTwin, WritingStyleFingerprint
+
+    twin = DigitalTwin()
+    now = datetime.now(UTC)
+
+    fingerprint = WritingStyleFingerprint(
+        id="fp-123",
+        user_id="user-123",
+        average_sentence_length=15.0,
+        vocabulary_level="moderate",
+        formality_score=0.7,
+        common_phrases=["looking forward", "best regards"],
+        greeting_style="Hi",
+        sign_off_style="Best",
+        emoji_usage=False,
+        punctuation_patterns={".": 0.6, "!": 0.2, "?": 0.2},
+        samples_analyzed=20,
+        confidence=0.85,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = fingerprint
+
+        guidelines = await twin.get_style_guidelines(user_id="user-123")
+
+        assert isinstance(guidelines, str)
+        assert "Hi" in guidelines
+        assert "Best" in guidelines
+        assert "moderate" in guidelines.lower()
+        assert len(guidelines) > 50
+
+
+@pytest.mark.asyncio
+async def test_get_style_guidelines_returns_default_when_no_fingerprint() -> None:
+    """Test get_style_guidelines returns default when no fingerprint exists."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+
+    with patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = None
+
+        guidelines = await twin.get_style_guidelines(user_id="user-123")
+
+        assert isinstance(guidelines, str)
+        assert "professional" in guidelines.lower() or "clear" in guidelines.lower()
+
+
+@pytest.mark.asyncio
+async def test_score_style_match_returns_score() -> None:
+    """Test score_style_match returns similarity score."""
+    from src.memory.digital_twin import DigitalTwin, WritingStyleFingerprint
+
+    twin = DigitalTwin()
+    now = datetime.now(UTC)
+
+    fingerprint = WritingStyleFingerprint(
+        id="fp-123",
+        user_id="user-123",
+        average_sentence_length=12.0,
+        vocabulary_level="simple",
+        formality_score=0.4,
+        common_phrases=["thanks", "let me know"],
+        greeting_style="Hey",
+        sign_off_style="Thanks",
+        emoji_usage=True,
+        punctuation_patterns={".": 0.5, "!": 0.3, "?": 0.2},
+        samples_analyzed=15,
+        confidence=0.8,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = fingerprint
+
+        matching_text = "Hey! Thanks for the update. Let me know if you need anything! 😊"
+        score = await twin.score_style_match(user_id="user-123", generated_text=matching_text)
+
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+        assert score > 0.5
+
+
+@pytest.mark.asyncio
+async def test_score_style_match_returns_zero_when_no_fingerprint() -> None:
+    """Test score_style_match returns 0 when no fingerprint exists."""
+    from src.memory.digital_twin import DigitalTwin
+
+    twin = DigitalTwin()
+
+    with patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = None
+
+        score = await twin.score_style_match(
+            user_id="user-123",
+            generated_text="Some text here.",
+        )
+
+        assert score == 0.0
