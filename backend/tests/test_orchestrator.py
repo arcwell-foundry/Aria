@@ -703,3 +703,94 @@ async def test_execute_parallel_batches_tasks_correctly() -> None:
     # All should report total_tasks=3
     for update in starting_updates:
         assert update.total_tasks == 3
+
+
+# Task 9: Agent Management Methods Tests
+
+
+def test_get_agent_status_returns_agent_status() -> None:
+    """Test get_agent_status returns correct agent status."""
+    from unittest.mock import MagicMock
+
+    from src.agents.base import AgentStatus
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    agent_id = orchestrator.spawn_agent(ScoutAgent)
+    status = orchestrator.get_agent_status(agent_id)
+
+    assert status == AgentStatus.IDLE
+
+
+def test_get_agent_status_returns_none_for_unknown_agent() -> None:
+    """Test get_agent_status returns None for unknown agent ID."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    status = orchestrator.get_agent_status("nonexistent-id")
+
+    assert status is None
+
+
+def test_cleanup_removes_all_active_agents() -> None:
+    """Test cleanup removes all active agents."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # Spawn some agents
+    orchestrator.spawn_agent(ScoutAgent)
+    orchestrator.spawn_agent(ScoutAgent)
+    assert len(orchestrator.active_agents) == 2
+
+    # Cleanup
+    orchestrator.cleanup()
+
+    assert len(orchestrator.active_agents) == 0
+
+
+def test_cleanup_resets_token_counter() -> None:
+    """Test cleanup resets the token usage counter."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    # Simulate some token usage
+    orchestrator._total_tokens_used = 5000
+
+    orchestrator.cleanup()
+
+    assert orchestrator._total_tokens_used == 0
+
+
+def test_active_agent_count_property() -> None:
+    """Test active_agent_count returns correct count."""
+    from unittest.mock import MagicMock
+
+    from src.agents.orchestrator import AgentOrchestrator
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    orchestrator = AgentOrchestrator(llm_client=mock_llm, user_id="user-123")
+
+    assert orchestrator.active_agent_count == 0
+
+    orchestrator.spawn_agent(ScoutAgent)
+    assert orchestrator.active_agent_count == 1
+
+    orchestrator.spawn_agent(ScoutAgent)
+    assert orchestrator.active_agent_count == 2

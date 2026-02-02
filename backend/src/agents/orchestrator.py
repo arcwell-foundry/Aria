@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult, AgentStatus, BaseAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -146,6 +146,43 @@ class AgentOrchestrator:
             True if within budget, False otherwise.
         """
         return (self._total_tokens_used + estimated_tokens) <= self.max_tokens
+
+    @property
+    def active_agent_count(self) -> int:
+        """Get the count of currently active agents.
+
+        Returns:
+            Number of active agents.
+        """
+        return len(self.active_agents)
+
+    def get_agent_status(self, agent_id: str) -> AgentStatus | None:
+        """Get the status of an agent by ID.
+
+        Args:
+            agent_id: The unique identifier of the agent.
+
+        Returns:
+            AgentStatus if agent exists, None otherwise.
+        """
+        agent = self.active_agents.get(agent_id)
+        if agent is None:
+            return None
+        return agent.status
+
+    def cleanup(self) -> None:
+        """Clean up all active agents and reset counters.
+
+        Should be called when orchestration is complete or on error.
+        """
+        agent_count = len(self.active_agents)
+        self.active_agents.clear()
+        self._total_tokens_used = 0
+
+        logger.info(
+            f"Orchestrator cleanup: removed {agent_count} agents, reset token counter",
+            extra={"agents_removed": agent_count, "user_id": self.user_id},
+        )
 
     async def spawn_and_execute(
         self,
