@@ -19,6 +19,16 @@ PUBMED_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
 PUBMED_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 PUBMED_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
+# ClinicalTrials.gov API endpoint
+CLINICALTRIALS_API_URL = "https://clinicaltrials.gov/api/v2/studies"
+
+# OpenFDA API endpoints
+FDA_DRUG_API_URL = "https://api.fda.gov/drug/label.json"
+FDA_DEVICE_API_URL = "https://api.fda.gov/device/510k.json"
+
+# ChEMBL API endpoint
+CHEMBL_API_URL = "https://www.ebi.ac.uk/chembl/api/data"
+
 
 class AnalystAgent(BaseAgent):
     """Scientific research agent for life sciences queries.
@@ -161,38 +171,334 @@ class AnalystAgent(BaseAgent):
             logger.error(f"PubMed search failed: {e}")
             return {"error": str(e), "pmids": [], "count": 0}
 
-    async def _clinical_trials_search(self, query: str, max_results: int = 20) -> dict[str, Any]:
+    async def _pubmed_fetch_details(self, pmids: list[str]) -> dict[str, Any]:
+        """Fetch detailed metadata for PubMed articles.
+
+        Args:
+            pmids: List of PubMed IDs to fetch details for.
+
+        Returns:
+            Dictionary mapping PMID to article metadata.
+        """
+        import time
+
+        # Rate limiting
+        current_time = time.time()
+        time_since_last = current_time - self._pubmem_last_call_time
+        min_interval = 1.0 / self._pubmed_rate_limit
+        if time_since_last < min_interval:
+            await asyncio.sleep(min_interval - time_since_last)
+
+        if not pmids:
+            return {}
+
+        # Check cache for batch
+        cache_key = f"pubmed_details:{','.join(sorted(pmids))}"
+        if cache_key in self._research_cache:
+            logger.info(f"PubMed details cache hit for {len(pmids)} PMIDs")
+            return cast(dict[str, Any], self._research_cache[cache_key])
+
+        try:
+            client = await self._get_http_client()
+
+            params = {
+                "db": "pubmed",
+                "id": ",".join(pmids),
+                "retmode": "json",
+                "rettype": "abstract",
+            }
+
+            response = await client.get(PUBMED_ESUMMARY_URL, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            result_data: dict[str, Any] = data.get("result", {})
+
+            # Remove the "uids" key which contains the list, not the details
+            if "uids" in result_data:
+                del result_data["uids"]
+
+            self._research_cache[cache_key] = result_data
+            self._pubmem_last_call_time = time.time()
+
+            logger.info(f"Fetched details for {len(result_data)} articles")
+
+            return result_data
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"PubMed details API error: {e}")
+            return {}
+        except Exception as e:
+            logger.error(f"PubMed details fetch failed: {e}")
+            return {}
+
+    async def _clinical_trials_search(
+        self,
+        query: str,
+        max_results: int = 20,
+        status: str | None = None,
+    ) -> dict[str, Any]:
         """Search ClinicalTrials.gov for studies matching the query.
 
         Args:
             query: Search query string.
             max_results: Maximum number of results to return.
+            status: Optional filter by study status.
 
         Returns:
-            Dictionary with search results.
+            Dictionary with total_count and list of studies.
         """
-        raise NotImplementedError("ClinicalTrials search will be implemented in Task 6")
+        # Check cache
+        cache_key = f"clinicaltrials:{query}:{max_results}:{status}"
+        if cache_key in self._research_cache:
+            logger.info(f"ClinicalTrials cache hit for query: {query}")
+            return cast(dict[str, Any], self._research_cache[cache_key])
 
-    async def _fda_drug_search(self, drug_name: str, search_type: str = "brand") -> dict[str, Any]:
+        try:
+            client = await self._get_http_client()
+
+            # Build parameters
+            params: dict[str, str | int] = {
+                "query.term": query,
+                "pageSize": max_results,
+            }
+
+            if status:
+                params["filter.oversightStatus"] = status
+
+            response = await client.get(CLINICALTRIALS_API_URL, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Transform studies to a cleaner format
+            studies = []
+            for study in data.get("studies", []):
+                proto = study.get("protocolSection", {})
+                id_module = proto.get("identificationModule", {})
+                status_module = proto.get("statusModule", {})
+                conditions_module = proto.get("conditionsModule", {})
+
+                studies.append(
+                    {
+                        "nct_id": id_module.get("nctId"),
+                        "title": id_module.get("briefTitle"),
+                        "status": status_module.get("overallStatus"),
+                        "start_date": status_module.get("startDate"),
+                        "conditions": conditions_module.get("conditions", []),
+                    }
+                )
+
+            result = {
+                "query": query,
+                "total_count": data.get("totalCount", 0),
+                "studies": studies,
+            }
+
+            # Cache result
+            self._research_cache[cache_key] = result
+
+            logger.info(
+                f"ClinicalTrials search found {result['total_count']} studies for: {query}",
+                extra={"query": query, "count": result["total_count"]},
+            )
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ClinicalTrials API error: {e}")
+            return {"error": str(e), "studies": [], "total_count": 0}
+        except Exception as e:
+            logger.error(f"ClinicalTrials search failed: {e}")
+            return {"error": str(e), "studies": [], "total_count": 0}
+
+    async def _fda_drug_search(
+        self,
+        drug_name: str,
+        search_type: str = "brand",
+        max_results: int = 10,
+    ) -> dict[str, Any]:
         """Search OpenFDA API for drug or device information.
 
         Args:
             drug_name: Name of the drug or device to search.
             search_type: Type of search - "brand", "generic", or "device".
-
-        Returns:
-            Dictionary with search results.
-        """
-        raise NotImplementedError("FDA search will be implemented in Task 7")
-
-    async def _chembl_search(self, query: str, max_results: int = 20) -> dict[str, Any]:
-        """Search ChEMBL database for bioactive molecules.
-
-        Args:
-            query: Search query string.
             max_results: Maximum number of results to return.
 
         Returns:
-            Dictionary with search results.
+            Dictionary with total count and list of products/devices.
         """
-        raise NotImplementedError("ChEMBL search will be implemented in Task 8")
+        # Check cache
+        cache_key = f"fda:{drug_name}:{search_type}:{max_results}"
+        if cache_key in self._research_cache:
+            logger.info(f"FDA cache hit for: {drug_name}")
+            return cast(dict[str, Any], self._research_cache[cache_key])
+
+        try:
+            client = await self._get_http_client()
+
+            # Determine API endpoint and search field
+            if search_type == "device":
+                url = FDA_DEVICE_API_URL
+                search_field = "device_name"
+            else:
+                url = FDA_DRUG_API_URL
+                search_field = (
+                    "openfda.brand_name" if search_type == "brand" else "openfda.generic_name"
+                )
+
+            # Build parameters
+            params: dict[str, str | int] = {
+                "search": f"{search_field}:{drug_name}",
+                "limit": max_results,
+            }
+
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Extract results
+            results = data.get("results", [])
+            products = []
+
+            if search_type == "device":
+                for item in results:
+                    products.append(
+                        {
+                            "device_name": item.get("device_name"),
+                            "device_class": item.get("device_class"),
+                            "medical_specialty": item.get("medical_specialty_description"),
+                        }
+                    )
+            else:
+                for item in results:
+                    openfda = item.get("openfda", {})
+                    products.append(
+                        {
+                            "brand_name": openfda.get("brand_name", [""])[0]
+                            if openfda.get("brand_name")
+                            else None,
+                            "generic_name": openfda.get("generic_name", [""])[0]
+                            if openfda.get("generic_name")
+                            else None,
+                            "manufacturer": openfda.get("manufacturer_name", [""])[0]
+                            if openfda.get("manufacturer_name")
+                            else None,
+                            "purpose": item.get("purpose", []),
+                        }
+                    )
+
+            result = {
+                "query": drug_name,
+                "search_type": search_type,
+                "total": data.get("meta", {}).get("total", 0),
+                "products": products,
+            }
+
+            # Cache result
+            self._research_cache[cache_key] = result
+
+            logger.info(
+                f"FDA search found {result['total']} {search_type} results for: {drug_name}",
+            )
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"FDA API error: {e}")
+            return {"error": str(e), "products": [], "total": 0}
+        except Exception as e:
+            logger.error(f"FDA search failed: {e}")
+            return {"error": str(e), "products": [], "total": 0}
+
+    async def _chembl_search(
+        self,
+        query: str,
+        search_type: str = "molecule",
+        max_results: int = 20,
+    ) -> dict[str, Any]:
+        """Search ChEMBL database for bioactive molecules.
+
+        Args:
+            query: Search query string (molecule name, target, etc.).
+            search_type: Type of search - "molecule", "target", or "drug".
+            max_results: Maximum number of results to return.
+
+        Returns:
+            Dictionary with total_count and list of molecules/targets.
+        """
+        # Check cache
+        cache_key = f"chembl:{query}:{search_type}:{max_results}"
+        if cache_key in self._research_cache:
+            logger.info(f"ChEMBL cache hit for: {query}")
+            return cast(dict[str, Any], self._research_cache[cache_key])
+
+        try:
+            client = await self._get_http_client()
+
+            # Determine endpoint
+            if search_type == "target":
+                endpoint = f"{CHEMBL_API_URL}/target"
+            elif search_type == "drug":
+                endpoint = f"{CHEMBL_API_URL}/drug"
+            else:  # molecule
+                endpoint = f"{CHEMBL_API_URL}/molecule"
+
+            # Build parameters - JSON format
+            params: dict[str, str | int] = {
+                "format": "json",
+                "q": query,
+                "limit": max_results,
+            }
+
+            response = await client.get(endpoint, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Extract results - ChEMBL API returns various formats
+            molecules = data.get("molecules", {})
+            if isinstance(molecules, dict):
+                molecule_list = molecules.get("molecule", [])
+            else:
+                molecule_list = molecules if isinstance(molecules, list) else []
+
+            results = []
+            for item in molecule_list[:max_results]:
+                results.append(
+                    {
+                        "molecule_chembl_id": item.get("molecule_chembl_id"),
+                        "pref_name": item.get("pref_name"),
+                        "molecule_type": item.get("molecule_type"),
+                        "max_phase": item.get("max_phase"),
+                        "therapeutic_area": item.get("therapeutic_area"),
+                    }
+                )
+
+            # Get total count from page_meta if available
+            page_meta = data.get("page_meta", {})
+            total_count = page_meta.get("total_count", len(results))
+
+            result = {
+                "query": query,
+                "search_type": search_type,
+                "total_count": total_count,
+                "molecules": results,
+            }
+
+            # Cache result
+            self._research_cache[cache_key] = result
+
+            logger.info(
+                f"ChEMBL search found {result['total_count']} molecules for: {query}",
+            )
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ChEMBL API error: {e}")
+            return {"error": str(e), "molecules": [], "total_count": 0}
+        except Exception as e:
+            logger.error(f"ChEMBL search failed: {e}")
+            return {"error": str(e), "molecules": [], "total_count": 0}
