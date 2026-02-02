@@ -205,8 +205,8 @@ class DebriefService:
         """
         prompt = f"""Analyze these meeting debrief notes and extract structured information.
 
-Meeting: {context.get('title', 'Unknown')}
-Attendees: {', '.join(context.get('attendees', []))}
+Meeting: {context.get("title", "Unknown")}
+Attendees: {", ".join(context.get("attendees", []))}
 
 User's Notes:
 {notes}
@@ -253,7 +253,10 @@ Be concise. Only include items explicitly mentioned or clearly implied."""
         return cast(dict[str, Any], json.loads(response_text.strip()))
 
     async def _generate_follow_up_draft(
-        self, meeting_context: dict[str, Any], extracted: dict[str, Any], user_id: str  # noqa: ARG002
+        self,
+        meeting_context: dict[str, Any],
+        extracted: dict[str, Any],
+        user_id: str,  # noqa: ARG002
     ) -> str:
         """Generate a follow-up email draft.
 
@@ -267,12 +270,12 @@ Be concise. Only include items explicitly mentioned or clearly implied."""
         """
         prompt = f"""Write a brief follow-up email after this meeting.
 
-Meeting: {meeting_context.get('title')}
-Outcome: {extracted['outcome']}
-Summary: {extracted['summary']}
-Our commitments: {', '.join(extracted['commitments_ours'])}
-Their commitments: {', '.join(extracted['commitments_theirs'])}
-Action items: {extracted['action_items']}
+Meeting: {meeting_context.get("title")}
+Outcome: {extracted["outcome"]}
+Summary: {extracted["summary"]}
+Our commitments: {", ".join(extracted["commitments_ours"])}
+Their commitments: {", ".join(extracted["commitments_theirs"])}
+Action items: {extracted["action_items"]}
 
 Write a professional, concise follow-up email that:
 1. Thanks them for their time

@@ -120,7 +120,11 @@ async def create_battle_card(
 
     logger.info(
         "Creating battle card",
-        extra={"user_id": current_user.id, "company_id": company_id, "competitor_name": data.competitor_name},
+        extra={
+            "user_id": current_user.id,
+            "company_id": company_id,
+            "competitor_name": data.competitor_name,
+        },
     )
     svc = _get_service()
 

@@ -26,9 +26,7 @@ class BriefingService:
     def __init__(self) -> None:
         """Initialize briefing service with dependencies."""
         self._db = SupabaseClient.get_client()
-        self._llm = anthropic.Anthropic(
-            api_key=settings.ANTHROPIC_API_KEY.get_secret_value()
-        )
+        self._llm = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
 
     async def generate_briefing(
         self, user_id: str, briefing_date: date | None = None
@@ -57,9 +55,7 @@ class BriefingService:
         task_data = await self._get_task_data(user_id)
 
         # Generate summary using LLM
-        summary = await self._generate_summary(
-            calendar_data, lead_data, signal_data, task_data
-        )
+        summary = await self._generate_summary(calendar_data, lead_data, signal_data, task_data)
 
         content: dict[str, Any] = {
             "summary": summary,
@@ -133,9 +129,7 @@ class BriefingService:
                 return content
         return await self.generate_briefing(user_id, briefing_date)
 
-    async def list_briefings(
-        self, user_id: str, limit: int = 7
-    ) -> list[dict[str, Any]]:
+    async def list_briefings(self, user_id: str, limit: int = 7) -> list[dict[str, Any]]:
         """List recent briefings for user.
 
         Args:
@@ -158,7 +152,9 @@ class BriefingService:
         return [b for b in data if isinstance(b, dict)]
 
     async def _get_calendar_data(
-        self, user_id: str, briefing_date: date  # noqa: ARG002
+        self,
+        user_id: str,
+        briefing_date: date,  # noqa: ARG002
     ) -> dict[str, Any]:
         """Get calendar events for the day.
 
@@ -213,7 +209,11 @@ class BriefingService:
         return {"overdue": [], "due_today": []}
 
     async def _generate_summary(
-        self, calendar: dict[str, Any], leads: dict[str, Any], signals: dict[str, Any], tasks: dict[str, Any]
+        self,
+        calendar: dict[str, Any],
+        leads: dict[str, Any],
+        signals: dict[str, Any],
+        tasks: dict[str, Any],
     ) -> str:
         """Generate executive summary using LLM.
 
@@ -228,10 +228,10 @@ class BriefingService:
         """
         prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
 
-Calendar: {calendar['meeting_count']} meetings today
-Leads needing attention: {len(leads.get('needs_attention', []))}
-New signals: {len(signals.get('company_news', []))}
-Overdue tasks: {len(tasks.get('overdue', []))}
+Calendar: {calendar["meeting_count"]} meetings today
+Leads needing attention: {len(leads.get("needs_attention", []))}
+New signals: {len(signals.get("company_news", []))}
+Overdue tasks: {len(tasks.get("overdue", []))}
 
 Be concise and actionable. Start with "Good morning!"
 """

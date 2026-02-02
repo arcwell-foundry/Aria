@@ -107,9 +107,7 @@ async def get_briefing_by_date(
     briefing = await service.get_briefing(current_user.id, briefing_date)
 
     if not briefing:
-        raise HTTPException(
-            status_code=404, detail=f"Briefing for {briefing_date} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Briefing for {briefing_date} not found")
 
     logger.info(
         "Briefing retrieved by date",

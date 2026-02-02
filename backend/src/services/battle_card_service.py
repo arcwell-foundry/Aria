@@ -137,13 +137,7 @@ class BattleCardService:
         Returns:
             Battle card if found, None otherwise.
         """
-        result = (
-            self._db.table("battle_cards")
-            .select("*")
-            .eq("id", card_id)
-            .single()
-            .execute()
-        )
+        result = self._db.table("battle_cards").select("*").eq("id", card_id).single().execute()
 
         if result.data:
             return cast(dict[str, Any], result.data)
@@ -224,12 +218,7 @@ class BattleCardService:
                 )
 
         # Apply update
-        result = (
-            self._db.table("battle_cards")
-            .update(update_data)
-            .eq("id", card_id)
-            .execute()
-        )
+        result = self._db.table("battle_cards").update(update_data).eq("id", card_id).execute()
 
         # Record changes
         if changes:
@@ -309,6 +298,4 @@ class BattleCardService:
         handlers = list(current.get("objection_handlers", []))
         handlers.append({"objection": objection, "response": response})
 
-        return await self.update_battle_card(
-            card_id, BattleCardUpdate(objection_handlers=handlers)
-        )
+        return await self.update_battle_card(card_id, BattleCardUpdate(objection_handlers=handlers))
