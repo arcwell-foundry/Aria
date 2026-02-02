@@ -7,6 +7,7 @@ This module implements ARIA's cognitive memory architecture:
 - Procedural: Learned workflows (Supabase)
 - Prospective: Future tasks/reminders (Supabase)
 - Lead: Sales pursuit tracking (Graphiti + Supabase)
+- Digital Twin: User writing style fingerprinting (Graphiti)
 """
 
 from src.memory.episodic import Episode, EpisodicMemory
@@ -23,6 +24,11 @@ from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
     count_tokens,
+)
+from src.memory.digital_twin import (
+    DigitalTwin,
+    TextStyleAnalyzer,
+    WritingStyleFingerprint,
 )
 
 __all__ = [
@@ -46,4 +52,8 @@ __all__ = [
     "TriggerType",
     "TaskStatus",
     "TaskPriority",
+    # Digital Twin
+    "DigitalTwin",
+    "TextStyleAnalyzer",
+    "WritingStyleFingerprint",
 ]
