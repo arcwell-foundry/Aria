@@ -122,3 +122,149 @@ def test_writing_style_fingerprint_from_dict_deserializes_correctly() -> None:
     assert fingerprint.confidence == 0.95
     assert fingerprint.created_at == now
     assert fingerprint.updated_at == now
+
+
+def test_text_style_analyzer_extract_sentence_length() -> None:
+    """Test TextStyleAnalyzer extracts average sentence length."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Hello there. How are you today? I hope you are doing well."
+    result = analyzer.extract_sentence_length(text)
+
+    # 3 sentences, roughly 3 + 5 + 7 = 15 words, avg 5
+    assert 4.0 <= result <= 6.0
+
+
+def test_text_style_analyzer_extract_vocabulary_level_simple() -> None:
+    """Test TextStyleAnalyzer detects simple vocabulary."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Hi! How are you? I am good. See you soon."
+    result = analyzer.extract_vocabulary_level(text)
+
+    assert result == "simple"
+
+
+def test_text_style_analyzer_extract_vocabulary_level_advanced() -> None:
+    """Test TextStyleAnalyzer detects advanced vocabulary."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = (
+        "The pharmaceutical consortium's comprehensive analysis demonstrates "
+        "unprecedented efficacy in cardiovascular rehabilitation protocols."
+    )
+    result = analyzer.extract_vocabulary_level(text)
+
+    assert result == "advanced"
+
+
+def test_text_style_analyzer_extract_formality_informal() -> None:
+    """Test TextStyleAnalyzer detects informal tone."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Hey! What's up? Gonna grab lunch? lol that's awesome :)"
+    result = analyzer.extract_formality_score(text)
+
+    assert result < 0.4
+
+
+def test_text_style_analyzer_extract_formality_formal() -> None:
+    """Test TextStyleAnalyzer detects formal tone."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = (
+        "Dear Mr. Johnson, I am writing to formally request a meeting "
+        "regarding the proposed acquisition. Please advise on your availability."
+    )
+    result = analyzer.extract_formality_score(text)
+
+    assert result > 0.6
+
+
+def test_text_style_analyzer_extract_punctuation_patterns() -> None:
+    """Test TextStyleAnalyzer extracts punctuation patterns."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Hello! How are you? I am fine. Great to hear!"
+    result = analyzer.extract_punctuation_patterns(text)
+
+    assert "." in result
+    assert "!" in result
+    assert "?" in result
+    # Should be ratios, not counts
+    total = sum(result.values())
+    assert 0.99 <= total <= 1.01  # Should sum to ~1.0
+
+
+def test_text_style_analyzer_detect_emoji_usage_true() -> None:
+    """Test TextStyleAnalyzer detects emoji usage."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Thanks so much! 😊 Looking forward to it! 🎉"
+    result = analyzer.detect_emoji_usage(text)
+
+    assert result is True
+
+
+def test_text_style_analyzer_detect_emoji_usage_false() -> None:
+    """Test TextStyleAnalyzer detects no emoji usage."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    text = "Thank you for your consideration. I look forward to hearing from you."
+    result = analyzer.detect_emoji_usage(text)
+
+    assert result is False
+
+
+def test_text_style_analyzer_extract_common_phrases() -> None:
+    """Test TextStyleAnalyzer extracts common phrases."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    texts = [
+        "Best regards, John",
+        "Looking forward to your response. Best regards, John",
+        "Thank you. Best regards, John",
+    ]
+    result = analyzer.extract_common_phrases(texts)
+
+    # "Best regards" should be detected
+    assert any("best regards" in phrase.lower() for phrase in result)
+
+
+def test_text_style_analyzer_extract_greeting_style() -> None:
+    """Test TextStyleAnalyzer extracts greeting style."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    texts = [
+        "Hi Sarah, hope you're doing well.",
+        "Hi Team, quick update on the project.",
+        "Hi everyone, let's discuss the roadmap.",
+    ]
+    result = analyzer.extract_greeting_style(texts)
+
+    assert result == "Hi"
+
+
+def test_text_style_analyzer_extract_sign_off_style() -> None:
+    """Test TextStyleAnalyzer extracts sign-off style."""
+    from src.memory.digital_twin import TextStyleAnalyzer
+
+    analyzer = TextStyleAnalyzer()
+    texts = [
+        "Let me know your thoughts.\n\nBest,\nJohn",
+        "Looking forward to it.\n\nBest,\nJohn",
+        "Talk soon.\n\nBest,\nJohn",
+    ]
+    result = analyzer.extract_sign_off_style(texts)
+
+    assert result == "Best"
