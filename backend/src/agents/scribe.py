@@ -25,6 +25,10 @@ class ScribeAgent(BaseAgent):
     name = "Scribe"
     description = "Drafts emails and documents with style matching"
 
+    # Valid communication types and tones
+    VALID_COMMUNICATION_TYPES = {"email", "document", "message"}
+    VALID_TONES = {"formal", "friendly", "urgent"}
+
     def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
         """Initialize the Scribe agent.
 
@@ -47,6 +51,41 @@ class ScribeAgent(BaseAgent):
             "personalize": self._personalize,
             "apply_template": self._apply_template,
         }
+
+    def validate_input(self, task: dict[str, Any]) -> bool:
+        """Validate draft task input.
+
+        Args:
+            task: Task specification to validate.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Required fields
+        if "communication_type" not in task:
+            return False
+
+        if "goal" not in task:
+            return False
+
+        # Validate communication_type
+        comm_type = task["communication_type"]
+        if comm_type not in self.VALID_COMMUNICATION_TYPES:
+            return False
+
+        # Validate tone if present
+        if "tone" in task:
+            tone = task["tone"]
+            if tone not in self.VALID_TONES:
+                return False
+
+        # Validate recipient if present
+        if "recipient" in task and task["recipient"] is not None:
+            recipient = task["recipient"]
+            if not isinstance(recipient, dict):
+                return False
+
+        return True
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
         """Execute the scribe agent's primary task.
