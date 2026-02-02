@@ -290,3 +290,70 @@ async def test_calendar_write_delete_requires_event_id() -> None:
     assert result["success"] is False
     assert "error" in result
     assert "event_id required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_crm_read_returns_records() -> None:
+    """Test crm_read returns list of CRM records."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+    )
+
+    assert isinstance(result, dict)
+    assert "records" in result
+    assert isinstance(result["records"], list)
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_by_record_type() -> None:
+    """Test crm_read filters by record_type (leads, contacts, accounts)."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    # Test leads
+    leads_result = await agent._crm_read(record_type="leads")
+    assert leads_result["record_type"] == "leads"
+
+    # Test contacts
+    contacts_result = await agent._crm_read(record_type="contacts")
+    assert contacts_result["record_type"] == "contacts"
+
+
+@pytest.mark.asyncio
+async def test_crm_read_includes_record_fields() -> None:
+    """Test crm_read records include expected fields."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(record_type="leads")
+
+    if len(result["records"]) > 0:
+        record = result["records"][0]
+        assert "id" in record
+        assert "name" in record
+
+
+@pytest.mark.asyncio
+async def test_crm_read_filters_by_id() -> None:
+    """Test crm_read can filter by record_id."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._crm_read(
+        record_type="leads",
+        record_id="lead-123",
+    )
+
+    assert result["record_type"] == "leads"
+    assert result.get("record_id") == "lead-123"

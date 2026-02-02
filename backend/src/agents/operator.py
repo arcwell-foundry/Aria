@@ -227,17 +227,104 @@ class OperatorAgent(BaseAgent):
             "event_id": event_id,
         }
 
-    async def _crm_read(self, **kwargs: Any) -> Any:
-        """Read data from CRM system.
+    async def _crm_read(
+        self,
+        record_type: str,
+        record_id: str | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Read CRM records (leads, contacts, accounts).
+
+        This is a mock implementation for CRM read operations.
+        In production, this would integrate with Salesforce, HubSpot, etc.
 
         Args:
-            **kwargs: CRM read parameters.
+            record_type: Type of record - "leads", "contacts", "accounts".
+            record_id: Optional specific record ID to fetch.
+            filters: Optional filters for querying records.
 
         Returns:
-            CRM data.
+            Dictionary with list of CRM records.
         """
-        # Placeholder implementation - will be implemented in Task 5
-        pass
+        logger.info(
+            f"Reading CRM records: {record_type}",
+            extra={"user_id": self.user_id, "record_id": record_id},
+        )
+
+        # Mock CRM data by type
+        mock_data: dict[str, list[dict[str, Any]]] = {
+            "leads": [
+                {
+                    "id": "lead-001",
+                    "name": "Acme Corp",
+                    "status": "qualified",
+                    "value": 50000,
+                    "source": "website",
+                    "created_date": "2024-01-15",
+                },
+                {
+                    "id": "lead-002",
+                    "name": "TechStart Inc",
+                    "status": "prospecting",
+                    "value": 75000,
+                    "source": "referral",
+                    "created_date": "2024-01-20",
+                },
+            ],
+            "contacts": [
+                {
+                    "id": "contact-001",
+                    "name": "John Smith",
+                    "email": "john@example.com",
+                    "phone": "+1-555-0101",
+                    "company": "Acme Corp",
+                    "title": "CEO",
+                },
+                {
+                    "id": "contact-002",
+                    "name": "Jane Doe",
+                    "email": "jane@techstart.com",
+                    "phone": "+1-555-0102",
+                    "company": "TechStart Inc",
+                    "title": "VP Sales",
+                },
+            ],
+            "accounts": [
+                {
+                    "id": "account-001",
+                    "name": "Acme Corp",
+                    "industry": "Technology",
+                    "employees": 250,
+                    "revenue": 5000000,
+                },
+                {
+                    "id": "account-002",
+                    "name": "TechStart Inc",
+                    "industry": "Software",
+                    "employees": 50,
+                    "revenue": 2000000,
+                },
+            ],
+        }
+
+        # Get records for type
+        records = mock_data.get(record_type, [])
+
+        # Filter by record_id if specified
+        if record_id:
+            records = [r for r in records if r.get("id") == record_id]
+
+        # Apply additional filters if provided
+        if filters:
+            for key, value in filters.items():
+                records = [r for r in records if r.get(key) == value]
+
+        return {
+            "record_type": record_type,
+            "record_id": record_id,
+            "records": records,
+            "total_count": len(records),
+        }
 
     async def _crm_write(self, **kwargs: Any) -> Any:
         """Write data to CRM system.
