@@ -159,13 +159,44 @@ class HunterAgent(BaseAgent):
         # Return results up to the limit
         return mock_companies[:limit]
 
-    async def _enrich_company(self) -> dict[str, Any]:
+    async def _enrich_company(
+        self,
+        company: dict[str, Any],
+    ) -> dict[str, Any]:
         """Enrich company data with additional information.
 
+        Args:
+            company: Company data dictionary to enrich.
+
         Returns:
-            Enriched company data.
+            Enriched company data with additional fields.
         """
-        return {}
+        # Check cache using domain or name as key
+        cache_key = company.get("domain") or company.get("name", "")
+        if cache_key in self._company_cache:
+            cached = self._company_cache[cache_key]
+            # Type narrowing: cached value is always a dict when stored
+            assert isinstance(cached, dict)
+            return cached
+
+        logger.info(
+            f"Enriching company data for '{company.get('name', 'Unknown')}'",
+        )
+
+        # Copy original company data
+        enriched = company.copy()
+
+        # Add enrichment data
+        enriched["technologies"] = ["Salesforce", "HubSpot", "Marketo"]
+        enriched["linkedin_url"] = f"https://www.linkedin.com/company/{cache_key.replace('.', '')}"
+        enriched["funding_stage"] = "Series C"
+        enriched["founded_year"] = 2015
+        enriched["revenue"] = "$10M - $50M"
+
+        # Store in cache
+        self._company_cache[cache_key] = enriched
+
+        return enriched
 
     async def _find_contacts(self) -> list[Any]:
         """Find contacts at a target company.

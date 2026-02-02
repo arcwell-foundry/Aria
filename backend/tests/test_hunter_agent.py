@@ -227,3 +227,114 @@ async def test_search_companies_logs_searches(caplog: Any) -> None:
 
     assert "Searching for companies" in caplog.text
     assert "biotechnology" in caplog.text
+
+
+# Task 4: enrich_company tool tests
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_adds_technologies() -> None:
+    """Test enrich_company adds technologies list."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Company",
+        "domain": "testcompany.com",
+        "industry": "Biotechnology",
+    }
+
+    result = await agent._enrich_company(company)
+
+    assert "technologies" in result
+    assert isinstance(result["technologies"], list)
+    assert len(result["technologies"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_preserves_original_fields() -> None:
+    """Test enrich_company preserves all original company fields."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Company",
+        "domain": "testcompany.com",
+        "description": "A test company",
+        "industry": "Biotechnology",
+        "size": "Mid-market",
+    }
+
+    result = await agent._enrich_company(company)
+
+    assert result["name"] == "Test Company"
+    assert result["domain"] == "testcompany.com"
+    assert result["description"] == "A test company"
+    assert result["industry"] == "Biotechnology"
+    assert result["size"] == "Mid-market"
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_adds_linkedin_url() -> None:
+    """Test enrich_company adds linkedin_url field."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Company",
+        "domain": "testcompany.com",
+    }
+
+    result = await agent._enrich_company(company)
+
+    assert "linkedin_url" in result
+    assert isinstance(result["linkedin_url"], str)
+    assert len(result["linkedin_url"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_caches_results() -> None:
+    """Test enrich_company caches results and returns same object on cache hit."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Company",
+        "domain": "testcompany.com",
+    }
+
+    result1 = await agent._enrich_company(company)
+    result2 = await agent._enrich_company(company)
+
+    # Should return the exact same object from cache
+    assert result1 is result2
+    # Verify cache was populated
+    assert "testcompany.com" in agent._company_cache
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_adds_funding_stage() -> None:
+    """Test enrich_company adds funding_stage field."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    company = {
+        "name": "Test Company",
+        "domain": "testcompany.com",
+    }
+
+    result = await agent._enrich_company(company)
+
+    assert "funding_stage" in result
+    assert isinstance(result["funding_stage"], str)
+    assert len(result["funding_stage"]) > 0

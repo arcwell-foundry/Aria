@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def test_analyst_agent_has_name_and_description() -> None:
     """Test AnalystAgent has correct name and description class attributes."""
@@ -15,16 +13,16 @@ def test_analyst_agent_has_name_and_description() -> None:
 
 def test_analyst_agent_extends_base_agent() -> None:
     """Test AnalystAgent extends BaseAgent."""
-    from src.agents.base import BaseAgent
     from src.agents.analyst import AnalystAgent
+    from src.agents.base import BaseAgent
 
     assert issubclass(AnalystAgent, BaseAgent)
 
 
 def test_analyst_agent_initializes_with_llm_and_user() -> None:
     """Test AnalystAgent initializes with llm_client, user_id, and _research_cache."""
-    from src.agents.base import AgentStatus
     from src.agents.analyst import AnalystAgent
+    from src.agents.base import AgentStatus
 
     mock_llm = MagicMock()
     agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
