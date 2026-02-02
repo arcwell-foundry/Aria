@@ -396,3 +396,33 @@ async def test_query_by_time_range_respects_as_of_for_recorded_at() -> None:
 
         # Episode should be filtered out (recorded after as_of)
         assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_query_by_event_type_respects_as_of() -> None:
+    """Test query_by_event_type filters episodes recorded after as_of date."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    past = now - timedelta(days=30)
+
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Event Type: meeting\nContent: Team sync\nOccurred At: {past.isoformat()}\nRecorded At: {now.isoformat()}"
+    mock_edge.created_at = past
+    mock_edge.uuid = "episode-456"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        # Query as of 7 days ago - should NOT include episode recorded today
+        as_of_date = now - timedelta(days=7)
+        results = await memory.query_by_event_type(
+            user_id="user-456",
+            event_type="meeting",
+            as_of=as_of_date,
+        )
+
+        assert len(results) == 0

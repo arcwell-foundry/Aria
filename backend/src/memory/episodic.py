@@ -416,7 +416,11 @@ class EpisodicMemory:
             raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_event_type(
-        self, user_id: str, event_type: str, limit: int = 50
+        self,
+        user_id: str,
+        event_type: str,
+        limit: int = 50,
+        as_of: datetime | None = None,
     ) -> list[Episode]:
         """Query episodes by event type.
 
@@ -424,6 +428,8 @@ class EpisodicMemory:
             user_id: The user ID to query episodes for.
             event_type: The type of event (e.g., 'meeting', 'call', 'email').
             limit: Maximum number of episodes to return.
+            as_of: Optional point-in-time filter. If provided, only episodes
+                   recorded on or before this datetime are included.
 
         Returns:
             List of Episode instances matching the event type.
@@ -438,6 +444,14 @@ class EpisodicMemory:
 
             episodes = []
             for edge in results[:limit]:
+                # Apply as_of filter if provided
+                if as_of is not None:
+                    fact = getattr(edge, "fact", "")
+                    recorded_at = self._extract_recorded_at_from_fact(fact)
+                    if recorded_at is not None and recorded_at > as_of:
+                        # Skip episodes recorded after the as_of date
+                        continue
+
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode and episode.event_type == event_type:
                     episodes.append(episode)
