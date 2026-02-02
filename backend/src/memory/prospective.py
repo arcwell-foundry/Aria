@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,6 +201,16 @@ class ProspectiveMemory:
                     "task": task.task,
                     "trigger_type": task.trigger_type.value,
                 },
+            )
+
+            # Audit log the creation
+            await log_memory_operation(
+                user_id=task.user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.PROSPECTIVE,
+                memory_id=task_id,
+                metadata={"task": task.task, "trigger_type": task.trigger_type.value},
+                suppress_errors=True,
             )
 
             return task_id

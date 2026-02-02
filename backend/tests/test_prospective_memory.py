@@ -1049,3 +1049,52 @@ def test_prospective_memory_exported_from_memory_module() -> None:
     assert TaskStatus is not None
     assert TaskPriority is not None
     assert TriggerType is not None
+
+
+@pytest.mark.asyncio
+async def test_create_task_logs_audit_entry() -> None:
+    """Test that create_task logs an audit entry."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.memory.audit import MemoryOperation, MemoryType
+    from src.memory.prospective import (
+        ProspectiveMemory,
+        ProspectiveTask,
+        TaskPriority,
+        TaskStatus,
+        TriggerType,
+    )
+
+    now = datetime.now(UTC)
+    task = ProspectiveTask(
+        id="task-audit-test",
+        user_id="user-456",
+        task="Follow up",
+        description="Follow up with client",
+        trigger_type=TriggerType.TIME,
+        trigger_config={"due_at": now.isoformat()},
+        status=TaskStatus.PENDING,
+        priority=TaskPriority.MEDIUM,
+        related_goal_id=None,
+        related_lead_id=None,
+        completed_at=None,
+        created_at=now,
+    )
+
+    memory = ProspectiveMemory()
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = [{"id": "task-audit-test"}]
+    mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+    with patch.object(memory, "_get_supabase_client", return_value=mock_client):
+        with patch("src.memory.prospective.log_memory_operation", new_callable=AsyncMock) as mock_log:
+            mock_log.return_value = "audit-task-123"
+
+            await memory.create_task(task)
+
+            mock_log.assert_called_once()
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["operation"] == MemoryOperation.CREATE
+            assert call_kwargs["memory_type"] == MemoryType.PROSPECTIVE
