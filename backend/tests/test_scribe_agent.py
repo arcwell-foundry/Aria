@@ -769,3 +769,184 @@ async def test_apply_template_logs_usage(caplog: Any) -> None:
         )
 
     assert "template" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_agent_result() -> None:
+    """Test execute returns AgentResult with draft data."""
+    from src.agents.base import AgentResult
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "John Doe"},
+        "context": "Following up on meeting",
+        "goal": "Schedule next steps",
+        "tone": "formal",
+    }
+
+    result = await agent.execute(task)
+
+    assert isinstance(result, AgentResult)
+
+
+@pytest.mark.asyncio
+async def test_execute_email_returns_email_draft() -> None:
+    """Test execute with email type returns email draft."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Jane Smith", "company": "TechCorp"},
+        "context": "Product demo follow-up",
+        "goal": "Get feedback and schedule next call",
+        "tone": "friendly",
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    assert data["draft_type"] == "email"
+    assert "content" in data
+    assert "subject" in data["content"]
+    assert "body" in data["content"]
+
+
+@pytest.mark.asyncio
+async def test_execute_document_returns_document_draft() -> None:
+    """Test execute with document type returns document draft."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "document",
+        "context": "Q4 sales performance data",
+        "goal": "Executive summary for leadership",
+        "tone": "formal",
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    assert data["draft_type"] == "document"
+    assert "content" in data
+    assert "title" in data["content"]
+    assert "body" in data["content"]
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_template_when_specified() -> None:
+    """Test execute uses template when template_name is provided."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Sarah"},
+        "context": "the product demo",
+        "goal": "Follow up",
+        "template_name": "follow_up_email",
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    assert data.get("template_used") == "follow_up_email"
+
+
+@pytest.mark.asyncio
+async def test_execute_applies_style_when_provided() -> None:
+    """Test execute applies Digital Twin style when style is provided."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Mike"},
+        "context": "Check-in",
+        "goal": "Weekly update",
+        "tone": "friendly",
+        "style": {"signature": "Cheers, Alex"},
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    assert data.get("style_applied") is not None
+    # Signature should be in the content
+    assert "Cheers, Alex" in data["content"]["body"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sets_ready_for_review() -> None:
+    """Test execute sets ready_for_review flag."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Test"},
+        "context": "Test",
+        "goal": "Test",
+    }
+
+    result = await agent.execute(task)
+    data = result.data
+
+    assert data["ready_for_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_handles_message_type() -> None:
+    """Test execute handles message communication type."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "message",
+        "recipient": {"name": "Team"},
+        "context": "Quick update",
+        "goal": "Inform team about deadline",
+        "tone": "urgent",
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    # Messages are treated like short emails
+    assert result.data["draft_type"] == "email"
+
+
+@pytest.mark.asyncio
+async def test_execute_success_flag() -> None:
+    """Test execute sets success flag correctly."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "context": "Test",
+        "goal": "Test",
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True

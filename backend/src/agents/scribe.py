@@ -123,16 +123,142 @@ class ScribeAgent(BaseAgent):
 
         return True
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
-        """Execute the scribe agent's primary task.
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
+        """Execute the draft task.
+
+        Orchestrates the full drafting workflow:
+        1. Determine communication type
+        2. Apply template if specified
+        3. Draft the content
+        4. Personalize with Digital Twin style
+        5. Return draft ready for review
 
         Args:
-            task: Task specification with parameters.
+            task: Task specification with:
+                - communication_type: "email", "document", "message"
+                - recipient: Optional recipient info
+                - context: Background context
+                - goal: What to achieve
+                - tone: "formal", "friendly", "urgent"
+                - template_name: Optional template to use
+                - style: Optional Digital Twin style
 
         Returns:
-            AgentResult with success status and output data.
+            AgentResult with drafted content.
         """
-        return AgentResult(success=True, data={})
+        comm_type = task["communication_type"]
+        recipient = task.get("recipient")
+        context = task.get("context", "")
+        goal = task.get("goal", "")
+        tone = task.get("tone", "formal")
+        template_name = task.get("template_name")
+        style = task.get("style")
+
+        logger.info(
+            f"Starting draft for {comm_type}",
+            extra={
+                "communication_type": comm_type,
+                "tone": tone,
+                "has_template": template_name is not None,
+                "has_style": style is not None,
+            },
+        )
+
+        template_used = None
+        style_applied = None
+
+        try:
+            # Handle email or message types
+            if comm_type in ("email", "message"):
+                # Use template if specified
+                if template_name:
+                    variables = {
+                        "name": recipient.get("name", "there") if recipient else "there",
+                        "meeting_topic": context,
+                        "purpose": goal,
+                        "reason": context,
+                    }
+                    content_body = await self._apply_template(template_name, variables)
+
+                    if content_body:
+                        template_used = template_name
+                        content = {
+                            "subject": goal[:60] if goal else "Follow-up",
+                            "body": content_body,
+                            "recipient_name": recipient.get("name") if recipient else None,
+                            "tone": tone,
+                            "word_count": len(content_body.split()),
+                            "has_call_to_action": True,
+                        }
+                    else:
+                        # Fallback to regular draft
+                        content = await self._draft_email(
+                            recipient=recipient,
+                            context=context,
+                            goal=goal,
+                            tone=tone,
+                        )
+                else:
+                    content = await self._draft_email(
+                        recipient=recipient,
+                        context=context,
+                        goal=goal,
+                        tone=tone,
+                    )
+
+                draft_type = "email"
+
+            # Handle document type
+            elif comm_type == "document":
+                document_type = task.get("document_type", "brief")
+                content = await self._draft_document(
+                    document_type=document_type,
+                    context=context,
+                    goal=goal,
+                    tone=tone,
+                )
+                draft_type = "document"
+
+            else:
+                # Fallback to email
+                content = await self._draft_email(
+                    recipient=recipient,
+                    context=context,
+                    goal=goal,
+                    tone=tone,
+                )
+                draft_type = "email"
+
+            # Apply personalization if style provided
+            if style and "body" in content:
+                content["body"] = await self._personalize(content["body"], style)
+                style_applied = "custom"
+
+            result_data = {
+                "draft_type": draft_type,
+                "content": content,
+                "style_applied": style_applied,
+                "template_used": template_used,
+                "ready_for_review": True,
+            }
+
+            logger.info(
+                f"Draft complete: {draft_type}",
+                extra={
+                    "draft_type": draft_type,
+                    "word_count": content.get("word_count", 0),
+                },
+            )
+
+            return AgentResult(success=True, data=result_data)
+
+        except Exception as e:
+            logger.error(f"Draft failed: {e}", extra={"error": str(e)})
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+            )
 
     async def _draft_email(
         self,
