@@ -10,6 +10,7 @@ This module implements ARIA's cognitive memory architecture:
 - Digital Twin: User writing style fingerprinting (Graphiti)
 """
 
+from src.memory.confidence import ConfidenceScorer
 from src.memory.digital_twin import (
     DigitalTwin,
     TextStyleAnalyzer,
@@ -32,6 +33,8 @@ from src.memory.working import (
 )
 
 __all__ = [
+    # Confidence Scoring
+    "ConfidenceScorer",
     # Working Memory
     "WorkingMemory",
     "WorkingMemoryManager",

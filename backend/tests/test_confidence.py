@@ -304,3 +304,12 @@ def test_meets_threshold_uses_default_threshold() -> None:
 
     # At floor of 0.4, equal to threshold, should pass
     assert result is True
+
+
+def test_confidence_scorer_exportable_from_memory_module() -> None:
+    """Test ConfidenceScorer can be imported from memory module."""
+    from src.memory import ConfidenceScorer
+
+    scorer = ConfidenceScorer()
+    assert scorer is not None
+    assert hasattr(scorer, "get_effective_confidence")
