@@ -348,8 +348,31 @@ class EpisodicMemory:
             logger.exception("Failed to get episode", extra={"episode_id": episode_id})
             raise EpisodicMemoryError(f"Failed to get episode: {e}") from e
 
+    def _extract_recorded_at_from_fact(self, fact: str) -> datetime | None:
+        """Extract recorded_at timestamp from a fact string.
+
+        Args:
+            fact: The fact string containing episode metadata.
+
+        Returns:
+            The recorded_at datetime if found, None otherwise.
+        """
+        for line in fact.split("\n"):
+            if line.startswith("Recorded At:"):
+                recorded_at_str = line.replace("Recorded At:", "").strip()
+                try:
+                    return datetime.fromisoformat(recorded_at_str)
+                except ValueError:
+                    return None
+        return None
+
     async def query_by_time_range(
-        self, user_id: str, start: datetime, end: datetime, limit: int = 50
+        self,
+        user_id: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 50,
+        as_of: datetime | None = None,
     ) -> list[Episode]:
         """Query episodes within a time range.
 
@@ -358,6 +381,8 @@ class EpisodicMemory:
             start: Start of the time range (inclusive).
             end: End of the time range (inclusive).
             limit: Maximum number of episodes to return.
+            as_of: Optional point-in-time filter. If provided, only episodes
+                   recorded on or before this datetime are included.
 
         Returns:
             List of Episode instances within the time range.
@@ -372,6 +397,14 @@ class EpisodicMemory:
 
             episodes = []
             for edge in results[:limit]:
+                # Apply as_of filter if provided
+                if as_of is not None:
+                    fact = getattr(edge, "fact", "")
+                    recorded_at = self._extract_recorded_at_from_fact(fact)
+                    if recorded_at is not None and recorded_at > as_of:
+                        # Skip episodes recorded after the as_of date
+                        continue
+
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode:
                     episodes.append(episode)

@@ -363,3 +363,36 @@ async def test_store_episode_logs_audit_entry() -> None:
             assert call_kwargs["operation"] == MemoryOperation.CREATE
             assert call_kwargs["memory_type"] == MemoryType.EPISODIC
             assert call_kwargs["suppress_errors"] is True
+
+
+@pytest.mark.asyncio
+async def test_query_by_time_range_respects_as_of_for_recorded_at() -> None:
+    """Test query_by_time_range filters episodes recorded after as_of date."""
+    memory = EpisodicMemory()
+    mock_client = MagicMock()
+
+    now = datetime.now(UTC)
+    past = now - timedelta(days=30)
+
+    # Episode occurred in the past but was recorded "today"
+    mock_edge = MagicMock()
+    mock_edge.fact = f"Event Type: meeting\nContent: Q1 planning\nOccurred At: {past.isoformat()}\nRecorded At: {now.isoformat()}"
+    mock_edge.created_at = past
+    mock_edge.uuid = "episode-123"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(memory, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        # Query as of 7 days ago - should NOT include episode recorded today
+        as_of_date = now - timedelta(days=7)
+        results = await memory.query_by_time_range(
+            user_id="user-456",
+            start=past - timedelta(days=5),
+            end=past + timedelta(days=5),
+            as_of=as_of_date,
+        )
+
+        # Episode should be filtered out (recorded after as_of)
+        assert len(results) == 0
