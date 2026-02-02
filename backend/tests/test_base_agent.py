@@ -251,3 +251,81 @@ def test_base_agent_format_output_can_be_overridden() -> None:
 
     assert result["formatted"] is True
     assert result["data"] == {"raw": "data"}
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_executes_registered_tool() -> None:
+    """Test _call_tool executes a registered tool."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {
+                "greet": self._greet,
+            }
+
+        async def _greet(self, name: str) -> str:
+            return f"Hello, {name}!"
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._call_tool("greet", name="World")
+
+    assert result == "Hello, World!"
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_raises_for_unknown_tool() -> None:
+    """Test _call_tool raises ValueError for unknown tool."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {"known_tool": lambda: "result"}
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    with pytest.raises(ValueError, match="Unknown tool: unknown_tool"):
+        await agent._call_tool("unknown_tool")
+
+
+@pytest.mark.asyncio
+async def test_base_agent_call_tool_handles_sync_tools() -> None:
+    """Test _call_tool can handle synchronous tool functions."""
+    from src.agents.base import AgentResult, BaseAgent
+
+    class TestAgent(BaseAgent):
+        name = "Test Agent"
+        description = "A test agent"
+
+        def _register_tools(self) -> dict[str, Any]:
+            return {
+                "sync_tool": self._sync_tool,
+            }
+
+        def _sync_tool(self, value: int) -> int:
+            return value * 2
+
+        async def execute(self, task: dict[str, Any]) -> AgentResult:
+            return AgentResult(success=True, data={})
+
+    mock_llm = MagicMock()
+    agent = TestAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._call_tool("sync_tool", value=21)
+
+    assert result == 42

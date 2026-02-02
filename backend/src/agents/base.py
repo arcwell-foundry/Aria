@@ -3,6 +3,7 @@
 Provides the abstract base class and common types for all specialized agents.
 """
 
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -110,6 +111,30 @@ class BaseAgent(ABC):
             Formatted output data.
         """
         return data
+
+    async def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
+        """Call a registered tool with error handling.
+
+        Args:
+            tool_name: Name of the tool to call.
+            **kwargs: Arguments to pass to the tool.
+
+        Returns:
+            Tool execution result.
+
+        Raises:
+            ValueError: If tool_name is not registered.
+        """
+        if tool_name not in self.tools:
+            raise ValueError(f"Unknown tool: {tool_name}")
+
+        tool = self.tools[tool_name]
+
+        # Handle both sync and async tools
+        if inspect.iscoroutinefunction(tool):
+            return await tool(**kwargs)
+        else:
+            return tool(**kwargs)
 
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
