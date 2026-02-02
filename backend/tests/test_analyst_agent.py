@@ -32,3 +32,19 @@ def test_analyst_agent_initializes_with_llm_and_user() -> None:
     assert agent.status == AgentStatus.IDLE
     assert hasattr(agent, "_research_cache")
     assert agent._research_cache == {}
+
+
+def test_analyst_agent_registers_four_tools() -> None:
+    """Test AnalystAgent._register_tools returns dict with 4 tools."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    tools = agent.tools
+
+    assert len(tools) == 4
+    assert "pubmed_search" in tools
+    assert "clinical_trials_search" in tools
+    assert "fda_drug_search" in tools
+    assert "chembl_search" in tools
