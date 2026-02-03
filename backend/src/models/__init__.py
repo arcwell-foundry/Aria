@@ -20,11 +20,19 @@ from src.models.meeting_brief import (
     MeetingBriefResponse,
     UpcomingMeetingResponse,
 )
+from src.models.preferences import (
+    DefaultTone,
+    MeetingBriefLeadHours,
+    PreferenceCreate,
+    PreferenceResponse,
+    PreferenceUpdate,
+)
 
 __all__ = [
     "AttendeeProfileResponse",
     "BriefStatus",
     "CompanyResearchResponse",
+    "DefaultTone",
     "EmailDraftCreate",
     "EmailDraftListResponse",
     "EmailDraftPurpose",
@@ -36,6 +44,10 @@ __all__ = [
     "EmailSendResponse",
     "GenerateBriefRequest",
     "MeetingBriefContent",
+    "MeetingBriefLeadHours",
     "MeetingBriefResponse",
+    "PreferenceCreate",
+    "PreferenceResponse",
+    "PreferenceUpdate",
     "UpcomingMeetingResponse",
 ]
