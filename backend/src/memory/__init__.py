@@ -33,6 +33,7 @@ from src.memory.digital_twin import (
 )
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.procedural import ProceduralMemory, Workflow
+from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.prospective import (
     ProspectiveMemory,
     ProspectiveTask,
@@ -91,4 +92,7 @@ __all__ = [
     # Conversation Episodes
     "ConversationEpisode",
     "ConversationService",
+    # Conversation Priming
+    "ConversationContext",
+    "ConversationPrimingService",
 ]

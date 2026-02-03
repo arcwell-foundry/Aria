@@ -20,8 +20,10 @@ from src.core.exceptions import (
     ProspectiveMemoryError,
     SemanticMemoryError,
 )
+from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryAuditLogger, MemoryOperation, MemoryType
+from src.memory.conversation import ConversationService
 from src.memory.corporate import (
     CORPORATE_SOURCE_CONFIDENCE,
     CorporateFact,
@@ -30,6 +32,7 @@ from src.memory.corporate import (
 )
 from src.memory.digital_twin import DigitalTwin
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.priming import ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
     ProspectiveMemory,
@@ -38,6 +41,7 @@ from src.memory.prospective import (
     TaskStatus,
     TriggerType,
 )
+from src.memory.salience import SalienceService
 from src.memory.semantic import SOURCE_CONFIDENCE, FactSource, SemanticFact, SemanticMemory
 
 logger = logging.getLogger(__name__)
@@ -291,6 +295,21 @@ class InvalidateCorporateFactRequest(BaseModel):
     """Request body for invalidating a corporate fact."""
 
     reason: str = Field(..., min_length=1, description="Reason for invalidation")
+
+
+class PrimeConversationResponse(BaseModel):
+    """Response for conversation priming endpoint."""
+
+    recent_context: list[dict[str, Any]] = Field(
+        default_factory=list, description="Recent conversation episodes"
+    )
+    open_threads: list[dict[str, Any]] = Field(
+        default_factory=list, description="Unresolved topics from past conversations"
+    )
+    salient_facts: list[dict[str, Any]] = Field(
+        default_factory=list, description="High-salience facts about entities"
+    )
+    formatted_context: str = Field(..., description="Pre-formatted context for LLM consumption")
 
 
 class MemoryQueryService:
@@ -1532,3 +1551,63 @@ async def search_corporate_facts(
         page_size=page_size,
         has_more=has_more,
     )
+
+
+# Conversation Priming Endpoints
+
+
+@router.get("/prime", response_model=PrimeConversationResponse)
+async def prime_conversation(
+    current_user: CurrentUser,
+    initial_message: str | None = Query(None, description="Initial message for entity lookup"),
+) -> PrimeConversationResponse:
+    """Get context for starting a new conversation.
+
+    Gathers recent episodes, open threads, and high-salience facts
+    to prime ARIA with relevant context from past interactions.
+
+    Args:
+        current_user: The authenticated user.
+        initial_message: Optional first message to find relevant entities.
+
+    Returns:
+        PrimeConversationResponse with context for LLM.
+    """
+    try:
+        # Initialize services
+        db_client = SupabaseClient.get_client()
+        llm_client = LLMClient()
+
+        conversation_service = ConversationService(
+            db_client=db_client,
+            llm_client=llm_client,
+        )
+        salience_service = SalienceService(db_client=db_client)
+
+        priming_service = ConversationPrimingService(
+            conversation_service=conversation_service,
+            salience_service=salience_service,
+            db_client=db_client,
+        )
+
+        context = await priming_service.prime_conversation(
+            user_id=current_user.id,
+            initial_message=initial_message,
+        )
+
+        return PrimeConversationResponse(
+            recent_context=context.recent_episodes,
+            open_threads=context.open_threads,
+            salient_facts=context.salient_facts,
+            formatted_context=context.formatted_context,
+        )
+
+    except Exception as e:
+        logger.error(
+            "Failed to prime conversation",
+            extra={"user_id": current_user.id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to gather conversation context",
+        ) from None
