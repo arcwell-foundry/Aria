@@ -112,21 +112,23 @@ class MeetingBriefService:
 
     async def update_brief_status(
         self,
+        user_id: str,
         brief_id: str,
         status: str,
         brief_content: dict[str, Any] | None = None,
         error_message: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """Update brief status and optionally content.
 
         Args:
+            user_id: The user's ID.
             brief_id: The brief's ID.
             status: New status (pending/generating/completed/failed).
             brief_content: Optional brief content to set.
             error_message: Optional error message if failed.
 
         Returns:
-            Updated brief dict.
+            Updated brief dict, or None if not found.
         """
         update_data: dict[str, Any] = {"status": status}
 
@@ -137,11 +139,24 @@ class MeetingBriefService:
         if error_message is not None:
             update_data["error_message"] = error_message
 
-        result = self._db.table("meeting_briefs").update(update_data).eq("id", brief_id).execute()
+        result = (
+            self._db.table("meeting_briefs")
+            .update(update_data)
+            .eq("id", brief_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not result.data:
+            logger.warning(
+                "Brief not found for update",
+                extra={"brief_id": brief_id, "user_id": user_id},
+            )
+            return None
 
         logger.info(
             "Updated meeting brief status",
-            extra={"brief_id": brief_id, "status": status},
+            extra={"brief_id": brief_id, "status": status, "user_id": user_id},
         )
 
         return cast(dict[str, Any], result.data[0])

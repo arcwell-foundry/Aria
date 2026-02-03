@@ -179,20 +179,26 @@ async def test_update_brief_status_updates_status() -> None:
     with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
         mock_brief = {
             "id": "brief-123",
+            "user_id": "user-123",
             "status": "generating",
         }
 
         mock_db = MagicMock()
-        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = (
-            MagicMock(data=[mock_brief])
+        mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[mock_brief]
         )
         mock_db_class.get_client.return_value = mock_db
 
         from src.services.meeting_brief import MeetingBriefService
 
         service = MeetingBriefService()
-        result = await service.update_brief_status(brief_id="brief-123", status="generating")
+        result = await service.update_brief_status(
+            user_id="user-123",
+            brief_id="brief-123",
+            status="generating",
+        )
 
+        assert result is not None
         assert result["status"] == "generating"
 
 
@@ -202,6 +208,7 @@ async def test_update_brief_status_with_content() -> None:
     with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
         mock_brief = {
             "id": "brief-123",
+            "user_id": "user-123",
             "status": "completed",
             "brief_content": {"summary": "Test content"},
             "generated_at": "2026-02-03T14:00:00Z",
@@ -209,7 +216,9 @@ async def test_update_brief_status_with_content() -> None:
 
         mock_db = MagicMock()
         mock_update = MagicMock()
-        mock_update.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_brief])
+        mock_update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[mock_brief]
+        )
         mock_db.table.return_value.update = mock_update
         mock_db_class.get_client.return_value = mock_db
 
@@ -217,11 +226,13 @@ async def test_update_brief_status_with_content() -> None:
 
         service = MeetingBriefService()
         result = await service.update_brief_status(
+            user_id="user-123",
             brief_id="brief-123",
             status="completed",
             brief_content={"summary": "Test content"},
         )
 
+        assert result is not None
         assert result["status"] == "completed"
         assert result["brief_content"] == {"summary": "Test content"}
 
@@ -238,13 +249,16 @@ async def test_update_brief_status_with_error_message() -> None:
     with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
         mock_brief = {
             "id": "brief-123",
+            "user_id": "user-123",
             "status": "failed",
             "error_message": "Research failed: API timeout",
         }
 
         mock_db = MagicMock()
         mock_update = MagicMock()
-        mock_update.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_brief])
+        mock_update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[mock_brief]
+        )
         mock_db.table.return_value.update = mock_update
         mock_db_class.get_client.return_value = mock_db
 
@@ -252,13 +266,37 @@ async def test_update_brief_status_with_error_message() -> None:
 
         service = MeetingBriefService()
         result = await service.update_brief_status(
+            user_id="user-123",
             brief_id="brief-123",
             status="failed",
             error_message="Research failed: API timeout",
         )
 
+        assert result is not None
         assert result["status"] == "failed"
         assert result["error_message"] == "Research failed: API timeout"
+
+
+@pytest.mark.asyncio
+async def test_update_brief_status_returns_none_when_not_found() -> None:
+    """Test update_brief_status returns None when brief doesn't exist."""
+    with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
+        mock_db = MagicMock()
+        mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.meeting_brief import MeetingBriefService
+
+        service = MeetingBriefService()
+        result = await service.update_brief_status(
+            user_id="user-123",
+            brief_id="nonexistent-brief",
+            status="generating",
+        )
+
+        assert result is None
 
 
 @pytest.mark.asyncio
