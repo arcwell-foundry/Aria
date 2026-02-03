@@ -2,7 +2,7 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from src.db.supabase import SupabaseClient
 from src.integrations.domain import (
@@ -37,7 +37,7 @@ class IntegrationService:
                 client.table("user_integrations").select("*").eq("user_id", user_id).execute()
             )
 
-            return response.data if response.data else []
+            return cast(list[dict[str, Any]], response.data) if response.data else []
 
         except Exception:
             logger.exception("Failed to fetch user integrations")
@@ -59,7 +59,7 @@ class IntegrationService:
         """
         try:
             client = SupabaseClient.get_client()
-            response = (
+            result = (
                 client.table("user_integrations")
                 .select("*")
                 .eq("user_id", user_id)
@@ -68,7 +68,9 @@ class IntegrationService:
                 .execute()
             )
 
-            return response.data
+            if result is None or result.data is None:
+                return None
+            return cast(dict[str, Any], result.data)
 
         except Exception:
             logger.exception("Failed to fetch integration")
@@ -112,7 +114,7 @@ class IntegrationService:
             response = client.table("user_integrations").insert(data).execute()
 
             if response.data and len(response.data) > 0:
-                return response.data[0]
+                return cast(dict[str, Any], response.data[0])
 
             raise Exception("Failed to create integration")
 
@@ -144,7 +146,7 @@ class IntegrationService:
             )
 
             if response.data and len(response.data) > 0:
-                return response.data[0]
+                return cast(dict[str, Any], response.data[0])
 
             raise Exception("Integration not found")
 

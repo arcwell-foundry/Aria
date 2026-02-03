@@ -7,9 +7,9 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
+from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType, SyncStatus
 from src.integrations.oauth import get_oauth_client
-from src.integrations.service import SyncStatus, get_integration_service
+from src.integrations.service import get_integration_service
 
 logger = logging.getLogger(__name__)
 
