@@ -1,5 +1,6 @@
 """Service for email draft generation and management."""
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -464,12 +465,10 @@ class DraftService:
             raise
         except Exception as e:
             # Try to update draft status to failed
-            try:
+            with contextlib.suppress(Exception):
                 await self.update_draft(
                     user_id, draft_id, {"status": "failed", "error_message": str(e)}
                 )
-            except Exception:
-                pass
             logger.exception("Failed to send email draft")
             raise EmailSendError(str(e), draft_id=draft_id) from e
 
