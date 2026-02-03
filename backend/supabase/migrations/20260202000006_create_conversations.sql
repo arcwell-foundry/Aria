@@ -19,10 +19,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-    -- Ensure one conversation record per conversation_id
-    UNIQUE(id, user_id)
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- =============================================================================
