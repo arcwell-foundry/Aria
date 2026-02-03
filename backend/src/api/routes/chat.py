@@ -46,6 +46,14 @@ class Timing(BaseModel):
     total_ms: float
 
 
+class CognitiveLoadInfo(BaseModel):
+    """Cognitive load information in chat response."""
+
+    level: str
+    score: float
+    recommendation: str
+
+
 class ChatResponse(BaseModel):
     """Response from chat endpoint."""
 
@@ -53,6 +61,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation]
     conversation_id: str
     timing: Timing | None = None
+    cognitive_load: CognitiveLoadInfo | None = None
 
 
 class ConversationListResponse(BaseModel):
@@ -123,6 +132,9 @@ async def chat(
         citations=[Citation(**c) for c in result.get("citations", [])],
         conversation_id=result["conversation_id"],
         timing=Timing(**result["timing"]) if result.get("timing") else None,
+        cognitive_load=CognitiveLoadInfo(**result["cognitive_load"])
+        if result.get("cognitive_load")
+        else None,
     )
 
 

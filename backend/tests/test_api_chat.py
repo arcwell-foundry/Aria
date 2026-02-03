@@ -197,3 +197,44 @@ def test_chat_endpoint_returns_timing(test_client: TestClient) -> None:
     assert data["timing"]["memory_query_ms"] == 45.5
     assert data["timing"]["llm_response_ms"] == 500.2
     assert data["timing"]["total_ms"] == 550.0
+
+
+def test_chat_response_includes_cognitive_load(test_client: TestClient) -> None:
+    """Chat response should include cognitive_load field."""
+    from src.services.chat import ChatService
+
+    mock_result = {
+        "message": "Test response",
+        "citations": [],
+        "conversation_id": "conv-123",
+        "timing": {
+            "memory_query_ms": 10.0,
+            "llm_response_ms": 100.0,
+            "total_ms": 110.0,
+        },
+        "cognitive_load": {
+            "level": "medium",
+            "score": 0.45,
+            "recommendation": "balanced",
+        },
+    }
+
+    with mock_cognitive_load_deps():
+        with patch.object(
+            ChatService,
+            "process_message",
+            new_callable=AsyncMock,
+        ) as mock_process:
+            mock_process.return_value = mock_result
+
+            response = test_client.post(
+                "/api/v1/chat",
+                json={"message": "Hello"},
+            )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "cognitive_load" in data
+    assert data["cognitive_load"]["level"] == "medium"
+    assert data["cognitive_load"]["score"] == 0.45
+    assert data["cognitive_load"]["recommendation"] == "balanced"
