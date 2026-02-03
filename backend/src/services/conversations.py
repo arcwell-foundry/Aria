@@ -13,10 +13,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from supabase import Client
+
+from src.core.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class Conversation:
     created_at: datetime
     updated_at: datetime
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
             "id": self.id,
@@ -48,7 +50,7 @@ class Conversation:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> Conversation:
+    def from_dict(cls, data: dict[str, Any]) -> Conversation:
         """Create Conversation from database record."""
         last_message_at = data.get("last_message_at")
         created_at = data["created_at"]
@@ -83,7 +85,7 @@ class ConversationMessage:
     content: str
     created_at: datetime
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
             "id": self.id,
@@ -94,7 +96,7 @@ class ConversationMessage:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> ConversationMessage:
+    def from_dict(cls, data: dict[str, Any]) -> ConversationMessage:
         """Create ConversationMessage from database record."""
         created_at = data["created_at"]
         if isinstance(created_at, str):
@@ -189,7 +191,7 @@ class ConversationService:
         )
 
         if not conv.data:
-            raise ValueError("Conversation not found")
+            raise NotFoundError(resource="Conversation", resource_id=conversation_id)
 
         # Get messages from working memory (for now)
         # In production, these would be stored in a messages table
@@ -201,7 +203,7 @@ class ConversationService:
             user_id=user_id,
         )
 
-        messages = working_memory.get_messages()
+        messages = working_memory.messages
 
         return [
             ConversationMessage(
@@ -233,18 +235,27 @@ class ConversationService:
         Raises:
             ValueError: If conversation doesn't belong to user.
         """
-        result = (
+        # First update
+        (
             self.db.table("conversations")
             .update({"title": title, "updated_at": datetime.now(UTC).isoformat()})
             .eq("user_id", user_id)
             .eq("id", conversation_id)
+            .execute()
+        )
+
+        # Then fetch the updated record
+        result = (
+            self.db.table("conversations")
             .select("*")
+            .eq("user_id", user_id)
+            .eq("id", conversation_id)
             .single()
             .execute()
         )
 
         if not result.data:
-            raise ValueError("Conversation not found")
+            raise NotFoundError(resource="Conversation", resource_id=conversation_id)
 
         return Conversation.from_dict(result.data)
 
@@ -277,7 +288,7 @@ class ConversationService:
         )
 
         if not conv.data:
-            raise ValueError("Conversation not found")
+            raise NotFoundError(resource="Conversation", resource_id=conversation_id)
 
         # Delete conversation record
         (
