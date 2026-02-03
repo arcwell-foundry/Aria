@@ -277,7 +277,21 @@ async def test_get_signal_data_returns_empty_dict_when_no_signals() -> None:
 @pytest.mark.asyncio
 async def test_get_task_data_returns_empty_dict_when_no_tasks() -> None:
     """Test _get_task_data returns empty structure when no tasks."""
-    with patch("src.services.briefing.SupabaseClient"):
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        # Setup DB mock to return empty results
+        mock_db = MagicMock()
+        mock_table = MagicMock()
+
+        # Both queries return empty data
+        mock_table.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_table.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table.return_value = mock_table
+        mock_db_class.get_client.return_value = mock_db
+
         from src.services.briefing import BriefingService
 
         service = BriefingService()
@@ -347,3 +361,64 @@ async def test_generate_briefing_uses_custom_date_when_provided(
         call_args = mock_upsert.call_args
         data = call_args[0][0] if call_args[0] else call_args[1][0]
         assert data["briefing_date"] == "2026-02-01"
+
+
+@pytest.mark.asyncio
+async def test_get_task_data_returns_overdue_tasks() -> None:
+    """Test _get_task_data returns overdue tasks from prospective_memories."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        overdue_tasks = [
+            {
+                "id": "task-1",
+                "task": "Follow up with Acme Corp",
+                "priority": "high",
+                "trigger_config": {"due_at": "2026-02-01T09:00:00Z"},
+            },
+        ]
+        today_tasks = [
+            {
+                "id": "task-2",
+                "task": "Send proposal",
+                "priority": "medium",
+                "trigger_config": {"due_at": "2026-02-03T17:00:00Z"},
+            },
+        ]
+
+        # Setup DB mock for two separate queries
+        mock_db = MagicMock()
+        mock_table = MagicMock()
+
+        # First call returns overdue, second call returns today
+        mock_table.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=overdue_tasks
+        )
+        mock_table.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=today_tasks
+        )
+        mock_db.table.return_value = mock_table
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_task_data(user_id="test-user-123")
+
+        assert "overdue" in result
+        assert "due_today" in result
+
+        # Verify overdue tasks are populated correctly
+        assert len(result["overdue"]) == 1
+        assert result["overdue"][0]["id"] == "task-1"
+        assert result["overdue"][0]["task"] == "Follow up with Acme Corp"
+        assert result["overdue"][0]["priority"] == "high"
+        assert result["overdue"][0]["due_at"] == "2026-02-01T09:00:00Z"
+
+        # Verify due_today tasks are populated correctly
+        assert len(result["due_today"]) == 1
+        assert result["due_today"][0]["id"] == "task-2"
+        assert result["due_today"][0]["task"] == "Send proposal"
+        assert result["due_today"][0]["priority"] == "medium"
+        assert result["due_today"][0]["due_at"] == "2026-02-03T17:00:00Z"
+
+        # Verify the table was queried
+        mock_db.table.assert_called_with("prospective_memories")

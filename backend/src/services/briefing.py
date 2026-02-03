@@ -9,7 +9,7 @@ This service generates daily briefings containing:
 """
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import anthropic
@@ -196,17 +196,66 @@ class BriefingService:
             "competitive_intel": [],
         }
 
-    async def _get_task_data(self, user_id: str) -> dict[str, Any]:  # noqa: ARG002
-        """Get task status.
+    async def _get_task_data(self, user_id: str) -> dict[str, Any]:
+        """Get task status from prospective memories.
 
         Args:
             user_id: The user's ID.
 
         Returns:
-            Dict with overdue and due_today.
+            Dict with overdue and due_today tasks.
         """
-        # TODO: Integrate with prospective memory
-        return {"overdue": [], "due_today": []}
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
+
+        # Get overdue tasks (due_at < today AND status = pending)
+        overdue_result = (
+            self._db.table("prospective_memories")
+            .select("id, task, priority, trigger_config")
+            .eq("user_id", user_id)
+            .eq("status", "pending")
+            .lt("trigger_config->>due_at", today_start.isoformat())
+            .order("trigger_config->>due_at", desc=False)
+            .limit(10)
+            .execute()
+        )
+
+        # Get tasks due today (today_start <= due_at < today_end AND status = pending)
+        today_result = (
+            self._db.table("prospective_memories")
+            .select("id, task, priority, trigger_config")
+            .eq("user_id", user_id)
+            .eq("status", "pending")
+            .gte("trigger_config->>due_at", today_start.isoformat())
+            .lt("trigger_config->>due_at", today_end.isoformat())
+            .order("trigger_config->>due_at", desc=False)
+            .limit(10)
+            .execute()
+        )
+
+        overdue = [
+            {
+                "id": t["id"],
+                "task": t["task"],
+                "priority": t["priority"],
+                "due_at": t.get("trigger_config", {}).get("due_at"),
+            }
+            for t in (overdue_result.data or [])
+            if isinstance(t, dict)
+        ]
+
+        due_today = [
+            {
+                "id": t["id"],
+                "task": t["task"],
+                "priority": t["priority"],
+                "due_at": t.get("trigger_config", {}).get("due_at"),
+            }
+            for t in (today_result.data or [])
+            if isinstance(t, dict)
+        ]
+
+        return {"overdue": overdue, "due_today": due_today}
 
     async def _generate_summary(
         self,
