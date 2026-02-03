@@ -5,4 +5,5 @@ export { GoalsPage } from "./Goals";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";
 export { IntegrationsSettingsPage } from "./IntegrationsSettings";
 export { LoginPage } from "./Login";
+export { MeetingBriefPage } from "./MeetingBrief";
 export { SignupPage } from "./Signup";

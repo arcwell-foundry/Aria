@@ -8,6 +8,7 @@ import {
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
   LoginPage,
+  MeetingBriefPage,
   SignupPage,
   DashboardPage,
   GoalsPage,
@@ -51,6 +52,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <GoalsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/meetings/:id/brief"
+              element={
+                <ProtectedRoute>
+                  <MeetingBriefPage />
                 </ProtectedRoute>
               }
             />
