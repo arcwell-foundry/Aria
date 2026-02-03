@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { ChatInput, ChatMessage, StreamingMessage } from "@/components/chat";
-import { useStreamingMessage } from "@/hooks/useChat";
+import { ChatInput, ChatMessage, StreamingMessage, ConversationSidebar } from "@/components/chat";
+import { useStreamingMessage, useConversationMessages } from "@/hooks/useChat";
 import type { ChatMessage as ChatMessageType } from "@/api/chat";
 
 export function AriaChatPage() {
@@ -9,8 +10,12 @@ export function AriaChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelStreamRef = useRef<(() => void) | null>(null);
+  const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchParams] = useSearchParams();
 
   const { isStreaming, streamedContent, startStream, reset } = useStreamingMessage();
+  const { data: conversationMessages } = useConversationMessages(conversationId);
 
   // Auto-scroll to bottom when messages change
   const scrollToBottom = useCallback(() => {
@@ -21,9 +26,23 @@ export function AriaChatPage() {
     scrollToBottom();
   }, [messages, streamedContent, scrollToBottom]);
 
+  // Load conversation messages when selected
+  useEffect(() => {
+    if (conversationId && conversationMessages) {
+      setMessages(conversationMessages);
+    }
+  }, [conversationId, conversationMessages]);
+
+  // Handle URL parameter for conversation selection
+  useEffect(() => {
+    const convId = searchParams.get("c");
+    if (convId && convId !== conversationId) {
+      setConversationId(convId);
+    }
+  }, [searchParams, conversationId]);
+
   const handleSend = useCallback(
     (content: string) => {
-      // Add user message immediately
       const userMessage: ChatMessageType = {
         id: crypto.randomUUID(),
         conversation_id: conversationId || "",
@@ -32,25 +51,26 @@ export function AriaChatPage() {
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMessage]);
-
-      // Reset any previous stream state
       reset();
 
-      // Start streaming
       cancelStreamRef.current = startStream(
         {
           content,
           conversation_id: conversationId || undefined,
         },
         (assistantMessage) => {
-          // On complete, add the full message
-          setMessages((prev) => [...prev, assistantMessage]);
-          setConversationId(assistantMessage.conversation_id);
+          setMessages((prev) => {
+            const withoutTemp = prev.slice(0, -1);
+            return [...withoutTemp, userMessage, assistantMessage];
+          });
+          const newConversationId = assistantMessage.conversation_id;
+          setConversationId(newConversationId);
+          navigate(`/dashboard/aria?c=${newConversationId}`, { replace: true });
           reset();
         }
       );
     },
-    [conversationId, startStream, reset]
+    [conversationId, startStream, reset, navigate]
   );
 
   // Cleanup on unmount
@@ -66,11 +86,28 @@ export function AriaChatPage() {
     setMessages([]);
     setConversationId(null);
     reset();
-  }, [reset]);
+    navigate("/dashboard/aria", { replace: true });
+  }, [reset, navigate]);
+
+  const handleConversationSelect = useCallback((convId: string) => {
+    setConversationId(convId);
+    navigate(`/dashboard/aria?c=${convId}`, { replace: true });
+  }, [navigate]);
 
   return (
     <DashboardLayout>
-      <div className="relative h-[calc(100vh-4rem)] flex flex-col">
+      <div className="relative h-[calc(100vh-4rem)] flex">
+        {/* Conversation Sidebar */}
+        <ConversationSidebar
+          currentConversationId={conversationId}
+          onNewConversation={handleNewConversation}
+          onConversationSelect={handleConversationSelect}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+
+        {/* Main chat area */}
+        <div className="flex-1 flex flex-col min-w-0">
         {/* Atmospheric background */}
         <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 pointer-events-none" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary-900/20 via-transparent to-transparent pointer-events-none" />
@@ -79,6 +116,35 @@ export function AriaChatPage() {
         <div className="relative border-b border-white/5 bg-slate-900/50 backdrop-blur-sm">
           <div className="max-w-4xl mx-auto px-4 lg:px-8 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
+              {/* Sidebar toggle button (shows on desktop) */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="hidden lg:flex px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all duration-200 items-center gap-2"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {sidebarOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                  )}
+                </svg>
+              </button>
+
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="lg:hidden px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all duration-200"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+
               {/* ARIA Avatar */}
               <div className="relative">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full blur-lg opacity-30" />
@@ -219,6 +285,7 @@ export function AriaChatPage() {
               }
             />
           </div>
+        </div>
         </div>
       </div>
     </DashboardLayout>
