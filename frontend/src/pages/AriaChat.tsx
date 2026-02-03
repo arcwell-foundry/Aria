@@ -27,6 +27,7 @@ export function AriaChatPage() {
   }, [messages, streamedContent, scrollToBottom]);
 
   // Load conversation messages when selected
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with external data source
   useEffect(() => {
     if (conversationId && conversationMessages) {
       setMessages(conversationMessages);
@@ -34,6 +35,7 @@ export function AriaChatPage() {
   }, [conversationId, conversationMessages]);
 
   // Handle URL parameter for conversation selection
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with URL params
   useEffect(() => {
     const convId = searchParams.get("c");
     if (convId && convId !== conversationId) {
