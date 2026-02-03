@@ -7,6 +7,7 @@ const navItems = [
   { name: "ARIA Chat", href: "/dashboard/aria", icon: "chat" },
   { name: "Goals", href: "/goals", icon: "target" },
   { name: "Battle Cards", href: "/dashboard/battlecards", icon: "swords" },
+  { name: "Integrations", href: "/settings/integrations", icon: "integration" },
   { name: "Lead Memory", href: "/leads", icon: "users" },
   { name: "Daily Briefing", href: "/briefing", icon: "calendar" },
   { name: "Settings", href: "/settings", icon: "settings" },
@@ -101,6 +102,21 @@ function NavIcon({ name }: { name: string }) {
           strokeLinejoin="round"
           strokeWidth={2}
           d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+        />
+      </svg>
+    ),
+    integration: (
+      <svg
+        className="w-5 h-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"
         />
       </svg>
     ),
