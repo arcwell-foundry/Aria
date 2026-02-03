@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { IntegrationType, IntegrationStatus } from "@/api/integrations";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -302,8 +302,12 @@ function IntegrationCardSkeleton() {
       <div className="flex items-start gap-4">
         <div className="w-12 h-12 bg-slate-700 rounded-xl animate-pulse" />
         <div className="flex-1 space-y-3">
-          <div className="h-5 bg-slate-700 rounded w-1/3 animate-pulse" />
+          <div className="flex justify-between">
+            <div className="h-5 bg-slate-700 rounded w-1/3 animate-pulse" />
+            <div className="h-6 bg-slate-700 rounded w-20 animate-pulse" />
+          </div>
           <div className="h-4 bg-slate-700 rounded w-2/3 animate-pulse" />
+          <div className="h-4 bg-slate-700 rounded w-1/4 animate-pulse" />
           <div className="h-8 bg-slate-700 rounded w-24 animate-pulse" />
         </div>
       </div>
@@ -311,19 +315,173 @@ function IntegrationCardSkeleton() {
   );
 }
 
+// Error banner component
+interface ErrorBannerProps {
+  message: string;
+  onRetry: () => void;
+  onDismiss: () => void;
+}
+
+function ErrorBanner({ message, onRetry, onDismiss }: ErrorBannerProps) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.2 }}
+        className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl"
+      >
+        <div className="flex items-start gap-3">
+          <svg
+            className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <div className="flex-1">
+            <p className="text-sm text-red-300">{message}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onRetry}
+              className="px-3 py-1 text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={onDismiss}
+              className="p-1 text-red-400 hover:text-red-300 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 // Main settings page
 export function IntegrationsSettingsPage() {
   const [integrationToConnect, setIntegrationToConnect] =
     useState<IntegrationType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Polling state
+  const pollingRef = useRef<{ attempts: number; timeoutId: NodeJS.Timeout | null }>({
+    attempts: 0,
+    timeoutId: null,
+  });
+  const isPollingRef = useRef(false);
 
   // Queries
-  const { data: integrations, isLoading: isLoadingIntegrations } = useIntegrations();
-  const { data: availableIntegrations, isLoading: isLoadingAvailable } =
-    useAvailableIntegrations();
+  const {
+    data: integrations,
+    isLoading: isLoadingIntegrations,
+    error: integrationsError,
+    refetch: refetchIntegrations
+  } = useIntegrations();
+  const {
+    data: availableIntegrations,
+    isLoading: isLoadingAvailable,
+    error: availableError,
+    refetch: refetchAvailable
+  } = useAvailableIntegrations();
 
   // Mutations
   const connectMutation = useConnectIntegration();
   const disconnectMutation = useDisconnectIntegration();
+
+  // Start polling for connection status
+  const startPolling = useCallback((integrationType: IntegrationType) => {
+    if (isPollingRef.current) return;
+    isPollingRef.current = true;
+    pollingRef.current.attempts = 0;
+
+    const pollConnectionStatus = async () => {
+      // Check if we've exceeded max attempts (15 attempts * 2 seconds = 30 seconds)
+      if (pollingRef.current.attempts >= 15) {
+        isPollingRef.current = false;
+        if (pollingRef.current.timeoutId) {
+          clearTimeout(pollingRef.current.timeoutId);
+          pollingRef.current.timeoutId = null;
+        }
+        pollingRef.current.attempts = 0;
+        setError("Connection timed out. Please try connecting again.");
+        sessionStorage.removeItem("pending_integration");
+        setIntegrationToConnect(null);
+        return;
+      }
+
+      pollingRef.current.attempts++;
+
+      try {
+        // Refetch integrations to check connection status
+        await refetchIntegrations();
+        await refetchAvailable();
+
+        // Check if the integration is now connected
+        const availableData = await refetchAvailable();
+        const isConnected = availableData?.data?.find(
+          (item: { integration_type: IntegrationType; is_connected: boolean }) =>
+            item.integration_type === integrationType && item.is_connected
+        );
+
+        if (isConnected) {
+          isPollingRef.current = false;
+          if (pollingRef.current.timeoutId) {
+            clearTimeout(pollingRef.current.timeoutId);
+            pollingRef.current.timeoutId = null;
+          }
+          pollingRef.current.attempts = 0;
+          sessionStorage.removeItem("pending_integration");
+          setIntegrationToConnect(null);
+          return;
+        }
+
+        // Schedule next poll
+        pollingRef.current.timeoutId = setTimeout(pollConnectionStatus, 2000);
+      } catch (err) {
+        // Continue polling on error, but log it
+        console.error("Error polling connection status:", err);
+        pollingRef.current.timeoutId = setTimeout(pollConnectionStatus, 2000);
+      }
+    };
+
+    pollConnectionStatus();
+  }, [refetchIntegrations, refetchAvailable]);
+
+  // Check for pending integration on mount
+  useEffect(() => {
+    const pendingIntegration = sessionStorage.getItem("pending_integration");
+    if (pendingIntegration) {
+      setIntegrationToConnect(pendingIntegration as IntegrationType);
+      startPolling(pendingIntegration as IntegrationType);
+    }
+    // Cleanup on unmount
+    return () => {
+      if (pollingRef.current.timeoutId) {
+        clearTimeout(pollingRef.current.timeoutId);
+      }
+    };
+  }, [startPolling]);
+
+  // Handle retry
+  const handleRetry = useCallback(() => {
+    setError(null);
+    refetchIntegrations();
+    refetchAvailable();
+  }, [refetchIntegrations, refetchAvailable]);
 
   // Create a map of connected integrations
   const connectedIntegrationsMap = new Map<IntegrationType, boolean>();
@@ -338,9 +496,13 @@ export function IntegrationsSettingsPage() {
 
   // Handle connect
   const handleConnect = async (type: IntegrationType) => {
+    setError(null);
     setIntegrationToConnect(type);
 
     try {
+      // Store pending integration in sessionStorage for polling after callback
+      sessionStorage.setItem("pending_integration", type);
+
       // Get redirect URI
       const redirectUri = `${window.location.origin}/settings/integrations/callback`;
 
@@ -349,17 +511,23 @@ export function IntegrationsSettingsPage() {
       window.location.href = `/api/v1/integrations/${type}/auth?redirect_uri=${encodeURIComponent(redirectUri)}`;
     } catch (error) {
       console.error("Failed to initiate OAuth flow:", error);
+      setError("Failed to initiate connection. Please try again.");
       setIntegrationToConnect(null);
+      sessionStorage.removeItem("pending_integration");
     }
   };
 
   // Handle disconnect
   const handleDisconnect = async (type: IntegrationType) => {
+    setError(null);
     disconnectMutation.mutate(type);
   };
 
   // Check if any mutation is pending
   const isPending = connectMutation.isPending || disconnectMutation.isPending;
+
+  // Check if there's a query error
+  const hasQueryError = integrationsError || availableError;
 
   return (
     <DashboardLayout>
@@ -412,10 +580,21 @@ export function IntegrationsSettingsPage() {
             </div>
           </motion.div>
 
+          {/* Error banner */}
+          <AnimatePresence>
+            {(error || hasQueryError) && (
+              <ErrorBanner
+                message={error || "Failed to load integrations. Please try again."}
+                onRetry={handleRetry}
+                onDismiss={() => setError(null)}
+              />
+            )}
+          </AnimatePresence>
+
           {/* Loading state */}
           {isLoadingIntegrations || isLoadingAvailable ? (
             <div className="grid gap-4 md:grid-cols-2">
-              {[1, 2, 3, 4].map((i) => (
+              {[1, 2, 3, 4, 5].map((i) => (
                 <IntegrationCardSkeleton key={i} />
               ))}
             </div>

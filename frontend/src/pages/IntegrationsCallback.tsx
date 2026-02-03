@@ -17,7 +17,15 @@ export function IntegrationsCallbackPage() {
       const code = searchParams.get("code");
       const state = searchParams.get("state");
       const error = searchParams.get("error");
-      const integrationType = searchParams.get("integration");
+
+      // Try to get integration type from sessionStorage first (stored before OAuth flow)
+      // Fall back to URL param for backward compatibility
+      let integrationType = sessionStorage.getItem("pending_integration");
+      const integrationFromUrl = searchParams.get("integration");
+
+      if (!integrationType && integrationFromUrl) {
+        integrationType = integrationFromUrl;
+      }
 
       if (error) {
         setStatus("error");
@@ -26,12 +34,15 @@ export function IntegrationsCallbackPage() {
             ? "Access was denied. Please try again."
             : "An error occurred during authentication."
         );
+        // Clear pending integration on error
+        sessionStorage.removeItem("pending_integration");
         return;
       }
 
       if (!code || !integrationType) {
         setStatus("error");
         setErrorMessage("Invalid callback parameters.");
+        sessionStorage.removeItem("pending_integration");
         return;
       }
 
@@ -47,6 +58,7 @@ export function IntegrationsCallbackPage() {
         setStatus("success");
 
         // Redirect to settings after a delay
+        // Note: sessionStorage cleanup will happen in the settings page after polling confirms connection
         setTimeout(() => {
           navigate("/settings/integrations", { replace: true });
         }, 2000);
@@ -55,6 +67,8 @@ export function IntegrationsCallbackPage() {
         setErrorMessage(
           err instanceof Error ? err.message : "Failed to connect integration."
         );
+        // Clear pending integration on error
+        sessionStorage.removeItem("pending_integration");
       }
     };
 
