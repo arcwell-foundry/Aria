@@ -19,6 +19,7 @@ from src.memory.audit import (
     log_memory_operation,
 )
 from src.memory.confidence import ConfidenceScorer
+from src.memory.salience import SalienceService
 from src.memory.corporate import (
     CORPORATE_SOURCE_CONFIDENCE,
     CorporateFact,
@@ -55,6 +56,8 @@ __all__ = [
     "log_memory_operation",
     # Confidence Scoring
     "ConfidenceScorer",
+    # Salience Service
+    "SalienceService",
     # Working Memory
     "WorkingMemory",
     "WorkingMemoryManager",

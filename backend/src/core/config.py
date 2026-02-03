@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     CONFIDENCE_MIN_THRESHOLD: float = 0.3  # Minimum for inclusion in responses
     CONFIDENCE_REFRESH_WINDOW_DAYS: int = 7  # Days before decay starts after refresh
 
+    # Salience Decay Configuration (US-218)
+    SALIENCE_HALF_LIFE_DAYS: int = 30  # Days for salience to decay to 50%
+    SALIENCE_ACCESS_BOOST: float = 0.1  # Boost per memory retrieval
+    SALIENCE_MIN: float = 0.01  # Minimum salience (never zero)
+
     @field_validator("SUPABASE_URL")
     @classmethod
     def validate_supabase_url(cls, v: str) -> str:
