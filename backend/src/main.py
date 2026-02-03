@@ -15,7 +15,9 @@ from src.api.routes import (
     battle_cards,
     briefings,
     chat,
+    cognitive_load,
     debriefs,
+    drafts,
     goals,
     integrations,
     memory,
@@ -87,10 +89,12 @@ app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
+app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
+app.include_router(cognitive_load.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
