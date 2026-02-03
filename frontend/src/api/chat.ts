@@ -15,6 +15,8 @@ export interface Conversation {
   title: string | null;
   created_at: string;
   updated_at: string;
+  last_message_preview?: string | null;
+  message_count?: number;
 }
 
 export interface ConversationListResponse {
