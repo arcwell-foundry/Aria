@@ -168,8 +168,8 @@ class BriefingService:
         # TODO: Integrate with calendar service
         return {"meeting_count": 0, "key_meetings": []}
 
-    async def _get_lead_data(self, user_id: str) -> dict[str, Any]:  # noqa: ARG002
-        """Get lead status summary.
+    async def _get_lead_data(self, user_id: str) -> dict[str, Any]:
+        """Get lead status summary from lead_memories.
 
         Args:
             user_id: The user's ID.
@@ -177,8 +177,58 @@ class BriefingService:
         Returns:
             Dict with hot_leads, needs_attention, and recently_active.
         """
-        # TODO: Integrate with lead memory service
-        return {"hot_leads": [], "needs_attention": [], "recently_active": []}
+        week_ago = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+
+        # Hot leads: health_score >= 70 AND status = active
+        hot_result = (
+            self._db.table("lead_memories")
+            .select("id, company_name, health_score, lifecycle_stage, last_activity_at")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .gte("health_score", 70)
+            .order("health_score", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        # Needs attention: health_score <= 40 AND status = active
+        attention_result = (
+            self._db.table("lead_memories")
+            .select("id, company_name, health_score, lifecycle_stage, last_activity_at")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .lte("health_score", 40)
+            .order("health_score", desc=False)
+            .limit(5)
+            .execute()
+        )
+
+        # Recently active: last_activity_at within 7 days
+        active_result = (
+            self._db.table("lead_memories")
+            .select("id, company_name, health_score, lifecycle_stage, last_activity_at")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .gte("last_activity_at", week_ago)
+            .order("last_activity_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        def format_lead(lead: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "id": lead["id"],
+                "company_name": lead["company_name"],
+                "health_score": lead.get("health_score"),
+                "lifecycle_stage": lead.get("lifecycle_stage"),
+                "last_activity_at": lead.get("last_activity_at"),
+            }
+
+        return {
+            "hot_leads": [format_lead(lead) for lead in (hot_result.data or []) if isinstance(lead, dict)],
+            "needs_attention": [format_lead(lead) for lead in (attention_result.data or []) if isinstance(lead, dict)],
+            "recently_active": [format_lead(lead) for lead in (active_result.data or []) if isinstance(lead, dict)],
+        }
 
     async def _get_signal_data(self, user_id: str) -> dict[str, Any]:  # noqa: ARG002
         """Get market signals.

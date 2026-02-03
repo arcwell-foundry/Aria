@@ -422,3 +422,88 @@ async def test_get_task_data_returns_overdue_tasks() -> None:
 
         # Verify the table was queried
         mock_db.table.assert_called_with("prospective_memories")
+
+
+@pytest.mark.asyncio
+async def test_get_lead_data_returns_categorized_leads() -> None:
+    """Test _get_lead_data returns leads categorized by urgency."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        hot_leads = [
+            {
+                "id": "lead-1",
+                "company_name": "Acme Corp",
+                "health_score": 85,
+                "lifecycle_stage": "opportunity",
+                "last_activity_at": "2026-02-01T10:00:00Z",
+            },
+        ]
+        needs_attention = [
+            {
+                "id": "lead-2",
+                "company_name": "Beta Inc",
+                "health_score": 35,
+                "lifecycle_stage": "lead",
+                "last_activity_at": "2026-01-15T10:00:00Z",
+            },
+        ]
+        recently_active = [
+            {
+                "id": "lead-3",
+                "company_name": "Gamma LLC",
+                "health_score": 60,
+                "lifecycle_stage": "prospect",
+                "last_activity_at": "2026-02-02T15:00:00Z",
+            },
+        ]
+
+        mock_db = MagicMock()
+        mock_table = MagicMock()
+
+        # Track call count to return different data for different queries
+        call_count = [0]
+
+        def mock_execute() -> MagicMock:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return MagicMock(data=hot_leads)
+            elif call_count[0] == 2:
+                return MagicMock(data=needs_attention)
+            else:
+                return MagicMock(data=recently_active)
+
+        # Setup chained method mocks
+        mock_table.select.return_value.eq.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute = mock_execute
+        mock_table.select.return_value.eq.return_value.eq.return_value.lte.return_value.order.return_value.limit.return_value.execute = mock_execute
+
+        mock_db.table.return_value = mock_table
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_lead_data(user_id="test-user-123")
+
+        # Verify keys exist
+        assert "hot_leads" in result
+        assert "needs_attention" in result
+        assert "recently_active" in result
+
+        # Verify lead_memories table was queried
+        mock_db.table.assert_called_with("lead_memories")
+
+        # Verify hot_leads contains actual data
+        assert len(result["hot_leads"]) == 1
+        assert result["hot_leads"][0]["id"] == "lead-1"
+        assert result["hot_leads"][0]["company_name"] == "Acme Corp"
+        assert result["hot_leads"][0]["health_score"] == 85
+
+        # Verify needs_attention contains actual data
+        assert len(result["needs_attention"]) == 1
+        assert result["needs_attention"][0]["id"] == "lead-2"
+        assert result["needs_attention"][0]["company_name"] == "Beta Inc"
+        assert result["needs_attention"][0]["health_score"] == 35
+
+        # Verify recently_active contains actual data
+        assert len(result["recently_active"]) == 1
+        assert result["recently_active"][0]["id"] == "lead-3"
+        assert result["recently_active"][0]["company_name"] == "Gamma LLC"
