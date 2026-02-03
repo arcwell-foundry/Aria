@@ -34,9 +34,9 @@ export function CalendarSection({ calendar }: CalendarSectionProps) {
     >
       <div className="space-y-3">
         {key_meetings.map((meeting, index) => (
-          <button
+          <div
             key={index}
-            className="w-full flex items-start gap-4 p-3 bg-slate-700/30 hover:bg-slate-700/50 border border-slate-600/30 rounded-lg transition-colors text-left group"
+            className="flex items-start gap-4 p-3 bg-slate-700/30 border border-slate-600/30 rounded-lg"
           >
             <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 bg-primary-500/10 border border-primary-500/20 rounded-lg">
               <Clock className="w-5 h-5 text-primary-400" />
@@ -45,7 +45,7 @@ export function CalendarSection({ calendar }: CalendarSectionProps) {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-primary-400">{meeting.time}</span>
               </div>
-              <h4 className="text-white font-medium truncate group-hover:text-primary-300 transition-colors">
+              <h4 className="text-white font-medium truncate">
                 {meeting.title}
               </h4>
               {meeting.attendees && meeting.attendees.length > 0 && (
@@ -58,7 +58,7 @@ export function CalendarSection({ calendar }: CalendarSectionProps) {
                 </div>
               )}
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </CollapsibleSection>

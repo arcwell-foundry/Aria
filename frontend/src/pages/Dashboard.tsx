@@ -25,7 +25,7 @@ export function DashboardPage() {
     error: todayError,
   } = useTodayBriefing();
 
-  const { data: historicalBriefing, isLoading: isHistoricalLoading } =
+  const { data: historicalBriefing, isLoading: isHistoricalLoading, error: historicalError } =
     useBriefingByDate(selectedDate || "");
 
   const regenerateMutation = useRegenerateBriefing();
@@ -100,6 +100,18 @@ export function DashboardPage() {
           <div className="mt-6 space-y-6">
             {isLoading ? (
               <BriefingSkeleton />
+            ) : historicalError && selectedDate ? (
+              <div className="text-center py-12">
+                <p className="text-slate-400 mb-4">
+                  Could not load briefing for this date.
+                </p>
+                <button
+                  onClick={() => setSelectedDate(null)}
+                  className="text-primary-400 hover:text-primary-300 underline"
+                >
+                  Return to today's briefing
+                </button>
+              </div>
             ) : todayError && !selectedDate ? (
               <BriefingEmpty
                 onGenerate={() => regenerateMutation.mutate()}

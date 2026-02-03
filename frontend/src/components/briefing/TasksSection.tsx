@@ -16,7 +16,7 @@ function TaskCard({
   const isOverdue = variant === "overdue";
 
   return (
-    <button className="w-full flex items-center gap-3 p-3 bg-slate-700/30 hover:bg-slate-700/50 border border-slate-600/30 rounded-lg transition-colors text-left group">
+    <div className="flex items-center gap-3 p-3 bg-slate-700/30 border border-slate-600/30 rounded-lg">
       <div
         className={`flex-shrink-0 p-2 rounded-lg ${
           isOverdue ? "bg-red-500/10" : "bg-slate-600/50"
@@ -29,7 +29,7 @@ function TaskCard({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <h4 className="text-white font-medium truncate group-hover:text-primary-300 transition-colors">
+        <h4 className="text-white font-medium truncate">
           {task.title}
         </h4>
         {task.due_date && (
@@ -55,7 +55,7 @@ function TaskCard({
           {task.priority}
         </span>
       )}
-    </button>
+    </div>
   );
 }
 

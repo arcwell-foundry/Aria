@@ -1,4 +1,5 @@
 import { X, Calendar } from "lucide-react";
+import { useEffect } from "react";
 import { useBriefingList } from "@/hooks/useBriefing";
 
 interface BriefingHistoryModalProps {
@@ -13,6 +14,17 @@ export function BriefingHistoryModal({
   onSelectDate,
 }: BriefingHistoryModalProps) {
   const { data: briefings, isLoading } = useBriefingList(14);
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -51,9 +63,10 @@ export function BriefingHistoryModal({
           ) : briefings && briefings.length > 0 ? (
             <div className="space-y-2">
               {briefings.map((briefing) => {
-                const date = new Date(briefing.briefing_date);
-                const isToday =
-                  date.toDateString() === new Date().toDateString();
+                // Parse date with timezone safety (compare date strings directly)
+                const today = new Date().toISOString().split("T")[0];
+                const isToday = briefing.briefing_date === today;
+                const date = new Date(briefing.briefing_date + "T12:00:00");
 
                 return (
                   <button
