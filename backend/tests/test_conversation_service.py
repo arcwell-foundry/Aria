@@ -472,5 +472,11 @@ class TestExtractEpisode:
         )
 
         assert isinstance(result, ConversationEpisode)
-        # Should have empty/default values for extracted fields
-        assert result.key_topics == [] or result.key_topics is not None
+
+        # Verify the insert was called with empty defaults for extracted fields
+        insert_call = mock_db.table.return_value.insert.call_args
+        insert_data = insert_call[0][0]
+        assert insert_data["key_topics"] == []
+        assert insert_data["user_state"] == {}
+        assert insert_data["outcomes"] == []
+        assert insert_data["open_threads"] == []

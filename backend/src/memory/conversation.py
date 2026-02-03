@@ -265,7 +265,14 @@ class ConversationService:
 
         Returns:
             The created ConversationEpisode.
+
+        Raises:
+            ValueError: If messages list is empty.
+            RuntimeError: If database storage fails.
         """
+        if not messages:
+            raise ValueError("Cannot extract episode from empty conversation")
+
         # Format messages for LLM
         formatted_conversation = self._format_messages(messages)
 
@@ -325,6 +332,9 @@ class ConversationService:
 
         # Step 6: Store in database
         result = self.db.table("conversation_episodes").insert(episode_data).execute()
+
+        if not result.data:
+            raise RuntimeError("Failed to store conversation episode")
 
         # Step 7: Return ConversationEpisode from stored data
         stored_data: dict[str, Any] = result.data[0]  # type: ignore[assignment]
