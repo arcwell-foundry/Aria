@@ -231,7 +231,7 @@ class IntegrationService:
 
             # Disconnect from Composio
             oauth_client = get_oauth_client()
-            await oauth_client.disconnect_integration(integration["composio_connection_id"])
+            await oauth_client.disconnect_integration(user_id, integration["composio_connection_id"])
 
             # Delete from database
             await self.delete_integration(integration["id"])
