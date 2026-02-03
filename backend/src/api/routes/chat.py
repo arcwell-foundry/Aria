@@ -161,7 +161,11 @@ async def list_conversations(
         .eq("user_id", current_user.id)
         .execute()
     )
-    total = count_result.count if hasattr(count_result, "count") else len(conversations)
+    total = (
+        count_result.count
+        if hasattr(count_result, "count") and count_result.count is not None
+        else len(conversations)
+    )
 
     return ConversationListResponse(
         conversations=[c.to_dict() for c in conversations],
