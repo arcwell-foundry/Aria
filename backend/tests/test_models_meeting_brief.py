@@ -107,15 +107,21 @@ def test_generate_brief_request_valid() -> None:
     assert len(request.attendee_emails) == 2
 
 
-def test_generate_brief_request_requires_event_id() -> None:
-    """Test GenerateBriefRequest requires calendar_event_id."""
+def test_generate_brief_request_event_id_is_optional() -> None:
+    """Test GenerateBriefRequest allows optional calendar_event_id.
+
+    calendar_event_id can be provided via path parameter in the route,
+    so it's optional in the request body.
+    """
     from src.models.meeting_brief import GenerateBriefRequest
 
-    with pytest.raises(ValidationError):
-        GenerateBriefRequest(
-            meeting_title="Discovery Call",
-            meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
-        )
+    # Should not raise - calendar_event_id is optional
+    request = GenerateBriefRequest(
+        meeting_title="Discovery Call",
+        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
+    )
+    assert request.calendar_event_id is None
+    assert request.meeting_title == "Discovery Call"
 
 
 def test_upcoming_meeting_response_valid() -> None:

@@ -1,7 +1,9 @@
 """Tests for HunterAgent module."""
 
-import pytest
+from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def test_hunter_agent_has_name_and_description() -> None:
