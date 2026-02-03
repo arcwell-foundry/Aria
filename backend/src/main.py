@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
-from src.api.routes import auth, battle_cards, briefings, chat, debriefs, goals, memory, signals
+from src.api.routes import auth, battle_cards, briefings, chat, debriefs, goals, integrations, memory, signals
 from src.core.exceptions import ARIAException
 
 # Configure logging
@@ -78,6 +78,7 @@ app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
+app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 
