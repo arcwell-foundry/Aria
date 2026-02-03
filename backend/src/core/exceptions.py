@@ -510,3 +510,52 @@ class AgentExecutionError(ARIAException):
             status_code=500,
             details={"agent_name": agent_name, "task_type": task_type},
         )
+
+
+class EmailDraftError(ARIAException):
+    """Exception for email draft generation errors."""
+
+    def __init__(
+        self,
+        message: str = "Unknown error",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize email draft error.
+
+        Args:
+            message: Error details.
+            details: Additional error details.
+        """
+        super().__init__(
+            message=f"Email draft operation failed: {message}",
+            code="EMAIL_DRAFT_ERROR",
+            status_code=500,
+            details=details,
+        )
+
+
+class EmailSendError(ARIAException):
+    """Exception for email sending errors."""
+
+    def __init__(
+        self,
+        message: str = "Unknown error",
+        draft_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize email send error.
+
+        Args:
+            message: Error details.
+            draft_id: Optional ID of the draft that failed to send.
+            details: Additional error details.
+        """
+        error_details = details or {}
+        if draft_id:
+            error_details["draft_id"] = draft_id
+        super().__init__(
+            message=f"Email send failed: {message}",
+            code="EMAIL_SEND_ERROR",
+            status_code=502,
+            details=error_details,
+        )
