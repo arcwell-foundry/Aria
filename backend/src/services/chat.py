@@ -9,6 +9,7 @@ This service handles chat interactions by:
 
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
@@ -48,6 +49,135 @@ class ChatService:
         self._working_memory_manager = WorkingMemoryManager()
         self._extraction_service = ExtractionService()
 
+    async def _ensure_conversation_record(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> None:
+        """Ensure a conversation record exists for this conversation_id.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Unique conversation identifier.
+
+        Note:
+            This is a fire-and-forget operation. Errors are logged but not raised.
+        """
+        from src.db.supabase import get_supabase_client
+
+        try:
+            db = get_supabase_client()
+
+            # Check if conversation exists
+            result = (
+                db.table("conversations")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("id", conversation_id)
+                .execute()
+            )
+
+            if result.data:
+                # Conversation exists, update it
+                (
+                    db.table("conversations")
+                    .update(
+                        {
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
+                    .eq("user_id", user_id)
+                    .eq("id", conversation_id)
+                    .execute()
+                )
+            else:
+                # Create new conversation record
+                db.table("conversations").insert(
+                    {
+                        "id": conversation_id,
+                        "user_id": user_id,
+                        "message_count": 0,
+                    }
+                ).execute()
+
+        except Exception as e:
+            logger.warning(
+                "Failed to ensure conversation record",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                },
+            )
+
+    async def _update_conversation_metadata(
+        self,
+        user_id: str,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        """Update conversation metadata after message exchange.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Unique conversation identifier.
+            user_message: The user's message content.
+            assistant_message: The assistant's response content.
+
+        Note:
+            This is a fire-and-forget operation. Errors are logged but not raised.
+        """
+        from src.db.supabase import get_supabase_client
+
+        try:
+            db = get_supabase_client()
+
+            # Generate preview from user message (first 100 chars)
+            preview = user_message[:100]
+            if len(user_message) > 100:
+                preview += "..."
+
+            # Get current message count
+            current = (
+                db.table("conversations")
+                .select("message_count")
+                .eq("user_id", user_id)
+                .eq("id", conversation_id)
+                .single()
+                .execute()
+            )
+
+            message_count = 0
+            if current.data:
+                message_count = current.data.get("message_count", 0)
+
+            # Update metadata
+            (
+                db.table("conversations")
+                .update(
+                    {
+                        "message_count": message_count + 2,  # user + assistant
+                        "last_message_at": datetime.now(UTC).isoformat(),
+                        "last_message_preview": preview,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                )
+                .eq("user_id", user_id)
+                .eq("id", conversation_id)
+                .execute()
+            )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to update conversation metadata",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                },
+            )
+
     async def process_message(
         self,
         user_id: str,
@@ -76,6 +206,9 @@ class ChatService:
             conversation_id=conversation_id,
             user_id=user_id,
         )
+
+        # Ensure conversation record exists for sidebar
+        await self._ensure_conversation_record(user_id, conversation_id)
 
         # Add user message to working memory
         working_memory.add_message("user", message)
@@ -131,6 +264,11 @@ class ChatService:
                 "Information extraction failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
+
+        # Update conversation metadata for sidebar
+        await self._update_conversation_metadata(
+            user_id, conversation_id, message, response_text
+        )
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
