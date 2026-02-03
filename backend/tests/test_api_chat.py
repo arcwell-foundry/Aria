@@ -1,5 +1,7 @@
 """Tests for chat API routes."""
 
+from contextlib import contextmanager
+from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,6 +9,25 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_current_user
 from src.main import app
+from src.models.cognitive_load import CognitiveLoadState, LoadLevel
+
+
+@contextmanager
+def mock_cognitive_load_deps() -> Generator[MagicMock, None, None]:
+    """Context manager to mock cognitive load dependencies."""
+    mock_load_state = CognitiveLoadState(
+        level=LoadLevel.LOW,
+        score=0.2,
+        factors={},
+        recommendation="detailed",
+    )
+    with patch("src.services.chat.get_supabase_client") as mock_get_db:
+        mock_get_db.return_value = MagicMock()
+        with patch("src.services.chat.CognitiveLoadMonitor") as mock_monitor_class:
+            mock_monitor = MagicMock()
+            mock_monitor.estimate_load = AsyncMock(return_value=mock_load_state)
+            mock_monitor_class.return_value = mock_monitor
+            yield mock_monitor
 
 
 @pytest.fixture
@@ -34,24 +55,25 @@ def test_chat_endpoint_returns_response(test_client: TestClient) -> None:
     """Test POST /api/v1/chat returns response."""
     from src.services.chat import ChatService
 
-    with patch.object(
-        ChatService,
-        "process_message",
-        new_callable=AsyncMock,
-    ) as mock_process:
-        mock_process.return_value = {
-            "message": "Hello! How can I help you today?",
-            "citations": [],
-            "conversation_id": "conv-123",
-        }
-
-        response = test_client.post(
-            "/api/v1/chat",
-            json={
-                "message": "Hello",
+    with mock_cognitive_load_deps():
+        with patch.object(
+            ChatService,
+            "process_message",
+            new_callable=AsyncMock,
+        ) as mock_process:
+            mock_process.return_value = {
+                "message": "Hello! How can I help you today?",
+                "citations": [],
                 "conversation_id": "conv-123",
-            },
-        )
+            }
+
+            response = test_client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "Hello",
+                    "conversation_id": "conv-123",
+                },
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -73,21 +95,22 @@ def test_chat_endpoint_generates_conversation_id(test_client: TestClient) -> Non
     """Test POST /api/v1/chat generates conversation_id if not provided."""
     from src.services.chat import ChatService
 
-    with patch.object(
-        ChatService,
-        "process_message",
-        new_callable=AsyncMock,
-    ) as mock_process:
-        mock_process.return_value = {
-            "message": "Response",
-            "citations": [],
-            "conversation_id": "generated-id",
-        }
+    with mock_cognitive_load_deps():
+        with patch.object(
+            ChatService,
+            "process_message",
+            new_callable=AsyncMock,
+        ) as mock_process:
+            mock_process.return_value = {
+                "message": "Response",
+                "citations": [],
+                "conversation_id": "generated-id",
+            }
 
-        response = test_client.post(
-            "/api/v1/chat",
-            json={"message": "Hello"},
-        )
+            response = test_client.post(
+                "/api/v1/chat",
+                json={"message": "Hello"},
+            )
 
     assert response.status_code == 200
     call_kwargs = mock_process.call_args.kwargs
@@ -99,31 +122,32 @@ def test_chat_endpoint_includes_citations(test_client: TestClient) -> None:
     """Test POST /api/v1/chat includes memory citations."""
     from src.services.chat import ChatService
 
-    with patch.object(
-        ChatService,
-        "process_message",
-        new_callable=AsyncMock,
-    ) as mock_process:
-        mock_process.return_value = {
-            "message": "Based on our meeting, the Q3 budget is $500K.",
-            "citations": [
-                {
-                    "id": "episode-1",
-                    "type": "episodic",
-                    "content": "Meeting about Q3 budget",
-                    "confidence": None,
-                }
-            ],
-            "conversation_id": "conv-123",
-        }
-
-        response = test_client.post(
-            "/api/v1/chat",
-            json={
-                "message": "What's the Q3 budget?",
+    with mock_cognitive_load_deps():
+        with patch.object(
+            ChatService,
+            "process_message",
+            new_callable=AsyncMock,
+        ) as mock_process:
+            mock_process.return_value = {
+                "message": "Based on our meeting, the Q3 budget is $500K.",
+                "citations": [
+                    {
+                        "id": "episode-1",
+                        "type": "episodic",
+                        "content": "Meeting about Q3 budget",
+                        "confidence": None,
+                    }
+                ],
                 "conversation_id": "conv-123",
-            },
-        )
+            }
+
+            response = test_client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "What's the Q3 budget?",
+                    "conversation_id": "conv-123",
+                },
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -145,26 +169,27 @@ def test_chat_endpoint_returns_timing(test_client: TestClient) -> None:
     """Test POST /api/v1/chat returns timing information."""
     from src.services.chat import ChatService
 
-    with patch.object(
-        ChatService,
-        "process_message",
-        new_callable=AsyncMock,
-    ) as mock_process:
-        mock_process.return_value = {
-            "message": "Response",
-            "citations": [],
-            "conversation_id": "conv-123",
-            "timing": {
-                "memory_query_ms": 45.5,
-                "llm_response_ms": 500.2,
-                "total_ms": 550.0,
-            },
-        }
+    with mock_cognitive_load_deps():
+        with patch.object(
+            ChatService,
+            "process_message",
+            new_callable=AsyncMock,
+        ) as mock_process:
+            mock_process.return_value = {
+                "message": "Response",
+                "citations": [],
+                "conversation_id": "conv-123",
+                "timing": {
+                    "memory_query_ms": 45.5,
+                    "llm_response_ms": 500.2,
+                    "total_ms": 550.0,
+                },
+            }
 
-        response = test_client.post(
-            "/api/v1/chat",
-            json={"message": "Hello", "conversation_id": "conv-123"},
-        )
+            response = test_client.post(
+                "/api/v1/chat",
+                json={"message": "Hello", "conversation_id": "conv-123"},
+            )
 
     assert response.status_code == 200
     data = response.json()

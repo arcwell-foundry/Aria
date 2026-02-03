@@ -14,7 +14,10 @@ from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
 from src.core.llm import LLMClient
+from src.db.supabase import get_supabase_client
+from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.memory.working import WorkingMemoryManager
+from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.services.extraction import ExtractionService
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,15 @@ The following information may be relevant to this conversation:
 
 Use this context naturally in your response. If you reference specific facts, note the confidence level if it's below 0.8."""
 
+HIGH_LOAD_INSTRUCTION = """
+IMPORTANT: The user appears to be under high cognitive load right now. Adapt your response:
+- Be extremely concise and direct
+- Lead with the most important information
+- Avoid asking multiple questions
+- Offer to handle tasks independently
+- Use bullet points for clarity
+"""
+
 
 class ChatService:
     """Service for memory-integrated chat interactions."""
@@ -48,6 +60,7 @@ class ChatService:
         self._llm_client = LLMClient()
         self._working_memory_manager = WorkingMemoryManager()
         self._extraction_service = ExtractionService()
+        self._cognitive_monitor = CognitiveLoadMonitor(db_client=get_supabase_client())
 
     async def _ensure_conversation_record(
         self,
@@ -213,6 +226,17 @@ class ChatService:
         # Add user message to working memory
         working_memory.add_message("user", message)
 
+        # Get conversation history for cognitive load estimation
+        conversation_messages = working_memory.get_context_for_llm()
+
+        # Estimate cognitive load from recent messages
+        recent_messages = conversation_messages[-5:]  # Last 5 messages
+        load_state = await self._cognitive_monitor.estimate_load(
+            user_id=user_id,
+            recent_messages=recent_messages,
+            session_id=conversation_id,
+        )
+
         # Query relevant memories with timing
         memory_start = time.perf_counter()
         memories = await self._query_relevant_memories(
@@ -222,11 +246,8 @@ class ChatService:
         )
         memory_ms = (time.perf_counter() - memory_start) * 1000
 
-        # Build system prompt with memory context
-        system_prompt = self._build_system_prompt(memories)
-
-        # Get conversation history
-        conversation_messages = working_memory.get_context_for_llm()
+        # Build system prompt with memory context and load adaptation
+        system_prompt = self._build_system_prompt(memories, load_state)
 
         logger.info(
             "Processing chat message",
@@ -236,6 +257,7 @@ class ChatService:
                 "memory_count": len(memories),
                 "message_count": len(conversation_messages),
                 "memory_query_ms": memory_ms,
+                "cognitive_load_level": load_state.level.value,
             },
         )
 
@@ -279,6 +301,11 @@ class ChatService:
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
             },
+            "cognitive_load": {
+                "level": load_state.level.value,
+                "score": round(load_state.score, 3),
+                "recommendation": load_state.recommendation,
+            },
         }
 
     async def _query_relevant_memories(
@@ -300,21 +327,39 @@ class ChatService:
             offset=0,
         )
 
-    def _build_system_prompt(self, memories: list[dict[str, Any]]) -> str:
-        """Build system prompt with memory context."""
+    def _build_system_prompt(
+        self,
+        memories: list[dict[str, Any]],
+        load_state: CognitiveLoadState | None = None,
+    ) -> str:
+        """Build system prompt with memory context and load adaptation.
+
+        Args:
+            memories: List of memory dicts to include as context.
+            load_state: Optional cognitive load state for response adaptation.
+
+        Returns:
+            Formatted system prompt string.
+        """
         if not memories:
-            return ARIA_SYSTEM_PROMPT.format(memory_context="")
+            memory_context = ""
+        else:
+            memory_lines = []
+            for mem in memories:
+                confidence_str = ""
+                if mem.get("confidence") is not None:
+                    confidence_str = f" (confidence: {mem['confidence']:.0%})"
+                memory_lines.append(f"- [{mem['memory_type']}] {mem['content']}{confidence_str}")
 
-        memory_lines = []
-        for mem in memories:
-            confidence_str = ""
-            if mem.get("confidence") is not None:
-                confidence_str = f" (confidence: {mem['confidence']:.0%})"
-            memory_lines.append(f"- [{mem['memory_type']}] {mem['content']}{confidence_str}")
+            memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
 
-        memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
+        base_prompt = ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
 
-        return ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
+        # Add high load instruction if needed
+        if load_state and load_state.level in [LoadLevel.HIGH, LoadLevel.CRITICAL]:
+            base_prompt = HIGH_LOAD_INSTRUCTION + "\n\n" + base_prompt
+
+        return base_prompt
 
     def _build_citations(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Build citations list from memories."""

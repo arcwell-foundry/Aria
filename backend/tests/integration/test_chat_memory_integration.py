@@ -4,12 +4,33 @@ These tests verify the full flow of memory-aware chat,
 including memory retrieval, LLM response, and information extraction.
 """
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.memory.semantic import FactSource, SemanticFact
+from src.models.cognitive_load import CognitiveLoadState, LoadLevel
+
+
+@contextmanager
+def mock_cognitive_load_deps() -> Generator[MagicMock, None, None]:
+    """Context manager to mock cognitive load dependencies."""
+    mock_load_state = CognitiveLoadState(
+        level=LoadLevel.LOW,
+        score=0.2,
+        factors={},
+        recommendation="detailed",
+    )
+    with patch("src.services.chat.get_supabase_client") as mock_get_db:
+        mock_get_db.return_value = MagicMock()
+        with patch("src.services.chat.CognitiveLoadMonitor") as mock_monitor_class:
+            mock_monitor = MagicMock()
+            mock_monitor.estimate_load = AsyncMock(return_value=mock_load_state)
+            mock_monitor_class.return_value = mock_monitor
+            yield mock_monitor
 
 
 @pytest.mark.asyncio
@@ -29,59 +50,60 @@ async def test_chat_queries_memory_and_includes_in_response() -> None:
         valid_from=datetime.now(UTC),
     )
 
-    with (
-        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
-        patch("src.services.chat.LLMClient") as mock_llm_class,
-        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
-        patch("src.services.chat.ExtractionService") as mock_extract_class,
-    ):
-        # Setup memory query service to return relevant memories
-        mock_mqs = AsyncMock()
-        mock_mqs.query = AsyncMock(
-            return_value=[
-                {
-                    "id": existing_fact.id,
-                    "memory_type": "semantic",
-                    "content": f"{existing_fact.subject} {existing_fact.predicate} {existing_fact.object}",
-                    "relevance_score": 0.85,
-                    "confidence": existing_fact.confidence,
-                    "timestamp": existing_fact.valid_from,
-                }
-            ]
-        )
-        mock_mqs_class.return_value = mock_mqs
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+            patch("src.services.chat.LLMClient") as mock_llm_class,
+            patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            # Setup memory query service to return relevant memories
+            mock_mqs = AsyncMock()
+            mock_mqs.query = AsyncMock(
+                return_value=[
+                    {
+                        "id": existing_fact.id,
+                        "memory_type": "semantic",
+                        "content": f"{existing_fact.subject} {existing_fact.predicate} {existing_fact.object}",
+                        "relevance_score": 0.85,
+                        "confidence": existing_fact.confidence,
+                        "timestamp": existing_fact.valid_from,
+                    }
+                ]
+            )
+            mock_mqs_class.return_value = mock_mqs
 
-        # Setup LLM to return response mentioning the fact
-        mock_llm = AsyncMock()
-        mock_llm.generate_response = AsyncMock(
-            return_value="Based on your preference for morning meetings, I'll schedule the demo at 9 AM."
-        )
-        mock_llm_class.return_value = mock_llm
+            # Setup LLM to return response mentioning the fact
+            mock_llm = AsyncMock()
+            mock_llm.generate_response = AsyncMock(
+                return_value="Based on your preference for morning meetings, I'll schedule the demo at 9 AM."
+            )
+            mock_llm_class.return_value = mock_llm
 
-        # Setup working memory
-        mock_working_memory = MagicMock()
-        mock_working_memory.get_context_for_llm.return_value = []
-        mock_wmm = MagicMock()
-        mock_wmm.get_or_create.return_value = mock_working_memory
-        mock_wmm_class.return_value = mock_wmm
+            # Setup working memory
+            mock_working_memory = MagicMock()
+            mock_working_memory.get_context_for_llm.return_value = []
+            mock_wmm = MagicMock()
+            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm_class.return_value = mock_wmm
 
-        # Setup extraction service
-        mock_extract = AsyncMock()
-        mock_extract.extract_and_store = AsyncMock(return_value=[])
-        mock_extract_class.return_value = mock_extract
+            # Setup extraction service
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
 
-        service = ChatService()
-        result = await service.process_message(
-            user_id="user-123",
-            conversation_id="conv-456",
-            message="Can you schedule a demo?",
-        )
+            service = ChatService()
+            result = await service.process_message(
+                user_id="user-123",
+                conversation_id="conv-456",
+                message="Can you schedule a demo?",
+            )
 
-        # Verify response mentions the preference
-        assert "morning" in result["message"].lower()
+            # Verify response mentions the preference
+            assert "morning" in result["message"].lower()
 
-        # Verify timing is reasonable (mocked so should be fast)
-        assert result["timing"]["total_ms"] < 5000  # Less than 5 seconds
+            # Verify timing is reasonable (mocked so should be fast)
+            assert result["timing"]["total_ms"] < 5000  # Less than 5 seconds
 
 
 @pytest.mark.asyncio
@@ -173,53 +195,54 @@ async def test_full_chat_flow_with_extraction() -> None:
     """Test complete chat flow including memory query, response, and extraction."""
     from src.services.chat import ChatService
 
-    with (
-        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
-        patch("src.services.chat.LLMClient") as mock_llm_class,
-        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
-        patch("src.services.chat.ExtractionService") as mock_extract_class,
-    ):
-        # Setup memory service with no prior memories
-        mock_mqs = AsyncMock()
-        mock_mqs.query = AsyncMock(return_value=[])
-        mock_mqs_class.return_value = mock_mqs
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+            patch("src.services.chat.LLMClient") as mock_llm_class,
+            patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            # Setup memory service with no prior memories
+            mock_mqs = AsyncMock()
+            mock_mqs.query = AsyncMock(return_value=[])
+            mock_mqs_class.return_value = mock_mqs
 
-        # Setup LLM response
-        mock_llm = AsyncMock()
-        mock_llm.generate_response = AsyncMock(
-            return_value="I'll note that your quarterly budget is $500K. How would you like to allocate it?"
-        )
-        mock_llm_class.return_value = mock_llm
+            # Setup LLM response
+            mock_llm = AsyncMock()
+            mock_llm.generate_response = AsyncMock(
+                return_value="I'll note that your quarterly budget is $500K. How would you like to allocate it?"
+            )
+            mock_llm_class.return_value = mock_llm
 
-        # Setup working memory
-        mock_working_memory = MagicMock()
-        mock_working_memory.get_context_for_llm.return_value = [
-            {"role": "user", "content": "Our budget for this quarter is $500K."}
-        ]
-        mock_wmm = MagicMock()
-        mock_wmm.get_or_create.return_value = mock_working_memory
-        mock_wmm_class.return_value = mock_wmm
+            # Setup working memory
+            mock_working_memory = MagicMock()
+            mock_working_memory.get_context_for_llm.return_value = [
+                {"role": "user", "content": "Our budget for this quarter is $500K."}
+            ]
+            mock_wmm = MagicMock()
+            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm_class.return_value = mock_wmm
 
-        # Setup extraction - this is the key part
-        mock_extract = AsyncMock()
-        mock_extract.extract_and_store = AsyncMock(return_value=["extracted-fact-1"])
-        mock_extract_class.return_value = mock_extract
+            # Setup extraction - this is the key part
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=["extracted-fact-1"])
+            mock_extract_class.return_value = mock_extract
 
-        service = ChatService()
-        result = await service.process_message(
-            user_id="user-123",
-            conversation_id="conv-456",
-            message="Our budget for this quarter is $500K.",
-        )
+            service = ChatService()
+            result = await service.process_message(
+                user_id="user-123",
+                conversation_id="conv-456",
+                message="Our budget for this quarter is $500K.",
+            )
 
-        # Verify the response
-        assert "budget" in result["message"].lower()
-        assert result["conversation_id"] == "conv-456"
+            # Verify the response
+            assert "budget" in result["message"].lower()
+            assert result["conversation_id"] == "conv-456"
 
-        # Verify extraction was called with the conversation
-        mock_extract.extract_and_store.assert_called_once()
-        call_kwargs = mock_extract.extract_and_store.call_args.kwargs
-        assert call_kwargs["user_id"] == "user-123"
+            # Verify extraction was called with the conversation
+            mock_extract.extract_and_store.assert_called_once()
+            call_kwargs = mock_extract.extract_and_store.call_args.kwargs
+            assert call_kwargs["user_id"] == "user-123"
 
 
 @pytest.mark.asyncio
@@ -227,81 +250,82 @@ async def test_memory_context_improves_response_quality() -> None:
     """Test that memory context helps generate more relevant responses."""
     from src.services.chat import ChatService
 
-    with (
-        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
-        patch("src.services.chat.LLMClient") as mock_llm_class,
-        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
-        patch("src.services.chat.ExtractionService") as mock_extract_class,
-    ):
-        # Setup memory with relevant context
-        mock_mqs = AsyncMock()
-        mock_mqs.query = AsyncMock(
-            return_value=[
-                {
-                    "id": "fact-1",
-                    "memory_type": "semantic",
-                    "content": "Acme Corp annual_revenue $50M",
-                    "relevance_score": 0.9,
-                    "confidence": 0.95,
-                    "timestamp": datetime.now(UTC),
-                },
-                {
-                    "id": "fact-2",
-                    "memory_type": "semantic",
-                    "content": "Acme Corp industry pharmaceuticals",
-                    "relevance_score": 0.85,
-                    "confidence": 0.90,
-                    "timestamp": datetime.now(UTC),
-                },
-            ]
-        )
-        mock_mqs_class.return_value = mock_mqs
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+            patch("src.services.chat.LLMClient") as mock_llm_class,
+            patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            # Setup memory with relevant context
+            mock_mqs = AsyncMock()
+            mock_mqs.query = AsyncMock(
+                return_value=[
+                    {
+                        "id": "fact-1",
+                        "memory_type": "semantic",
+                        "content": "Acme Corp annual_revenue $50M",
+                        "relevance_score": 0.9,
+                        "confidence": 0.95,
+                        "timestamp": datetime.now(UTC),
+                    },
+                    {
+                        "id": "fact-2",
+                        "memory_type": "semantic",
+                        "content": "Acme Corp industry pharmaceuticals",
+                        "relevance_score": 0.85,
+                        "confidence": 0.90,
+                        "timestamp": datetime.now(UTC),
+                    },
+                ]
+            )
+            mock_mqs_class.return_value = mock_mqs
 
-        # Capture the system prompt to verify it includes memory
-        captured_system_prompt = None
+            # Capture the system prompt to verify it includes memory
+            captured_system_prompt = None
 
-        async def capture_system_prompt(
-            *,
-            messages: list[dict[str, str]],
-            system_prompt: str | None = None,
-            **_kwargs: object,
-        ) -> str:
-            nonlocal captured_system_prompt
-            _ = messages  # Silence unused variable warning
-            captured_system_prompt = system_prompt
-            return (
-                "Based on Acme Corp's $50M revenue in the pharmaceutical industry, I recommend..."
+            async def capture_system_prompt(
+                *,
+                messages: list[dict[str, str]],
+                system_prompt: str | None = None,
+                **_kwargs: object,
+            ) -> str:
+                nonlocal captured_system_prompt
+                _ = messages  # Silence unused variable warning
+                captured_system_prompt = system_prompt
+                return (
+                    "Based on Acme Corp's $50M revenue in the pharmaceutical industry, I recommend..."
+                )
+
+            mock_llm = AsyncMock()
+            mock_llm.generate_response = AsyncMock(side_effect=capture_system_prompt)
+            mock_llm_class.return_value = mock_llm
+
+            # Setup working memory
+            mock_working_memory = MagicMock()
+            mock_working_memory.get_context_for_llm.return_value = []
+            mock_wmm = MagicMock()
+            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm_class.return_value = mock_wmm
+
+            # Setup extraction
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+            result = await service.process_message(
+                user_id="user-123",
+                conversation_id="conv-456",
+                message="What do you recommend for Acme Corp?",
             )
 
-        mock_llm = AsyncMock()
-        mock_llm.generate_response = AsyncMock(side_effect=capture_system_prompt)
-        mock_llm_class.return_value = mock_llm
+            # Verify memory was included in the system prompt
+            assert captured_system_prompt is not None
+            assert "Acme Corp" in captured_system_prompt or "$50M" in captured_system_prompt
 
-        # Setup working memory
-        mock_working_memory = MagicMock()
-        mock_working_memory.get_context_for_llm.return_value = []
-        mock_wmm = MagicMock()
-        mock_wmm.get_or_create.return_value = mock_working_memory
-        mock_wmm_class.return_value = mock_wmm
-
-        # Setup extraction
-        mock_extract = AsyncMock()
-        mock_extract.extract_and_store = AsyncMock(return_value=[])
-        mock_extract_class.return_value = mock_extract
-
-        service = ChatService()
-        result = await service.process_message(
-            user_id="user-123",
-            conversation_id="conv-456",
-            message="What do you recommend for Acme Corp?",
-        )
-
-        # Verify memory was included in the system prompt
-        assert captured_system_prompt is not None
-        assert "Acme Corp" in captured_system_prompt or "$50M" in captured_system_prompt
-
-        # Verify citations are returned
-        assert len(result["citations"]) == 2
+            # Verify citations are returned
+            assert len(result["citations"]) == 2
 
 
 @pytest.mark.asyncio
@@ -309,39 +333,40 @@ async def test_extraction_failure_does_not_break_chat() -> None:
     """Test that extraction failures don't prevent chat from completing."""
     from src.services.chat import ChatService
 
-    with (
-        patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
-        patch("src.services.chat.LLMClient") as mock_llm_class,
-        patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
-        patch("src.services.chat.ExtractionService") as mock_extract_class,
-    ):
-        mock_mqs = AsyncMock()
-        mock_mqs.query = AsyncMock(return_value=[])
-        mock_mqs_class.return_value = mock_mqs
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService") as mock_mqs_class,
+            patch("src.services.chat.LLMClient") as mock_llm_class,
+            patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_mqs = AsyncMock()
+            mock_mqs.query = AsyncMock(return_value=[])
+            mock_mqs_class.return_value = mock_mqs
 
-        mock_llm = AsyncMock()
-        mock_llm.generate_response = AsyncMock(return_value="Hello! How can I help?")
-        mock_llm_class.return_value = mock_llm
+            mock_llm = AsyncMock()
+            mock_llm.generate_response = AsyncMock(return_value="Hello! How can I help?")
+            mock_llm_class.return_value = mock_llm
 
-        mock_working_memory = MagicMock()
-        mock_working_memory.get_context_for_llm.return_value = []
-        mock_wmm = MagicMock()
-        mock_wmm.get_or_create.return_value = mock_working_memory
-        mock_wmm_class.return_value = mock_wmm
+            mock_working_memory = MagicMock()
+            mock_working_memory.get_context_for_llm.return_value = []
+            mock_wmm = MagicMock()
+            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm_class.return_value = mock_wmm
 
-        # Extraction raises an exception
-        mock_extract = AsyncMock()
-        mock_extract.extract_and_store = AsyncMock(side_effect=Exception("Extraction failed"))
-        mock_extract_class.return_value = mock_extract
+            # Extraction raises an exception
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(side_effect=Exception("Extraction failed"))
+            mock_extract_class.return_value = mock_extract
 
-        service = ChatService()
+            service = ChatService()
 
-        # Should not raise, chat should still complete
-        result = await service.process_message(
-            user_id="user-123",
-            conversation_id="conv-456",
-            message="Hello!",
-        )
+            # Should not raise, chat should still complete
+            result = await service.process_message(
+                user_id="user-123",
+                conversation_id="conv-456",
+                message="Hello!",
+            )
 
-        assert result["message"] == "Hello! How can I help?"
-        assert result["conversation_id"] == "conv-456"
+            assert result["message"] == "Hello! How can I help?"
+            assert result["conversation_id"] == "conv-456"
