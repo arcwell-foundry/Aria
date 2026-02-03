@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { AriaChatPage, LoginPage, SignupPage, DashboardPage, GoalsPage } from "@/pages";
+import { AriaChatPage, BattleCardsPage, LoginPage, SignupPage, DashboardPage, GoalsPage } from "@/pages";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,6 +42,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <GoalsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/battlecards"
+              element={
+                <ProtectedRoute>
+                  <BattleCardsPage />
                 </ProtectedRoute>
               }
             />
