@@ -19,7 +19,7 @@ from src.memory.audit import (
     log_memory_operation,
 )
 from src.memory.confidence import ConfidenceScorer
-from src.memory.salience import SalienceService
+from src.memory.conversation import ConversationEpisode, ConversationService
 from src.memory.corporate import (
     CORPORATE_SOURCE_CONFIDENCE,
     CorporateFact,
@@ -40,6 +40,7 @@ from src.memory.prospective import (
     TaskStatus,
     TriggerType,
 )
+from src.memory.salience import SalienceService
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 from src.memory.working import (
     WorkingMemory,
@@ -87,4 +88,7 @@ __all__ = [
     "CorporateFactSource",
     "CorporateMemory",
     "CORPORATE_SOURCE_CONFIDENCE",
+    # Conversation Episodes
+    "ConversationEpisode",
+    "ConversationService",
 ]

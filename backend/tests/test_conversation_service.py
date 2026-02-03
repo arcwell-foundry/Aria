@@ -8,6 +8,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+def test_conversation_service_exported_from_memory_module() -> None:
+    """ConversationService should be importable from src.memory."""
+    from src.memory import ConversationEpisode, ConversationService
+
+    assert ConversationService is not None
+    assert ConversationEpisode is not None
+
+
 def test_conversation_episode_module_importable() -> None:
     """ConversationEpisode should be importable from memory.conversation."""
     from src.memory.conversation import ConversationEpisode
