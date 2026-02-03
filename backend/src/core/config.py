@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     # Daily.co (Phase 6)
     DAILY_API_KEY: SecretStr | None = None
 
-    # Composio
+    # Composio OAuth Configuration
     COMPOSIO_API_KEY: SecretStr | None = None
+    COMPOSIO_BASE_URL: str = "https://api.composio.dev"
 
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
