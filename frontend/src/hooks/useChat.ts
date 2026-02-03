@@ -5,6 +5,9 @@ import {
   listConversations,
   sendMessage,
   streamMessage,
+  updateConversationTitle,
+  deleteConversation,
+  searchConversations,
   type ChatMessage,
   type SendMessageRequest,
 } from "@/api/chat";
@@ -104,4 +107,45 @@ export function useStreamingMessage() {
     startStream,
     reset,
   };
+}
+
+// Update conversation title mutation
+export function useUpdateConversationTitle() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ conversationId, title }: { conversationId: string; title: string }) =>
+      updateConversationTitle(conversationId, { title }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.conversations(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.conversation(variables.conversationId),
+      });
+    },
+  });
+}
+
+// Delete conversation mutation
+export function useDeleteConversation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteConversation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.conversations(),
+      });
+    },
+  });
+}
+
+// Search conversations hook
+export function useSearchConversations(query: string) {
+  return useQuery({
+    queryKey: [...chatKeys.conversations(), "search", query],
+    queryFn: () => searchConversations(query),
+    enabled: query.length > 0,
+  });
 }

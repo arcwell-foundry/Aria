@@ -17,6 +17,20 @@ export interface Conversation {
   updated_at: string;
 }
 
+export interface ConversationListResponse {
+  conversations: Conversation[];
+  total: number;
+}
+
+export interface UpdateConversationTitleRequest {
+  title: string;
+}
+
+export interface DeleteConversationResponse {
+  status: string;
+  id: string;
+}
+
 export interface SendMessageRequest {
   content: string;
   conversation_id?: string;
@@ -40,6 +54,28 @@ export async function getConversation(conversationId: string): Promise<ChatMessa
 
 export async function listConversations(): Promise<Conversation[]> {
   const response = await apiClient.get<Conversation[]>("/chat/conversations");
+  return response.data;
+}
+
+export async function updateConversationTitle(
+  conversationId: string,
+  data: UpdateConversationTitleRequest
+): Promise<Conversation> {
+  const response = await apiClient.put<Conversation>(
+    `/chat/conversations/${conversationId}/title`,
+    data
+  );
+  return response.data;
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await apiClient.delete(`/chat/conversations/${conversationId}`);
+}
+
+export async function searchConversations(query: string): Promise<Conversation[]> {
+  const response = await apiClient.get<Conversation[]>("/chat/conversations", {
+    params: { search: query },
+  });
   return response.data;
 }
 
