@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS meeting_briefs (
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'generating', 'completed', 'failed')),
     generated_at TIMESTAMPTZ,
     error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(user_id, calendar_event_id)
 );
 
@@ -47,6 +47,7 @@ CREATE INDEX idx_meeting_briefs_user_id ON meeting_briefs(user_id);
 CREATE INDEX idx_meeting_briefs_meeting_time ON meeting_briefs(meeting_time);
 CREATE INDEX idx_meeting_briefs_status ON meeting_briefs(status);
 CREATE INDEX idx_meeting_briefs_user_time ON meeting_briefs(user_id, meeting_time);
+CREATE INDEX idx_meeting_briefs_content ON meeting_briefs USING GIN(brief_content);
 
 -- Updated at trigger (reuse existing function)
 CREATE TRIGGER update_meeting_briefs_updated_at
