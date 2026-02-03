@@ -20,11 +20,10 @@ class CognitiveLoadState(BaseModel):
 
     level: LoadLevel
     score: float = Field(..., ge=0.0, le=1.0, description="Load score 0.0 to 1.0")
-    factors: dict[str, float] = Field(
-        default_factory=dict, description="Individual factor scores"
-    )
+    factors: dict[str, float] = Field(default_factory=dict, description="Individual factor scores")
     recommendation: str = Field(
-        ..., description="Response style recommendation: detailed, balanced, concise, concise_urgent"
+        ...,
+        description="Response style recommendation: detailed, balanced, concise, concise_urgent",
     )
 
 
@@ -51,6 +50,4 @@ class CognitiveLoadHistoryResponse(BaseModel):
 
     snapshots: list[CognitiveLoadSnapshotResponse]
     average_score: float | None = None
-    trend: str | None = Field(
-        None, description="Trend direction: improving, stable, worsening"
-    )
+    trend: str | None = Field(None, description="Trend direction: improving, stable, worsening")

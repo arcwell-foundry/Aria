@@ -59,9 +59,7 @@ async def get_cognitive_load(
         return state
 
     except Exception:
-        logger.exception(
-            "Failed to get cognitive load", extra={"user_id": current_user.id}
-        )
+        logger.exception("Failed to get cognitive load", extra={"user_id": current_user.id})
         raise HTTPException(
             status_code=503,
             detail="Cognitive load service temporarily unavailable",
@@ -109,9 +107,7 @@ async def get_cognitive_load_history(
         if len(snapshots) >= 4:
             mid = len(snapshots) // 2
             recent_avg = sum(s.load_score for s in snapshots[:mid]) / mid
-            older_avg = sum(s.load_score for s in snapshots[mid:]) / (
-                len(snapshots) - mid
-            )
+            older_avg = sum(s.load_score for s in snapshots[mid:]) / (len(snapshots) - mid)
             if recent_avg < older_avg - 0.1:
                 trend = "improving"
             elif recent_avg > older_avg + 0.1:
@@ -135,9 +131,7 @@ async def get_cognitive_load_history(
         )
 
     except Exception:
-        logger.exception(
-            "Failed to get cognitive load history", extra={"user_id": current_user.id}
-        )
+        logger.exception("Failed to get cognitive load history", extra={"user_id": current_user.id})
         raise HTTPException(
             status_code=503,
             detail="Cognitive load service temporarily unavailable",

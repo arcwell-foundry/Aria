@@ -29,9 +29,7 @@ class MessageResponse(BaseModel):
     message: str
 
 
-@router.post(
-    "/email", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/email", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_email_draft(
     current_user: CurrentUser, request: EmailDraftCreate
 ) -> dict[str, Any]:
@@ -94,9 +92,7 @@ async def list_drafts(
     """
     service = get_draft_service()
     drafts = await service.list_drafts(current_user.id, limit, status)
-    logger.info(
-        "Drafts listed", extra={"user_id": current_user.id, "count": len(drafts)}
-    )
+    logger.info("Drafts listed", extra={"user_id": current_user.id, "count": len(drafts)})
     return drafts
 
 
@@ -144,14 +140,10 @@ async def update_draft(
         service = get_draft_service()
         updates = request.model_dump(exclude_unset=True)
         draft = await service.update_draft(current_user.id, draft_id, updates)
-        logger.info(
-            "Draft updated", extra={"user_id": current_user.id, "draft_id": draft_id}
-        )
+        logger.info("Draft updated", extra={"user_id": current_user.id, "draft_id": draft_id})
         return draft
     except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=e.message
-        ) from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except EmailDraftError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message
@@ -179,9 +171,7 @@ async def delete_draft(current_user: CurrentUser, draft_id: str) -> dict[str, st
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete draft",
         )
-    logger.info(
-        "Draft deleted", extra={"user_id": current_user.id, "draft_id": draft_id}
-    )
+    logger.info("Draft deleted", extra={"user_id": current_user.id, "draft_id": draft_id})
     return {"message": "Draft deleted successfully"}
 
 
@@ -208,18 +198,14 @@ async def regenerate_draft(
         service = get_draft_service()
         tone = request.tone if request else None
         additional_context = request.additional_context if request else None
-        draft = await service.regenerate_draft(
-            current_user.id, draft_id, tone, additional_context
-        )
+        draft = await service.regenerate_draft(current_user.id, draft_id, tone, additional_context)
         logger.info(
             "Draft regenerated",
             extra={"user_id": current_user.id, "draft_id": draft_id},
         )
         return draft
     except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=e.message
-        ) from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except EmailDraftError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message
@@ -243,15 +229,9 @@ async def send_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]
     try:
         service = get_draft_service()
         result = await service.send_draft(current_user.id, draft_id)
-        logger.info(
-            "Draft sent", extra={"user_id": current_user.id, "draft_id": draft_id}
-        )
+        logger.info("Draft sent", extra={"user_id": current_user.id, "draft_id": draft_id})
         return result
     except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=e.message
-        ) from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except EmailSendError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message
-        ) from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
