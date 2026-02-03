@@ -325,24 +325,26 @@ class TestExtractEpisode:
         """Create mock Supabase client."""
         mock = MagicMock()
         mock.table.return_value.insert.return_value.execute.return_value = MagicMock(
-            data=[{
-                "id": "ep-generated-123",
-                "user_id": "user-456",
-                "conversation_id": "conv-789",
-                "summary": "Test summary",
-                "key_topics": ["topic1"],
-                "entities_discussed": [],
-                "user_state": {},
-                "outcomes": [],
-                "open_threads": [],
-                "message_count": 3,
-                "duration_minutes": 5,
-                "started_at": "2026-02-02T10:00:00+00:00",
-                "ended_at": "2026-02-02T10:05:00+00:00",
-                "current_salience": 1.0,
-                "last_accessed_at": "2026-02-02T10:05:00+00:00",
-                "access_count": 0,
-            }]
+            data=[
+                {
+                    "id": "ep-generated-123",
+                    "user_id": "user-456",
+                    "conversation_id": "conv-789",
+                    "summary": "Test summary",
+                    "key_topics": ["topic1"],
+                    "entities_discussed": [],
+                    "user_state": {},
+                    "outcomes": [],
+                    "open_threads": [],
+                    "message_count": 3,
+                    "duration_minutes": 5,
+                    "started_at": "2026-02-02T10:00:00+00:00",
+                    "ended_at": "2026-02-02T10:05:00+00:00",
+                    "current_salience": 1.0,
+                    "last_accessed_at": "2026-02-02T10:05:00+00:00",
+                    "access_count": 0,
+                }
+            ]
         )
         return mock
 
@@ -352,15 +354,31 @@ class TestExtractEpisode:
         mock = MagicMock()
         # First call returns summary
         # Second call returns extraction JSON
-        mock.generate_response = AsyncMock(side_effect=[
-            "Discussed project timeline and resource allocation. Agreed to weekly check-ins.",
-            json.dumps({
-                "key_topics": ["project timeline", "resources", "check-ins"],
-                "user_state": {"mood": "focused", "confidence": "high", "focus": "planning"},
-                "outcomes": [{"type": "decision", "content": "Weekly check-ins starting Monday"}],
-                "open_threads": [{"topic": "budget", "status": "pending", "context": "Awaiting finance approval"}],
-            }),
-        ])
+        mock.generate_response = AsyncMock(
+            side_effect=[
+                "Discussed project timeline and resource allocation. Agreed to weekly check-ins.",
+                json.dumps(
+                    {
+                        "key_topics": ["project timeline", "resources", "check-ins"],
+                        "user_state": {
+                            "mood": "focused",
+                            "confidence": "high",
+                            "focus": "planning",
+                        },
+                        "outcomes": [
+                            {"type": "decision", "content": "Weekly check-ins starting Monday"}
+                        ],
+                        "open_threads": [
+                            {
+                                "topic": "budget",
+                                "status": "pending",
+                                "context": "Awaiting finance approval",
+                            }
+                        ],
+                    }
+                ),
+            ]
+        )
         return mock
 
     @pytest.fixture
@@ -368,8 +386,16 @@ class TestExtractEpisode:
         """Create sample conversation messages."""
         now = datetime.now(UTC)
         return [
-            {"role": "user", "content": "Let's discuss the project timeline", "created_at": now - timedelta(minutes=5)},
-            {"role": "assistant", "content": "Sure! What's the target deadline?", "created_at": now - timedelta(minutes=4)},
+            {
+                "role": "user",
+                "content": "Let's discuss the project timeline",
+                "created_at": now - timedelta(minutes=5),
+            },
+            {
+                "role": "assistant",
+                "content": "Sure! What's the target deadline?",
+                "created_at": now - timedelta(minutes=4),
+            },
             {"role": "user", "content": "End of Q1, we need weekly check-ins", "created_at": now},
         ]
 
@@ -457,10 +483,12 @@ class TestExtractEpisode:
         from src.memory.conversation import ConversationEpisode, ConversationService
 
         mock_llm = MagicMock()
-        mock_llm.generate_response = AsyncMock(side_effect=[
-            "Valid summary here.",
-            "This is not valid JSON at all",  # Malformed JSON
-        ])
+        mock_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Valid summary here.",
+                "This is not valid JSON at all",  # Malformed JSON
+            ]
+        )
 
         service = ConversationService(db_client=mock_db, llm_client=mock_llm)
 
@@ -480,3 +508,258 @@ class TestExtractEpisode:
         assert insert_data["user_state"] == {}
         assert insert_data["outcomes"] == []
         assert insert_data["open_threads"] == []
+
+
+# ============================================================================
+# GetRecentEpisodes Tests (Task 5)
+# ============================================================================
+
+
+class TestGetRecentEpisodes:
+    """Tests for retrieving recent conversation episodes."""
+
+    @pytest.fixture
+    def mock_db_with_episodes(self) -> MagicMock:
+        """Create mock DB with episode data."""
+        mock = MagicMock()
+        now = datetime.now(UTC)
+
+        episodes_data = [
+            {
+                "id": "ep-1",
+                "user_id": "user-456",
+                "conversation_id": "conv-1",
+                "summary": "Discussed Q1 targets",
+                "key_topics": ["sales", "Q1"],
+                "entities_discussed": ["Acme Corp"],
+                "user_state": {"mood": "focused"},
+                "outcomes": [],
+                "open_threads": [],
+                "message_count": 10,
+                "duration_minutes": 15,
+                "started_at": (now - timedelta(hours=2)).isoformat(),
+                "ended_at": (now - timedelta(hours=1, minutes=45)).isoformat(),
+                "current_salience": 0.9,
+                "last_accessed_at": now.isoformat(),
+                "access_count": 2,
+            },
+            {
+                "id": "ep-2",
+                "user_id": "user-456",
+                "conversation_id": "conv-2",
+                "summary": "Weekly sync",
+                "key_topics": ["sync", "updates"],
+                "entities_discussed": [],
+                "user_state": {},
+                "outcomes": [{"type": "action", "content": "Review proposal"}],
+                "open_threads": [
+                    {"topic": "budget", "status": "pending", "context": "Need CFO sign-off"}
+                ],
+                "message_count": 5,
+                "duration_minutes": 8,
+                "started_at": (now - timedelta(days=1)).isoformat(),
+                "ended_at": (now - timedelta(days=1) + timedelta(minutes=8)).isoformat(),
+                "current_salience": 0.7,
+                "last_accessed_at": (now - timedelta(days=1)).isoformat(),
+                "access_count": 0,
+            },
+        ]
+
+        mock.table.return_value.select.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=episodes_data
+        )
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_get_recent_episodes_returns_list(self, mock_db_with_episodes: MagicMock) -> None:
+        """get_recent_episodes should return list of episodes."""
+        from src.memory.conversation import ConversationEpisode, ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_episodes, llm_client=mock_llm)
+
+        episodes = await service.get_recent_episodes(user_id="user-456", limit=5)
+
+        assert isinstance(episodes, list)
+        assert len(episodes) == 2
+        assert all(isinstance(ep, ConversationEpisode) for ep in episodes)
+
+    @pytest.mark.asyncio
+    async def test_get_recent_episodes_filters_by_salience(
+        self, mock_db_with_episodes: MagicMock
+    ) -> None:
+        """get_recent_episodes should filter by minimum salience."""
+        from src.memory.conversation import ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_episodes, llm_client=mock_llm)
+
+        await service.get_recent_episodes(user_id="user-456", min_salience=0.5)
+
+        # Verify gte was called with salience threshold
+        mock_db_with_episodes.table.return_value.select.return_value.eq.return_value.gte.assert_called_with(
+            "current_salience", 0.5
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_recent_episodes_orders_by_ended_at(
+        self, mock_db_with_episodes: MagicMock
+    ) -> None:
+        """get_recent_episodes should order by ended_at descending."""
+        from src.memory.conversation import ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_episodes, llm_client=mock_llm)
+
+        await service.get_recent_episodes(user_id="user-456")
+
+        mock_db_with_episodes.table.return_value.select.return_value.eq.return_value.gte.return_value.order.assert_called_with(
+            "ended_at", desc=True
+        )
+
+
+# ============================================================================
+# GetOpenThreads Tests (Task 5)
+# ============================================================================
+
+
+class TestGetOpenThreads:
+    """Tests for retrieving open threads across conversations."""
+
+    @pytest.fixture
+    def mock_db_with_threads(self) -> MagicMock:
+        """Create mock DB with episodes containing open threads."""
+        mock = MagicMock()
+        now = datetime.now(UTC)
+
+        episodes_with_threads = [
+            {
+                "conversation_id": "conv-1",
+                "ended_at": (now - timedelta(hours=1)).isoformat(),
+                "open_threads": [
+                    {
+                        "topic": "pricing",
+                        "status": "awaiting_response",
+                        "context": "Client reviewing",
+                    },
+                ],
+            },
+            {
+                "conversation_id": "conv-2",
+                "ended_at": (now - timedelta(days=1)).isoformat(),
+                "open_threads": [
+                    {"topic": "contract", "status": "pending", "context": "Legal review"},
+                    {"topic": "timeline", "status": "blocked", "context": "Waiting on resources"},
+                ],
+            },
+        ]
+
+        mock.table.return_value.select.return_value.eq.return_value.neq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=episodes_with_threads
+        )
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_get_open_threads_returns_list(self, mock_db_with_threads: MagicMock) -> None:
+        """get_open_threads should return list of thread dicts."""
+        from src.memory.conversation import ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_threads, llm_client=mock_llm)
+
+        threads = await service.get_open_threads(user_id="user-456")
+
+        assert isinstance(threads, list)
+        assert len(threads) == 3  # Total threads from both episodes
+
+    @pytest.mark.asyncio
+    async def test_get_open_threads_includes_conversation_context(
+        self, mock_db_with_threads: MagicMock
+    ) -> None:
+        """get_open_threads should include source conversation info."""
+        from src.memory.conversation import ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_threads, llm_client=mock_llm)
+
+        threads = await service.get_open_threads(user_id="user-456")
+
+        for thread in threads:
+            assert "from_conversation" in thread
+            assert "conversation_ended" in thread
+
+    @pytest.mark.asyncio
+    async def test_get_open_threads_respects_limit(self, mock_db_with_threads: MagicMock) -> None:
+        """get_open_threads should respect limit parameter."""
+        from src.memory.conversation import ConversationService
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db_with_threads, llm_client=mock_llm)
+
+        threads = await service.get_open_threads(user_id="user-456", limit=2)
+
+        assert len(threads) <= 2
+
+
+# ============================================================================
+# GetEpisode Tests (Task 5)
+# ============================================================================
+
+
+class TestGetEpisode:
+    """Tests for retrieving a specific episode."""
+
+    @pytest.mark.asyncio
+    async def test_get_episode_returns_episode(self) -> None:
+        """get_episode should return specific episode by ID."""
+        from src.memory.conversation import ConversationEpisode, ConversationService
+
+        mock_db = MagicMock()
+        now = datetime.now(UTC)
+
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={
+                "id": "ep-123",
+                "user_id": "user-456",
+                "conversation_id": "conv-789",
+                "summary": "Test episode",
+                "key_topics": [],
+                "entities_discussed": [],
+                "user_state": {},
+                "outcomes": [],
+                "open_threads": [],
+                "message_count": 5,
+                "duration_minutes": 10,
+                "started_at": now.isoformat(),
+                "ended_at": now.isoformat(),
+                "current_salience": 1.0,
+                "last_accessed_at": now.isoformat(),
+                "access_count": 0,
+            }
+        )
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        episode = await service.get_episode(user_id="user-456", episode_id="ep-123")
+
+        assert episode is not None
+        assert isinstance(episode, ConversationEpisode)
+        assert episode.id == "ep-123"
+
+    @pytest.mark.asyncio
+    async def test_get_episode_returns_none_when_not_found(self) -> None:
+        """get_episode should return None when episode doesn't exist."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        episode = await service.get_episode(user_id="user-456", episode_id="nonexistent")
+
+        assert episode is None

@@ -356,7 +356,20 @@ class ConversationService:
         Returns:
             List of recent ConversationEpisode objects.
         """
-        raise NotImplementedError("Will be implemented in Task 5")
+        result = (
+            self.db.table("conversation_episodes")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("current_salience", min_salience)
+            .order("ended_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        if not result.data:
+            return []
+
+        return [ConversationEpisode.from_dict(ep) for ep in result.data]
 
     async def get_open_threads(
         self,
@@ -372,7 +385,34 @@ class ConversationService:
         Returns:
             List of open thread dicts with conversation context.
         """
-        raise NotImplementedError("Will be implemented in Task 5")
+        result = (
+            self.db.table("conversation_episodes")
+            .select("open_threads, ended_at, conversation_id")
+            .eq("user_id", user_id)
+            .neq("open_threads", [])
+            .order("ended_at", desc=True)
+            .limit(20)  # Fetch more episodes to gather enough threads
+            .execute()
+        )
+
+        if not result.data:
+            return []
+
+        # Flatten threads from all episodes
+        threads: list[dict[str, Any]] = []
+        for ep in result.data:
+            ep_threads = ep.get("open_threads", [])
+            if not ep_threads:
+                continue
+            for thread in ep_threads:
+                thread_with_context = {
+                    **thread,
+                    "from_conversation": ep["conversation_id"],
+                    "conversation_ended": ep["ended_at"],
+                }
+                threads.append(thread_with_context)
+
+        return threads[:limit]
 
     async def get_episode(
         self,
@@ -388,4 +428,16 @@ class ConversationService:
         Returns:
             ConversationEpisode or None if not found.
         """
-        raise NotImplementedError("Will be implemented in Task 5")
+        result = (
+            self.db.table("conversation_episodes")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("id", episode_id)
+            .single()
+            .execute()
+        )
+
+        if not result.data:
+            return None
+
+        return ConversationEpisode.from_dict(result.data)
