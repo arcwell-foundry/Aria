@@ -26,5 +26,8 @@ pytest-cov>=4.1.0,<5.0.0
 mypy>=1.8.0,<2.0.0
 ruff>=0.1.0,<1.0.0
 
+# Integrations
+composio-core>=0.3.0,<1.0.0
+
 # Types for dependencies
 # (types installed automatically with packages)
