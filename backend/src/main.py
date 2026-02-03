@@ -20,6 +20,7 @@ from src.api.routes import (
     drafts,
     goals,
     integrations,
+    meetings,
     memory,
     signals,
 )
@@ -92,6 +93,7 @@ app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
+app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")

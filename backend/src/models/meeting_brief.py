@@ -77,9 +77,14 @@ class MeetingBriefResponse(BaseModel):
 
 
 class GenerateBriefRequest(BaseModel):
-    """Request to generate a meeting brief."""
+    """Request to generate a meeting brief.
 
-    calendar_event_id: str = Field(..., description="Calendar event ID")
+    Note: calendar_event_id is optional because it can be provided via path parameter.
+    """
+
+    calendar_event_id: str | None = Field(
+        default=None, description="Calendar event ID (optional if provided in path)"
+    )
     meeting_title: str | None = Field(default=None, description="Meeting title")
     meeting_time: datetime = Field(..., description="Meeting start time")
     attendee_emails: list[EmailStr] = Field(
