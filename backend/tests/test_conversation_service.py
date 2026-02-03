@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 
 def test_conversation_episode_module_importable() -> None:
@@ -234,8 +235,6 @@ def test_conversation_episode_from_dict_handles_missing_salience_fields() -> Non
 # ============================================================================
 # ConversationService Tests (Task 3)
 # ============================================================================
-
-from unittest.mock import AsyncMock, MagicMock
 
 
 class TestConversationServiceInit:
