@@ -27,7 +27,7 @@ mypy>=1.8.0,<2.0.0
 ruff>=0.1.0,<1.0.0
 
 # Integrations
-composio-core>=0.3.0,<1.0.0
+composio>=0.10.7,<1.0.0
 
 # Types for dependencies
 # (types installed automatically with packages)
