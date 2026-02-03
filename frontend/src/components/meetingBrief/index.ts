@@ -1,8 +1,11 @@
 export { AgendaSection } from "./AgendaSection";
 export { AttendeeCard } from "./AttendeeCard";
 export { AttendeesSection } from "./AttendeesSection";
+export { BriefNotesSection } from "./BriefNotesSection";
 export { BriefSummary } from "./BriefSummary";
 export { CompanySection } from "./CompanySection";
+export { GeneratingOverlay } from "./GeneratingOverlay";
 export { MeetingBriefEmpty } from "./MeetingBriefEmpty";
 export { MeetingBriefHeader } from "./MeetingBriefHeader";
 export { MeetingBriefSkeleton } from "./MeetingBriefSkeleton";
+export { RisksOpportunitiesSection } from "./RisksOpportunitiesSection";
