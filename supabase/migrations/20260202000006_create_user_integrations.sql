@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS user_integrations (
     composio_connection_id TEXT NOT NULL, -- Reference to Composio's stored connection
     composio_account_id TEXT, -- Composio account identifier
     display_name TEXT, -- User-friendly name (e.g., user's email)
-    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'disconnected', 'error'
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disconnected', 'error')),
     last_sync_at TIMESTAMPTZ,
-    sync_status TEXT DEFAULT 'success', -- 'success', 'pending', 'failed'
+    sync_status TEXT DEFAULT 'success' CHECK (sync_status IN ('success', 'pending', 'failed')),
     error_message TEXT,
     metadata JSONB DEFAULT '{}', -- Additional integration-specific data
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -38,9 +38,18 @@ CREATE POLICY "Users can delete own integrations"
     ON user_integrations FOR DELETE
     USING (auth.uid() = user_id);
 
+-- Service role full access for backend operations
+CREATE POLICY "Service role full access to integrations"
+    ON user_integrations
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
 -- Index for quick lookups
 CREATE INDEX idx_user_integrations_user_type ON user_integrations(user_id, integration_type);
 CREATE INDEX idx_user_integrations_status ON user_integrations(status);
+
+-- Table comment
+COMMENT ON TABLE user_integrations IS 'User OAuth integration connections. Tokens stored by Composio, we store references only.';
 
 -- Updated at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
