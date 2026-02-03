@@ -2,7 +2,10 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 def test_conversation_episode_module_importable() -> None:
@@ -310,11 +313,6 @@ class TestFormatMessages:
 # ============================================================================
 # ExtractEpisode Tests (Task 4)
 # ============================================================================
-
-from typing import Any
-from unittest.mock import AsyncMock
-
-import pytest
 
 
 class TestExtractEpisode:
@@ -763,3 +761,172 @@ class TestGetEpisode:
         episode = await service.get_episode(user_id="user-456", episode_id="nonexistent")
 
         assert episode is None
+
+
+# ============================================================================
+# Entity Extraction Tests (Task 6)
+# ============================================================================
+
+
+class TestEntityExtraction:
+    """Tests for Graphiti entity extraction integration."""
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_uses_graphiti(self) -> None:
+        """_extract_entities should use Graphiti for entity extraction."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+
+        # Create mock nodes with proper name attributes
+        source1 = MagicMock()
+        source1.name = "John Doe"
+        result1 = MagicMock()
+        result1.source_node = source1
+
+        source2 = MagicMock()
+        source2.name = "Acme Corp"
+        result2 = MagicMock()
+        result2.source_node = source2
+
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(return_value=[result1, result2])
+
+        service = ConversationService(
+            db_client=mock_db,
+            llm_client=mock_llm,
+            graphiti_client=mock_graphiti,
+        )
+
+        messages = [
+            {"role": "user", "content": "I spoke with John Doe from Acme Corp"},
+        ]
+
+        entities = await service._extract_entities(messages)
+
+        assert isinstance(entities, list)
+        assert "John Doe" in entities
+        assert "Acme Corp" in entities
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_handles_no_graphiti(self) -> None:
+        """_extract_entities should work without Graphiti client."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+
+        service = ConversationService(
+            db_client=mock_db,
+            llm_client=mock_llm,
+            graphiti_client=None,  # No Graphiti
+        )
+
+        messages = [{"role": "user", "content": "Hello"}]
+        entities = await service._extract_entities(messages)
+
+        assert entities == []
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_extracts_unique_names(self) -> None:
+        """_extract_entities should extract unique entity names from source and target nodes."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+
+        # Create mock nodes with proper name attributes (MagicMock auto-generates .name)
+        source1 = MagicMock()
+        source1.name = "John Doe"
+        target1 = MagicMock()
+        target1.name = "Acme Corp"
+
+        source2 = MagicMock()
+        source2.name = "John Doe"  # Duplicate
+        target2 = MagicMock()
+        target2.name = "Widget Inc"
+
+        result1 = MagicMock()
+        result1.source_node = source1
+        result1.target_node = target1
+
+        result2 = MagicMock()
+        result2.source_node = source2
+        result2.target_node = target2
+
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(return_value=[result1, result2])
+
+        service = ConversationService(
+            db_client=mock_db,
+            llm_client=mock_llm,
+            graphiti_client=mock_graphiti,
+        )
+
+        messages = [
+            {"role": "user", "content": "John Doe from Acme Corp called about Widget Inc"},
+        ]
+
+        entities = await service._extract_entities(messages)
+
+        assert isinstance(entities, list)
+        assert len(entities) == 3  # John Doe, Acme Corp, Widget Inc (no duplicates)
+        assert "John Doe" in entities
+        assert "Acme Corp" in entities
+        assert "Widget Inc" in entities
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_handles_graphiti_error(self) -> None:
+        """_extract_entities should handle Graphiti errors gracefully."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(side_effect=Exception("Graphiti unavailable"))
+
+        service = ConversationService(
+            db_client=mock_db,
+            llm_client=mock_llm,
+            graphiti_client=mock_graphiti,
+        )
+
+        messages = [{"role": "user", "content": "Test message"}]
+        entities = await service._extract_entities(messages)
+
+        # Should return empty list on error, not raise
+        assert entities == []
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_combines_message_content(self) -> None:
+        """_extract_entities should combine all message content for search."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(return_value=[])
+
+        service = ConversationService(
+            db_client=mock_db,
+            llm_client=mock_llm,
+            graphiti_client=mock_graphiti,
+        )
+
+        messages = [
+            {"role": "user", "content": "Hello John"},
+            {"role": "assistant", "content": "How can I help?"},
+            {"role": "user", "content": "Call Acme Corp"},
+        ]
+
+        await service._extract_entities(messages)
+
+        # Verify search was called with combined text
+        mock_graphiti.search.assert_called_once()
+        search_arg = mock_graphiti.search.call_args[0][0]
+        assert "Hello John" in search_arg
+        assert "How can I help?" in search_arg
+        assert "Call Acme Corp" in search_arg

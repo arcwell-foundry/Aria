@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from graphiti_core import Graphiti
+
     from src.core.llm import LLMClient
     from supabase import Client
 
@@ -147,15 +149,18 @@ class ConversationService:
         self,
         db_client: Client,
         llm_client: LLMClient,
+        graphiti_client: Graphiti | None = None,
     ) -> None:
         """Initialize the conversation service.
 
         Args:
             db_client: Supabase client for database operations.
             llm_client: LLM client for Claude API calls.
+            graphiti_client: Optional Graphiti client for entity extraction.
         """
         self.db = db_client
         self.llm = llm_client
+        self.graphiti = graphiti_client
 
     def _format_messages(self, messages: list[dict[str, str]]) -> str:
         """Format messages as readable conversation text.
@@ -231,21 +236,42 @@ class ConversationService:
 
     async def _extract_entities(
         self,
-        messages: list[dict[str, Any]],  # noqa: ARG002
+        messages: list[dict[str, Any]],
     ) -> list[str]:
-        """Extract entity names from conversation messages.
-
-        This is a stub that returns an empty list.
-        Full Graphiti integration will be added in Task 6.
+        """Extract entity names from messages using Graphiti.
 
         Args:
             messages: List of conversation messages.
 
         Returns:
-            List of entity names (currently empty).
+            List of unique entity names found.
         """
-        # TODO: Implement Graphiti entity extraction in Task 6
-        return []
+        if self.graphiti is None:
+            return []
+
+        try:
+            # Combine all message content for entity search
+            combined_text = " ".join(msg.get("content", "") for msg in messages)
+
+            # Use Graphiti to find related entities
+            results = await self.graphiti.search(combined_text)
+
+            # Extract unique entity names
+            entities: set[str] = set()
+            for result in results:
+                if hasattr(result, "source_node") and hasattr(result.source_node, "name"):
+                    entities.add(result.source_node.name)
+                if hasattr(result, "target_node") and hasattr(result.target_node, "name"):
+                    entities.add(result.target_node.name)
+
+            return list(entities)
+
+        except Exception as e:
+            logger.warning(
+                "Entity extraction failed",
+                extra={"error": str(e)},
+            )
+            return []
 
     async def extract_episode(
         self,
