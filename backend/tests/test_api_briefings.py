@@ -244,3 +244,32 @@ def test_briefings_endpoints_require_authentication() -> None:
 
     response = client.post("/api/v1/briefings/generate")
     assert response.status_code == 401
+
+    response = client.post("/api/v1/briefings/regenerate")
+    assert response.status_code == 401
+
+
+def test_regenerate_briefing_creates_new_briefing(test_client: TestClient) -> None:
+    """Test POST /api/v1/briefings/regenerate creates new briefing."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
+        "src.services.briefing.anthropic.Anthropic"
+    ) as mock_llm_class:
+        # Setup DB mock
+        mock_db = MagicMock()
+        mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(
+            data=[{"id": "briefing-123"}]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        # Setup LLM mock
+        mock_llm_response = MagicMock()
+        mock_llm_content = MagicMock()
+        mock_llm_content.text = "Regenerated briefing"
+        mock_llm_response.content = [mock_llm_content]
+        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+
+        response = test_client.post("/api/v1/briefings/regenerate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "summary" in data

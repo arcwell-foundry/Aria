@@ -139,3 +139,23 @@ async def generate_briefing(
     )
 
     return BriefingContent(**content)
+
+
+@router.post("/regenerate", response_model=BriefingContent)
+async def regenerate_briefing(
+    current_user: CurrentUser,
+) -> BriefingContent:
+    """Regenerate today's briefing with fresh data.
+
+    Forces regeneration of today's briefing, useful when
+    underlying data has changed (new leads, signals, etc.).
+    """
+    service = BriefingService()
+    content = await service.generate_briefing(current_user.id)
+
+    logger.info(
+        "Briefing regenerated",
+        extra={"user_id": current_user.id},
+    )
+
+    return BriefingContent(**content)
