@@ -261,7 +261,14 @@ async def test_get_lead_data_returns_empty_dict_when_no_leads() -> None:
 @pytest.mark.asyncio
 async def test_get_signal_data_returns_empty_dict_when_no_signals() -> None:
     """Test _get_signal_data returns empty structure when no signals."""
-    with patch("src.services.briefing.SupabaseClient"):
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        # Setup DB mock to return empty results
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
         from src.services.briefing import BriefingService
 
         service = BriefingService()
@@ -507,3 +514,72 @@ async def test_get_lead_data_returns_categorized_leads() -> None:
         assert len(result["recently_active"]) == 1
         assert result["recently_active"][0]["id"] == "lead-3"
         assert result["recently_active"][0]["company_name"] == "Gamma LLC"
+
+
+@pytest.mark.asyncio
+async def test_get_signal_data_returns_categorized_signals() -> None:
+    """Test _get_signal_data returns signals categorized by type."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        signals = [
+            {
+                "id": "signal-1",
+                "company_name": "Acme Corp",
+                "signal_type": "funding",
+                "headline": "Acme raises $50M Series B",
+                "summary": "Acme Corp raised $50M in Series B funding.",
+                "relevance_score": 0.9,
+                "detected_at": "2026-02-02T10:00:00Z",
+            },
+            {
+                "id": "signal-2",
+                "company_name": "Beta Inc",
+                "signal_type": "hiring",
+                "headline": "Beta Inc hiring 50 sales reps",
+                "summary": "Beta Inc expanding sales team.",
+                "relevance_score": 0.7,
+                "detected_at": "2026-02-02T11:00:00Z",
+            },
+            {
+                "id": "signal-3",
+                "company_name": "Competitor X",
+                "signal_type": "product",
+                "headline": "Competitor X launches new feature",
+                "summary": "New feature released by competitor.",
+                "relevance_score": 0.8,
+                "detected_at": "2026-02-02T12:00:00Z",
+            },
+        ]
+
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=signals
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_signal_data(user_id="test-user-123")
+
+        # Verify structure
+        assert "company_news" in result
+        assert "market_trends" in result
+        assert "competitive_intel" in result
+
+        # Verify funding signal is in company_news
+        assert len(result["company_news"]) == 1
+        assert result["company_news"][0]["id"] == "signal-1"
+        assert result["company_news"][0]["company_name"] == "Acme Corp"
+        assert result["company_news"][0]["headline"] == "Acme raises $50M Series B"
+
+        # Verify hiring and product signals are in competitive_intel
+        assert len(result["competitive_intel"]) == 2
+        competitive_ids = [s["id"] for s in result["competitive_intel"]]
+        assert "signal-2" in competitive_ids
+        assert "signal-3" in competitive_ids
+
+        # Verify market_trends is empty (no matching signal types)
+        assert len(result["market_trends"]) == 0
+
+        # Verify the market_signals table was queried
+        mock_db.table.assert_called_with("market_signals")

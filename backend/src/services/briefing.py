@@ -230,8 +230,8 @@ class BriefingService:
             "recently_active": [format_lead(lead) for lead in (active_result.data or []) if isinstance(lead, dict)],
         }
 
-    async def _get_signal_data(self, user_id: str) -> dict[str, Any]:  # noqa: ARG002
-        """Get market signals.
+    async def _get_signal_data(self, user_id: str) -> dict[str, Any]:
+        """Get market signals from market_signals table.
 
         Args:
             user_id: The user's ID.
@@ -239,11 +239,59 @@ class BriefingService:
         Returns:
             Dict with company_news, market_trends, and competitive_intel.
         """
-        # TODO: Integrate with signal detection
+        week_ago = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+
+        # Get unread signals from the past week
+        result = (
+            self._db.table("market_signals")
+            .select("id, company_name, signal_type, headline, summary, relevance_score, detected_at")
+            .eq("user_id", user_id)
+            .is_("dismissed_at", "null")
+            .gte("detected_at", week_ago)
+            .order("relevance_score", desc=True)
+            .limit(20)
+            .execute()
+        )
+
+        signals = result.data or []
+
+        # Categorize by signal type
+        company_news_types = {"funding", "leadership", "earnings", "partnership"}
+        market_trend_types = {"regulatory", "clinical_trial", "fda_approval", "patent"}
+        competitive_types = {"product", "hiring"}
+
+        def format_signal(s: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "id": s["id"],
+                "company_name": s["company_name"],
+                "headline": s["headline"],
+                "summary": s.get("summary"),
+                "relevance_score": s.get("relevance_score"),
+                "detected_at": s.get("detected_at"),
+            }
+
+        company_news = [
+            format_signal(s)
+            for s in signals
+            if isinstance(s, dict) and s.get("signal_type") in company_news_types
+        ][:5]
+
+        market_trends = [
+            format_signal(s)
+            for s in signals
+            if isinstance(s, dict) and s.get("signal_type") in market_trend_types
+        ][:5]
+
+        competitive_intel = [
+            format_signal(s)
+            for s in signals
+            if isinstance(s, dict) and s.get("signal_type") in competitive_types
+        ][:5]
+
         return {
-            "company_news": [],
-            "market_trends": [],
-            "competitive_intel": [],
+            "company_news": company_news,
+            "market_trends": market_trends,
+            "competitive_intel": competitive_intel,
         }
 
     async def _get_task_data(self, user_id: str) -> dict[str, Any]:
