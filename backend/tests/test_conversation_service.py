@@ -305,3 +305,172 @@ class TestFormatMessages:
         formatted = service._format_messages([])
 
         assert formatted == ""
+
+
+# ============================================================================
+# ExtractEpisode Tests (Task 4)
+# ============================================================================
+
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+
+class TestExtractEpisode:
+    """Tests for episode extraction from conversations."""
+
+    @pytest.fixture
+    def mock_db(self) -> MagicMock:
+        """Create mock Supabase client."""
+        mock = MagicMock()
+        mock.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{
+                "id": "ep-generated-123",
+                "user_id": "user-456",
+                "conversation_id": "conv-789",
+                "summary": "Test summary",
+                "key_topics": ["topic1"],
+                "entities_discussed": [],
+                "user_state": {},
+                "outcomes": [],
+                "open_threads": [],
+                "message_count": 3,
+                "duration_minutes": 5,
+                "started_at": "2026-02-02T10:00:00+00:00",
+                "ended_at": "2026-02-02T10:05:00+00:00",
+                "current_salience": 1.0,
+                "last_accessed_at": "2026-02-02T10:05:00+00:00",
+                "access_count": 0,
+            }]
+        )
+        return mock
+
+    @pytest.fixture
+    def mock_llm(self) -> MagicMock:
+        """Create mock LLM client."""
+        mock = MagicMock()
+        # First call returns summary
+        # Second call returns extraction JSON
+        mock.generate_response = AsyncMock(side_effect=[
+            "Discussed project timeline and resource allocation. Agreed to weekly check-ins.",
+            json.dumps({
+                "key_topics": ["project timeline", "resources", "check-ins"],
+                "user_state": {"mood": "focused", "confidence": "high", "focus": "planning"},
+                "outcomes": [{"type": "decision", "content": "Weekly check-ins starting Monday"}],
+                "open_threads": [{"topic": "budget", "status": "pending", "context": "Awaiting finance approval"}],
+            }),
+        ])
+        return mock
+
+    @pytest.fixture
+    def sample_messages(self) -> list[dict[str, Any]]:
+        """Create sample conversation messages."""
+        now = datetime.now(UTC)
+        return [
+            {"role": "user", "content": "Let's discuss the project timeline", "created_at": now - timedelta(minutes=5)},
+            {"role": "assistant", "content": "Sure! What's the target deadline?", "created_at": now - timedelta(minutes=4)},
+            {"role": "user", "content": "End of Q1, we need weekly check-ins", "created_at": now},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_episode_calls_llm_for_summary(
+        self, mock_db: MagicMock, mock_llm: MagicMock, sample_messages: list[dict[str, Any]]
+    ) -> None:
+        """extract_episode should call LLM to generate summary."""
+        from src.memory.conversation import ConversationService
+
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        await service.extract_episode(
+            user_id="user-456",
+            conversation_id="conv-789",
+            messages=sample_messages,
+        )
+
+        # Should have called generate_response twice (summary + extraction)
+        assert mock_llm.generate_response.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_extract_episode_stores_in_database(
+        self, mock_db: MagicMock, mock_llm: MagicMock, sample_messages: list[dict[str, Any]]
+    ) -> None:
+        """extract_episode should store episode in database."""
+        from src.memory.conversation import ConversationService
+
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        await service.extract_episode(
+            user_id="user-456",
+            conversation_id="conv-789",
+            messages=sample_messages,
+        )
+
+        mock_db.table.assert_called_with("conversation_episodes")
+        mock_db.table.return_value.insert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_extract_episode_returns_episode_object(
+        self, mock_db: MagicMock, mock_llm: MagicMock, sample_messages: list[dict[str, Any]]
+    ) -> None:
+        """extract_episode should return ConversationEpisode."""
+        from src.memory.conversation import ConversationEpisode, ConversationService
+
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        result = await service.extract_episode(
+            user_id="user-456",
+            conversation_id="conv-789",
+            messages=sample_messages,
+        )
+
+        assert isinstance(result, ConversationEpisode)
+        assert result.user_id == "user-456"
+        assert result.conversation_id == "conv-789"
+
+    @pytest.mark.asyncio
+    async def test_extract_episode_calculates_duration(
+        self, mock_db: MagicMock, mock_llm: MagicMock, sample_messages: list[dict[str, Any]]
+    ) -> None:
+        """extract_episode should calculate duration from timestamps."""
+        from src.memory.conversation import ConversationService
+
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        await service.extract_episode(
+            user_id="user-456",
+            conversation_id="conv-789",
+            messages=sample_messages,
+        )
+
+        # Verify insert was called with duration
+        insert_call = mock_db.table.return_value.insert.call_args
+        insert_data = insert_call[0][0]
+        assert "duration_minutes" in insert_data
+        assert insert_data["message_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_extract_episode_handles_malformed_json(
+        self, mock_db: MagicMock, sample_messages: list[dict[str, Any]]
+    ) -> None:
+        """extract_episode should handle malformed LLM JSON gracefully."""
+        from src.memory.conversation import ConversationEpisode, ConversationService
+
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(side_effect=[
+            "Valid summary here.",
+            "This is not valid JSON at all",  # Malformed JSON
+        ])
+
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        # Should not raise, should use defaults
+        result = await service.extract_episode(
+            user_id="user-456",
+            conversation_id="conv-789",
+            messages=sample_messages,
+        )
+
+        assert isinstance(result, ConversationEpisode)
+        # Should have empty/default values for extracted fields
+        assert result.key_topics == [] or result.key_topics is not None

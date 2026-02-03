@@ -11,6 +11,7 @@ Extracts structured information from conversations:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -176,11 +177,81 @@ class ConversationService:
 
         return "\n\n".join(lines)
 
+    def _get_message_timestamp(self, message: dict[str, Any]) -> datetime:
+        """Extract timestamp from a message.
+
+        Args:
+            message: Message dict that may contain 'created_at' field.
+
+        Returns:
+            Datetime of the message, or current time if not available.
+        """
+        created_at = message.get("created_at")
+        if created_at is None:
+            return datetime.now(UTC)
+        if isinstance(created_at, datetime):
+            return created_at
+        if isinstance(created_at, str):
+            return datetime.fromisoformat(created_at)
+        return datetime.now(UTC)
+
+    def _parse_extraction_response(self, response: str) -> dict[str, Any]:
+        """Parse LLM extraction response JSON.
+
+        Handles malformed JSON gracefully by returning defaults.
+
+        Args:
+            response: LLM response string that should be JSON.
+
+        Returns:
+            Parsed dict with extracted fields, or defaults if parsing fails.
+        """
+        defaults: dict[str, Any] = {
+            "key_topics": [],
+            "user_state": {},
+            "outcomes": [],
+            "open_threads": [],
+        }
+
+        try:
+            parsed = json.loads(response)
+            # Validate and merge with defaults
+            return {
+                "key_topics": parsed.get("key_topics", []),
+                "user_state": parsed.get("user_state", {}),
+                "outcomes": parsed.get("outcomes", []),
+                "open_threads": parsed.get("open_threads", []),
+            }
+        except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse LLM extraction response as JSON",
+                extra={"response_preview": response[:100]},
+            )
+            return defaults
+
+    async def _extract_entities(
+        self,
+        messages: list[dict[str, Any]],  # noqa: ARG002
+    ) -> list[str]:
+        """Extract entity names from conversation messages.
+
+        This is a stub that returns an empty list.
+        Full Graphiti integration will be added in Task 6.
+
+        Args:
+            messages: List of conversation messages.
+
+        Returns:
+            List of entity names (currently empty).
+        """
+        # TODO: Implement Graphiti entity extraction in Task 6
+        return []
+
     async def extract_episode(
         self,
         user_id: str,
         conversation_id: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
     ) -> ConversationEpisode:
         """Extract durable content from a conversation.
 
@@ -195,7 +266,69 @@ class ConversationService:
         Returns:
             The created ConversationEpisode.
         """
-        raise NotImplementedError("Will be implemented in Task 4")
+        # Format messages for LLM
+        formatted_conversation = self._format_messages(messages)
+
+        # Step 1: Generate summary using LLM
+        summary_prompt = SUMMARY_PROMPT.format(conversation=formatted_conversation)
+        summary = await self.llm.generate_response(
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_tokens=500,
+            temperature=0.3,
+        )
+
+        # Step 2: Extract structured information using LLM
+        extraction_prompt = EXTRACTION_PROMPT.format(conversation=formatted_conversation)
+        extraction_response = await self.llm.generate_response(
+            messages=[{"role": "user", "content": extraction_prompt}],
+            max_tokens=1000,
+            temperature=0.2,
+        )
+
+        # Parse the extraction response (handles malformed JSON gracefully)
+        extracted = self._parse_extraction_response(extraction_response)
+
+        # Step 3: Extract entities (stub for now)
+        entities = await self._extract_entities(messages)
+
+        # Step 4: Calculate duration from timestamps
+        if messages:
+            started_at = self._get_message_timestamp(messages[0])
+            ended_at = self._get_message_timestamp(messages[-1])
+            duration_seconds = (ended_at - started_at).total_seconds()
+            duration_minutes = max(1, int(duration_seconds / 60))
+        else:
+            now = datetime.now(UTC)
+            started_at = now
+            ended_at = now
+            duration_minutes = 0
+
+        # Step 5: Prepare episode data for database
+        now = datetime.now(UTC)
+        episode_data = {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "summary": summary.strip(),
+            "key_topics": extracted["key_topics"],
+            "entities_discussed": entities,
+            "user_state": extracted["user_state"],
+            "outcomes": extracted["outcomes"],
+            "open_threads": extracted["open_threads"],
+            "message_count": len(messages),
+            "duration_minutes": duration_minutes,
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "current_salience": 1.0,
+            "last_accessed_at": now.isoformat(),
+            "access_count": 0,
+        }
+
+        # Step 6: Store in database
+        result = self.db.table("conversation_episodes").insert(episode_data).execute()
+
+        # Step 7: Return ConversationEpisode from stored data
+        stored_data: dict[str, Any] = result.data[0]  # type: ignore[assignment]
+        return ConversationEpisode.from_dict(stored_data)
 
     async def get_recent_episodes(
         self,
