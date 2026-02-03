@@ -2,11 +2,13 @@
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any, cast
 
-from src.core.exceptions import EmailDraftError, NotFoundError
+from src.core.exceptions import EmailDraftError, EmailSendError, NotFoundError
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.integrations.oauth import get_oauth_client
 from src.memory.digital_twin import DigitalTwin
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
 
@@ -388,6 +390,125 @@ class DraftService:
         except Exception as e:
             logger.exception("Failed to regenerate draft")
             raise EmailDraftError(str(e)) from e
+
+    async def send_draft(self, user_id: str, draft_id: str) -> dict[str, Any]:
+        """Send a draft email via user's email integration.
+
+        Args:
+            user_id: The ID of the user who owns the draft.
+            draft_id: The ID of the draft to send.
+
+        Returns:
+            The updated draft data with sent status.
+
+        Raises:
+            NotFoundError: If the draft is not found.
+            EmailSendError: If sending fails.
+        """
+        try:
+            draft = await self.get_draft(user_id, draft_id)
+            if draft is None:
+                raise NotFoundError("Draft", draft_id)
+
+            if draft["status"] == "sent":
+                raise EmailSendError("Draft already sent", draft_id=draft_id)
+
+            # Get email integration
+            integration = await self._get_email_integration(user_id)
+            if integration is None:
+                raise EmailSendError(
+                    "No email integration connected. Please connect Gmail or Outlook.",
+                    draft_id=draft_id,
+                )
+
+            # Determine action based on integration type
+            integration_type = integration["integration_type"]
+            if integration_type == "gmail":
+                action = "gmail_send_email"
+            elif integration_type == "outlook":
+                action = "outlook_send_email"
+            else:
+                raise EmailSendError(
+                    f"Unsupported email integration: {integration_type}",
+                    draft_id=draft_id,
+                )
+
+            # Execute send via Composio
+            oauth_client = get_oauth_client()
+            await oauth_client.execute_action(
+                connection_id=integration["composio_connection_id"],
+                action=action,
+                params={
+                    "to": draft["recipient_email"],
+                    "subject": draft["subject"],
+                    "body": draft["body"],
+                },
+            )
+
+            # Update status to sent
+            now = datetime.now(UTC)
+            updates = {"status": "sent", "sent_at": now.isoformat()}
+            result = await self.update_draft(user_id, draft_id, updates)
+
+            logger.info(
+                "Email draft sent",
+                extra={
+                    "user_id": user_id,
+                    "draft_id": draft_id,
+                    "integration": integration_type,
+                },
+            )
+            return result
+
+        except (NotFoundError, EmailSendError):
+            raise
+        except Exception as e:
+            # Try to update draft status to failed
+            try:
+                await self.update_draft(
+                    user_id, draft_id, {"status": "failed", "error_message": str(e)}
+                )
+            except Exception:
+                pass
+            logger.exception("Failed to send email draft")
+            raise EmailSendError(str(e), draft_id=draft_id) from e
+
+    async def _get_email_integration(self, user_id: str) -> dict[str, Any] | None:
+        """Get user's email integration (Gmail or Outlook).
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            Integration data as a dictionary, or None if not found.
+        """
+        try:
+            client = SupabaseClient.get_client()
+            # Try Gmail first
+            result = (
+                client.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "gmail")
+                .maybe_single()
+                .execute()
+            )
+            if result.data:
+                return cast(dict[str, Any], result.data)
+
+            # Try Outlook
+            result = (
+                client.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "outlook")
+                .maybe_single()
+                .execute()
+            )
+            return cast(dict[str, Any], result.data) if result.data else None
+        except Exception:
+            logger.warning(f"Failed to get email integration for user {user_id}")
+            return None
 
     async def _get_lead_context(
         self, user_id: str, lead_memory_id: str | None

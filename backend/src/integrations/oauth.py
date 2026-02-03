@@ -132,6 +132,32 @@ class ComposioOAuthClient:
         data: dict[str, Any] = response.json()
         return bool(data.get("is_working", False))
 
+    async def execute_action(
+        self,
+        connection_id: str,
+        action: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute an action via Composio.
+
+        Args:
+            connection_id: The connection ID
+            action: The action to execute (e.g., 'gmail_send_email')
+            params: Parameters for the action
+
+        Returns:
+            Action result
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        response = await self._http.post(
+            f"/connections/{connection_id}/actions/{action}",
+            json=params,
+        )
+        response.raise_for_status()
+        return dict(response.json())
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._http_client is not None:

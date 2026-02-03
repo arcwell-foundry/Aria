@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.exceptions import EmailDraftError, NotFoundError
+from src.core.exceptions import EmailDraftError, EmailSendError, NotFoundError
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
 
 
@@ -753,3 +753,289 @@ async def test_update_draft_with_no_changes_returns_existing(
         # Should return existing draft without calling update
         assert result["id"] == "draft-123"
         mock_table.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_via_gmail(
+    mock_draft_data: dict[str, Any],
+) -> None:
+    """Test send_draft sends via Gmail integration."""
+    from src.services.draft_service import DraftService
+
+    with (
+        patch("src.services.draft_service.LLMClient"),
+        patch("src.services.draft_service.DigitalTwin"),
+        patch("src.services.draft_service.SupabaseClient") as mock_db_class,
+        patch("src.services.draft_service.get_oauth_client") as mock_oauth_getter,
+    ):
+        mock_client = MagicMock()
+
+        def create_table_mock(name: str) -> MagicMock:
+            mock_table = MagicMock()
+
+            if name == "email_drafts":
+                # For get_draft (select)
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+                mock_eq2 = MagicMock()
+                mock_single = MagicMock()
+                mock_single.execute.return_value = MagicMock(data=mock_draft_data)
+                mock_eq2.single.return_value = mock_single
+                mock_eq1.eq.return_value = mock_eq2
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+                # For update_draft (update)
+                sent_data = {
+                    **mock_draft_data,
+                    "status": "sent",
+                    "sent_at": "2026-02-03T10:00:00+00:00",
+                }
+                mock_update = MagicMock()
+                mock_update_eq1 = MagicMock()
+                mock_update_eq2 = MagicMock()
+                mock_update_eq2.execute.return_value = MagicMock(data=[sent_data])
+                mock_update_eq1.eq.return_value = mock_update_eq2
+                mock_update.eq.return_value = mock_update_eq1
+                mock_table.update.return_value = mock_update
+
+            elif name == "user_integrations":
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+                mock_eq2 = MagicMock()
+                mock_maybe_single = MagicMock()
+                mock_maybe_single.execute.return_value = MagicMock(
+                    data={
+                        "id": "int-123",
+                        "composio_connection_id": "conn-456",
+                        "integration_type": "gmail",
+                    }
+                )
+                mock_eq2.maybe_single.return_value = mock_maybe_single
+                mock_eq1.eq.return_value = mock_eq2
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+            return mock_table
+
+        mock_client.table = create_table_mock
+        mock_db_class.get_client.return_value = mock_client
+
+        mock_oauth = AsyncMock()
+        mock_oauth.execute_action = AsyncMock(return_value={"success": True})
+        mock_oauth_getter.return_value = mock_oauth
+
+        service = DraftService()
+        result = await service.send_draft("user-456", "draft-123")
+
+        assert result["status"] == "sent"
+        mock_oauth.execute_action.assert_called_once_with(
+            connection_id="conn-456",
+            action="gmail_send_email",
+            params={
+                "to": mock_draft_data["recipient_email"],
+                "subject": mock_draft_data["subject"],
+                "body": mock_draft_data["body"],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_draft_via_outlook(
+    mock_draft_data: dict[str, Any],
+) -> None:
+    """Test send_draft sends via Outlook integration when Gmail not available."""
+    from src.services.draft_service import DraftService
+
+    with (
+        patch("src.services.draft_service.LLMClient"),
+        patch("src.services.draft_service.DigitalTwin"),
+        patch("src.services.draft_service.SupabaseClient") as mock_db_class,
+        patch("src.services.draft_service.get_oauth_client") as mock_oauth_getter,
+    ):
+        mock_client = MagicMock()
+        gmail_call_count = 0
+
+        def create_table_mock(name: str) -> MagicMock:
+            nonlocal gmail_call_count
+            mock_table = MagicMock()
+
+            if name == "email_drafts":
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+                mock_eq2 = MagicMock()
+                mock_single = MagicMock()
+                mock_single.execute.return_value = MagicMock(data=mock_draft_data)
+                mock_eq2.single.return_value = mock_single
+                mock_eq1.eq.return_value = mock_eq2
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+                sent_data = {**mock_draft_data, "status": "sent"}
+                mock_update = MagicMock()
+                mock_update_eq1 = MagicMock()
+                mock_update_eq2 = MagicMock()
+                mock_update_eq2.execute.return_value = MagicMock(data=[sent_data])
+                mock_update_eq1.eq.return_value = mock_update_eq2
+                mock_update.eq.return_value = mock_update_eq1
+                mock_table.update.return_value = mock_update
+
+            elif name == "user_integrations":
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+
+                def eq_router(field: str, value: str) -> MagicMock:
+                    nonlocal gmail_call_count
+                    mock_eq2 = MagicMock()
+                    mock_maybe_single = MagicMock()
+                    if value == "gmail":
+                        gmail_call_count += 1
+                        # Gmail not found
+                        mock_maybe_single.execute.return_value = MagicMock(data=None)
+                    else:
+                        # Outlook found
+                        mock_maybe_single.execute.return_value = MagicMock(
+                            data={
+                                "id": "int-123",
+                                "composio_connection_id": "conn-789",
+                                "integration_type": "outlook",
+                            }
+                        )
+                    mock_eq2.maybe_single.return_value = mock_maybe_single
+                    return mock_eq2
+
+                mock_eq1.eq = eq_router
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+            return mock_table
+
+        mock_client.table = create_table_mock
+        mock_db_class.get_client.return_value = mock_client
+
+        mock_oauth = AsyncMock()
+        mock_oauth.execute_action = AsyncMock(return_value={"success": True})
+        mock_oauth_getter.return_value = mock_oauth
+
+        service = DraftService()
+        result = await service.send_draft("user-456", "draft-123")
+
+        assert result["status"] == "sent"
+        mock_oauth.execute_action.assert_called_once()
+        call_args = mock_oauth.execute_action.call_args
+        assert call_args.kwargs["action"] == "outlook_send_email"
+        assert call_args.kwargs["connection_id"] == "conn-789"
+
+
+@pytest.mark.asyncio
+async def test_send_draft_fails_without_integration(
+    mock_draft_data: dict[str, Any],
+) -> None:
+    """Test send_draft fails when no email integration."""
+    from src.services.draft_service import DraftService
+
+    with (
+        patch("src.services.draft_service.LLMClient"),
+        patch("src.services.draft_service.DigitalTwin"),
+        patch("src.services.draft_service.SupabaseClient") as mock_db_class,
+    ):
+        mock_client = MagicMock()
+
+        def create_table_mock(name: str) -> MagicMock:
+            mock_table = MagicMock()
+
+            if name == "email_drafts":
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+                mock_eq2 = MagicMock()
+                mock_single = MagicMock()
+                mock_single.execute.return_value = MagicMock(data=mock_draft_data)
+                mock_eq2.single.return_value = mock_single
+                mock_eq1.eq.return_value = mock_eq2
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+            elif name == "user_integrations":
+                mock_select = MagicMock()
+                mock_eq1 = MagicMock()
+                mock_eq2 = MagicMock()
+                mock_maybe_single = MagicMock()
+                # No integration found
+                mock_maybe_single.execute.return_value = MagicMock(data=None)
+                mock_eq2.maybe_single.return_value = mock_maybe_single
+                mock_eq1.eq.return_value = mock_eq2
+                mock_select.eq.return_value = mock_eq1
+                mock_table.select.return_value = mock_select
+
+            return mock_table
+
+        mock_client.table = create_table_mock
+        mock_db_class.get_client.return_value = mock_client
+
+        service = DraftService()
+        with pytest.raises(EmailSendError) as exc_info:
+            await service.send_draft("user-456", "draft-123")
+        assert "integration" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_fails_for_already_sent(
+    mock_draft_data: dict[str, Any],
+) -> None:
+    """Test send_draft fails when draft is already sent."""
+    from src.services.draft_service import DraftService
+
+    with (
+        patch("src.services.draft_service.LLMClient"),
+        patch("src.services.draft_service.DigitalTwin"),
+        patch("src.services.draft_service.SupabaseClient") as mock_db_class,
+    ):
+        mock_client = MagicMock()
+        sent_draft_data = {**mock_draft_data, "status": "sent"}
+
+        mock_table = MagicMock()
+        mock_select = MagicMock()
+        mock_eq1 = MagicMock()
+        mock_eq2 = MagicMock()
+        mock_single = MagicMock()
+        mock_single.execute.return_value = MagicMock(data=sent_draft_data)
+        mock_eq2.single.return_value = mock_single
+        mock_eq1.eq.return_value = mock_eq2
+        mock_select.eq.return_value = mock_eq1
+        mock_table.select.return_value = mock_select
+        mock_client.table.return_value = mock_table
+        mock_db_class.get_client.return_value = mock_client
+
+        service = DraftService()
+        with pytest.raises(EmailSendError) as exc_info:
+            await service.send_draft("user-456", "draft-123")
+        assert "already sent" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_fails_for_not_found() -> None:
+    """Test send_draft fails when draft doesn't exist."""
+    from src.services.draft_service import DraftService
+
+    with (
+        patch("src.services.draft_service.LLMClient"),
+        patch("src.services.draft_service.DigitalTwin"),
+        patch("src.services.draft_service.SupabaseClient") as mock_db_class,
+    ):
+        mock_client = MagicMock()
+        mock_table = MagicMock()
+        mock_select = MagicMock()
+        mock_eq1 = MagicMock()
+        mock_eq2 = MagicMock()
+        mock_single = MagicMock()
+        mock_single.execute.return_value = MagicMock(data=None)
+        mock_eq2.single.return_value = mock_single
+        mock_eq1.eq.return_value = mock_eq2
+        mock_select.eq.return_value = mock_eq1
+        mock_table.select.return_value = mock_select
+        mock_client.table.return_value = mock_table
+        mock_db_class.get_client.return_value = mock_client
+
+        service = DraftService()
+        with pytest.raises(NotFoundError):
+            await service.send_draft("user-456", "nonexistent")
