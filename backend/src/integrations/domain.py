@@ -1,8 +1,9 @@
 """Domain models for OAuth integrations."""
 
 from dataclasses import dataclass
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class IntegrationType(str, Enum):
@@ -46,11 +47,11 @@ class Integration:
     last_sync_at: datetime | None = None
     sync_status: SyncStatus = SyncStatus.SUCCESS
     error_message: str | None = None
-    metadata: dict = None
+    metadata: dict[str, Any] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.metadata is None:
             self.metadata = {}
 
@@ -84,7 +85,10 @@ INTEGRATION_CONFIGS: dict[IntegrationType, IntegrationConfig] = {
         description="Connect Gmail for email drafting and analysis",
         composio_app_id="gmail",
         icon="mail",
-        scopes=["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
+        scopes=[
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+        ],
     ),
     IntegrationType.OUTLOOK: IntegrationConfig(
         integration_type=IntegrationType.OUTLOOK,
@@ -108,6 +112,10 @@ INTEGRATION_CONFIGS: dict[IntegrationType, IntegrationConfig] = {
         description="Connect HubSpot CRM for lead management",
         composio_app_id="hubspot",
         icon="crm",
-        scopes=["crm.objects.contacts.read", "crm.objects.companies.read", "crm.objects.deals.read"],
+        scopes=[
+            "crm.objects.contacts.read",
+            "crm.objects.companies.read",
+            "crm.objects.deals.read",
+        ],
     ),
 }
