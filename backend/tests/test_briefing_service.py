@@ -233,9 +233,16 @@ async def test_list_briefings_respects_limit_parameter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_calendar_data_returns_empty_dict_when_no_integration() -> None:
+async def test_get_calendar_data_returns_empty_when_no_integration() -> None:
     """Test _get_calendar_data returns empty structure when calendar not integrated."""
-    with patch("src.services.briefing.SupabaseClient"):
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        # No calendar integration configured
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        mock_db_class.get_client.return_value = mock_db
+
         from src.services.briefing import BriefingService
 
         service = BriefingService()
@@ -243,6 +250,90 @@ async def test_get_calendar_data_returns_empty_dict_when_no_integration() -> Non
             user_id="test-user-123", briefing_date=date.today()
         )
 
+        assert result == {"meeting_count": 0, "key_meetings": []}
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_data_structure() -> None:
+    """Test _get_calendar_data returns correct structure."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        mock_db = MagicMock()
+        # Return None to simulate no integration
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_calendar_data(
+            user_id="test-user-123", briefing_date=date.today()
+        )
+
+        # Verify structure even without integration
+        assert "meeting_count" in result
+        assert "key_meetings" in result
+        assert isinstance(result["meeting_count"], int)
+        assert isinstance(result["key_meetings"], list)
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_data_checks_user_integrations_table() -> None:
+    """Test _get_calendar_data queries user_integrations for google_calendar."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        mock_db = MagicMock()
+        mock_table = MagicMock()
+        mock_select = MagicMock()
+        mock_eq1 = MagicMock()
+        mock_eq2 = MagicMock()
+        mock_eq3 = MagicMock()
+        mock_single = MagicMock()
+
+        mock_db.table.return_value = mock_table
+        mock_table.select.return_value = mock_select
+        mock_select.eq.return_value = mock_eq1
+        mock_eq1.eq.return_value = mock_eq2
+        mock_eq2.eq.return_value = mock_eq3
+        mock_eq3.single.return_value = mock_single
+        mock_single.execute.return_value = MagicMock(data=None)
+
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        await service._get_calendar_data(
+            user_id="test-user-123", briefing_date=date.today()
+        )
+
+        # Verify the user_integrations table was queried
+        mock_db.table.assert_called_with("user_integrations")
+        mock_table.select.assert_called_with("id, provider, status")
+        mock_select.eq.assert_called_with("user_id", "test-user-123")
+        mock_eq1.eq.assert_called_with("provider", "google_calendar")
+        mock_eq2.eq.assert_called_with("status", "active")
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_data_returns_empty_when_integration_exists() -> None:
+    """Test _get_calendar_data returns empty structure even when integration exists (stub)."""
+    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+        # Integration exists but fetch not yet implemented
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "integration-123", "provider": "google_calendar", "status": "active"}
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_calendar_data(
+            user_id="test-user-123", briefing_date=date.today()
+        )
+
+        # Still returns empty structure until Composio fetch is implemented
         assert result == {"meeting_count": 0, "key_meetings": []}
 
 

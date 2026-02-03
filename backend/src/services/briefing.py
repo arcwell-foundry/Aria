@@ -154,7 +154,7 @@ class BriefingService:
     async def _get_calendar_data(
         self,
         user_id: str,
-        briefing_date: date,  # noqa: ARG002
+        briefing_date: date,
     ) -> dict[str, Any]:
         """Get calendar events for the day.
 
@@ -165,7 +165,31 @@ class BriefingService:
         Returns:
             Dict with meeting_count and key_meetings.
         """
-        # TODO: Integrate with calendar service
+        # Check if user has calendar integration
+        integration_result = (
+            self._db.table("user_integrations")
+            .select("id, provider, status")
+            .eq("user_id", user_id)
+            .eq("provider", "google_calendar")
+            .eq("status", "active")
+            .single()
+            .execute()
+        )
+
+        if not integration_result.data:
+            logger.debug(
+                "No calendar integration for user",
+                extra={"user_id": user_id},
+            )
+            return {"meeting_count": 0, "key_meetings": []}
+
+        # TODO: Implement Composio calendar fetch when available
+        # For now, return empty structure as calendar integration
+        # requires external OAuth flow completion
+        logger.info(
+            "Calendar integration found but fetch not yet implemented",
+            extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
+        )
         return {"meeting_count": 0, "key_meetings": []}
 
     async def _get_lead_data(self, user_id: str) -> dict[str, Any]:
@@ -225,9 +249,17 @@ class BriefingService:
             }
 
         return {
-            "hot_leads": [format_lead(lead) for lead in (hot_result.data or []) if isinstance(lead, dict)],
-            "needs_attention": [format_lead(lead) for lead in (attention_result.data or []) if isinstance(lead, dict)],
-            "recently_active": [format_lead(lead) for lead in (active_result.data or []) if isinstance(lead, dict)],
+            "hot_leads": [
+                format_lead(lead) for lead in (hot_result.data or []) if isinstance(lead, dict)
+            ],
+            "needs_attention": [
+                format_lead(lead)
+                for lead in (attention_result.data or [])
+                if isinstance(lead, dict)
+            ],
+            "recently_active": [
+                format_lead(lead) for lead in (active_result.data or []) if isinstance(lead, dict)
+            ],
         }
 
     async def _get_signal_data(self, user_id: str) -> dict[str, Any]:
@@ -244,7 +276,9 @@ class BriefingService:
         # Get unread signals from the past week
         result = (
             self._db.table("market_signals")
-            .select("id, company_name, signal_type, headline, summary, relevance_score, detected_at")
+            .select(
+                "id, company_name, signal_type, headline, summary, relevance_score, detected_at"
+            )
             .eq("user_id", user_id)
             .is_("dismissed_at", "null")
             .gte("detected_at", week_ago)
