@@ -11,8 +11,20 @@ from src.models.email_draft import (
     EmailRegenerateRequest,
     EmailSendResponse,
 )
+from src.models.meeting_brief import (
+    AttendeeProfileResponse,
+    BriefStatus,
+    CompanyResearchResponse,
+    GenerateBriefRequest,
+    MeetingBriefContent,
+    MeetingBriefResponse,
+    UpcomingMeetingResponse,
+)
 
 __all__ = [
+    "AttendeeProfileResponse",
+    "BriefStatus",
+    "CompanyResearchResponse",
     "EmailDraftCreate",
     "EmailDraftListResponse",
     "EmailDraftPurpose",
@@ -22,4 +34,8 @@ __all__ = [
     "EmailDraftUpdate",
     "EmailRegenerateRequest",
     "EmailSendResponse",
+    "GenerateBriefRequest",
+    "MeetingBriefContent",
+    "MeetingBriefResponse",
+    "UpcomingMeetingResponse",
 ]

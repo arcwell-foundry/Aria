@@ -1,7 +1,8 @@
 """Tests for meeting brief Pydantic models."""
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 from pydantic import ValidationError
 
 
@@ -77,7 +78,7 @@ def test_meeting_brief_response_valid() -> None:
         id="brief-123",
         calendar_event_id="evt-456",
         meeting_title="Q4 Review",
-        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=timezone.utc),
+        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
         status="completed",
         brief_content={
             "summary": "Meeting summary",
@@ -98,7 +99,7 @@ def test_generate_brief_request_valid() -> None:
     request = GenerateBriefRequest(
         calendar_event_id="evt-123",
         meeting_title="Discovery Call",
-        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=timezone.utc),
+        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
         attendee_emails=["john@example.com", "jane@example.com"],
     )
 
@@ -113,5 +114,22 @@ def test_generate_brief_request_requires_event_id() -> None:
     with pytest.raises(ValidationError):
         GenerateBriefRequest(
             meeting_title="Discovery Call",
-            meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=timezone.utc),
+            meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
         )
+
+
+def test_upcoming_meeting_response_valid() -> None:
+    """Test UpcomingMeetingResponse accepts valid data."""
+    from src.models.meeting_brief import UpcomingMeetingResponse
+
+    meeting = UpcomingMeetingResponse(
+        calendar_event_id="evt-123",
+        meeting_title="Q4 Review",
+        meeting_time=datetime(2026, 2, 4, 14, 0, tzinfo=UTC),
+        attendees=["john@example.com"],
+        brief_status="completed",
+        brief_id="brief-456",
+    )
+
+    assert meeting.calendar_event_id == "evt-123"
+    assert meeting.brief_status == "completed"

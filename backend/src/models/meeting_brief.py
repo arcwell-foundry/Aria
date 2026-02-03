@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class BriefStatus(str, Enum):
@@ -19,7 +19,7 @@ class BriefStatus(str, Enum):
 class AttendeeProfileResponse(BaseModel):
     """Attendee profile with research data."""
 
-    email: str = Field(..., description="Attendee email address")
+    email: EmailStr = Field(..., description="Attendee email address")
     name: str | None = Field(default=None, description="Full name")
     title: str | None = Field(default=None, description="Job title")
     company: str | None = Field(default=None, description="Company name")
@@ -82,7 +82,7 @@ class GenerateBriefRequest(BaseModel):
     calendar_event_id: str = Field(..., description="Calendar event ID")
     meeting_title: str | None = Field(default=None, description="Meeting title")
     meeting_time: datetime = Field(..., description="Meeting start time")
-    attendee_emails: list[str] = Field(
+    attendee_emails: list[EmailStr] = Field(
         default_factory=list, description="List of attendee email addresses"
     )
 
@@ -93,6 +93,6 @@ class UpcomingMeetingResponse(BaseModel):
     calendar_event_id: str = Field(..., description="Calendar event ID")
     meeting_title: str | None = Field(default=None, description="Meeting title")
     meeting_time: datetime = Field(..., description="Meeting start time")
-    attendees: list[str] = Field(default_factory=list, description="Attendee emails")
+    attendees: list[EmailStr] = Field(default_factory=list, description="Attendee emails")
     brief_status: BriefStatus | None = Field(default=None, description="Brief status if exists")
     brief_id: str | None = Field(default=None, description="Brief ID if exists")
