@@ -242,7 +242,9 @@ async def update_conversation_title(
         id=conversation.id,
         title=conversation.title,
         message_count=conversation.message_count,
-        last_message_at=conversation.last_message_at.isoformat() if conversation.last_message_at else None,
+        last_message_at=conversation.last_message_at.isoformat()
+        if conversation.last_message_at
+        else None,
         last_message_preview=conversation.last_message_preview,
         updated_at=conversation.updated_at.isoformat(),
     )

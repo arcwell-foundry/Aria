@@ -226,9 +226,7 @@ class ConversationPrimingService:
             for ep in episodes:
                 parts.append(f"- {ep['summary']}")
                 if ep.get("outcomes"):
-                    outcomes_text = ", ".join(
-                        o.get("content", "") for o in ep["outcomes"][:2]
-                    )
+                    outcomes_text = ", ".join(o.get("content", "") for o in ep["outcomes"][:2])
                     if outcomes_text:
                         parts.append(f"  Outcomes: {outcomes_text}")
 

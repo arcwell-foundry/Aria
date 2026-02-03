@@ -1,13 +1,12 @@
 """Service layer for managing user integrations."""
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.db.supabase import SupabaseClient
 from src.integrations.domain import (
     INTEGRATION_CONFIGS,
-    Integration,
     IntegrationStatus,
     IntegrationType,
     SyncStatus,
@@ -35,15 +34,12 @@ class IntegrationService:
         try:
             client = SupabaseClient.get_client()
             response = (
-                client.table("user_integrations")
-                .select("*")
-                .eq("user_id", user_id)
-                .execute()
+                client.table("user_integrations").select("*").eq("user_id", user_id).execute()
             )
 
             return response.data if response.data else []
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to fetch user integrations")
             raise
 
@@ -74,7 +70,7 @@ class IntegrationService:
 
             return response.data
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to fetch integration")
             return None
 
@@ -120,7 +116,7 @@ class IntegrationService:
 
             raise Exception("Failed to create integration")
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to create integration")
             raise
 
@@ -144,10 +140,7 @@ class IntegrationService:
         try:
             client = SupabaseClient.get_client()
             response = (
-                client.table("user_integrations")
-                .update(updates)
-                .eq("id", integration_id)
-                .execute()
+                client.table("user_integrations").update(updates).eq("id", integration_id).execute()
             )
 
             if response.data and len(response.data) > 0:
@@ -155,7 +148,7 @@ class IntegrationService:
 
             raise Exception("Integration not found")
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to update integration")
             raise
 
@@ -176,7 +169,7 @@ class IntegrationService:
             client.table("user_integrations").delete().eq("id", integration_id).execute()
             return True
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to delete integration")
             raise
 
@@ -231,7 +224,9 @@ class IntegrationService:
 
             # Disconnect from Composio
             oauth_client = get_oauth_client()
-            await oauth_client.disconnect_integration(user_id, integration["composio_connection_id"])
+            await oauth_client.disconnect_integration(
+                user_id, integration["composio_connection_id"]
+            )
 
             # Delete from database
             await self.delete_integration(integration["id"])
@@ -243,7 +238,7 @@ class IntegrationService:
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to disconnect integration")
             raise
 
@@ -263,7 +258,11 @@ class IntegrationService:
             available = []
             for integration_type, config in INTEGRATION_CONFIGS.items():
                 user_integration = next(
-                    (i for i in user_integrations if i["integration_type"] == integration_type.value),
+                    (
+                        i
+                        for i in user_integrations
+                        if i["integration_type"] == integration_type.value
+                    ),
                     None,
                 )
 
@@ -280,7 +279,7 @@ class IntegrationService:
 
             return available
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to fetch available integrations")
             raise
 

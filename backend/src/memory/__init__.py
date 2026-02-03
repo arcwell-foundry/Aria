@@ -32,8 +32,8 @@ from src.memory.digital_twin import (
     WritingStyleFingerprint,
 )
 from src.memory.episodic import Episode, EpisodicMemory
-from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.priming import ConversationContext, ConversationPrimingService
+from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
     ProspectiveMemory,
     ProspectiveTask,

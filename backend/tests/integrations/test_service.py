@@ -211,7 +211,7 @@ class TestDisconnectIntegration:
         )
 
         assert result is True
-        mock_oauth_client.disconnect_integration.assert_called_once_with("conn-123")
+        mock_oauth_client.disconnect_integration.assert_called_once_with("user-123", "conn-123")
 
 
 class TestUpdateSyncStatus:

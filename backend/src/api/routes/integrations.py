@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationStatus, IntegrationType
+from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
 from src.integrations.oauth import get_oauth_client
 from src.integrations.service import SyncStatus, get_integration_service
 
@@ -141,11 +141,11 @@ async def get_auth_url(
         # Validate integration type
         try:
             integration_type_enum = IntegrationType(integration_type)
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid integration type: {integration_type}",
-            )
+            ) from e
 
         config = INTEGRATION_CONFIGS.get(integration_type_enum)
         if not config:
@@ -178,7 +178,11 @@ async def get_auth_url(
         ) from e
 
 
-@router.post("/{integration_type}/connect", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{integration_type}/connect",
+    response_model=IntegrationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def connect_integration(
     integration_type: str,
     request: OAuthCallbackRequest,
@@ -201,11 +205,11 @@ async def connect_integration(
         # Validate integration type
         try:
             integration_type_enum = IntegrationType(integration_type)
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid integration type: {integration_type}",
-            )
+            ) from e
 
         # Exchange code for connection
         oauth_client = get_oauth_client()
@@ -266,11 +270,11 @@ async def disconnect_integration(
         # Validate integration type
         try:
             integration_type_enum = IntegrationType(integration_type)
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid integration type: {integration_type}",
-            )
+            ) from e
 
         service = get_integration_service()
         await service.disconnect_integration(current_user.id, integration_type_enum)
@@ -283,7 +287,9 @@ async def disconnect_integration(
             },
         )
 
-        return {"message": f"Successfully disconnected {integration_type.replace('_', ' ').title()}"}
+        return {
+            "message": f"Successfully disconnected {integration_type.replace('_', ' ').title()}"
+        }
 
     except HTTPException:
         raise

@@ -266,9 +266,7 @@ class ChatService:
             )
 
         # Update conversation metadata for sidebar
-        await self._update_conversation_metadata(
-            user_id, conversation_id, message, response_text
-        )
+        await self._update_conversation_metadata(user_id, conversation_id, message, response_text)
 
         total_ms = (time.perf_counter() - total_start) * 1000
 

@@ -10,7 +10,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
-from src.api.routes import auth, battle_cards, briefings, chat, debriefs, goals, integrations, memory, signals
+from src.api.routes import (
+    auth,
+    battle_cards,
+    briefings,
+    chat,
+    debriefs,
+    goals,
+    integrations,
+    memory,
+    signals,
+)
 from src.core.exceptions import ARIAException
 
 # Configure logging

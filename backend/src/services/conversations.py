@@ -140,23 +140,13 @@ class ConversationService:
         Returns:
             List of Conversation objects, ordered by most recently updated.
         """
-        query = (
-            self.db.table("conversations")
-            .select("*")
-            .eq("user_id", user_id)
-        )
+        query = self.db.table("conversations").select("*").eq("user_id", user_id)
 
         if search_query:
             # Search in title
             query = query.ilike("title", f"%{search_query}%")
 
-        result = (
-            query
-            .order("updated_at", desc=True)
-            .limit(limit)
-            .offset(offset)
-            .execute()
-        )
+        result = query.order("updated_at", desc=True).limit(limit).offset(offset).execute()
 
         if not result.data:
             return []
