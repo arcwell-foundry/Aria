@@ -11,9 +11,16 @@ Extracts structured information from conversations:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.core.llm import LLMClient
+    from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -94,3 +101,148 @@ class ConversationEpisode:
             last_accessed_at=last_accessed or datetime.now(UTC),
             access_count=data.get("access_count", 0),
         )
+
+
+# LLM prompts for episode extraction
+SUMMARY_PROMPT = """Summarize this conversation concisely in 2-3 sentences:
+
+{conversation}
+
+Focus on:
+- Key decisions made
+- Important information shared
+- Action items agreed
+- Questions left unanswered
+
+Summary:"""
+
+EXTRACTION_PROMPT = """Analyze this conversation and extract structured information:
+
+{conversation}
+
+Return a JSON object with:
+- "key_topics": list of 3-5 main topics discussed (short phrases)
+- "user_state": object with "mood" (stressed/neutral/positive), "confidence" (uncertain/moderate/high), "focus" (main area of attention)
+- "outcomes": list of objects with "type" (decision/action_item/information) and "content" (what was decided/agreed)
+- "open_threads": list of objects with "topic", "status" (pending/awaiting_response/blocked), and "context" (brief explanation)
+
+Return ONLY valid JSON, no explanation:"""
+
+
+class ConversationService:
+    """Service for extracting and storing conversation episodes.
+
+    Extracts durable memories from conversations including:
+    - Summary of key points
+    - Topics discussed
+    - User emotional/cognitive state
+    - Outcomes and decisions made
+    - Open threads requiring follow-up
+    """
+
+    IDLE_THRESHOLD_MINUTES = 30
+
+    def __init__(
+        self,
+        db_client: Client,
+        llm_client: LLMClient,
+    ) -> None:
+        """Initialize the conversation service.
+
+        Args:
+            db_client: Supabase client for database operations.
+            llm_client: LLM client for Claude API calls.
+        """
+        self.db = db_client
+        self.llm = llm_client
+
+    def _format_messages(self, messages: list[dict[str, str]]) -> str:
+        """Format messages as readable conversation text.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+
+        Returns:
+            Formatted conversation string.
+        """
+        if not messages:
+            return ""
+
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "unknown").capitalize()
+            content = msg.get("content", "")
+            lines.append(f"{role}: {content}")
+
+        return "\n\n".join(lines)
+
+    async def extract_episode(
+        self,
+        user_id: str,
+        conversation_id: str,
+        messages: list[dict[str, str]],
+    ) -> ConversationEpisode:
+        """Extract durable content from a conversation.
+
+        Uses LLM to generate summary and extract structured information,
+        then stores as a conversation episode.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Unique conversation identifier.
+            messages: List of message dicts with 'role', 'content', and 'created_at'.
+
+        Returns:
+            The created ConversationEpisode.
+        """
+        raise NotImplementedError("Will be implemented in Task 4")
+
+    async def get_recent_episodes(
+        self,
+        user_id: str,
+        limit: int = 5,
+        min_salience: float = 0.1,
+    ) -> list[ConversationEpisode]:
+        """Get recent conversation episodes for context priming.
+
+        Args:
+            user_id: The user's ID.
+            limit: Maximum number of episodes to return.
+            min_salience: Minimum salience threshold.
+
+        Returns:
+            List of recent ConversationEpisode objects.
+        """
+        raise NotImplementedError("Will be implemented in Task 5")
+
+    async def get_open_threads(
+        self,
+        user_id: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Get all unresolved threads across conversations.
+
+        Args:
+            user_id: The user's ID.
+            limit: Maximum number of threads to return.
+
+        Returns:
+            List of open thread dicts with conversation context.
+        """
+        raise NotImplementedError("Will be implemented in Task 5")
+
+    async def get_episode(
+        self,
+        user_id: str,
+        episode_id: str,
+    ) -> ConversationEpisode | None:
+        """Get a specific episode by ID.
+
+        Args:
+            user_id: The user's ID.
+            episode_id: The episode's UUID.
+
+        Returns:
+            ConversationEpisode or None if not found.
+        """
+        raise NotImplementedError("Will be implemented in Task 5")

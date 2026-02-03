@@ -229,3 +229,80 @@ def test_conversation_episode_from_dict_handles_missing_salience_fields() -> Non
     assert episode.current_salience == 1.0
     assert episode.access_count == 0
     assert episode.last_accessed_at is not None
+
+
+# ============================================================================
+# ConversationService Tests (Task 3)
+# ============================================================================
+
+from unittest.mock import AsyncMock, MagicMock
+
+
+class TestConversationServiceInit:
+    """Tests for ConversationService initialization."""
+
+    def test_conversation_service_importable(self) -> None:
+        """ConversationService should be importable."""
+        from src.memory.conversation import ConversationService
+
+        assert ConversationService is not None
+
+    def test_conversation_service_has_required_methods(self) -> None:
+        """ConversationService should have required interface methods."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        assert hasattr(service, "extract_episode")
+        assert hasattr(service, "get_recent_episodes")
+        assert hasattr(service, "get_open_threads")
+        assert hasattr(service, "get_episode")
+
+    def test_conversation_service_stores_clients(self) -> None:
+        """ConversationService should store injected clients."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        assert service.db is mock_db
+        assert service.llm is mock_llm
+
+
+class TestFormatMessages:
+    """Tests for message formatting helper."""
+
+    def test_format_messages_creates_readable_output(self) -> None:
+        """_format_messages should create readable conversation text."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        messages = [
+            {"role": "user", "content": "Hello ARIA"},
+            {"role": "assistant", "content": "Hello! How can I help?"},
+            {"role": "user", "content": "Tell me about Acme Corp"},
+        ]
+
+        formatted = service._format_messages(messages)
+
+        assert "User: Hello ARIA" in formatted
+        assert "Assistant: Hello! How can I help?" in formatted
+        assert "User: Tell me about Acme Corp" in formatted
+
+    def test_format_messages_handles_empty_list(self) -> None:
+        """_format_messages should handle empty message list."""
+        from src.memory.conversation import ConversationService
+
+        mock_db = MagicMock()
+        mock_llm = MagicMock()
+        service = ConversationService(db_client=mock_db, llm_client=mock_llm)
+
+        formatted = service._format_messages([])
+
+        assert formatted == ""
