@@ -1,6 +1,7 @@
 export { AriaChatPage } from "./AriaChat";
 export { BattleCardsPage } from "./BattleCards";
 export { DashboardPage } from "./Dashboard";
+export { EmailDraftsPage } from "./EmailDrafts";
 export { GoalsPage } from "./Goals";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";
 export { IntegrationsSettingsPage } from "./IntegrationsSettings";
