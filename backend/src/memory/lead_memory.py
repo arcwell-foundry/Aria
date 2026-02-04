@@ -22,6 +22,8 @@ from typing import Any
 from src.core.exceptions import LeadMemoryError
 from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
+from src.memory.health_score import HealthScoreCalculator, HealthScoreHistory
+from src.memory.lead_memory_events import LeadEventService
 
 logger = logging.getLogger(__name__)
 
@@ -637,3 +639,185 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to transition stage", extra={"lead_id": lead_id})
             raise LeadMemoryError(f"Failed to transition stage: {e}") from e
+
+    async def calculate_health_score(
+        self,
+        user_id: str,
+        lead_id: str,
+    ) -> int:
+        """Calculate and update health score for a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID to score.
+
+        Returns:
+            The calculated health score (0-100).
+
+        Raises:
+            LeadNotFoundError: If lead doesn't exist.
+            LeadMemoryError: If calculation fails.
+        """
+        from src.core.exceptions import LeadNotFoundError
+
+        try:
+            # Get lead data
+            lead = await self.get_by_id(user_id, lead_id)
+
+            # Get events for scoring
+            client = self._get_supabase_client()
+            event_service = LeadEventService(db_client=client)
+            events = await event_service.get_timeline(
+                user_id=user_id,
+                lead_memory_id=lead_id,
+            )
+
+            # Get insights (placeholder - will be implemented in US-515)
+            insights = []
+
+            # Get stakeholders (placeholder - will be implemented in US-515)
+            stakeholders = []
+
+            # Get stage history from metadata
+            stage_history = lead.metadata.get("stage_history", [])
+
+            # Calculate score
+            calculator = HealthScoreCalculator()
+            health_score = calculator.calculate(
+                lead=lead,
+                events=events,
+                insights=insights,
+                stakeholders=stakeholders,
+                stage_history=stage_history,
+            )
+
+            # Update lead with new score
+            await self.update(
+                user_id=user_id,
+                lead_id=lead_id,
+                health_score=health_score,
+            )
+
+            # Store score history
+            await self._store_score_history(
+                user_id=user_id,
+                lead_id=lead_id,
+                score=health_score,
+                calculator=calculator,
+                lead=lead,
+                events=events,
+            )
+
+            logger.info(
+                "Calculated health score",
+                extra={
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "health_score": health_score,
+                },
+            )
+
+            return health_score
+
+        except LeadNotFoundError:
+            raise
+        except LeadMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to calculate health score")
+            raise LeadMemoryError(f"Failed to calculate health score: {e}") from e
+
+    async def _store_score_history(
+        self,
+        user_id: str,
+        lead_id: str,
+        score: int,
+        calculator: HealthScoreCalculator,
+        lead: object,
+        events: list,
+    ) -> None:
+        """Store health score in history table.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID.
+            score: The calculated health score.
+            calculator: The calculator instance for component scores.
+            lead: The lead object.
+            events: List of events used for scoring.
+        """
+        try:
+            client = self._get_supabase_client()
+
+            # Calculate component scores for storage
+            stage_history = lead.metadata.get("stage_history", [])
+            stakeholders = []  # Placeholder
+
+            component_scores = {
+                "component_frequency": calculator._score_frequency(events),
+                "component_response_time": calculator._score_response_time(events),
+                "component_sentiment": calculator._score_sentiment([]),
+                "component_breadth": calculator._score_breadth(stakeholders),
+                "component_velocity": calculator._score_velocity(lead, stage_history),
+            }
+
+            data = {
+                "lead_memory_id": lead_id,
+                "user_id": user_id,
+                "score": score,
+                "calculated_at": datetime.now(UTC).isoformat(),
+                **component_scores,
+            }
+
+            client.table("health_score_history").insert(data).execute()
+
+        except Exception as e:
+            # Don't fail the main operation if history storage fails
+            logger.warning(
+                "Failed to store health score history",
+                extra={"lead_id": lead_id, "error": str(e)},
+            )
+
+    async def get_score_history(
+        self,
+        user_id: str,
+        lead_id: str,
+        limit: int = 100,
+    ) -> list[HealthScoreHistory]:
+        """Get health score history for a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID.
+            limit: Maximum number of history records.
+
+        Returns:
+            List of health score history records.
+
+        Raises:
+            LeadMemoryError: If retrieval fails.
+        """
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("health_score_history")
+                .select("score, calculated_at")
+                .eq("lead_memory_id", lead_id)
+                .eq("user_id", user_id)
+                .order("calculated_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+
+            return [
+                HealthScoreHistory(
+                    score=row["score"],
+                    calculated_at=datetime.fromisoformat(row["calculated_at"]),
+                )
+                for row in response.data
+            ]
+
+        except Exception as e:
+            logger.exception("Failed to get score history")
+            raise LeadMemoryError(f"Failed to get score history: {e}") from e
