@@ -1,8 +1,8 @@
 """Tests for Lead Memory module."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -759,3 +759,325 @@ class TestLeadMemoryModuleExports:
         assert LeadStatus is not None
         assert LifecycleStage is not None
         assert LeadTriggerType is not None
+
+
+class TestHealthScoreIntegration:
+    """Integration tests for health score calculation."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        mock_client = MagicMock()
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_full_health_score_calculation_flow(self, mock_supabase: MagicMock) -> None:
+        """Test complete health score calculation with mocked data."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.memory.lead_memory import (
+            LeadMemoryService,
+            LifecycleStage,
+            LeadStatus,
+            TriggerType,
+        )
+
+        now = datetime.now(UTC)
+
+        # Setup mock lead data
+        mock_lead_data = {
+            "id": "lead_123",
+            "user_id": "user_1",
+            "company_id": None,
+            "company_name": "Acme Corp",
+            "lifecycle_stage": "lead",
+            "status": "active",
+            "health_score": 50,
+            "trigger": "manual",
+            "crm_id": None,
+            "crm_provider": None,
+            "first_touch_at": (now - timedelta(days=30)).isoformat(),
+            "last_activity_at": now.isoformat(),
+            "expected_close_date": None,
+            "expected_value": None,
+            "tags": [],
+            "metadata": {"stage_history": []},
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Create mock events
+        mock_events = [
+            {
+                "id": f"evt_{i}",
+                "lead_memory_id": "lead_123",
+                "event_type": "email_sent",
+                "direction": "outbound",
+                "subject": "Follow up",
+                "content": "Checking in",
+                "participants": ["john@acme.com"],
+                "occurred_at": (now - timedelta(days=i)).isoformat(),
+                "source": "manual",
+                "source_id": None,
+                "created_at": now.isoformat(),
+            }
+            for i in range(10)
+        ]
+
+        # Configure mock for get_by_id
+        mock_get_response = MagicMock()
+        mock_get_response.data = mock_lead_data
+
+        # Configure mock for get_timeline
+        mock_timeline_response = MagicMock()
+        mock_timeline_response.data = mock_events
+
+        # Configure mock for update
+        mock_update_response = MagicMock()
+        mock_update_response.data = [mock_lead_data]
+
+        # Configure mock for history insert
+        mock_history_response = MagicMock()
+        mock_history_response.data = [{"id": "history_1"}]
+
+        # Set up the mock chain
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+
+        # get_by_id chain
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = (
+            mock_get_response
+        )
+
+        # get_timeline chain
+        mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = (
+            mock_timeline_response
+        )
+
+        # update chain
+        mock_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        # history insert chain
+        mock_table.insert.return_value.execute.return_value = mock_history_response
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            service = LeadMemoryService()
+
+            # Mock LeadEventService.get_timeline to return LeadEvent objects
+            from src.models.lead_memory import Direction, EventType
+
+            lead_events = [
+                LeadEvent(
+                    id=e["id"],
+                    lead_memory_id=e["lead_memory_id"],
+                    event_type=EventType.EMAIL_SENT,
+                    direction=Direction.OUTBOUND,
+                    subject=e["subject"],
+                    content=e["content"],
+                    participants=e["participants"],
+                    occurred_at=datetime.fromisoformat(e["occurred_at"]),
+                    source=e["source"],
+                    source_id=e["source_id"],
+                    created_at=datetime.fromisoformat(e["created_at"]),
+                )
+                for e in mock_events
+            ]
+
+            with patch.object(service, "_get_supabase_client", return_value=mock_supabase):
+                # Create a mock event service with async get_timeline
+                mock_event_service = MagicMock()
+                mock_event_service.get_timeline = AsyncMock(return_value=lead_events)
+
+                with patch(
+                    "src.memory.lead_memory.LeadEventService", return_value=mock_event_service
+                ):
+                    score = await service.calculate_health_score("user_1", "lead_123")
+
+        # Verify score is in valid range
+        assert 0 <= score <= 100
+
+    @pytest.mark.asyncio
+    async def test_health_score_with_events(self, mock_supabase: MagicMock) -> None:
+        """Test health score reflects event frequency."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.memory.lead_memory import (
+            LeadMemoryService,
+            LifecycleStage,
+            LeadStatus,
+            TriggerType,
+        )
+        from src.models.lead_memory import Direction, EventType
+
+        now = datetime.now(UTC)
+
+        # Create lead with recent activity
+        mock_lead_data = {
+            "id": "lead_456",
+            "user_id": "user_2",
+            "company_id": None,
+            "company_name": "TechCorp",
+            "lifecycle_stage": "opportunity",
+            "status": "active",
+            "health_score": 50,
+            "trigger": "manual",
+            "crm_id": None,
+            "crm_provider": None,
+            "first_touch_at": (now - timedelta(days=14)).isoformat(),
+            "last_activity_at": now.isoformat(),
+            "expected_close_date": None,
+            "expected_value": None,
+            "tags": [],
+            "metadata": {
+                "stage_history": [
+                    {
+                        "from_stage": "lead",
+                        "to_stage": "opportunity",
+                        "transitioned_at": (now - timedelta(days=7)).isoformat(),
+                    }
+                ]
+            },
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Events from last 10 days
+        mock_events = [
+            {
+                "id": f"evt_{i}",
+                "lead_memory_id": "lead_456",
+                "event_type": "email_sent",
+                "direction": "outbound",
+                "subject": "Follow up",
+                "content": "Checking in",
+                "participants": ["contact@techcorp.com"],
+                "occurred_at": (now - timedelta(days=i)).isoformat(),
+                "source": "manual",
+                "source_id": None,
+                "created_at": now.isoformat(),
+            }
+            for i in range(10)
+        ]
+
+        # Configure mocks
+        mock_get_response = MagicMock()
+        mock_get_response.data = mock_lead_data
+
+        mock_timeline_response = MagicMock()
+        mock_timeline_response.data = mock_events
+
+        mock_update_response = MagicMock()
+        mock_update_response.data = [mock_lead_data]
+
+        mock_history_response = MagicMock()
+        mock_history_response.data = [{"id": "history_1"}]
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = (
+            mock_get_response
+        )
+        mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = (
+            mock_timeline_response
+        )
+        mock_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+        mock_table.insert.return_value.execute.return_value = mock_history_response
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            service = LeadMemoryService()
+
+            lead_events = [
+                LeadEvent(
+                    id=e["id"],
+                    lead_memory_id=e["lead_memory_id"],
+                    event_type=EventType.EMAIL_SENT,
+                    direction=Direction.OUTBOUND,
+                    subject=e["subject"],
+                    content=e["content"],
+                    participants=e["participants"],
+                    occurred_at=datetime.fromisoformat(e["occurred_at"]),
+                    source=e["source"],
+                    source_id=e["source_id"],
+                    created_at=datetime.fromisoformat(e["created_at"]),
+                )
+                for e in mock_events
+            ]
+
+            with patch.object(service, "_get_supabase_client", return_value=mock_supabase):
+                mock_event_service = MagicMock()
+                mock_event_service.get_timeline = AsyncMock(return_value=lead_events)
+
+                with patch(
+                    "src.memory.lead_memory.LeadEventService", return_value=mock_event_service
+                ):
+                    score = await service.calculate_health_score("user_2", "lead_456")
+
+        # With recent events and stage progression, score should be decent
+        assert score > 40
+
+    @pytest.mark.asyncio
+    async def test_health_score_alert_flow(self, mock_supabase: MagicMock) -> None:
+        """Test alert generation on health score drop."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        now = datetime.now(UTC)
+
+        # Mock previous high score
+        mock_history = [
+            {
+                "score": 85,
+                "calculated_at": (now - timedelta(days=1)).isoformat(),
+            }
+        ]
+
+        mock_response = MagicMock()
+        mock_response.data = mock_history
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = (
+            mock_response
+        )
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            service = LeadMemoryService()
+
+            # Current score dropped 30 points - should trigger alert
+            should_alert = await service.check_for_health_alert("user_3", "lead_789", new_score=55)
+
+            assert should_alert is True
+
+    @pytest.mark.asyncio
+    async def test_health_score_no_alert_on_small_drop(self, mock_supabase: MagicMock) -> None:
+        """Test no alert on small score change."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        now = datetime.now(UTC)
+
+        # Mock previous score
+        mock_history = [
+            {
+                "score": 75,
+                "calculated_at": (now - timedelta(days=1)).isoformat(),
+            }
+        ]
+
+        mock_response = MagicMock()
+        mock_response.data = mock_history
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = (
+            mock_response
+        )
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            service = LeadMemoryService()
+
+            # Current score dropped only 10 points - should NOT trigger alert
+            should_alert = await service.check_for_health_alert("user_4", "lead_101", new_score=65)
+
+            assert should_alert is False
