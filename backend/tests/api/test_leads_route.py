@@ -718,3 +718,78 @@ class TestGetInsights:
             response = test_client.get("/api/v1/leads/lead-999/insights")
 
             assert response.status_code == 404
+
+
+class TestTransitionStage:
+    """Tests for POST /api/v1/leads/{lead_id}/transition endpoint."""
+
+    def test_transition_stage_requires_auth(self) -> None:
+        """Test that transitioning stage requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/leads/some-lead-id/transition",
+            json={"stage": "opportunity"},
+        )
+        assert response.status_code == 401
+
+    def test_transition_stage_success(self, test_client: TestClient) -> None:
+        """Test successfully transitioning lead stage."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        updated_lead = LeadMemory(
+            id="lead-123",
+            user_id="test-user-123",
+            company_name="Test Company",
+            lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            status=LeadStatus.ACTIVE,
+            health_score=75,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(return_value=updated_lead)
+            mock_instance.transition_stage = AsyncMock()
+
+            response = test_client.post(
+                "/api/v1/leads/lead-123/transition",
+                json={"stage": "opportunity"},
+            )
+
+            assert response.status_code == 200
+            mock_instance.transition_stage.assert_called_once()
+
+    def test_transition_stage_invalid(self, test_client: TestClient) -> None:
+        """Test invalid transition returns 400."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import InvalidStageTransitionError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.transition_stage = AsyncMock(
+                side_effect=InvalidStageTransitionError("account", "lead")
+            )
+
+            response = test_client.post(
+                "/api/v1/leads/lead-123/transition",
+                json={"stage": "lead"},
+            )
+
+            assert response.status_code == 400
+
+    def test_transition_stage_validation_error(self, test_client: TestClient) -> None:
+        """Test validation with invalid stage value."""
+        response = test_client.post(
+            "/api/v1/leads/lead-123/transition",
+            json={"stage": "invalid_stage"},
+        )
+        assert response.status_code == 422

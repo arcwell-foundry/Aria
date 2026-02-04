@@ -170,3 +170,8 @@ class InsightResponse(BaseModel):
     source_event_id: str | None
     detected_at: datetime
     addressed_at: datetime | None
+
+
+# Transition Request
+class StageTransitionRequest(BaseModel):
+    stage: LifecycleStage = Field(..., description="Target lifecycle stage")

@@ -16,7 +16,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, status
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import LeadMemoryError, LeadNotFoundError
+from src.core.exceptions import (
+    InvalidStageTransitionError,
+    LeadMemoryError,
+    LeadNotFoundError,
+)
 from src.memory.lead_memory import (
     LeadMemory,
     LeadMemoryService,
@@ -31,6 +35,7 @@ from src.models.lead_memory import (
     LeadMemoryCreate,
     LeadMemoryResponse,
     LeadMemoryUpdate,
+    StageTransitionRequest,
     StakeholderCreate,
     StakeholderResponse,
 )
@@ -548,6 +553,61 @@ async def get_insights(
     except LeadMemoryError as e:
         logger.exception("Failed to get insights")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+
+
+@router.post("/{lead_id}/transition", response_model=LeadMemoryResponse)
+async def transition_stage(
+    lead_id: str,
+    transition: StageTransitionRequest,
+    current_user: CurrentUser,
+) -> LeadMemoryResponse:
+    """Transition a lead to a new lifecycle stage.
+
+    Stages can only progress forward: lead -> opportunity -> account.
+
+    Args:
+        lead_id: The lead ID to transition.
+        transition: The transition request with target stage.
+        current_user: Current authenticated user.
+
+    Returns:
+        The updated lead.
+
+    Raises:
+        HTTPException: 400 if invalid transition, 404 if lead not found,
+                      500 if transition fails.
+    """
+    try:
+        service = LeadMemoryService()
+
+        # Convert model LifecycleStage (string value) to memory LifecycleStage
+        memory_stage = LifecycleStage(transition.stage.value)
+
+        await service.transition_stage(
+            user_id=current_user.id,
+            lead_id=lead_id,
+            new_stage=memory_stage,
+        )
+
+        updated_lead = await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+        return _lead_to_response(updated_lead)
+
+    except InvalidStageTransitionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to transition stage")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
 
 
 @router.post("/export")
