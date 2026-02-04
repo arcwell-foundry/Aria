@@ -821,3 +821,58 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to get score history")
             raise LeadMemoryError(f"Failed to get score history: {e}") from e
+
+    async def check_for_health_alert(
+        self,
+        user_id: str,
+        lead_id: str,
+        new_score: int,
+        alert_threshold: int = 20,
+    ) -> bool:
+        """Check if health score change should trigger alert.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID.
+            new_score: The newly calculated health score.
+            alert_threshold: Minimum drop to trigger alert.
+
+        Returns:
+            True if alert should be sent.
+
+        Raises:
+            LeadMemoryError: If check fails.
+        """
+        try:
+            # Get score history
+            history = await self.get_score_history(
+                user_id=user_id,
+                lead_id=lead_id,
+                limit=1,
+            )
+
+            # Check if alert needed
+            calculator = HealthScoreCalculator()
+            should_alert = calculator._should_alert(
+                current_score=new_score,
+                history=history,
+                threshold=alert_threshold,
+            )
+
+            if should_alert:
+                logger.info(
+                    "Health score alert triggered",
+                    extra={
+                        "lead_id": lead_id,
+                        "user_id": user_id,
+                        "new_score": new_score,
+                        "previous_score": history[0].score if history else None,
+                        "drop": history[0].score - new_score if history else 0,
+                    },
+                )
+
+            return should_alert
+
+        except Exception as e:
+            logger.exception("Failed to check for health alert")
+            raise LeadMemoryError(f"Failed to check for health alert: {e}") from e
