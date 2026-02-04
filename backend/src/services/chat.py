@@ -140,15 +140,13 @@ class ChatService:
         user_id: str,
         conversation_id: str,
         user_message: str,
-        assistant_message: str,
     ) -> None:
         """Update conversation metadata after message exchange.
 
         Args:
             user_id: The user's ID.
             conversation_id: Unique conversation identifier.
-            user_message: The user's message content.
-            assistant_message: The assistant's response content.
+            user_message: The user's message content (used for preview).
 
         Note:
             This is a fire-and-forget operation. Errors are logged but not raised.
@@ -311,7 +309,7 @@ class ChatService:
             )
 
         # Update conversation metadata for sidebar
-        await self._update_conversation_metadata(user_id, conversation_id, message, response_text)
+        await self._update_conversation_metadata(user_id, conversation_id, message)
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
