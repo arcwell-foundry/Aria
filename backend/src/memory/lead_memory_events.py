@@ -1,9 +1,56 @@
-"""Lead memory event tracking domain models.
+"""Lead memory event tracking for timeline of interactions.
 
-This module provides the core domain model for tracking lead events,
-including interactions like emails, meetings, calls, notes, and signals.
-Events represent the timeline of activity for each lead in the system.
+Events track all lead interactions including:
+- Email communications (sent/received)
+- Meetings and calls
+- Manual notes
+- Market signals
+
+Events are stored in Supabase with user isolation via RLS.
+
+Usage:
+    ```python
+    from src.memory import LeadEventService, EventType, Direction
+
+    service = LeadEventService()
+
+    # Add an event
+    from src.models.lead_memory import LeadEventCreate
+    from datetime import datetime, UTC
+
+    event_data = LeadEventCreate(
+        event_type=EventType.EMAIL_SENT,
+        direction="outbound",
+        subject="Follow up",
+        content="Checking in",
+        participants=["john@acme.com"],
+        occurred_at=datetime.now(UTC),
+        source="manual",
+    )
+
+    event_id = await service.add_event(
+        user_id="user-123",
+        lead_memory_id="lead-456",
+        event_data=event_data,
+    )
+
+    # Get timeline
+    events = await service.get_timeline(
+        user_id="user-123",
+        lead_memory_id="lead-456",
+        start_date=datetime(2025, 2, 1, tzinfo=UTC),
+        end_date=datetime(2025, 2, 28, tzinfo=UTC),
+    )
+
+    # Get events by type
+    emails = await service.get_by_type(
+        user_id="user-123",
+        lead_memory_id="lead-456",
+        event_type=EventType.EMAIL_SENT,
+    )
+    ```
 """
+
 
 from __future__ import annotations
 
