@@ -292,3 +292,51 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to create lead")
             raise LeadMemoryError(f"Failed to create lead: {e}") from e
+
+    async def get_by_id(self, user_id: str, lead_id: str) -> LeadMemory:
+        """Retrieve a specific lead by ID.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID.
+
+        Returns:
+            The requested LeadMemory.
+
+        Raises:
+            LeadNotFoundError: If lead doesn't exist.
+            LeadMemoryError: If retrieval fails.
+        """
+        from src.core.exceptions import LeadNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("lead_memories")
+                .select("*")
+                .eq("id", lead_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+
+            if response.data is None:
+                raise LeadNotFoundError(lead_id)
+
+            # Extract trigger from metadata if present
+            data = response.data
+            if "trigger" not in data and data.get("metadata", {}).get("trigger"):
+                data["trigger"] = data["metadata"]["trigger"]
+            elif "trigger" not in data:
+                data["trigger"] = "manual"
+
+            return LeadMemory.from_dict(data)
+
+        except LeadNotFoundError:
+            raise
+        except LeadMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get lead", extra={"lead_id": lead_id})
+            raise LeadMemoryError(f"Failed to get lead: {e}") from e

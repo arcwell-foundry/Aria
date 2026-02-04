@@ -295,3 +295,66 @@ class TestLeadMemoryServiceCreate:
                 call_kwargs = mock_audit.call_args.kwargs
                 assert call_kwargs["user_id"] == "user-123"
                 assert call_kwargs["memory_id"] == lead.id
+
+
+class TestLeadMemoryServiceGetById:
+    """Tests for LeadMemoryService.get_by_id()."""
+
+    @pytest.fixture
+    def mock_supabase_with_lead(self) -> MagicMock:
+        """Create a mocked Supabase client with lead data."""
+        mock_client = MagicMock()
+        now = datetime.now(UTC)
+        mock_response = MagicMock()
+        mock_response.data = {
+            "id": "lead-123",
+            "user_id": "user-456",
+            "company_id": None,
+            "company_name": "Acme Corp",
+            "lifecycle_stage": "lead",
+            "status": "active",
+            "health_score": 75,
+            "crm_id": None,
+            "crm_provider": None,
+            "first_touch_at": now.isoformat(),
+            "last_activity_at": now.isoformat(),
+            "expected_close_date": None,
+            "expected_value": None,
+            "tags": ["enterprise"],
+            "metadata": {"trigger": "manual"},
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = mock_response
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_returns_lead(self, mock_supabase_with_lead: MagicMock) -> None:
+        """Test get_by_id returns the correct lead."""
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_with_lead):
+            service = LeadMemoryService()
+            lead = await service.get_by_id(user_id="user-456", lead_id="lead-123")
+
+        assert lead.id == "lead-123"
+        assert lead.company_name == "Acme Corp"
+        assert lead.lifecycle_stage == LifecycleStage.LEAD
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_not_found_raises_error(self) -> None:
+        """Test get_by_id raises LeadNotFoundError when lead doesn't exist."""
+        from src.core.exceptions import LeadNotFoundError
+        from src.memory.lead_memory import LeadMemoryService
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = None
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_client):
+            service = LeadMemoryService()
+            with pytest.raises(LeadNotFoundError) as exc_info:
+                await service.get_by_id(user_id="user-456", lead_id="nonexistent")
+
+            assert "nonexistent" in str(exc_info.value)
