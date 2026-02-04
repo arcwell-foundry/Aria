@@ -38,7 +38,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
+from src.memory.lead_memory_events import LeadEvent
 from src.models.lead_memory import Direction, Sentiment
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ class HealthScoreCalculator:
     FAST_RESPONSE_HOURS = 4  # Fast response: within 4 hours
     SLOW_RESPONSE_HOURS = 72  # Slow response: after 72 hours
 
-    def _score_frequency(self, events: list) -> float:
+    def _score_frequency(self, events: list[LeadEvent]) -> float:
         """Score communication frequency.
 
         0.0 = no events or events >90 days old
@@ -120,9 +122,9 @@ class HealthScoreCalculator:
         base_score = 1.0 - (days_since_contact / 30)
         frequency_bonus = min(event_ratio - 1.0, 0.5)
 
-        return min(base_score + frequency_bonus, 1.0)
+        return float(min(base_score + frequency_bonus, 1.0))
 
-    def _score_response_time(self, events: list) -> float:
+    def _score_response_time(self, events: list[LeadEvent]) -> float:
         """Score response time to inbound communications.
 
         0.5 = neutral (no inbound events)
@@ -180,9 +182,9 @@ class HealthScoreCalculator:
             ratio = (avg_response_hours - self.FAST_RESPONSE_HOURS) / (
                 self.SLOW_RESPONSE_HOURS - self.FAST_RESPONSE_HOURS
             )
-            return 1.0 - ratio
+            return float(1.0 - ratio)
 
-    def _score_sentiment(self, insights: list) -> float:
+    def _score_sentiment(self, insights: list[Any]) -> float:
         """Score overall sentiment from insights.
 
         0.5 = neutral (no insights)
@@ -223,7 +225,7 @@ class HealthScoreCalculator:
 
         return sentiment_sum / total
 
-    def _score_breadth(self, stakeholders: list) -> float:
+    def _score_breadth(self, stakeholders: list[Any]) -> float:
         """Score stakeholder breadth.
 
         0.0 = no stakeholders
@@ -251,9 +253,9 @@ class HealthScoreCalculator:
         # Bonus for multiple stakeholders per role
         stakeholder_bonus = min((total_stakeholders - unique_roles) / 4.0, 0.2)
 
-        return min(role_score + stakeholder_bonus, 1.0)
+        return float(min(role_score + stakeholder_bonus, 1.0))
 
-    def _score_velocity(self, lead: object, stage_history: list) -> float:
+    def _score_velocity(self, lead: Any, stage_history: list[dict[str, Any]]) -> float:
         """Score stage progression velocity.
 
         0.5 = neutral (new lead)
@@ -268,7 +270,11 @@ class HealthScoreCalculator:
             Score between 0.0 and 1.0.
         """
         now = datetime.now(UTC)
-        days_since_first_touch = (now - lead.first_touch_at).days
+        # Access first_touch_at from lead object (type: ignore for dynamic attribute)
+        first_touch_at = getattr(lead, "first_touch_at", None)
+        if first_touch_at is None:
+            return 0.5  # Neutral if no first_touch_at
+        days_since_first_touch = (now - first_touch_at).days
 
         # New lead (<7 days) = neutral
         if days_since_first_touch < 7:
@@ -284,7 +290,7 @@ class HealthScoreCalculator:
             stage_entered_at = datetime.fromisoformat(last_transition["transitioned_at"])
         else:
             # No transitions yet, use first_touch_at as stage entry time
-            stage_entered_at = lead.first_touch_at
+            stage_entered_at = first_touch_at  # Already retrieved above
 
         days_in_stage = (now - stage_entered_at).days
 
@@ -301,11 +307,11 @@ class HealthScoreCalculator:
 
     def calculate(
         self,
-        lead: object,
-        events: list,
-        insights: list,
-        stakeholders: list,
-        stage_history: list,
+        lead: Any,
+        events: list[LeadEvent],
+        insights: list[Any],
+        stakeholders: list[Any],
+        stage_history: list[dict[str, Any]],
     ) -> int:
         """Calculate overall health score.
 
