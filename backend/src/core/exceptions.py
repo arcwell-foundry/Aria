@@ -432,6 +432,37 @@ class LeadNotFoundError(NotFoundError):
         super().__init__(resource="Lead", resource_id=lead_id)
 
 
+class LeadMemoryGraphError(ARIAException):
+    """Lead memory graph operation error (500).
+
+    Used for failures when storing or querying lead memory in the knowledge graph.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize lead memory graph error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Lead memory graph operation failed: {message}",
+            code="LEAD_MEMORY_GRAPH_ERROR",
+            status_code=500,
+        )
+
+
+class LeadMemoryNotFoundError(NotFoundError):
+    """Lead memory not found error (404)."""
+
+    def __init__(self, lead_id: str) -> None:
+        """Initialize lead memory not found error.
+
+        Args:
+            lead_id: The ID of the lead memory that was not found.
+        """
+        super().__init__(resource="Lead memory", resource_id=lead_id)
+
+
 class InvalidStageTransitionError(ARIAException):
     """Invalid lifecycle stage transition error (400).
 
