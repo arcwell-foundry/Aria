@@ -125,3 +125,82 @@ class LeadPatternDetector:
             db_client: Supabase client for database operations.
         """
         self.db = db_client
+
+    async def avg_time_to_close_by_segment(
+        self,
+        company_id: str,
+    ) -> list[ClosingTimePattern]:
+        """Calculate average time to close deals by segment.
+
+        Analyzes all closed/won leads to determine average closing time
+        for each segment (based on tags). Privacy-safe: only aggregated
+        data is returned, no user-identifiable information.
+
+        Args:
+            company_id: The company to analyze leads for.
+
+        Returns:
+            List of ClosingTimePattern, one per segment found.
+
+        Raises:
+            DatabaseError: If query fails.
+        """
+        from datetime import UTC
+
+        from src.core.exceptions import DatabaseError
+
+        try:
+            # Query closed/won leads
+            response = (
+                self.db.table("lead_memories")
+                .select("id, first_touch_at, updated_at, tags")
+                .eq("company_id", company_id)
+                .eq("status", "won")
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            now = datetime.now(UTC)
+
+            # Group by segment (first tag or "untagged")
+            segment_data: dict[str, list[float]] = {}
+            for lead in response.data:
+                tags = lead.get("tags", []) or []
+                segment = tags[0] if tags else "untagged"
+
+                first_touch = datetime.fromisoformat(lead["first_touch_at"])
+                closed_at = datetime.fromisoformat(lead["updated_at"])
+                days_to_close = (closed_at - first_touch).days
+
+                if segment not in segment_data:
+                    segment_data[segment] = []
+                segment_data[segment].append(float(days_to_close))
+
+            # Calculate averages
+            patterns = []
+            for segment, days_list in segment_data.items():
+                avg_days = sum(days_list) / len(days_list)
+                patterns.append(
+                    ClosingTimePattern(
+                        segment=segment,
+                        avg_days_to_close=avg_days,
+                        sample_size=len(days_list),
+                        calculated_at=now,
+                    )
+                )
+
+            logger.info(
+                "Calculated closing time patterns",
+                extra={
+                    "company_id": company_id,
+                    "segment_count": len(patterns),
+                },
+            )
+
+            return patterns
+
+        except Exception as e:
+            logger.exception("Failed to calculate closing time patterns")
+            raise DatabaseError(f"Failed to calculate closing time patterns: {e}") from e
