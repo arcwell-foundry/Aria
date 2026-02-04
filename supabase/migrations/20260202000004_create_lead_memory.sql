@@ -121,6 +121,37 @@ CREATE POLICY "Users can view contributions" ON lead_memory_contributions
 CREATE POLICY "Users can view own crm sync" ON lead_memory_crm_sync
     FOR ALL USING (lead_memory_id IN (SELECT id FROM lead_memories WHERE user_id = auth.uid()));
 
+-- Service role has full access
+CREATE POLICY "Service can manage lead_memories"
+    ON lead_memories
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service can manage lead_memory_events"
+    ON lead_memory_events
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service can manage lead_memory_stakeholders"
+    ON lead_memory_stakeholders
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service can manage lead_memory_insights"
+    ON lead_memory_insights
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service can manage lead_memory_contributions"
+    ON lead_memory_contributions
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service can manage lead_memory_crm_sync"
+    ON lead_memory_crm_sync
+    FOR ALL
+    USING (auth.role() = 'service_role');
+
 -- Indexes
 CREATE INDEX idx_lead_memories_user ON lead_memories(user_id);
 CREATE INDEX idx_lead_memories_status ON lead_memories(user_id, status);
