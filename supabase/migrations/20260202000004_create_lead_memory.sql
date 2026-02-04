@@ -163,3 +163,36 @@ CREATE INDEX idx_lead_events_type ON lead_memory_events(lead_memory_id, event_ty
 CREATE INDEX idx_lead_stakeholders_lead ON lead_memory_stakeholders(lead_memory_id);
 CREATE INDEX idx_lead_insights_lead ON lead_memory_insights(lead_memory_id);
 CREATE INDEX idx_lead_insights_type ON lead_memory_insights(lead_memory_id, insight_type);
+
+-- Comments for documentation
+COMMENT ON TABLE lead_memories IS 'Core lead/opportunity/account tracking with full lifecycle history and health scoring.';
+COMMENT ON COLUMN lead_memories.lifecycle_stage IS 'lead → opportunity → account progression. History preserved on transition.';
+COMMENT ON COLUMN lead_memories.health_score IS '0-100 composite score: communication(25%), response_time(20%), sentiment(20%), stakeholder_breadth(20%), velocity(15%).';
+COMMENT ON COLUMN lead_memories.crm_id IS 'External CRM record ID (Salesforce Opportunity ID, HubSpot Deal ID, etc.).';
+COMMENT ON COLUMN lead_memories.tags IS 'User-defined tags for categorization and filtering.';
+
+COMMENT ON TABLE lead_memory_events IS 'Timeline of all interactions: emails, meetings, calls, notes, and market signals.';
+COMMENT ON COLUMN lead_memory_events.direction IS 'inbound (received) or outbound (sent) for communications.';
+COMMENT ON COLUMN lead_memory_events.source IS 'Origin: gmail, calendar, manual, crm, or system.';
+COMMENT ON COLUMN lead_memory_events.source_id IS 'Original message/event ID from source system for deduplication.';
+
+COMMENT ON TABLE lead_memory_stakeholders IS 'Contact mapping with role classification, influence scoring, and sentiment tracking.';
+COMMENT ON COLUMN lead_memory_stakeholders.role IS 'decision_maker, influencer, champion, blocker, or user.';
+COMMENT ON COLUMN lead_memory_stakeholders.influence_level IS '1-10 scale of decision-making influence.';
+COMMENT ON COLUMN lead_memory_stakeholders.sentiment IS 'positive, neutral, negative, or unknown based on interactions.';
+COMMENT ON COLUMN lead_memory_stakeholders.personality_insights IS 'AI-derived communication preferences and behavioral patterns.';
+
+COMMENT ON TABLE lead_memory_insights IS 'AI-extracted intelligence: objections, buying signals, commitments, risks, and opportunities.';
+COMMENT ON COLUMN lead_memory_insights.insight_type IS 'objection, buying_signal, commitment, risk, or opportunity.';
+COMMENT ON COLUMN lead_memory_insights.confidence IS '0-1 score from AI model. Lower confidence requires human verification.';
+COMMENT ON COLUMN lead_memory_insights.source_event_id IS 'Links insight to the event that generated it.';
+
+COMMENT ON TABLE lead_memory_contributions IS 'Multi-user collaboration with owner approval workflow.';
+COMMENT ON COLUMN lead_memory_contributions.contribution_type IS 'event, note, or insight.';
+COMMENT ON COLUMN lead_memory_contributions.status IS 'pending (awaiting review), merged (accepted), or rejected.';
+
+COMMENT ON TABLE lead_memory_crm_sync IS 'Bidirectional CRM synchronization state and conflict tracking.';
+COMMENT ON COLUMN lead_memory_crm_sync.sync_direction IS 'push (ARIA→CRM), pull (CRM→ARIA), or bidirectional.';
+COMMENT ON COLUMN lead_memory_crm_sync.status IS 'synced, pending, conflict, or error.';
+COMMENT ON COLUMN lead_memory_crm_sync.pending_changes IS 'Array of changes awaiting sync.';
+COMMENT ON COLUMN lead_memory_crm_sync.conflict_log IS 'Array of resolved/unresolved conflicts with timestamps.';
