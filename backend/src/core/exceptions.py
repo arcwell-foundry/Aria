@@ -643,3 +643,93 @@ class EmailSendError(ARIAException):
             status_code=502,
             details=error_details,
         )
+
+
+class CRMSyncError(ARIAException):
+    """CRM synchronization error (500).
+
+    Used for failures during CRM sync operations.
+    """
+
+    def __init__(
+        self,
+        message: str = "Unknown error",
+        provider: str | None = None,
+    ) -> None:
+        """Initialize CRM sync error.
+
+        Args:
+            message: Error details.
+            provider: Optional CRM provider name.
+        """
+        details = {}
+        if provider:
+            details["provider"] = provider
+        super().__init__(
+            message=f"CRM sync error: {message}",
+            code="CRM_SYNC_ERROR",
+            status_code=500,
+            details=details,
+        )
+
+
+class CRMConnectionError(ARIAException):
+    """CRM connection error (502).
+
+    Used when unable to connect to CRM provider.
+    """
+
+    def __init__(self, provider: str, message: str | None = None) -> None:
+        """Initialize CRM connection error.
+
+        Args:
+            provider: The CRM provider name.
+            message: Optional error message.
+        """
+        error_message = message or f"Failed to connect to {provider}"
+        super().__init__(
+            message=error_message,
+            code="CRM_CONNECTION_ERROR",
+            status_code=502,
+            details={"provider": provider},
+        )
+
+
+class CRMSyncConflictError(ARIAException):
+    """CRM sync conflict error (409).
+
+    Raised when there are conflicting changes between ARIA and CRM.
+    """
+
+    def __init__(
+        self,
+        lead_id: str,
+        conflicting_fields: list[str],
+    ) -> None:
+        """Initialize CRM sync conflict error.
+
+        Args:
+            lead_id: The lead ID with conflicts.
+            conflicting_fields: List of fields with conflicts.
+        """
+        super().__init__(
+            message=f"Sync conflict detected for lead '{lead_id}' on fields: {', '.join(conflicting_fields)}",
+            code="CRM_SYNC_CONFLICT",
+            status_code=409,
+            details={
+                "lead_id": lead_id,
+                "conflicting_fields": conflicting_fields,
+            },
+        )
+
+
+class CRMSyncNotFoundError(NotFoundError):
+    """CRM sync state not found error (404)."""
+
+    def __init__(self, lead_id: str) -> None:
+        """Initialize CRM sync not found error.
+
+        Args:
+            lead_id: The lead ID with no sync state.
+        """
+        super().__init__(resource="CRM sync state", resource_id=lead_id)
