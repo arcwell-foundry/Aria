@@ -276,7 +276,8 @@ class LeadEventService:
 
             events = []
             for item in response.data:
-                events.append(LeadEvent.from_dict(item))
+                event_dict = cast(dict[str, Any], item)
+                events.append(LeadEvent.from_dict(event_dict))
 
             logger.info(
                 "Retrieved lead event timeline",
