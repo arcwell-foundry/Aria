@@ -38,6 +38,12 @@ from src.memory.lead_memory import (
     LifecycleStage,
     TriggerType as LeadTriggerType,
 )
+from src.memory.lead_memory_events import (
+    Direction,
+    EventType,
+    LeadEvent,
+    LeadEventService,
+)
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
@@ -108,4 +114,9 @@ __all__ = [
     "LeadStatus",
     "LifecycleStage",
     "LeadTriggerType",
+    # Lead Memory Events
+    "LeadEvent",
+    "LeadEventService",
+    "EventType",
+    "Direction",
 ]
