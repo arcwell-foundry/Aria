@@ -268,3 +268,124 @@ class LeadStakeholderService:
         except Exception as e:
             logger.exception("Failed to list lead stakeholders")
             raise DatabaseError(f"Failed to list lead stakeholders: {e}") from e
+
+    async def update_stakeholder(
+        self,
+        user_id: str,
+        stakeholder_id: str,
+        contact_name: str | None = None,
+        title: str | None = None,
+        role: StakeholderRole | None = None,
+        influence_level: int | None = None,
+        sentiment: Sentiment | None = None,
+        notes: str | None = None,
+    ) -> None:
+        """Update an existing stakeholder.
+
+        Only provided fields will be updated. None values are ignored.
+
+        Args:
+            user_id: The user who owns the lead.
+            stakeholder_id: The stakeholder ID to update.
+            contact_name: Optional new contact name.
+            title: Optional new job title.
+            role: Optional new role classification.
+            influence_level: Optional new influence level (1-10).
+            sentiment: Optional new sentiment.
+            notes: Optional new notes.
+
+        Raises:
+            DatabaseError: If update fails or stakeholder not found.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            # Build update data with only non-None values
+            update_data: dict[str, Any] = {}
+
+            if contact_name is not None:
+                update_data["contact_name"] = contact_name
+            if title is not None:
+                update_data["title"] = title
+            if role is not None:
+                update_data["role"] = role.value
+            if influence_level is not None:
+                update_data["influence_level"] = influence_level
+            if sentiment is not None:
+                update_data["sentiment"] = sentiment.value
+            if notes is not None:
+                update_data["notes"] = notes
+
+            if not update_data:
+                # Nothing to update
+                return
+
+            response = (
+                client.table("lead_stakeholders")
+                .update(update_data)
+                .eq("id", stakeholder_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise DatabaseError(f"Stakeholder {stakeholder_id} not found")
+
+            logger.info(
+                "Updated lead stakeholder",
+                extra={
+                    "stakeholder_id": stakeholder_id,
+                    "user_id": user_id,
+                    "fields_updated": list(update_data.keys()),
+                },
+            )
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update lead stakeholder")
+            raise DatabaseError(f"Failed to update lead stakeholder: {e}") from e
+
+    async def remove_stakeholder(
+        self,
+        user_id: str,
+        stakeholder_id: str,
+    ) -> None:
+        """Remove a stakeholder from a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            stakeholder_id: The stakeholder ID to remove.
+
+        Raises:
+            DatabaseError: If deletion fails or stakeholder not found.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("lead_stakeholders")
+                .delete()
+                .eq("id", stakeholder_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise DatabaseError(f"Stakeholder {stakeholder_id} not found")
+
+            logger.info(
+                "Removed lead stakeholder",
+                extra={
+                    "stakeholder_id": stakeholder_id,
+                    "user_id": user_id,
+                },
+            )
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to remove lead stakeholder")
+            raise DatabaseError(f"Failed to remove lead stakeholder: {e}") from e

@@ -38,6 +38,7 @@ from src.models.lead_memory import (
     StageTransitionRequest,
     StakeholderCreate,
     StakeholderResponse,
+    StakeholderUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -484,6 +485,203 @@ async def add_stakeholder(
         ) from e
 
 
+@router.get("/{lead_id}/stakeholders", response_model=list[StakeholderResponse])
+async def list_stakeholders(
+    lead_id: str,
+    current_user: CurrentUser,
+) -> list[StakeholderResponse]:
+    """List all stakeholders for a lead.
+
+    Args:
+        lead_id: The lead ID to list stakeholders for.
+        current_user: Current authenticated user.
+
+    Returns:
+        List of stakeholders for the lead.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if retrieval fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_stakeholders import LeadStakeholderService
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Get stakeholders
+        client = SupabaseClient.get_client()
+        stakeholder_service = LeadStakeholderService(db_client=client)
+
+        stakeholders = await stakeholder_service.list_by_lead(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        return [
+            StakeholderResponse(
+                id=stakeholder.id,
+                lead_memory_id=stakeholder.lead_memory_id,
+                contact_email=stakeholder.contact_email,
+                contact_name=stakeholder.contact_name,
+                title=stakeholder.title,
+                role=stakeholder.role,
+                influence_level=stakeholder.influence_level,
+                sentiment=stakeholder.sentiment,
+                last_contacted_at=stakeholder.last_contacted_at,
+                notes=stakeholder.notes,
+                created_at=stakeholder.created_at,
+            )
+            for stakeholder in stakeholders
+        ]
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to list stakeholders")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.patch("/{lead_id}/stakeholders/{stakeholder_id}", response_model=StakeholderResponse)
+async def update_stakeholder(
+    lead_id: str,
+    stakeholder_id: str,
+    stakeholder_data: StakeholderUpdate,
+    current_user: CurrentUser,
+) -> StakeholderResponse:
+    """Update a stakeholder.
+
+    Only provided fields will be updated. None values are ignored.
+
+    Args:
+        lead_id: The lead ID the stakeholder belongs to.
+        stakeholder_id: The stakeholder ID to update.
+        stakeholder_data: The fields to update.
+        current_user: Current authenticated user.
+
+    Returns:
+        The updated stakeholder.
+
+    Raises:
+        HTTPException: 404 if lead or stakeholder not found, 500 if update fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_stakeholders import LeadStakeholderService
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Update stakeholder
+        client = SupabaseClient.get_client()
+        stakeholder_service = LeadStakeholderService(db_client=client)
+
+        await stakeholder_service.update_stakeholder(
+            user_id=current_user.id,
+            stakeholder_id=stakeholder_id,
+            contact_name=stakeholder_data.contact_name,
+            title=stakeholder_data.title,
+            role=stakeholder_data.role,
+            influence_level=stakeholder_data.influence_level,
+            sentiment=stakeholder_data.sentiment,
+            notes=stakeholder_data.notes,
+        )
+
+        # Retrieve the updated stakeholder
+        stakeholders = await stakeholder_service.list_by_lead(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        # Find the updated stakeholder
+        updated_stakeholder = next((s for s in stakeholders if s.id == stakeholder_id), None)
+
+        if updated_stakeholder is None:
+            raise LeadMemoryError("Failed to retrieve updated stakeholder")
+
+        return StakeholderResponse(
+            id=updated_stakeholder.id,
+            lead_memory_id=updated_stakeholder.lead_memory_id,
+            contact_email=updated_stakeholder.contact_email,
+            contact_name=updated_stakeholder.contact_name,
+            title=updated_stakeholder.title,
+            role=updated_stakeholder.role,
+            influence_level=updated_stakeholder.influence_level,
+            sentiment=updated_stakeholder.sentiment,
+            last_contacted_at=updated_stakeholder.last_contacted_at,
+            notes=updated_stakeholder.notes,
+            created_at=updated_stakeholder.created_at,
+        )
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to update stakeholder")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.delete("/{lead_id}/stakeholders/{stakeholder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_stakeholder(
+    lead_id: str,
+    stakeholder_id: str,
+    current_user: CurrentUser,
+) -> None:
+    """Remove a stakeholder from a lead.
+
+    Args:
+        lead_id: The lead ID the stakeholder belongs to.
+        stakeholder_id: The stakeholder ID to remove.
+        current_user: Current authenticated user.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if deletion fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_stakeholders import LeadStakeholderService
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Remove stakeholder
+        client = SupabaseClient.get_client()
+        stakeholder_service = LeadStakeholderService(db_client=client)
+
+        await stakeholder_service.remove_stakeholder(
+            user_id=current_user.id,
+            stakeholder_id=stakeholder_id,
+        )
+
+        return None
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to remove stakeholder")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
 @router.get("/{lead_id}/insights", response_model=list[InsightResponse])
 async def get_insights(
     lead_id: str,
@@ -549,7 +747,9 @@ async def get_insights(
     except HTTPException:
         raise
     except LeadNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found") from e
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found"
+        ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to get insights")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
