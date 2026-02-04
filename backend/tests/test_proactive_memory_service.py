@@ -544,6 +544,65 @@ class TestTemporalTriggers:
 
         assert insights == []
 
+    @pytest.fixture
+    def mock_db_task_too_far(self) -> MagicMock:
+        """Mock DB with task more than 3 days away."""
+        from datetime import UTC, datetime, timedelta
+
+        mock = MagicMock()
+        five_days = datetime.now(UTC) + timedelta(days=5)
+        mock.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": "task-456",
+                    "task": "Far future task",
+                    "description": "Too far away",
+                    "trigger_config": {"trigger_date": five_days.isoformat()},
+                    "status": "pending",
+                    "priority": "low",
+                }
+            ]
+        )
+        return mock
+
+    def test_excludes_tasks_beyond_3_days(self, mock_db_task_too_far: MagicMock) -> None:
+        """Should not include tasks more than 3 days in the future."""
+        from src.intelligence.proactive_memory import ProactiveMemoryService
+
+        service = ProactiveMemoryService(db_client=mock_db_task_too_far)
+
+        insights = service._find_temporal_triggers(user_id="user-123")
+
+        assert insights == []
+
+    @pytest.fixture
+    def mock_db_missing_trigger_date(self) -> MagicMock:
+        """Mock DB with task missing trigger_date."""
+        mock = MagicMock()
+        mock.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": "task-789",
+                    "task": "No date task",
+                    "description": "Missing trigger date",
+                    "trigger_config": {},  # No trigger_date
+                    "status": "pending",
+                    "priority": "medium",
+                }
+            ]
+        )
+        return mock
+
+    def test_handles_missing_trigger_date(self, mock_db_missing_trigger_date: MagicMock) -> None:
+        """Should skip tasks without trigger_date."""
+        from src.intelligence.proactive_memory import ProactiveMemoryService
+
+        service = ProactiveMemoryService(db_client=mock_db_missing_trigger_date)
+
+        insights = service._find_temporal_triggers(user_id="user-123")
+
+        assert insights == []
+
 
 class TestModuleExports:
     """Tests for module-level exports."""

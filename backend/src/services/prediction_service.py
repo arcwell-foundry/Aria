@@ -7,10 +7,12 @@ This service handles:
 - Extracting predictions from ARIA responses
 """
 
+import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.models.prediction import (
     PredictionCreate,
@@ -412,3 +414,122 @@ class PredictionService:
         )
 
         return summary
+
+    async def extract_and_register(
+        self,
+        user_id: str,
+        response_text: str,
+        conversation_id: str | None = None,
+        message_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Extract predictions from ARIA's response and register them.
+
+        Uses LLM to parse the response text and identify implicit/explicit
+        predictions, then registers each with appropriate metadata.
+
+        Args:
+            user_id: The user's ID.
+            response_text: ARIA's response text to analyze.
+            conversation_id: Optional conversation ID for context.
+            message_id: Optional message ID for context.
+
+        Returns:
+            List of registered prediction dicts.
+        """
+        extraction_prompt = """Analyze this AI assistant response and extract any predictions made.
+
+A prediction is a statement about what WILL happen in the future. Look for:
+- Explicit predictions: "I predict...", "This will likely...", "I expect..."
+- Implicit predictions: confidence about future outcomes, deal closures, timelines
+- Probability statements: "There's an 80% chance...", "It's likely that..."
+
+For each prediction found, return a JSON object with:
+- content: what is being predicted (the prediction statement)
+- predicted_outcome: the expected result (if stated)
+- prediction_type: one of [user_action, external_event, deal_outcome, timing, market_signal, lead_response, meeting_outcome]
+- confidence: estimated confidence 0.0-1.0 based on language used
+- timeframe_days: when this should resolve (days from now, default 30)
+
+Return a JSON array of predictions. Return [] if no predictions found.
+
+Response to analyze:
+{response_text}
+
+JSON array only, no explanation:"""
+
+        try:
+            llm = LLMClient()
+            llm_response = await llm.generate_response(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": extraction_prompt.format(response_text=response_text),
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=1000,
+            )
+
+            # Parse JSON response
+            extracted = json.loads(llm_response.strip())
+
+            if not isinstance(extracted, list) or not extracted:
+                logger.debug(
+                    "No predictions extracted",
+                    extra={"user_id": user_id, "response_length": len(response_text)},
+                )
+                return []
+
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse LLM extraction response",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            return []
+        except Exception as e:
+            logger.exception(
+                "Error during prediction extraction",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            return []
+
+        # Register each extracted prediction
+        registered = []
+        for pred_data in extracted:
+            try:
+                prediction_type = PredictionType(pred_data.get("prediction_type", "timing"))
+                timeframe = pred_data.get("timeframe_days", 30)
+                expected_date = datetime.now(UTC).date() + timedelta(days=timeframe)
+
+                data = PredictionCreate(
+                    prediction_type=prediction_type,
+                    prediction_text=pred_data["content"],
+                    predicted_outcome=pred_data.get("predicted_outcome"),
+                    confidence=float(pred_data.get("confidence", 0.5)),
+                    context=None,
+                    source_conversation_id=conversation_id,
+                    source_message_id=message_id,
+                    validation_criteria=None,
+                    expected_resolution_date=expected_date,
+                )
+
+                result = await self.register(user_id, data)
+                registered.append(result)
+
+            except (KeyError, ValueError) as e:
+                logger.warning(
+                    "Invalid prediction data from extraction",
+                    extra={"user_id": user_id, "error": str(e), "data": pred_data},
+                )
+                continue
+
+        logger.info(
+            "Predictions extracted and registered",
+            extra={
+                "user_id": user_id,
+                "extracted_count": len(extracted),
+                "registered_count": len(registered),
+            },
+        )
+
+        return registered

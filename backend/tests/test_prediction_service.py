@@ -1,7 +1,7 @@
 """Tests for prediction service."""
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -336,3 +336,95 @@ async def test_confidence_to_bucket_rounds_correctly(mock_db: MagicMock) -> None
         assert service._confidence_to_bucket(0.05) == 0.1  # Minimum bucket
         assert service._confidence_to_bucket(0.99) == 1.0
         assert service._confidence_to_bucket(0.0) == 0.1  # Clamp to minimum
+
+
+@pytest.mark.asyncio
+async def test_extract_and_register_parses_predictions(mock_db: MagicMock) -> None:
+    """Test extract_and_register extracts predictions from text."""
+    with (
+        patch("src.services.prediction_service.SupabaseClient") as mock_db_class,
+        patch("src.services.prediction_service.LLMClient") as mock_llm_class,
+    ):
+        # Mock LLM response
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(
+            return_value='[{"content": "Deal will close by March", "predicted_outcome": "Deal closed", "prediction_type": "deal_outcome", "confidence": 0.8, "timeframe_days": 30}]'
+        )
+        mock_llm_class.return_value = mock_llm
+
+        # Mock DB insert
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": "pred-123",
+                    "prediction_type": "deal_outcome",
+                    "prediction_text": "Deal will close by March",
+                    "confidence": 0.8,
+                    "status": "pending",
+                }
+            ]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.prediction_service import PredictionService
+
+        service = PredictionService()
+        results = await service.extract_and_register(
+            user_id="user-456",
+            response_text="I believe this deal will close by March with high confidence.",
+            conversation_id="conv-789",
+            message_id="msg-101",
+        )
+
+        assert len(results) == 1
+        assert results[0]["prediction_type"] == "deal_outcome"
+
+
+@pytest.mark.asyncio
+async def test_extract_and_register_handles_no_predictions(mock_db: MagicMock) -> None:
+    """Test extract_and_register returns empty list when no predictions found."""
+    with (
+        patch("src.services.prediction_service.SupabaseClient") as mock_db_class,
+        patch("src.services.prediction_service.LLMClient") as mock_llm_class,
+    ):
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(return_value="[]")
+        mock_llm_class.return_value = mock_llm
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.prediction_service import PredictionService
+
+        service = PredictionService()
+        results = await service.extract_and_register(
+            user_id="user-456",
+            response_text="Here is the information you requested.",
+            conversation_id="conv-789",
+            message_id="msg-101",
+        )
+
+        assert results == []
+
+
+@pytest.mark.asyncio
+async def test_extract_and_register_handles_invalid_json(mock_db: MagicMock) -> None:
+    """Test extract_and_register handles invalid JSON gracefully."""
+    with (
+        patch("src.services.prediction_service.SupabaseClient") as mock_db_class,
+        patch("src.services.prediction_service.LLMClient") as mock_llm_class,
+    ):
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(return_value="not valid json")
+        mock_llm_class.return_value = mock_llm
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.prediction_service import PredictionService
+
+        service = PredictionService()
+        results = await service.extract_and_register(
+            user_id="user-456",
+            response_text="Some text",
+            conversation_id="conv-789",
+            message_id="msg-101",
+        )
+
+        assert results == []
