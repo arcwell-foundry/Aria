@@ -739,3 +739,23 @@ class TestLeadMemoryServiceTransitionStage:
 
         # Update should not be called for same stage
         mock_supabase_transition.table.return_value.update.assert_not_called()
+
+
+class TestLeadMemoryModuleExports:
+    """Tests for lead memory module exports."""
+
+    def test_lead_memory_exported_from_memory_module(self) -> None:
+        """Test LeadMemory classes are exported from memory module."""
+        from src.memory import (
+            LeadMemory,
+            LeadMemoryService,
+            LeadStatus,
+            LeadTriggerType,
+            LifecycleStage,
+        )
+
+        assert LeadMemory is not None
+        assert LeadMemoryService is not None
+        assert LeadStatus is not None
+        assert LifecycleStage is not None
+        assert LeadTriggerType is not None

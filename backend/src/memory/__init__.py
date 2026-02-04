@@ -31,6 +31,13 @@ from src.memory.digital_twin import (
     TextStyleAnalyzer,
     WritingStyleFingerprint,
 )
+from src.memory.lead_memory import (
+    LeadMemory,
+    LeadMemoryService,
+    LeadStatus,
+    LifecycleStage,
+    TriggerType as LeadTriggerType,
+)
 from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
@@ -95,4 +102,10 @@ __all__ = [
     # Conversation Priming
     "ConversationContext",
     "ConversationPrimingService",
+    # Lead Memory
+    "LeadMemory",
+    "LeadMemoryService",
+    "LeadStatus",
+    "LifecycleStage",
+    "LeadTriggerType",
 ]
