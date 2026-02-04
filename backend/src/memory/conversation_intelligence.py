@@ -6,23 +6,18 @@ risks, and opportunities.
 
 Usage:
     ```python
-    from src.memory.conversation_intelligence import ConversationIntelligence, Insight
-    from src.models.lead_memory import InsightType
+    from src.db.supabase import SupabaseClient
+    from src.memory.conversation_intelligence import ConversationIntelligence
 
-    # Initialize service
-    service = ConversationIntelligence()
+    # Initialize service with database client
+    client = SupabaseClient.get_client()
+    service = ConversationIntelligence(db_client=client)
 
     # Analyze an event
     insights = await service.analyze_event(
         user_id="user-123",
         lead_memory_id="lead-456",
         event=lead_event,
-    )
-
-    # Mark an insight as addressed
-    await service.mark_addressed(
-        user_id="user-123",
-        insight_id="insight-789",
     )
     ```
 """
