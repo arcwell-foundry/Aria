@@ -162,6 +162,9 @@ class LeadMemoryService:
     structured querying and CRM integration.
     """
 
+    # Class-level constant for valid stage transitions
+    _STAGE_ORDER = [LifecycleStage.LEAD, LifecycleStage.OPPORTUNITY, LifecycleStage.ACCOUNT]
+
     def _get_supabase_client(self) -> Any:
         """Get the Supabase client instance.
 
@@ -518,3 +521,119 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to list leads")
             raise LeadMemoryError(f"Failed to list leads: {e}") from e
+
+    async def transition_stage(
+        self,
+        user_id: str,
+        lead_id: str,
+        new_stage: LifecycleStage,
+    ) -> None:
+        """Transition a lead to a new lifecycle stage.
+
+        Stages can only progress forward: lead -> opportunity -> account.
+        History is preserved in metadata.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID to transition.
+            new_stage: The target lifecycle stage.
+
+        Raises:
+            LeadNotFoundError: If lead doesn't exist.
+            InvalidStageTransitionError: If transition is not allowed.
+            LeadMemoryError: If transition fails.
+        """
+        from src.core.exceptions import InvalidStageTransitionError
+
+        try:
+            # Get current lead
+            lead = await self.get_by_id(user_id, lead_id)
+
+            # No-op if same stage
+            if lead.lifecycle_stage == new_stage:
+                logger.info(
+                    "Stage transition is no-op (same stage)",
+                    extra={"lead_id": lead_id, "stage": new_stage.value},
+                )
+                return
+
+            # Validate forward-only progression
+            current_index = self._STAGE_ORDER.index(lead.lifecycle_stage)
+            target_index = self._STAGE_ORDER.index(new_stage)
+
+            if target_index <= current_index:
+                raise InvalidStageTransitionError(
+                    current_stage=lead.lifecycle_stage.value,
+                    target_stage=new_stage.value,
+                )
+
+            # Build stage history entry
+            now = datetime.now(UTC)
+            history_entry = {
+                "from_stage": lead.lifecycle_stage.value,
+                "to_stage": new_stage.value,
+                "transitioned_at": now.isoformat(),
+            }
+
+            # Get existing history or create new
+            existing_metadata = lead.metadata or {}
+            stage_history = existing_metadata.get("stage_history", [])
+            stage_history.append(history_entry)
+
+            # Update metadata with preserved history
+            updated_metadata = {
+                **existing_metadata,
+                "stage_history": stage_history,
+            }
+
+            # Perform update
+            client = self._get_supabase_client()
+            data = {
+                "lifecycle_stage": new_stage.value,
+                "metadata": updated_metadata,
+                "last_activity_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            response = (
+                client.table("lead_memories")
+                .update(data)
+                .eq("id", lead_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                from src.core.exceptions import LeadNotFoundError
+
+                raise LeadNotFoundError(lead_id)
+
+            logger.info(
+                "Transitioned lead stage",
+                extra={
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "from_stage": lead.lifecycle_stage.value,
+                    "to_stage": new_stage.value,
+                },
+            )
+
+            # Audit log the transition
+            await log_memory_operation(
+                user_id=user_id,
+                operation=MemoryOperation.UPDATE,
+                memory_type=MemoryType.LEAD,
+                memory_id=lead_id,
+                metadata={
+                    "action": "stage_transition",
+                    "from_stage": lead.lifecycle_stage.value,
+                    "to_stage": new_stage.value,
+                },
+                suppress_errors=True,
+            )
+
+        except (InvalidStageTransitionError, LeadMemoryError):
+            raise
+        except Exception as e:
+            logger.exception("Failed to transition stage", extra={"lead_id": lead_id})
+            raise LeadMemoryError(f"Failed to transition stage: {e}") from e

@@ -583,3 +583,159 @@ class TestLeadMemoryServiceListByUser:
             leads = await service.list_by_user(user_id="user-456", limit=10)
 
         mock_supabase_list.table.return_value.select.return_value.eq.return_value.order.return_value.limit.assert_called_with(10)
+
+
+class TestLeadMemoryServiceTransitionStage:
+    """Tests for LeadMemoryService.transition_stage()."""
+
+    @pytest.fixture
+    def mock_supabase_transition(self) -> MagicMock:
+        """Create a mocked Supabase client for stage transitions."""
+        mock_client = MagicMock()
+        now = datetime.now(UTC)
+
+        # Mock for get_by_id (select)
+        mock_get_response = MagicMock()
+        mock_get_response.data = {
+            "id": "lead-123",
+            "user_id": "user-456",
+            "company_id": None,
+            "company_name": "Acme Corp",
+            "lifecycle_stage": "lead",
+            "status": "active",
+            "health_score": 75,
+            "crm_id": None,
+            "crm_provider": None,
+            "first_touch_at": now.isoformat(),
+            "last_activity_at": now.isoformat(),
+            "expected_close_date": None,
+            "expected_value": None,
+            "tags": [],
+            "metadata": {"trigger": "manual", "stage_history": []},
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Mock for update
+        mock_update_response = MagicMock()
+        mock_update_response.data = [{"id": "lead-123"}]
+
+        mock_table = MagicMock()
+        mock_client.table.return_value = mock_table
+
+        # Set up select chain
+        mock_select = MagicMock()
+        mock_table.select.return_value = mock_select
+        mock_select.eq.return_value.eq.return_value.single.return_value.execute.return_value = mock_get_response
+
+        # Set up update chain
+        mock_update = MagicMock()
+        mock_table.update.return_value = mock_update
+        mock_update.eq.return_value.eq.return_value.execute.return_value = mock_update_response
+
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_transition_lead_to_opportunity(self, mock_supabase_transition: MagicMock) -> None:
+        """Test transitioning from lead to opportunity."""
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_transition):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                await service.transition_stage(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    new_stage=LifecycleStage.OPPORTUNITY,
+                )
+
+        # Verify update was called with new stage
+        update_call = mock_supabase_transition.table.return_value.update
+        update_call.assert_called_once()
+        update_data = update_call.call_args[0][0]
+        assert update_data["lifecycle_stage"] == "opportunity"
+
+    @pytest.mark.asyncio
+    async def test_transition_preserves_history(self, mock_supabase_transition: MagicMock) -> None:
+        """Test that stage transition preserves history in metadata."""
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_transition):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                await service.transition_stage(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    new_stage=LifecycleStage.OPPORTUNITY,
+                )
+
+        update_data = mock_supabase_transition.table.return_value.update.call_args[0][0]
+        metadata = update_data["metadata"]
+        assert "stage_history" in metadata
+        assert len(metadata["stage_history"]) == 1
+        assert metadata["stage_history"][0]["from_stage"] == "lead"
+        assert metadata["stage_history"][0]["to_stage"] == "opportunity"
+
+    @pytest.mark.asyncio
+    async def test_transition_invalid_backward_raises_error(self) -> None:
+        """Test that invalid backward transition raises error."""
+        from src.core.exceptions import InvalidStageTransitionError
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        mock_client = MagicMock()
+        now = datetime.now(UTC)
+
+        # Lead is already at opportunity stage
+        mock_get_response = MagicMock()
+        mock_get_response.data = {
+            "id": "lead-123",
+            "user_id": "user-456",
+            "company_id": None,
+            "company_name": "Acme Corp",
+            "lifecycle_stage": "opportunity",  # Current stage
+            "status": "active",
+            "health_score": 75,
+            "crm_id": None,
+            "crm_provider": None,
+            "first_touch_at": now.isoformat(),
+            "last_activity_at": now.isoformat(),
+            "expected_close_date": None,
+            "expected_value": None,
+            "tags": [],
+            "metadata": {"trigger": "manual"},
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_table = MagicMock()
+        mock_client.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = mock_get_response
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_client):
+            service = LeadMemoryService()
+            with pytest.raises(InvalidStageTransitionError) as exc_info:
+                await service.transition_stage(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    new_stage=LifecycleStage.LEAD,  # Trying to go backward
+                )
+
+            assert "opportunity" in str(exc_info.value)
+            assert "lead" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_transition_same_stage_is_noop(self, mock_supabase_transition: MagicMock) -> None:
+        """Test transitioning to same stage does nothing."""
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_transition):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                await service.transition_stage(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    new_stage=LifecycleStage.LEAD,  # Same as current
+                )
+
+        # Update should not be called for same stage
+        mock_supabase_transition.table.return_value.update.assert_not_called()
