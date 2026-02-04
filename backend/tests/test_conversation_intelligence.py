@@ -5,7 +5,9 @@ actionable insights from lead events using LLM analysis.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.memory.conversation_intelligence import ConversationIntelligence, Insight
 from src.models.lead_memory import InsightType
@@ -322,3 +324,141 @@ class TestConversationIntelligenceService:
         assert len(insights) == 2
         assert insights[0]["type"] == "objection"
         assert insights[1]["type"] == "commitment"
+
+
+class TestAnalyzeEvent:
+    """Tests for the analyze_event method."""
+
+    @pytest.mark.asyncio
+    async def test_analyze_event_extracts_insights(self):
+        """Test that analyze_event extracts and stores insights."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import Direction, EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        event = LeadEvent(
+            id="event-123",
+            lead_memory_id="lead-456",
+            event_type=EventType.EMAIL_RECEIVED,
+            direction=Direction.INBOUND,
+            subject="Re: Demo",
+            content="Great demo! We're concerned about pricing but ready to move forward.",
+            participants=["john@acme.com"],
+            occurred_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+            source="gmail",
+            source_id="msg-abc",
+            created_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+        )
+
+        # Mock LLM response
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.return_value = """[
+            {"type": "objection", "content": "Pricing concerns", "confidence": 0.80},
+            {"type": "buying_signal", "content": "Ready to move forward", "confidence": 0.90}
+        ]"""
+
+        # Mock database insert
+        mock_response = MagicMock()
+        mock_response.data = [
+            {"id": "insight-1", "detected_at": "2025-02-03T14:30:00+00:00"},
+            {"id": "insight-2", "detected_at": "2025-02-03T14:30:00+00:00"},
+        ]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.conversation_intelligence.LLMClient", return_value=mock_llm):
+            insights = await service.analyze_event(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                event=event,
+            )
+
+        assert len(insights) == 2
+        assert insights[0].insight_type == InsightType.OBJECTION
+        assert insights[0].content == "Pricing concerns"
+        assert insights[0].confidence == 0.80
+        assert insights[1].insight_type == InsightType.BUYING_SIGNAL
+
+    @pytest.mark.asyncio
+    async def test_analyze_event_returns_empty_for_no_insights(self):
+        """Test that analyze_event returns empty list when no insights found."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        event = LeadEvent(
+            id="event-123",
+            lead_memory_id="lead-456",
+            event_type=EventType.NOTE,
+            direction=None,
+            subject=None,
+            content="Internal note: need to follow up",
+            participants=[],
+            occurred_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+            source=None,
+            source_id=None,
+            created_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+        )
+
+        # Mock LLM response with no insights
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.return_value = "[]"
+
+        with patch("src.memory.conversation_intelligence.LLMClient", return_value=mock_llm):
+            insights = await service.analyze_event(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                event=event,
+            )
+
+        assert insights == []
+
+    @pytest.mark.asyncio
+    async def test_analyze_event_links_source_event(self):
+        """Test that insights are linked to source event."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        event = LeadEvent(
+            id="event-789",
+            lead_memory_id="lead-456",
+            event_type=EventType.CALL,
+            direction=None,
+            subject="Discovery call",
+            content="They committed to a pilot next month",
+            participants=["john@acme.com"],
+            occurred_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+            source="zoom",
+            source_id="call-123",
+            created_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.return_value = """[
+            {"type": "commitment", "content": "Pilot next month", "confidence": 0.95}
+        ]"""
+
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "insight-1", "detected_at": "2025-02-03T14:30:00+00:00"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.conversation_intelligence.LLMClient", return_value=mock_llm):
+            _insights = await service.analyze_event(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                event=event,
+            )
+
+        # Verify the insert was called with source_event_id
+        assert len(_insights) == 1  # Ensure we got insights to validate the flow
+        insert_call = mock_client.table.return_value.insert.call_args
+        assert insert_call is not None
+        inserted_data = insert_call[0][0]
+        assert isinstance(inserted_data, list)
+        assert inserted_data[0]["source_event_id"] == "event-789"

@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
+
+from src.core.llm import LLMClient
 
 if TYPE_CHECKING:
     from supabase import Client
@@ -257,3 +260,100 @@ Respond with ONLY the JSON array, no additional text."""
             valid_insights.append(item)
 
         return valid_insights
+
+    async def analyze_event(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        event: LeadEvent,
+    ) -> list[Insight]:
+        """Analyze a lead event and extract insights using LLM.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            event: The LeadEvent to analyze.
+
+        Returns:
+            List of extracted Insight instances.
+
+        Raises:
+            DatabaseError: If storage fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        # Build prompt and call LLM
+        prompt = self._build_analysis_prompt(event)
+        llm = LLMClient()
+
+        try:
+            llm_response = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,  # Lower temperature for more consistent extraction
+            )
+        except Exception as e:
+            logger.exception("LLM call failed during event analysis")
+            raise DatabaseError(f"LLM analysis failed: {e}") from e
+
+        # Parse response
+        raw_insights = self._parse_llm_response(llm_response)
+
+        if not raw_insights:
+            return []
+
+        # Convert to database records
+        now = datetime.now(UTC)
+        records = []
+        for raw in raw_insights:
+            records.append({
+                "id": str(uuid.uuid4()),
+                "lead_memory_id": lead_memory_id,
+                "insight_type": raw["type"],
+                "content": raw["content"],
+                "confidence": raw.get("confidence", 0.7),
+                "source_event_id": event.id,
+                "detected_at": now.isoformat(),
+            })
+
+        # Store in database
+        try:
+            db_response = self.db.table("lead_memory_insights").insert(records).execute()
+
+            if not db_response.data:
+                raise DatabaseError("Failed to insert insights")
+
+            # Convert to Insight instances
+            insights = []
+            for i, record in enumerate(db_response.data):
+                record_dict = cast(dict[str, Any], record)
+                # Merge our local data with DB response
+                insight_data = {
+                    "id": record_dict.get("id", records[i]["id"]),
+                    "lead_memory_id": lead_memory_id,
+                    "insight_type": records[i]["insight_type"],
+                    "content": records[i]["content"],
+                    "confidence": records[i]["confidence"],
+                    "source_event_id": records[i]["source_event_id"],
+                    "detected_at": record_dict.get("detected_at", records[i]["detected_at"]),
+                    "addressed_at": None,
+                    "addressed_by": None,
+                }
+                insights.append(Insight.from_dict(insight_data))
+
+            logger.info(
+                "Extracted insights from event",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "event_id": event.id,
+                    "insight_count": len(insights),
+                },
+            )
+
+            return insights
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to store insights")
+            raise DatabaseError(f"Failed to store insights: {e}") from e
