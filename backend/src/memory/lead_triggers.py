@@ -425,10 +425,8 @@ class LeadTriggerService:
                     + " ".join(episode.key_topics).lower()
                 )
 
-                if company_name_normalized in episode_text:
-                    # Found a mention - check if it's earlier than current first_touch
-                    if earliest_mention is None or episode.started_at < earliest_mention:
-                        earliest_mention = episode.started_at
+                if company_name_normalized in episode_text and (earliest_mention is None or episode.started_at < earliest_mention):
+                    earliest_mention = episode.started_at
 
             # If we found earlier contact, update first_touch_at
             if earliest_mention and earliest_mention < lead.first_touch_at:
