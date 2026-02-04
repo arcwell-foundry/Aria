@@ -1,7 +1,7 @@
 """Tests for Lead Pattern Detection module (US-516)."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -432,3 +432,155 @@ class TestFindSilentLeads:
 
         # Verify query filters by status=active (second .eq() call)
         mock_second_eq.assert_called_once_with("status", "active")
+
+
+class TestApplyWarningsToLead:
+    """Tests for apply_warnings_to_lead method."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_patterns_match(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test returns empty list when lead doesn't match negative patterns."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        # Mock lead data with good metrics
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = {
+            "id": "lead-1",
+            "company_name": "Healthy Corp",
+            "last_activity_at": datetime.now(UTC).isoformat(),
+            "health_score": 85,
+            "tags": ["enterprise"],
+        }
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = (
+            mock_lead_response
+        )
+
+        # Mock empty objections
+        mock_insight_response = MagicMock()
+        mock_insight_response.data = []
+        mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = (
+            mock_insight_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        warnings = await detector.apply_warnings_to_lead(
+            user_id="user-123",
+            lead_id="lead-1",
+        )
+
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_warns_on_silent_lead(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test warns when lead has been silent."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        now = datetime.now(UTC)
+
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = {
+            "id": "lead-1",
+            "company_name": "Silent Corp",
+            "last_activity_at": (now - timedelta(days=20)).isoformat(),
+            "health_score": 40,
+            "tags": [],
+        }
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = (
+            mock_lead_response
+        )
+
+        # Empty insights
+        mock_insight_response = MagicMock()
+        mock_insight_response.data = []
+        mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = (
+            mock_insight_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+
+        warnings = await detector.apply_warnings_to_lead(
+            user_id="user-123",
+            lead_id="lead-1",
+        )
+
+        silent_warning = next(
+            (w for w in warnings if "inactive" in w.message.lower()), None
+        )
+        assert silent_warning is not None
+        assert silent_warning.warning_type == "silent_lead"
+
+    @pytest.mark.asyncio
+    async def test_warns_on_unresolved_objection_pattern(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test warns when lead has unresolved objection matching low-resolution pattern."""
+        from src.memory.lead_patterns import LeadPatternDetector, ObjectionPattern
+
+        now = datetime.now(UTC)
+
+        # Mock lead data
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = {
+            "id": "lead-1",
+            "company_name": "At Risk Corp",
+            "last_activity_at": (now - timedelta(days=5)).isoformat(),  # Recent activity
+            "health_score": 55,
+            "tags": ["enterprise"],
+        }
+
+        # Mock unresolved objection for this lead
+        mock_insight_response = MagicMock()
+        mock_insight_response.data = [
+            {"content": "Budget constraints", "addressed_at": None},
+        ]
+
+        mock_table = MagicMock()
+        mock_supabase.table.return_value = mock_table
+        mock_table.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = (
+            mock_lead_response
+        )
+        mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = (
+            mock_insight_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+
+        # Mock the common_objection_patterns to return a low-resolution pattern
+        with patch.object(
+            detector,
+            "common_objection_patterns",
+            return_value=[
+                ObjectionPattern(
+                    objection_text="Budget constraints",
+                    frequency=10,
+                    resolution_rate=0.2,  # Only 20% resolved - bad pattern
+                    calculated_at=now,
+                )
+            ],
+        ):
+            warnings = await detector.apply_warnings_to_lead(
+                user_id="user-123",
+                lead_id="lead-1",
+                company_id="company-123",
+            )
+
+        budget_warning = next(
+            (w for w in warnings if "Budget" in w.message), None
+        )
+        assert budget_warning is not None
+        assert budget_warning.severity == "high"

@@ -110,6 +110,27 @@ class SilentLead:
     health_score: int
 
 
+@dataclass
+class LeadWarning:
+    """A warning applied to a lead based on negative pattern matching.
+
+    Attributes:
+        lead_id: The lead this warning applies to.
+        warning_type: Type of warning (e.g., "objection_pattern", "silent_lead").
+        message: Human-readable warning message.
+        severity: Warning severity ("low", "medium", "high").
+        pattern_source: Description of the pattern that triggered this warning.
+        created_at: When the warning was generated.
+    """
+
+    lead_id: str
+    warning_type: str
+    message: str
+    severity: str
+    pattern_source: str
+    created_at: datetime
+
+
 class LeadPatternDetector:
     """Service for detecting patterns across leads.
 
@@ -570,3 +591,126 @@ class LeadPatternDetector:
         except Exception as e:
             logger.exception("Failed to find silent leads")
             raise DatabaseError(f"Failed to find silent leads: {e}") from e
+
+    async def apply_warnings_to_lead(
+        self,
+        user_id: str,
+        lead_id: str,
+        company_id: str | None = None,
+        inactive_threshold_days: int = 14,
+        low_resolution_threshold: float = 0.3,
+    ) -> list[LeadWarning]:
+        """Apply warnings to a lead based on negative pattern matching.
+
+        Checks if the lead matches any concerning patterns:
+        - Unresolved objections that historically have low resolution rates
+        - Inactivity beyond threshold
+        - Other negative patterns
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead to check.
+            company_id: Optional company ID for pattern matching.
+            inactive_threshold_days: Days inactive to trigger warning (default 14).
+            low_resolution_threshold: Resolution rate below which to warn (default 0.3).
+
+        Returns:
+            List of LeadWarning for any matching patterns.
+
+        Raises:
+            ValueError: If user_id or lead_id is empty.
+            DatabaseError: If query fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        # Input validation
+        if not user_id:
+            raise ValueError("user_id must not be empty")
+        if not lead_id:
+            raise ValueError("lead_id must not be empty")
+
+        warnings: list[LeadWarning] = []
+        now = datetime.now(UTC)
+
+        try:
+            # Get lead data
+            lead_response = (
+                self.db.table("lead_memories")
+                .select("id, company_name, last_activity_at, health_score, tags")
+                .eq("id", lead_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+
+            if not lead_response.data:
+                return []
+
+            lead = cast(dict[str, Any], lead_response.data)
+            last_activity = datetime.fromisoformat(str(lead["last_activity_at"]))
+            days_inactive = (now - last_activity).days
+
+            # Check for silent lead warning
+            if days_inactive >= inactive_threshold_days:
+                severity = "medium" if days_inactive < 21 else "high"
+                warnings.append(
+                    LeadWarning(
+                        lead_id=lead_id,
+                        warning_type="silent_lead",
+                        message=f"Lead has been inactive for {days_inactive} days",
+                        severity=severity,
+                        pattern_source=f"Inactivity threshold: {inactive_threshold_days} days",
+                        created_at=now,
+                    )
+                )
+
+            # Get unresolved objections for this lead
+            objections_response = (
+                self.db.table("lead_memory_insights")
+                .select("content")
+                .eq("lead_memory_id", lead_id)
+                .eq("insight_type", "objection")
+                .is_("addressed_at", "null")
+                .execute()
+            )
+
+            unresolved_objections = [
+                str(cast(dict[str, Any], o).get("content", ""))
+                for o in (objections_response.data or [])
+            ]
+
+            # If company_id provided, check against objection patterns
+            if company_id and unresolved_objections:
+                patterns = await self.common_objection_patterns(company_id=company_id)
+
+                for pattern in patterns:
+                    if pattern.resolution_rate < low_resolution_threshold:
+                        # Check if lead has this objection
+                        for objection in unresolved_objections:
+                            if pattern.objection_text.lower() in objection.lower():
+                                warnings.append(
+                                    LeadWarning(
+                                        lead_id=lead_id,
+                                        warning_type="objection_pattern",
+                                        message=f"Unresolved objection '{objection}' matches pattern with only {pattern.resolution_rate:.0%} resolution rate",
+                                        severity="high",
+                                        pattern_source=f"Pattern: {pattern.objection_text} (n={pattern.frequency})",
+                                        created_at=now,
+                                    )
+                                )
+                                break
+
+            logger.info(
+                "Applied warnings to lead",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead_id,
+                    "warning_count": len(warnings),
+                },
+            )
+
+            return warnings
+
+        except Exception as e:
+            logger.exception("Failed to apply warnings to lead")
+            raise DatabaseError(f"Failed to apply warnings to lead: {e}") from e
