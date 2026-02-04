@@ -47,7 +47,10 @@ from src.memory.lead_memory_graph import (
     LeadMemoryNode,
     LeadRelationshipType,
 )
-from src.models.lead_memory import Direction, EventType
+from src.memory.health_score import (
+    HealthScoreCalculator,
+    HealthScoreHistory,
+)
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -64,6 +67,7 @@ from src.memory.working import (
     WorkingMemoryManager,
     count_tokens,
 )
+from src.models.lead_memory import Direction, EventType
 
 __all__ = [
     # Memory Audit
@@ -126,4 +130,7 @@ __all__ = [
     "LeadMemoryGraph",
     "LeadMemoryNode",
     "LeadRelationshipType",
+    # Health Score
+    "HealthScoreCalculator",
+    "HealthScoreHistory",
 ]
