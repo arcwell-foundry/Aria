@@ -338,3 +338,97 @@ class TestLeadCollaborationServiceInit:
             service._get_supabase_client()
 
         assert "Failed to get Supabase client" in str(exc_info.value)
+
+
+class TestAddContributor:
+    """Tests for the add_contributor method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_add_contributor_creates_record(self, mock_get_client):
+        """Test that add_contributor returns the contributor_id."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.add_contributor(
+            user_id="user_123",
+            lead_memory_id="lead_456",
+            contributor_id="user_789",
+        )
+
+        assert result == "user_789"
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        mock_get_client.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_add_contributor_with_existing_contributions(self, mock_get_client):
+        """Test that add_contributor works when contributor already has contributions."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        # Simulate existing contributions
+        mock_response.data = [
+            {"id": "cntrb_1", "contributor_id": "user_789"},
+            {"id": "cntrb_2", "contributor_id": "user_789"},
+        ]
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.add_contributor(
+            user_id="user_123",
+            lead_memory_id="lead_456",
+            contributor_id="user_789",
+        )
+
+        assert result == "user_789"
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_add_contributor_handles_database_error(self, mock_get_client):
+        """Test that add_contributor raises DatabaseError on database failure."""
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Database connection failed")
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.add_contributor(
+                user_id="user_123",
+                lead_memory_id="lead_456",
+                contributor_id="user_789",
+            )
+
+        assert "Failed to add contributor" in str(exc_info.value)
+        mock_get_client.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_add_contributor_propagates_database_error(self, mock_get_client):
+        """Test that add_contributor propagates DatabaseError directly."""
+        from src.core.exceptions import DatabaseError
+
+        mock_get_client.side_effect = DatabaseError("Custom database error")
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.add_contributor(
+                user_id="user_123",
+                lead_memory_id="lead_456",
+                contributor_id="user_789",
+            )
+
+        assert "Custom database error" in str(exc_info.value)

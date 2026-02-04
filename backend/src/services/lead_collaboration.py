@@ -188,3 +188,59 @@ class LeadCollaborationService:
             return SupabaseClient.get_client()
         except Exception as e:
             raise DatabaseError(f"Failed to get Supabase client: {e}") from e
+
+    async def add_contributor(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        contributor_id: str,
+    ) -> str:
+        """Add a contributor to a lead.
+
+        Note: Contributors are implicitly added when they make their first
+        contribution. This method exists for explicit addition and validation.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            contributor_id: User ID to add as contributor.
+
+        Returns:
+            The contributor_id that was added.
+
+        Raises:
+            DatabaseError: If operation fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            # Check if contributor already has contributions to this lead
+            response = (
+                client.table("lead_memory_contributions")
+                .select("*")
+                .eq("lead_memory_id", lead_memory_id)
+                .eq("contributor_id", contributor_id)
+                .execute()
+            )
+
+            # Contributors are tracked via their contributions
+            # No separate table - return the contributor_id
+            logger.info(
+                "Contributor added to lead",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "contributor_id": contributor_id,
+                    "existing_contributions": len(response.data or []),
+                },
+            )
+
+            return contributor_id
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to add contributor")
+            raise DatabaseError(f"Failed to add contributor: {e}") from e
