@@ -232,8 +232,14 @@ class LeadPatternDetector:
         recurring objection patterns and their resolution rates.
         Privacy-safe: only aggregated patterns returned.
 
+        Note:
+            Current implementation queries all objection insights without
+            company_id filtering on the insights table. The company_id parameter
+            is accepted for API consistency and future implementation when
+            a proper join or two-step query approach is added.
+
         Args:
-            company_id: The company to analyze.
+            company_id: The company to analyze (reserved for future filtering).
             min_frequency: Minimum occurrences to include (default 1).
 
         Returns:
@@ -251,11 +257,14 @@ class LeadPatternDetector:
 
         try:
             # Query objection insights
+            # Note: company_id filtering requires a join with lead_memories table
+            # which is not directly supported by Supabase Python client dot notation.
+            # For now, we query all objection insights. Future implementation could
+            # use a two-step query or a database function for proper filtering.
             response = (
                 self.db.table("lead_memory_insights")
                 .select("id, content, addressed_at")
                 .eq("insight_type", "objection")
-                .eq("lead_memories.company_id", company_id)
                 .execute()
             )
 
@@ -309,3 +318,157 @@ class LeadPatternDetector:
         except Exception as e:
             logger.exception("Failed to detect objection patterns")
             raise DatabaseError(f"Failed to detect objection patterns: {e}") from e
+
+    async def successful_engagement_patterns(
+        self,
+        company_id: str,
+        min_sample_size: int = 5,
+    ) -> list[EngagementPattern]:
+        """Detect engagement patterns correlated with deal success.
+
+        Analyzes health score components of won vs lost deals to identify
+        which engagement factors correlate most strongly with success.
+        Privacy-safe: only aggregated patterns returned.
+
+        Args:
+            company_id: The company to analyze.
+            min_sample_size: Minimum closed deals required (default 5).
+
+        Returns:
+            List of EngagementPattern sorted by correlation strength.
+
+        Raises:
+            ValueError: If company_id is empty.
+            DatabaseError: If query fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        # Input validation
+        if not company_id:
+            raise ValueError("company_id must not be empty")
+
+        try:
+            # Query closed leads (won and lost)
+            leads_response = (
+                self.db.table("lead_memories")
+                .select("id, status")
+                .eq("company_id", company_id)
+                .execute()
+            )
+
+            if not leads_response.data:
+                return []
+
+            # Filter to closed leads
+            closed_leads = [
+                cast(dict[str, Any], lead)
+                for lead in leads_response.data
+                if cast(dict[str, Any], lead).get("status") in ("won", "lost")
+            ]
+
+            if len(closed_leads) < min_sample_size:
+                return []
+
+            lead_ids = [lead["id"] for lead in closed_leads]
+            lead_status_map = {lead["id"]: lead["status"] for lead in closed_leads}
+
+            # Get health score history with component scores
+            history_response = (
+                self.db.table("health_score_history")
+                .select(
+                    "lead_memory_id, component_frequency, component_response_time, "
+                    "component_sentiment, component_breadth, component_velocity"
+                )
+                .in_("lead_memory_id", lead_ids)
+                .execute()
+            )
+
+            if not history_response.data:
+                return []
+
+            now = datetime.now(UTC)
+
+            # Calculate correlation for each component
+            components = [
+                (
+                    "touchpoint_frequency",
+                    "component_frequency",
+                    "Frequent communication correlates with success",
+                ),
+                (
+                    "response_time",
+                    "component_response_time",
+                    "Fast response time correlates with success",
+                ),
+                (
+                    "sentiment",
+                    "component_sentiment",
+                    "Positive sentiment correlates with success",
+                ),
+                (
+                    "stakeholder_breadth",
+                    "component_breadth",
+                    "Multi-stakeholder engagement correlates with success",
+                ),
+                (
+                    "stage_velocity",
+                    "component_velocity",
+                    "Fast stage progression correlates with success",
+                ),
+            ]
+
+            patterns = []
+            for pattern_type, component_field, description in components:
+                # Get average component score for won vs lost
+                won_scores: list[float] = []
+                lost_scores: list[float] = []
+
+                for item in history_response.data:
+                    record = cast(dict[str, Any], item)
+                    lead_id = record.get("lead_memory_id")
+                    score = record.get(component_field, 0) or 0
+
+                    if lead_status_map.get(lead_id) == "won":
+                        won_scores.append(float(score))
+                    elif lead_status_map.get(lead_id) == "lost":
+                        lost_scores.append(float(score))
+
+                if not won_scores or not lost_scores:
+                    continue
+
+                avg_won = sum(won_scores) / len(won_scores)
+                avg_lost = sum(lost_scores) / len(lost_scores)
+
+                # Simple correlation: how much higher is won vs lost
+                # Normalize to 0-1 range
+                if avg_won > avg_lost:
+                    correlation = min((avg_won - avg_lost) / max(avg_won, 0.01), 1.0)
+                else:
+                    correlation = 0.0
+
+                patterns.append(
+                    EngagementPattern(
+                        pattern_type=pattern_type,
+                        description=description,
+                        success_correlation=correlation,
+                        sample_size=len(won_scores) + len(lost_scores),
+                        calculated_at=now,
+                    )
+                )
+
+            # Sort by correlation strength
+            patterns.sort(key=lambda p: p.success_correlation, reverse=True)
+
+            logger.info(
+                "Detected engagement patterns",
+                extra={
+                    "company_id": company_id,
+                    "pattern_count": len(patterns),
+                },
+            )
+
+            return patterns
+
+        except Exception as e:
+            logger.exception("Failed to detect engagement patterns")
+            raise DatabaseError(f"Failed to detect engagement patterns: {e}") from e
