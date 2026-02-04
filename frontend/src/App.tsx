@@ -10,6 +10,7 @@ import {
   IntegrationsSettingsPage,
   LoginPage,
   MeetingBriefPage,
+  PreferencesSettingsPage,
   SignupPage,
   DashboardPage,
   GoalsPage,
@@ -93,6 +94,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <IntegrationsCallbackPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/preferences"
+              element={
+                <ProtectedRoute>
+                  <PreferencesSettingsPage />
                 </ProtectedRoute>
               }
             />

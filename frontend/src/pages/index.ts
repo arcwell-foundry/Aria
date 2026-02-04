@@ -7,4 +7,5 @@ export { IntegrationsCallbackPage } from "./IntegrationsCallback";
 export { IntegrationsSettingsPage } from "./IntegrationsSettings";
 export { LoginPage } from "./Login";
 export { MeetingBriefPage } from "./MeetingBrief";
+export { PreferencesSettingsPage } from "./PreferencesSettings";
 export { SignupPage } from "./Signup";
