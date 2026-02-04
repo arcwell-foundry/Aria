@@ -10,17 +10,19 @@ Events are stored in Supabase with user isolation via RLS.
 
 Usage:
     ```python
-    from src.memory import LeadEventService, EventType, Direction
-
-    service = LeadEventService()
-
-    # Add an event
-    from src.models.lead_memory import LeadEventCreate
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_memory_events import LeadEventService
+    from src.models.lead_memory import Direction, EventType, LeadEventCreate
     from datetime import datetime, UTC
 
+    # Initialize service with database client
+    client = SupabaseClient.get_client()
+    service = LeadEventService(db_client=client)
+
+    # Add an event
     event_data = LeadEventCreate(
         event_type=EventType.EMAIL_SENT,
-        direction="outbound",
+        direction=Direction.OUTBOUND,
         subject="Follow up",
         content="Checking in",
         participants=["john@acme.com"],
