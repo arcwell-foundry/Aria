@@ -368,3 +368,136 @@ async def test_add_signal_stores_insight() -> None:
         assert "Signal Type: buying_signal" in episode_body
         assert "EU market" in episode_body
         assert "Confidence: 0.85" in episode_body
+
+
+# --- search_leads tests ---
+
+
+@pytest.mark.asyncio
+async def test_search_leads_queries_graphiti() -> None:
+    """Test search_leads uses Graphiti semantic search."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_edge = MagicMock()
+    mock_edge.fact = "Lead ID: lead-123\nCompany: Acme Corp\nOWNED_BY: user-456\nLifecycle Stage: lead\nStatus: active\nHealth Score: 75"
+    mock_edge.created_at = now
+    mock_edge.name = "lead:lead-123"
+
+    mock_client.search = AsyncMock(return_value=[mock_edge])
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await graph.search_leads("user-456", "enterprise deals", limit=10)
+
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+        call_args = mock_client.search.call_args
+        assert "enterprise deals" in call_args[0][0]
+
+
+# --- find_leads_by_topic tests ---
+
+
+@pytest.mark.asyncio
+async def test_find_leads_by_topic_searches_communications() -> None:
+    """Test find_leads_by_topic searches for topic in lead communications."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_comm_edge = MagicMock()
+    mock_comm_edge.fact = "HAS_COMMUNICATION: lead-123\nEvent Type: email\nContent: Discussed pricing options for Q2"
+    mock_comm_edge.created_at = now
+    mock_comm_edge.name = "comm:lead-123:comm-456"
+
+    mock_lead_edge = MagicMock()
+    mock_lead_edge.fact = "Lead ID: lead-123\nCompany: Acme Corp\nOWNED_BY: user-456\nLifecycle Stage: opportunity\nStatus: active\nHealth Score: 80"
+    mock_lead_edge.created_at = now
+    mock_lead_edge.name = "lead:lead-123"
+
+    mock_client.search = AsyncMock(side_effect=[
+        [mock_comm_edge],
+        [mock_lead_edge],
+    ])
+
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = mock_lead_edge.fact
+    mock_node.created_at = now
+    mock_driver.execute_query = AsyncMock(return_value=([{"e": mock_node}], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await graph.find_leads_by_topic("user-456", "pricing", limit=10)
+
+        assert isinstance(results, list)
+        first_call = mock_client.search.call_args_list[0]
+        assert "pricing" in first_call[0][0]
+
+
+# --- find_silent_leads tests ---
+
+from datetime import timedelta
+
+
+@pytest.mark.asyncio
+async def test_find_silent_leads_returns_inactive() -> None:
+    """Test find_silent_leads returns leads with no recent activity."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    old_date = now - timedelta(days=30)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_lead_edge = MagicMock()
+    mock_lead_edge.fact = "Lead ID: lead-silent\nCompany: Silent Corp\nOWNED_BY: user-456\nLifecycle Stage: lead\nStatus: active\nHealth Score: 60"
+    mock_lead_edge.created_at = old_date
+    mock_lead_edge.name = "lead:lead-silent"
+
+    mock_client.search = AsyncMock(return_value=[mock_lead_edge])
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await graph.find_silent_leads("user-456", days_inactive=14, limit=10)
+
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+        call_args = mock_client.search.call_args
+        assert "inactive" in call_args[0][0].lower() or "silent" in call_args[0][0].lower()
+
+
+# --- get_leads_for_company tests ---
+
+
+@pytest.mark.asyncio
+async def test_get_leads_for_company_filters_by_company() -> None:
+    """Test get_leads_for_company returns only leads for specific company."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_lead_edge = MagicMock()
+    mock_lead_edge.fact = "Lead ID: lead-123\nCompany: Acme Corp\nOWNED_BY: user-456\nABOUT_COMPANY: company-789\nLifecycle Stage: opportunity\nStatus: active\nHealth Score: 80"
+    mock_lead_edge.created_at = now
+    mock_lead_edge.name = "lead:lead-123"
+
+    mock_client.search = AsyncMock(return_value=[mock_lead_edge])
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        results = await graph.get_leads_for_company("user-456", "company-789", limit=10)
+
+        assert isinstance(results, list)
+        mock_client.search.assert_called_once()
+        call_args = mock_client.search.call_args
+        assert "company-789" in call_args[0][0]

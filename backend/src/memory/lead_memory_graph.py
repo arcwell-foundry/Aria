@@ -200,6 +200,42 @@ class LeadMemoryGraph:
 
         return "\n".join(parts)
 
+    def _parse_edge_to_lead(self, edge: Any, user_id: str) -> LeadMemoryNode | None:
+        """Parse a Graphiti edge into a LeadMemoryNode.
+
+        Args:
+            edge: The Graphiti edge object.
+            user_id: The expected user ID for ownership verification.
+
+        Returns:
+            LeadMemoryNode if parsing succeeds and matches user, None otherwise.
+        """
+        try:
+            fact = getattr(edge, "fact", "")
+            created_at = getattr(edge, "created_at", datetime.now(UTC))
+            edge_name = getattr(edge, "name", "") or ""
+
+            # Extract lead ID from name (format: lead:lead-id)
+            if not edge_name.startswith("lead:"):
+                return None
+
+            lead_id = edge_name.replace("lead:", "")
+
+            lead = self._parse_content_to_lead(
+                lead_id=lead_id,
+                content=fact,
+                created_at=created_at if isinstance(created_at, datetime) else datetime.now(UTC),
+            )
+
+            # Verify ownership
+            if lead and lead.user_id != user_id:
+                return None
+
+            return lead
+        except Exception as e:
+            logger.warning(f"Failed to parse edge to lead: {e}")
+            return None
+
     def _parse_content_to_lead(
         self,
         lead_id: str,
@@ -610,7 +646,25 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If search fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            search_query = f"lead memory for user {user_id}: {query}"
+            results = await client.search(search_query)
+
+            leads = []
+            for edge in results[:limit]:
+                lead = self._parse_edge_to_lead(edge, user_id)
+                if lead:
+                    leads.append(lead)
+
+            return leads
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to search leads")
+            raise LeadMemoryGraphError(f"Failed to search leads: {e}") from e
 
     async def find_leads_by_topic(
         self,
@@ -631,7 +685,36 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If query fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            search_query = f"lead communication discussing {topic}"
+            results = await client.search(search_query)
+
+            lead_ids: set[str] = set()
+            for edge in results:
+                fact = getattr(edge, "fact", "")
+                for line in fact.split("\n"):
+                    if line.startswith("HAS_COMMUNICATION:"):
+                        lead_id = line.replace("HAS_COMMUNICATION:", "").strip()
+                        lead_ids.add(lead_id)
+                        break
+
+            leads = []
+            for lead_id in list(lead_ids)[:limit]:
+                try:
+                    lead = await self.get_lead(user_id, lead_id)
+                    leads.append(lead)
+                except LeadMemoryNotFoundError:
+                    continue
+
+            return leads
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to find leads by topic")
+            raise LeadMemoryGraphError(f"Failed to find leads by topic: {e}") from e
 
     async def find_silent_leads(
         self,
@@ -652,7 +735,34 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If query fails.
         """
-        raise NotImplementedError
+        try:
+            from datetime import timedelta
+
+            client = await self._get_graphiti_client()
+            cutoff_date = datetime.now(UTC) - timedelta(days=days_inactive)
+
+            search_query = f"lead memory for user {user_id} active status silent inactive no recent activity"
+            results = await client.search(search_query)
+
+            leads = []
+            for edge in results[:limit * 2]:
+                lead = self._parse_edge_to_lead(edge, user_id)
+                if (
+                    lead
+                    and lead.status == "active"
+                    and (lead.last_activity_at is None or lead.last_activity_at < cutoff_date)
+                ):
+                    leads.append(lead)
+                    if len(leads) >= limit:
+                        break
+
+            return leads
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to find silent leads")
+            raise LeadMemoryGraphError(f"Failed to find silent leads: {e}") from e
 
     async def get_leads_for_company(
         self,
@@ -673,4 +783,22 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If query fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            search_query = f"lead memory ABOUT_COMPANY {company_id} for user {user_id}"
+            results = await client.search(search_query)
+
+            leads = []
+            for edge in results[:limit]:
+                lead = self._parse_edge_to_lead(edge, user_id)
+                if lead and lead.company_id == company_id:
+                    leads.append(lead)
+
+            return leads
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get leads for company")
+            raise LeadMemoryGraphError(f"Failed to get leads for company: {e}") from e
