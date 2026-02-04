@@ -1,7 +1,6 @@
 """Tests for ProactiveInsight model."""
 
-import pytest
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 
 class TestInsightType:

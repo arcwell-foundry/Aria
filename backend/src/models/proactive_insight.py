@@ -5,50 +5,34 @@ to the user based on current context. SurfacedInsightRecord
 tracks what was surfaced and when for cooldown and analytics.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from pydantic import BaseModel, Field
 
-class InsightType(Enum):
+
+class InsightType(str, Enum):
     """Types of proactive insights ARIA can surface."""
 
-    PATTERN_MATCH = "pattern_match"  # Similar topics discussed before
-    CONNECTION = "connection"  # Entity connections via knowledge graph
-    TEMPORAL = "temporal"  # Time-based triggers (deadlines, anniversaries)
-    GOAL_RELEVANT = "goal_relevant"  # Relates to active goals
+    PATTERN_MATCH = "pattern_match"
+    CONNECTION = "connection"
+    TEMPORAL = "temporal"
+    GOAL_RELEVANT = "goal_relevant"
 
 
-@dataclass
-class ProactiveInsight:
-    """A memory worth volunteering to the user.
-
-    Represents a piece of context from memory that is relevant
-    to the current conversation and should be surfaced proactively.
-
-    Attributes:
-        insight_type: Category of why this is relevant
-        content: The actual insight content to share
-        relevance_score: How relevant this is (0.0 to 1.0)
-        source_memory_id: ID of the underlying memory
-        source_memory_type: Type of memory (semantic, episodic, etc.)
-        explanation: Why this insight is relevant
-    """
+class ProactiveInsight(BaseModel):
+    """A memory worth volunteering to the user."""
 
     insight_type: InsightType
     content: str
-    relevance_score: float
+    relevance_score: float = Field(..., ge=0.0, le=1.0)
     source_memory_id: str
     source_memory_type: str
     explanation: str
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize insight to dictionary.
-
-        Returns:
-            Dictionary representation suitable for JSON serialization.
-        """
+        """Serialize insight to dictionary."""
         return {
             "insight_type": self.insight_type.value,
             "content": self.content,
@@ -59,28 +43,8 @@ class ProactiveInsight:
         }
 
 
-@dataclass
-class SurfacedInsightRecord:
-    """Database record for a surfaced insight.
-
-    Tracks when insights were shown to users for cooldown
-    logic and engagement analytics.
-
-    Attributes:
-        id: Record UUID
-        user_id: User who received the insight
-        memory_type: Type of source memory
-        memory_id: ID of source memory
-        insight_type: Category of insight
-        context: What triggered surfacing
-        relevance_score: Relevance at time of surfacing
-        explanation: Why it was surfaced
-        surfaced_at: When it was shown
-        engaged: Whether user engaged with it
-        engaged_at: When user engaged
-        dismissed: Whether user dismissed it
-        dismissed_at: When user dismissed
-    """
+class SurfacedInsightRecord(BaseModel):
+    """Database record for a surfaced insight."""
 
     id: str
     user_id: str
@@ -88,7 +52,7 @@ class SurfacedInsightRecord:
     memory_id: str
     insight_type: str
     context: str | None
-    relevance_score: float
+    relevance_score: float = Field(..., ge=0.0, le=1.0)
     explanation: str | None
     surfaced_at: datetime
     engaged: bool
