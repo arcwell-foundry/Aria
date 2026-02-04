@@ -26,7 +26,7 @@ def mock_supabase_client() -> MagicMock:
     mock_client = MagicMock()
 
     # Mock successful response for all tables
-    def mock_table(table_name: str) -> MagicMock:
+    def mock_table(_table_name: str) -> MagicMock:
         mock_table = MagicMock()
 
         # Mock select chain
