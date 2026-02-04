@@ -10,7 +10,7 @@ const navItems = [
   { name: "Battle Cards", href: "/dashboard/battlecards", icon: "swords" },
   { name: "Email Drafts", href: "/dashboard/drafts", icon: "mail" },
   { name: "Integrations", href: "/settings/integrations", icon: "integration" },
-  { name: "Lead Memory", href: "/leads", icon: "users" },
+  { name: "Lead Memory", href: "/dashboard/leads", icon: "users" },
   { name: "Daily Briefing", href: "/briefing", icon: "calendar" },
   { name: "Settings", href: "/settings", icon: "settings" },
 ];
