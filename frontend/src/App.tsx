@@ -10,6 +10,7 @@ import {
   IntegrationsSettingsPage,
   LoginPage,
   MeetingBriefPage,
+  NotificationsPage,
   PreferencesSettingsPage,
   SignupPage,
   DashboardPage,
@@ -102,6 +103,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <PreferencesSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <NotificationsPage />
                 </ProtectedRoute>
               }
             />

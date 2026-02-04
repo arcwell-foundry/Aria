@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: "home" },
@@ -257,6 +258,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </button>
 
           <div className="flex items-center gap-4 ml-auto">
+            <NotificationBell />
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white font-medium">
                 {user?.full_name?.charAt(0) || user?.email?.charAt(0) || "U"}
