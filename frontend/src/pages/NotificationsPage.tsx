@@ -1,5 +1,5 @@
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { NotificationsPageContent } from "@/components/notifications/NotificationsPageContent";
+import { NotificationsPageContent } from "@/components/notifications/NotificationsPage";
 
 export function NotificationsPage() {
   return (

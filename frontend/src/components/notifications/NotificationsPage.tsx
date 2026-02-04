@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useNotifications, useDeleteNotification, useMarkAsRead } from "@/api/notifications";
+import { useNotifications, useDeleteNotification, useMarkAsRead, type Notification } from "@/api/notifications";
 import { Trash2, Check } from "lucide-react";
 
 // Shared time formatter and icons from NotificationBell
@@ -71,7 +71,7 @@ export function NotificationsPageContent() {
 
   const notifications = notificationsData?.notifications ?? [];
 
-  const handleNotificationClick = async (notification: any) => {
+  const handleNotificationClick = async (notification: Notification) => {
     if (!notification.read_at) {
       await markAsRead.mutateAsync(notification.id);
     }
@@ -87,7 +87,7 @@ export function NotificationsPageContent() {
     }
   };
 
-  const handleMarkRead = async (e: React.MouseEvent, notification: any) => {
+  const handleMarkRead = async (e: React.MouseEvent, notification: Notification) => {
     e.stopPropagation();
     if (!notification.read_at) {
       await markAsRead.mutateAsync(notification.id);
