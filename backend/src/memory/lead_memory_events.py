@@ -141,3 +141,29 @@ class LeadEvent:
             source_id=cast(str | None, data.get("source_id")),
             created_at=created_at,
         )
+
+
+class LeadEventService:
+    """Service for managing lead event operations.
+
+    Provides async interface for storing, retrieving, and querying
+    lead events. Events are stored in Supabase with user isolation
+    via RLS policies.
+    """
+
+    def _get_supabase_client(self) -> Any:
+        """Get the Supabase client instance.
+
+        Returns:
+            Initialized Supabase client.
+
+        Raises:
+            DatabaseError: If client initialization fails.
+        """
+        from src.core.exceptions import DatabaseError
+        from src.db.supabase import SupabaseClient
+
+        try:
+            return SupabaseClient.get_client()
+        except Exception as e:
+            raise DatabaseError(f"Failed to get Supabase client: {e}") from e

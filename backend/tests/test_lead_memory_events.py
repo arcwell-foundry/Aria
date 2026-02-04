@@ -8,7 +8,12 @@ This module tests the domain model for lead memory events, including:
 
 from datetime import UTC, datetime
 
-from src.memory.lead_memory_events import Direction, EventType, LeadEvent
+from src.memory.lead_memory_events import (
+    Direction,
+    EventType,
+    LeadEvent,
+    LeadEventService,
+)
 
 
 class TestEventTypeEnum:
@@ -278,3 +283,12 @@ class TestLeadEventDataclass:
         assert restored.source == original.source
         assert restored.source_id == original.source_id
         assert restored.created_at == original.created_at
+
+
+class TestLeadEventService:
+    """Tests for the LeadEventService class."""
+
+    def test_service_initialization(self):
+        """Test that LeadEventService can be instantiated."""
+        service = LeadEventService()
+        assert service is not None
