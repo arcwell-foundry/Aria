@@ -317,3 +317,118 @@ class TestSuccessfulEngagementPatterns:
         )
         assert freq_pattern is not None
         assert freq_pattern.success_correlation > 0.5
+
+
+class TestFindSilentLeads:
+    """Tests for find_silent_leads method."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_silent_leads(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test returns empty list when all leads are active."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        silent = await detector.find_silent_leads(user_id="user-123")
+
+        assert silent == []
+
+    @pytest.mark.asyncio
+    async def test_finds_leads_inactive_for_default_14_days(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test finds leads inactive for 14+ days by default."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        now = datetime.now(UTC)
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "lead-1",
+                "company_name": "Stale Corp",
+                "last_activity_at": (now - timedelta(days=20)).isoformat(),
+                "health_score": 45,
+            },
+            {
+                "id": "lead-2",
+                "company_name": "Dormant Inc",
+                "last_activity_at": (now - timedelta(days=30)).isoformat(),
+                "health_score": 30,
+            },
+        ]
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        silent = await detector.find_silent_leads(user_id="user-123")
+
+        assert len(silent) == 2
+        assert silent[0].company_name == "Stale Corp"
+        assert silent[0].days_inactive >= 20
+        assert silent[1].days_inactive >= 30
+
+    @pytest.mark.asyncio
+    async def test_custom_inactive_days_threshold(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test custom inactive_days parameter."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        now = datetime.now(UTC)
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "lead-1",
+                "company_name": "Recent Quiet",
+                "last_activity_at": (now - timedelta(days=8)).isoformat(),
+                "health_score": 60,
+            },
+        ]
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        # Find leads inactive for 7+ days
+        silent = await detector.find_silent_leads(user_id="user-123", inactive_days=7)
+
+        assert len(silent) == 1
+        assert silent[0].days_inactive >= 7
+
+    @pytest.mark.asyncio
+    async def test_only_returns_active_status_leads(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test only active leads are returned, not won/lost."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        mock_response = MagicMock()
+        mock_response.data = []
+
+        # Set up mock chain to track the second .eq() call for status filtering
+        mock_first_eq = MagicMock()
+        mock_second_eq = MagicMock()
+        mock_first_eq.eq = mock_second_eq
+        mock_second_eq.return_value.lt.return_value.order.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_supabase.table.return_value.select.return_value.eq.return_value = mock_first_eq
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        await detector.find_silent_leads(user_id="user-123")
+
+        # Verify query filters by status=active (second .eq() call)
+        mock_second_eq.assert_called_once_with("status", "active")

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -493,3 +493,80 @@ class LeadPatternDetector:
         except Exception as e:
             logger.exception("Failed to detect engagement patterns")
             raise DatabaseError(f"Failed to detect engagement patterns: {e}") from e
+
+    async def find_silent_leads(
+        self,
+        user_id: str,
+        inactive_days: int = 14,
+        limit: int = 50,
+    ) -> list[SilentLead]:
+        """Find leads that have been inactive for a specified period.
+
+        Identifies leads with no activity for the given number of days.
+        Only returns active leads (not won/lost).
+
+        Args:
+            user_id: The user to find silent leads for.
+            inactive_days: Days of inactivity to be considered silent (default 14).
+            limit: Maximum number of leads to return (default 50).
+
+        Returns:
+            List of SilentLead ordered by days inactive descending.
+
+        Raises:
+            ValueError: If user_id is empty.
+            DatabaseError: If query fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        # Input validation
+        if not user_id:
+            raise ValueError("user_id must not be empty")
+
+        try:
+            now = datetime.now(UTC)
+            cutoff = now - timedelta(days=inactive_days)
+
+            response = (
+                self.db.table("lead_memories")
+                .select("id, company_name, last_activity_at, health_score")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .lt("last_activity_at", cutoff.isoformat())
+                .order("last_activity_at", desc=False)  # Oldest first
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            silent_leads = []
+            for item in response.data[:limit]:
+                lead = cast(dict[str, Any], item)
+                last_activity = datetime.fromisoformat(str(lead["last_activity_at"]))
+                days_inactive = (now - last_activity).days
+
+                silent_leads.append(
+                    SilentLead(
+                        lead_id=str(lead["id"]),
+                        company_name=str(lead["company_name"]),
+                        days_inactive=days_inactive,
+                        last_activity_at=last_activity,
+                        health_score=int(lead.get("health_score", 0) or 0),
+                    )
+                )
+
+            logger.info(
+                "Found silent leads",
+                extra={
+                    "user_id": user_id,
+                    "inactive_days": inactive_days,
+                    "count": len(silent_leads),
+                },
+            )
+
+            return silent_leads
+
+        except Exception as e:
+            logger.exception("Failed to find silent leads")
+            raise DatabaseError(f"Failed to find silent leads: {e}") from e
