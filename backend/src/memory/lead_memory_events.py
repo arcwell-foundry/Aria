@@ -263,7 +263,9 @@ class LeadEventService:
         try:
             client = self._get_supabase_client()
 
-            query = client.table("lead_memory_events").select("*").eq("lead_memory_id", lead_memory_id)
+            query = (
+                client.table("lead_memory_events").select("*").eq("lead_memory_id", lead_memory_id)
+            )
 
             if start_date:
                 query = query.gte("occurred_at", start_date.isoformat())
@@ -382,7 +384,9 @@ class LeadEventService:
         """
         from src.models.lead_memory import LeadEventCreate
 
-        event_type = EventType.EMAIL_SENT if direction == Direction.OUTBOUND else EventType.EMAIL_RECEIVED
+        event_type = (
+            EventType.EMAIL_SENT if direction == Direction.OUTBOUND else EventType.EMAIL_RECEIVED
+        )
 
         event_data = LeadEventCreate(
             event_type=event_type,

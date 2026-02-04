@@ -31,20 +31,23 @@ from src.memory.digital_twin import (
     TextStyleAnalyzer,
     WritingStyleFingerprint,
 )
+from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.lead_memory import (
     LeadMemory,
     LeadMemoryService,
     LeadStatus,
     LifecycleStage,
+)
+from src.memory.lead_memory import (
     TriggerType as LeadTriggerType,
 )
-from src.memory.lead_memory_events import (
-    Direction,
-    EventType,
-    LeadEvent,
-    LeadEventService,
+from src.memory.lead_memory_events import LeadEvent, LeadEventService
+from src.memory.lead_memory_graph import (
+    LeadMemoryGraph,
+    LeadMemoryNode,
+    LeadRelationshipType,
 )
-from src.memory.episodic import Episode, EpisodicMemory
+from src.models.lead_memory import Direction, EventType
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -119,4 +122,8 @@ __all__ = [
     "LeadEventService",
     "EventType",
     "Direction",
+    # Lead Memory Graph
+    "LeadMemoryGraph",
+    "LeadMemoryNode",
+    "LeadRelationshipType",
 ]
