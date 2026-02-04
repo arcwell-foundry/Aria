@@ -475,7 +475,9 @@ class TestMarkAddressed:
 
         mock_response = MagicMock()
         mock_response.data = [{"id": "insight-123", "addressed_at": "2025-02-04T10:00:00+00:00"}]
-        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
 
         result = await service.mark_addressed(
             user_id="user-123",
@@ -494,7 +496,9 @@ class TestMarkAddressed:
 
         mock_response = MagicMock()
         mock_response.data = []
-        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
 
         result = await service.mark_addressed(
             user_id="user-123",

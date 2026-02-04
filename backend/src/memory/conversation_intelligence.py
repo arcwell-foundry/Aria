@@ -305,15 +305,17 @@ Respond with ONLY the JSON array, no additional text."""
         now = datetime.now(UTC)
         records = []
         for raw in raw_insights:
-            records.append({
-                "id": str(uuid.uuid4()),
-                "lead_memory_id": lead_memory_id,
-                "insight_type": raw["type"],
-                "content": raw["content"],
-                "confidence": raw.get("confidence", 0.7),
-                "source_event_id": event.id,
-                "detected_at": now.isoformat(),
-            })
+            records.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "lead_memory_id": lead_memory_id,
+                    "insight_type": raw["type"],
+                    "content": raw["content"],
+                    "confidence": raw.get("confidence", 0.7),
+                    "source_event_id": event.id,
+                    "detected_at": now.isoformat(),
+                }
+            )
 
         # Store in database
         try:
@@ -438,10 +440,12 @@ Respond with ONLY the JSON array, no additional text."""
             now = datetime.now(UTC)
             response = (
                 self.db.table("lead_memory_insights")
-                .update({
-                    "addressed_at": now.isoformat(),
-                    "addressed_by": user_id,
-                })
+                .update(
+                    {
+                        "addressed_at": now.isoformat(),
+                        "addressed_by": user_id,
+                    }
+                )
                 .eq("id", insight_id)
                 .execute()
             )
