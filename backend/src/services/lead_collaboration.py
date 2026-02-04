@@ -8,17 +8,13 @@ can be merged or rejected by the lead owner.
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from supabase import Client
-
-from src.models.lead_memory import ContributionStatus as ModelContributionStatus
-from src.models.lead_memory import ContributionType as ModelContributionType
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +68,7 @@ class Contribution:
             "contribution_id": self.contribution_id,
             "status": self.status.value,
             "reviewed_by": self.reviewed_by,
-            "reviewed_at": self.reviewed_at.isoformat()
-            if self.reviewed_at
-            else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -137,6 +131,34 @@ class Contributor:
     email: str
     added_at: datetime
     contribution_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize contributor to a dictionary."""
+        return {
+            "id": self.id,
+            "lead_memory_id": self.lead_memory_id,
+            "name": self.name,
+            "email": self.email,
+            "added_at": self.added_at.isoformat(),
+            "contribution_count": self.contribution_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Contributor:
+        """Create a Contributor from a dictionary."""
+        added_at_raw = data["added_at"]
+        added_at = (
+            datetime.fromisoformat(added_at_raw) if isinstance(added_at_raw, str) else added_at_raw
+        )
+
+        return cls(
+            id=cast(str, data["id"]),
+            lead_memory_id=cast(str, data["lead_memory_id"]),
+            name=cast(str, data["name"]),
+            email=cast(str, data["email"]),
+            added_at=added_at,
+            contribution_count=cast(int, data["contribution_count"]),
+        )
 
 
 class LeadCollaborationService:

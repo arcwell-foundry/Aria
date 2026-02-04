@@ -14,12 +14,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.exceptions import DatabaseError
-from src.models.lead_memory import (
-    ContributionStatus as ModelContributionStatus,
-)
-from src.models.lead_memory import (
-    ContributionType as ModelContributionType,
-)
 from src.services.lead_collaboration import (
     Contribution,
     ContributionStatus,
@@ -63,7 +57,6 @@ class TestContributionDataclass:
     def test_contribution_creation_all_fields(self):
         """Test creating a Contribution with all fields populated."""
         created_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
-        reviewed_at = datetime(2025, 2, 4, 15, 0, tzinfo=UTC)
 
         contribution = Contribution(
             id="cntrb_123",
@@ -267,6 +260,48 @@ class TestContributorDataclass:
         )
 
         assert contributor.contribution_count == 0
+
+    def test_contributor_to_dict(self):
+        """Test serialization to dict with all fields."""
+        added_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+
+        contributor = Contributor(
+            id="cntr_123",
+            lead_memory_id="lead_456",
+            name="Jane Doe",
+            email="jane.doe@example.com",
+            added_at=added_at,
+            contribution_count=5,
+        )
+
+        result = contributor.to_dict()
+
+        assert result["id"] == "cntr_123"
+        assert result["lead_memory_id"] == "lead_456"
+        assert result["name"] == "Jane Doe"
+        assert result["email"] == "jane.doe@example.com"
+        assert result["added_at"] == "2025-02-04T14:30:00+00:00"
+        assert result["contribution_count"] == 5
+
+    def test_contributor_from_dict(self):
+        """Test creating a Contributor from a dictionary."""
+        data = {
+            "id": "cntr_xyz",
+            "lead_memory_id": "lead_abc",
+            "name": "Bob Johnson",
+            "email": "bob.johnson@example.com",
+            "added_at": "2025-02-04T14:30:00+00:00",
+            "contribution_count": 10,
+        }
+
+        contributor = Contributor.from_dict(data)
+
+        assert contributor.id == "cntr_xyz"
+        assert contributor.lead_memory_id == "lead_abc"
+        assert contributor.name == "Bob Johnson"
+        assert contributor.email == "bob.johnson@example.com"
+        assert contributor.added_at == datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+        assert contributor.contribution_count == 10
 
 
 class TestLeadCollaborationServiceInit:
