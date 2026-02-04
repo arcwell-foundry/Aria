@@ -24,6 +24,8 @@ from src.memory.lead_memory import (
     LifecycleStage,
 )
 from src.models.lead_memory import (
+    InsightResponse,
+    InsightType,
     LeadEventCreate,
     LeadEventResponse,
     LeadMemoryCreate,
@@ -475,6 +477,77 @@ async def add_stakeholder(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         ) from e
+
+
+@router.get("/{lead_id}/insights", response_model=list[InsightResponse])
+async def get_insights(
+    lead_id: str,
+    current_user: CurrentUser,
+    insight_type: str | None = Query(None, description="Filter by insight type"),
+    include_addressed: bool = Query(False, description="Include addressed insights"),
+) -> list[InsightResponse]:
+    """Get AI insights for a lead.
+
+    Args:
+        lead_id: The lead ID to get insights for.
+        current_user: Current authenticated user.
+        insight_type: Optional filter by insight type.
+        include_addressed: Whether to include addressed insights (default False).
+
+    Returns:
+        List of insights for the lead.
+
+    Raises:
+        HTTPException: 404 if lead not found, 400 if invalid insight type, 500 if retrieval fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_insights import LeadInsightsService
+
+    try:
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        insight_type_filter = None
+        if insight_type:
+            try:
+                insight_type_filter = InsightType(insight_type)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid insight type: {insight_type}",
+                ) from e
+
+        client = SupabaseClient.get_client()
+        insights_service = LeadInsightsService(db_client=client)
+
+        insights = await insights_service.get_insights(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+            insight_type=insight_type_filter,
+            include_addressed=include_addressed,
+        )
+
+        return [
+            InsightResponse(
+                id=insight.id,
+                lead_memory_id=insight.lead_memory_id,
+                insight_type=insight.insight_type,
+                content=insight.content,
+                confidence=insight.confidence,
+                source_event_id=insight.source_event_id,
+                detected_at=insight.detected_at,
+                addressed_at=insight.addressed_at,
+            )
+            for insight in insights
+        ]
+
+    except HTTPException:
+        raise
+    except LeadNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found") from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to get insights")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @router.post("/export")

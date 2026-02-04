@@ -639,3 +639,82 @@ class TestAddStakeholder:
             json={"contact_name": "John Doe"},  # Missing contact_email
         )
         assert response.status_code == 422
+
+
+class TestGetInsights:
+    """Tests for GET /api/v1/leads/{lead_id}/insights endpoint."""
+
+    def test_get_insights_requires_auth(self) -> None:
+        """Test that getting insights requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.get("/api/v1/leads/some-lead-id/insights")
+        assert response.status_code == 401
+
+    def test_get_insights_success(self, test_client: TestClient) -> None:
+        """Test successfully getting insights."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.memory.lead_insights import LeadInsight
+        from src.models.lead_memory import InsightType
+
+        mock_insights = [
+            LeadInsight(
+                id="insight-1",
+                lead_memory_id="lead-456",
+                insight_type=InsightType.BUYING_SIGNAL,
+                content="Decision maker expressed interest in timeline",
+                confidence=0.85,
+                source_event_id="event-123",
+                detected_at=datetime.now(UTC),
+                addressed_at=None,
+            ),
+            LeadInsight(
+                id="insight-2",
+                lead_memory_id="lead-456",
+                insight_type=InsightType.RISK,
+                content="No budget confirmation received",
+                confidence=0.70,
+                source_event_id=None,
+                detected_at=datetime.now(UTC),
+                addressed_at=None,
+            ),
+        ]
+
+        # Mock the LeadInsightsService where it's imported (inside the function)
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.memory.lead_insights.LeadInsightsService") as mock_insights_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            # Mock SupabaseClient.get_client()
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_insights_instance = mock_insights_service.return_value
+            mock_insights_instance.get_insights = AsyncMock(return_value=mock_insights)
+
+            response = test_client.get("/api/v1/leads/lead-456/insights")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data) == 2
+            assert data[0]["insight_type"] == "buying_signal"
+            assert data[1]["insight_type"] == "risk"
+
+    def test_get_insights_not_found(self, test_client: TestClient) -> None:
+        """Test getting insights for non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.get("/api/v1/leads/lead-999/insights")
+
+            assert response.status_code == 404
