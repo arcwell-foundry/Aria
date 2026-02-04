@@ -316,3 +316,55 @@ class LeadCollaborationService:
         except Exception as e:
             logger.exception("Failed to submit contribution")
             raise DatabaseError(f"Failed to submit contribution: {e}") from e
+
+    async def get_pending_contributions(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+    ) -> list[Contribution]:
+        """Get pending contributions for a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+
+        Returns:
+            List of pending Contribution instances, sorted by created_at descending.
+
+        Raises:
+            DatabaseError: If retrieval fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            query = (
+                client.table("lead_memory_contributions")
+                .select("*")
+                .eq("lead_memory_id", lead_memory_id)
+                .eq("status", ContributionStatus.PENDING.value)
+                .order("created_at", desc=True)
+            )
+
+            response = query.execute()
+
+            contributions = []
+            for item in response.data:
+                contribution_dict = cast(dict[str, Any], item)
+                contributions.append(Contribution.from_dict(contribution_dict))
+
+            logger.info(
+                "Retrieved pending contributions",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "count": len(contributions),
+                },
+            )
+
+            return contributions
+
+        except Exception as e:
+            logger.exception("Failed to get pending contributions")
+            raise DatabaseError(f"Failed to get pending contributions: {e}") from e

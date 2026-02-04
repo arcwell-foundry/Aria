@@ -557,3 +557,128 @@ class TestSubmitContribution:
             )
 
         assert "Failed to insert contribution" in str(exc_info.value)
+
+
+class TestGetPendingContributions:
+    """Tests for the get_pending_contributions method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_pending_contributions_returns_list(self, mock_get_client):
+        """Test that get_pending_contributions returns a list of Contribution instances."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        # Mock data already sorted by created_at descending (as Supabase would return)
+        mock_response.data = [
+            {
+                "id": "cntrb_456",
+                "lead_memory_id": "lead_456",
+                "contributor_id": "user_123",
+                "contribution_type": "note",
+                "contribution_id": None,
+                "status": "pending",
+                "reviewed_by": None,
+                "reviewed_at": None,
+                "created_at": "2025-02-04T15:00:00+00:00",
+            },
+            {
+                "id": "cntrb_123",
+                "lead_memory_id": "lead_456",
+                "contributor_id": "user_789",
+                "contribution_type": "event",
+                "contribution_id": "event_abc",
+                "status": "pending",
+                "reviewed_by": None,
+                "reviewed_at": None,
+                "created_at": "2025-02-04T14:30:00+00:00",
+            },
+        ]
+
+        # Mock the query chain: table().select().eq().eq().order().execute()
+        mock_query = MagicMock()
+        mock_query.execute.return_value = mock_response
+        mock_order = MagicMock()
+        mock_order.order.return_value = mock_query
+        mock_eq2 = MagicMock()
+        mock_eq2.eq.return_value = mock_order
+        mock_eq1 = MagicMock()
+        mock_eq1.eq.return_value = mock_eq2
+        mock_select = MagicMock()
+        mock_select.select.return_value = mock_eq1
+        mock_client.table.return_value = mock_select
+
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_pending_contributions(
+            user_id="user_456",
+            lead_memory_id="lead_456",
+        )
+
+        assert len(result) == 2
+        assert all(isinstance(c, Contribution) for c in result)
+
+        # Verify the contributions are sorted by created_at descending (newest first)
+        assert result[0].id == "cntrb_456"
+        assert result[1].id == "cntrb_123"
+
+        # Verify query was constructed correctly
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        mock_select.select.assert_called_once_with("*")
+        mock_eq1.eq.assert_called_once_with("lead_memory_id", "lead_456")
+        mock_eq2.eq.assert_called_once_with("status", "pending")
+        mock_order.order.assert_called_once_with("created_at", desc=True)
+        mock_query.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_pending_contributions_empty(self, mock_get_client):
+        """Test that get_pending_contributions returns an empty list when no contributions."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+
+        # Mock the query chain
+        mock_query = MagicMock()
+        mock_query.execute.return_value = mock_response
+        mock_order = MagicMock()
+        mock_order.order.return_value = mock_query
+        mock_eq2 = MagicMock()
+        mock_eq2.eq.return_value = mock_order
+        mock_eq1 = MagicMock()
+        mock_eq1.eq.return_value = mock_eq2
+        mock_select = MagicMock()
+        mock_select.select.return_value = mock_eq1
+        mock_client.table.return_value = mock_select
+
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_pending_contributions(
+            user_id="user_456",
+            lead_memory_id="lead_456",
+        )
+
+        assert result == []
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_pending_contributions_handles_database_error(self, mock_get_client):
+        """Test that get_pending_contributions raises DatabaseError on database failure."""
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Database connection failed")
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.get_pending_contributions(
+                user_id="user_456",
+                lead_memory_id="lead_456",
+            )
+
+        assert "Failed to get pending contributions" in str(exc_info.value)
+        mock_get_client.assert_called_once()
