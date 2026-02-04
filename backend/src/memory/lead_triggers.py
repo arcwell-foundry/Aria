@@ -10,6 +10,7 @@ Handles deduplication and retroactive history scanning.
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from src.memory.lead_memory import LeadMemory, LeadMemoryService, TriggerType
@@ -121,6 +122,74 @@ class LeadTriggerService:
         except Exception:
             logger.exception(
                 "Failed to find or create lead",
+                extra={"user_id": user_id, "company_name": company_name},
+            )
+            raise
+
+    async def on_email_approved(
+        self,
+        user_id: str,
+        company_name: str,
+        email_subject: str,
+        email_content: str,
+        recipient_email: str,
+        occurred_at: datetime,
+    ) -> LeadMemory:
+        """Create lead when user approves outbound email to prospect.
+
+        Args:
+            user_id: The user who approved the email.
+            company_name: Name of prospect's company (extracted from email).
+            email_subject: Subject line of approved email.
+            email_content: Body content of approved email.
+            recipient_email: Email address of prospect.
+            occurred_at: When the email was sent.
+
+        Returns:
+            The created or existing LeadMemory.
+        """
+        try:
+            # Find or create lead
+            lead = await self.find_or_create(
+                user_id=user_id,
+                company_name=company_name,
+                trigger=TriggerType.EMAIL_APPROVED,
+            )
+
+            # Add email event to lead timeline
+            from src.models.lead_memory import Direction, EventType, LeadEventCreate
+
+            event_data = LeadEventCreate(
+                event_type=EventType.EMAIL_SENT,
+                direction=Direction.OUTBOUND,
+                subject=email_subject,
+                content=email_content,
+                participants=[recipient_email],
+                occurred_at=occurred_at,
+                source="gmail",
+            )
+
+            await self.event_service.add_event(
+                user_id=user_id,
+                lead_memory_id=lead.id,
+                event_data=event_data,
+            )
+
+            logger.info(
+                "Created lead from approved email",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead.id,
+                    "company_name": company_name,
+                    "recipient": recipient_email,
+                },
+            )
+
+            return lead
+
+        except Exception as e:
+            logger.exception(
+                "Failed to process email approval trigger",
                 extra={"user_id": user_id, "company_name": company_name},
             )
             raise
