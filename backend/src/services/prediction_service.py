@@ -339,7 +339,8 @@ class PredictionService:
         result = query.execute()
 
         stats = []
-        for row in result.data:
+        rows = cast(list[dict[str, Any]], result.data)
+        for row in rows:
             total = row["total_predictions"]
             correct = row["correct_predictions"]
             accuracy = correct / total if total > 0 else 0.0
@@ -383,11 +384,12 @@ class PredictionService:
             .execute()
         )
 
-        total = len(result.data)
-        correct = len([p for p in result.data if p["status"] == "validated_correct"])
+        predictions = cast(list[dict[str, Any]], result.data)
+        total = len(predictions)
+        correct = len([p for p in predictions if p["status"] == "validated_correct"])
 
         by_type: dict[str, dict[str, int]] = {}
-        for pred in result.data:
+        for pred in predictions:
             ptype = pred["prediction_type"]
             if ptype not in by_type:
                 by_type[ptype] = {"total": 0, "correct": 0}
