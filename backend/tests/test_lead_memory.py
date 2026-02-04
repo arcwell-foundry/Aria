@@ -358,3 +358,78 @@ class TestLeadMemoryServiceGetById:
                 await service.get_by_id(user_id="user-456", lead_id="nonexistent")
 
             assert "nonexistent" in str(exc_info.value)
+
+
+class TestLeadMemoryServiceUpdate:
+    """Tests for LeadMemoryService.update()."""
+
+    @pytest.fixture
+    def mock_supabase_update(self) -> MagicMock:
+        """Create a mocked Supabase client for updates."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "lead-123"}]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_response
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_update_lead_fields(self, mock_supabase_update: MagicMock) -> None:
+        """Test updating lead fields."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_update):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                await service.update(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    company_name="Acme Corp Updated",
+                    health_score=85,
+                    tags=["enterprise", "priority"],
+                )
+
+        # Verify update was called with correct data
+        update_call = mock_supabase_update.table.return_value.update
+        update_call.assert_called_once()
+        update_data = update_call.call_args[0][0]
+        assert update_data["company_name"] == "Acme Corp Updated"
+        assert update_data["health_score"] == 85
+        assert update_data["tags"] == ["enterprise", "priority"]
+
+    @pytest.mark.asyncio
+    async def test_update_lead_updates_last_activity(self, mock_supabase_update: MagicMock) -> None:
+        """Test that update sets last_activity_at."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_update):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                await service.update(
+                    user_id="user-456",
+                    lead_id="lead-123",
+                    company_name="New Name",
+                )
+
+        update_data = mock_supabase_update.table.return_value.update.call_args[0][0]
+        assert "last_activity_at" in update_data
+        assert "updated_at" in update_data
+
+    @pytest.mark.asyncio
+    async def test_update_lead_not_found_raises_error(self) -> None:
+        """Test update raises LeadNotFoundError when lead doesn't exist."""
+        from src.core.exceptions import LeadNotFoundError
+        from src.memory.lead_memory import LeadMemoryService
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_client):
+            service = LeadMemoryService()
+            with pytest.raises(LeadNotFoundError):
+                await service.update(
+                    user_id="user-456",
+                    lead_id="nonexistent",
+                    company_name="New Name",
+                )

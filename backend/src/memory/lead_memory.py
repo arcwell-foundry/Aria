@@ -340,3 +340,103 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to get lead", extra={"lead_id": lead_id})
             raise LeadMemoryError(f"Failed to get lead: {e}") from e
+
+    async def update(
+        self,
+        user_id: str,
+        lead_id: str,
+        company_name: str | None = None,
+        health_score: int | None = None,
+        crm_id: str | None = None,
+        crm_provider: str | None = None,
+        expected_close_date: date | None = None,
+        expected_value: Decimal | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Update an existing lead.
+
+        Only provided fields will be updated. None values are ignored.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead ID to update.
+            company_name: Optional new company name.
+            health_score: Optional new health score (0-100).
+            crm_id: Optional CRM record ID.
+            crm_provider: Optional CRM provider.
+            expected_close_date: Optional expected close date.
+            expected_value: Optional expected deal value.
+            tags: Optional new tags list.
+            metadata: Optional metadata to merge.
+
+        Raises:
+            LeadNotFoundError: If lead doesn't exist.
+            LeadMemoryError: If update fails.
+        """
+        from src.core.exceptions import LeadNotFoundError
+
+        try:
+            client = self._get_supabase_client()
+            now = datetime.now(UTC)
+
+            # Build update data from provided fields
+            data: dict[str, Any] = {
+                "last_activity_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            if company_name is not None:
+                data["company_name"] = company_name
+            if health_score is not None:
+                data["health_score"] = health_score
+            if crm_id is not None:
+                data["crm_id"] = crm_id
+            if crm_provider is not None:
+                data["crm_provider"] = crm_provider
+            if expected_close_date is not None:
+                data["expected_close_date"] = expected_close_date.isoformat()
+            if expected_value is not None:
+                data["expected_value"] = float(expected_value)
+            if tags is not None:
+                data["tags"] = tags
+            if metadata is not None:
+                data["metadata"] = metadata
+
+            response = (
+                client.table("lead_memories")
+                .update(data)
+                .eq("id", lead_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise LeadNotFoundError(lead_id)
+
+            logger.info(
+                "Updated lead",
+                extra={
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "updated_fields": list(data.keys()),
+                },
+            )
+
+            # Audit log the update
+            await log_memory_operation(
+                user_id=user_id,
+                operation=MemoryOperation.UPDATE,
+                memory_type=MemoryType.LEAD,
+                memory_id=lead_id,
+                metadata={"updated_fields": list(data.keys())},
+                suppress_errors=True,
+            )
+
+        except LeadNotFoundError:
+            raise
+        except LeadMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update lead", extra={"lead_id": lead_id})
+            raise LeadMemoryError(f"Failed to update lead: {e}") from e
