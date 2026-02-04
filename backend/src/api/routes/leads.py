@@ -28,6 +28,7 @@ from src.models.lead_memory import (
     LeadEventResponse,
     LeadMemoryCreate,
     LeadMemoryResponse,
+    LeadMemoryUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -237,6 +238,68 @@ async def create_lead(
 
     except LeadMemoryError as e:
         logger.exception("Failed to create lead")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.patch("/{lead_id}", response_model=LeadMemoryResponse)
+async def update_lead(
+    lead_id: str,
+    lead_data: LeadMemoryUpdate,
+    current_user: CurrentUser,
+) -> LeadMemoryResponse:
+    """Update an existing lead.
+
+    Only provided fields will be updated. None values are ignored.
+
+    Args:
+        lead_id: The lead ID to update.
+        lead_data: The fields to update.
+        current_user: Current authenticated user.
+
+    Returns:
+        The updated lead.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if update fails.
+    """
+    from decimal import Decimal
+
+    try:
+        service = LeadMemoryService()
+
+        # Verify lead exists
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Convert expected_value to Decimal if provided
+        expected_value = (
+            Decimal(str(lead_data.expected_value)) if lead_data.expected_value else None
+        )
+
+        # Perform update
+        await service.update(
+            user_id=current_user.id,
+            lead_id=lead_id,
+            company_name=lead_data.company_name,
+            health_score=lead_data.health_score,
+            expected_close_date=lead_data.expected_close_date,
+            expected_value=expected_value,
+            tags=lead_data.tags,
+        )
+
+        # Fetch and return updated lead
+        updated_lead = await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+        return _lead_to_response(updated_lead)
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to update lead")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),

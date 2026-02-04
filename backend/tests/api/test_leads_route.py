@@ -113,9 +113,10 @@ class TestCreateLead:
 
     def test_create_lead_with_minimal_data(self, test_client: TestClient) -> None:
         """Test creating a lead with minimal required fields."""
+        from datetime import UTC, datetime
         from unittest.mock import AsyncMock, patch
-        from src.memory.lead_memory import LeadMemory, TriggerType, LifecycleStage, LeadStatus
-        from datetime import datetime, UTC
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
 
         mock_lead = LeadMemory(
             id="test-lead-123",
@@ -149,10 +150,11 @@ class TestCreateLead:
 
     def test_create_lead_with_all_fields(self, test_client: TestClient) -> None:
         """Test creating a lead with all optional fields."""
-        from unittest.mock import AsyncMock, patch
-        from src.memory.lead_memory import LeadMemory, TriggerType, LifecycleStage, LeadStatus
-        from datetime import datetime, UTC, date
+        from datetime import UTC, date, datetime
         from decimal import Decimal
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
 
         mock_lead = LeadMemory(
             id="test-lead-456",
@@ -198,3 +200,82 @@ class TestCreateLead:
         """Test validation when missing required field."""
         response = test_client.post("/api/v1/leads", json={})
         assert response.status_code == 422  # Pydantic validation error
+
+
+class TestUpdateLead:
+    """Tests for PATCH /api/v1/leads/{lead_id} endpoint."""
+
+    def test_update_lead_requires_auth(self) -> None:
+        """Test that updating a lead requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.patch(
+            "/api/v1/leads/some-lead-id",
+            json={"company_name": "Updated Name"},
+        )
+        assert response.status_code == 401
+
+    def test_update_lead_partial(self, test_client: TestClient) -> None:
+        """Test updating a lead with partial data."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        existing_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Original Name",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        updated_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Original Name",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=75,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=[existing_lead, updated_lead])
+            mock_instance.update = AsyncMock()
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-123",
+                json={"health_score": 75},
+            )
+
+            assert response.status_code == 200
+            mock_instance.update.assert_called_once()
+
+    def test_update_lead_not_found(self, test_client: TestClient) -> None:
+        """Test updating a non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("test-lead-999"))
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-999",
+                json={"company_name": "New Name"},
+            )
+
+            assert response.status_code == 404
