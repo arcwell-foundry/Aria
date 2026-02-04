@@ -32,6 +32,10 @@ from src.memory.digital_twin import (
     WritingStyleFingerprint,
 )
 from src.memory.episodic import Episode, EpisodicMemory
+from src.memory.health_score import (
+    HealthScoreCalculator,
+    HealthScoreHistory,
+)
 from src.memory.lead_memory import (
     LeadMemory,
     LeadMemoryService,
@@ -46,10 +50,6 @@ from src.memory.lead_memory_graph import (
     LeadMemoryGraph,
     LeadMemoryNode,
     LeadRelationshipType,
-)
-from src.memory.health_score import (
-    HealthScoreCalculator,
-    HealthScoreHistory,
 )
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
