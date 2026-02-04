@@ -19,3 +19,11 @@ def test_lead_memory_not_found_error_exists() -> None:
     error = LeadMemoryNotFoundError("lead-123")
     assert "lead-123" in str(error)
     assert error.status_code == 404
+
+
+def test_memory_type_has_lead() -> None:
+    """Test MemoryType enum includes LEAD."""
+    from src.memory.audit import MemoryType
+
+    assert hasattr(MemoryType, "LEAD")
+    assert MemoryType.LEAD.value == "lead"
