@@ -293,3 +293,58 @@ class LeadEventService:
         except Exception as e:
             logger.exception("Failed to get lead event timeline")
             raise DatabaseError(f"Failed to get lead event timeline: {e}") from e
+
+    async def get_by_type(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        event_type: EventType,
+    ) -> list[LeadEvent]:
+        """Get events of a specific type for a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            event_type: The type of events to retrieve.
+
+        Returns:
+            List of LeadEvent instances of the specified type,
+            ordered by occurred_at descending.
+
+        Raises:
+            DatabaseError: If retrieval fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            response = (
+                client.table("lead_memory_events")
+                .select("*")
+                .eq("lead_memory_id", lead_memory_id)
+                .eq("event_type", event_type.value)
+                .order("occurred_at", desc=True)
+                .execute()
+            )
+
+            events = []
+            for item in response.data:
+                event_dict = cast(dict[str, Any], item)
+                events.append(LeadEvent.from_dict(event_dict))
+
+            logger.info(
+                "Retrieved lead events by type",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "event_type": event_type.value,
+                    "event_count": len(events),
+                },
+            )
+
+            return events
+
+        except Exception as e:
+            logger.exception("Failed to get lead events by type")
+            raise DatabaseError(f"Failed to get lead events by type: {e}") from e

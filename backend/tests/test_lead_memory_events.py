@@ -551,3 +551,145 @@ class TestLeadEventServiceTimeline:
 
             assert len(events) == 1
             assert events[0].event_type == EventType.NOTE
+
+
+class TestLeadEventServiceByType:
+    """Tests for the get_by_type method."""
+
+    @pytest.mark.asyncio
+    async def test_get_events_by_type(self):
+        """Test getting events filtered by type."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "email-2",
+                "lead_memory_id": "lead-123",
+                "event_type": "email_sent",
+                "direction": "outbound",
+                "subject": "Follow up 2",
+                "content": "Any update?",
+                "participants": ["john@acme.com"],
+                "occurred_at": "2025-02-03T10:00:00+00:00",
+                "source": "gmail",
+                "source_id": "msg-2",
+                "created_at": "2025-02-03T10:00:00+00:00",
+            },
+            {
+                "id": "email-1",
+                "lead_memory_id": "lead-123",
+                "event_type": "email_sent",
+                "direction": "outbound",
+                "subject": "Follow up 1",
+                "content": "Checking in",
+                "participants": ["john@acme.com"],
+                "occurred_at": "2025-02-01T10:00:00+00:00",
+                "source": "gmail",
+                "source_id": "msg-1",
+                "created_at": "2025-02-01T10:00:00+00:00",
+            },
+        ]
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_by_type(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+                event_type=EventType.EMAIL_SENT,
+            )
+
+            assert len(events) == 2
+            assert all(e.event_type == EventType.EMAIL_SENT for e in events)
+            assert events[0].subject == "Follow up 2"  # Most recent first
+
+    @pytest.mark.asyncio
+    async def test_get_meetings_by_type(self):
+        """Test getting meetings filtered by type."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "meeting-1",
+                "lead_memory_id": "lead-123",
+                "event_type": "meeting",
+                "direction": None,
+                "subject": "Demo",
+                "content": "Product walkthrough",
+                "participants": ["john@acme.com"],
+                "occurred_at": "2025-02-02T15:00:00+00:00",
+                "source": "calendar",
+                "source_id": "cal-1",
+                "created_at": "2025-02-02T15:00:00+00:00",
+            },
+        ]
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_by_type(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+                event_type=EventType.MEETING,
+            )
+
+            assert len(events) == 1
+            assert events[0].event_type == EventType.MEETING
+            assert events[0].source == "calendar"
+
+    @pytest.mark.asyncio
+    async def test_get_by_type_empty_result(self):
+        """Test getting events by type when no events match."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_by_type(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+                event_type=EventType.CALL,
+            )
+
+            assert events == []
+
+    @pytest.mark.asyncio
+    async def test_get_by_type_handles_database_error(self):
+        """Test that database errors are properly wrapped in get_by_type."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Connection lost")
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            with pytest.raises(DatabaseError) as exc_info:
+                await service.get_by_type(
+                    user_id="user-123",
+                    lead_memory_id="lead-123",
+                    event_type=EventType.NOTE,
+                )
+
+            assert "Failed to get lead events by type" in str(exc_info.value)
