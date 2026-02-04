@@ -348,3 +348,93 @@ class LeadEventService:
         except Exception as e:
             logger.exception("Failed to get lead events by type")
             raise DatabaseError(f"Failed to get lead events by type: {e}") from e
+
+    async def add_event_from_gmail(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        message_id: str,
+        subject: str,
+        from_email: str,
+        to_emails: list[str],
+        body: str,
+        sent_at: datetime,
+        direction: Direction,
+    ) -> str:
+        """Add an event from Gmail integration.
+
+        Integration point: Called by Gmail webhook handler or sync job.
+        TODO: Implement in Phase 6 (Integrations)
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            message_id: Gmail message ID for deduplication.
+            subject: Email subject.
+            from_email: Sender email address.
+            to_emails: Recipient email addresses.
+            body: Email body content.
+            sent_at: When the email was sent.
+            direction: inbound (received) or outbound (sent).
+
+        Returns:
+            The ID of the created event.
+        """
+        from src.models.lead_memory import LeadEventCreate
+
+        event_type = EventType.EMAIL_SENT if direction == Direction.OUTBOUND else EventType.EMAIL_RECEIVED
+
+        event_data = LeadEventCreate(
+            event_type=event_type,
+            direction=direction,
+            subject=subject,
+            content=body[:5000],  # Truncate long emails
+            participants=to_emails + [from_email],
+            occurred_at=sent_at,
+            source="gmail",
+            source_id=message_id,
+        )
+
+        return await self.add_event(user_id, lead_memory_id, event_data)
+
+    async def add_event_from_calendar(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        event_id: str,
+        title: str,
+        description: str | None,
+        attendees: list[str],
+        start_time: datetime,
+    ) -> str:
+        """Add an event from Calendar integration.
+
+        Integration point: Called by Calendar webhook handler or sync job.
+        TODO: Implement in Phase 6 (Integrations)
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            event_id: Calendar event ID for deduplication.
+            title: Meeting title.
+            description: Meeting description.
+            attendees: List of attendee emails.
+            start_time: Meeting start time.
+
+        Returns:
+            The ID of the created event.
+        """
+        from src.models.lead_memory import LeadEventCreate
+
+        event_data = LeadEventCreate(
+            event_type=EventType.MEETING,
+            direction=None,
+            subject=title,
+            content=description,
+            participants=attendees,
+            occurred_at=start_time,
+            source="calendar",
+            source_id=event_id,
+        )
+
+        return await self.add_event(user_id, lead_memory_id, event_data)
