@@ -23,6 +23,7 @@ from src.api.routes import (
     meetings,
     memory,
     notifications,
+    predictions,
     preferences,
     signals,
 )
@@ -100,6 +101,7 @@ app.include_router(memory.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(predictions.router, prefix="/api/v1")
 app.include_router(preferences.router, prefix="/api/v1")
 
 
