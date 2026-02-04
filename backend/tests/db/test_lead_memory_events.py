@@ -10,7 +10,8 @@ without requiring a live database connection. This follows the existing
 test patterns in the codebase.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,7 +28,7 @@ def mock_supabase_client() -> MagicMock:
     mock_client = MagicMock()
 
     # Store the last table name for assertion
-    last_table_name = {"name": None}
+    last_table_name: dict[str, str | None] = {"name": None}
 
     # Mock successful response for all tables
     def mock_table(table_name: str) -> MagicMock:
@@ -35,7 +36,7 @@ def mock_supabase_client() -> MagicMock:
         mock_table_instance = MagicMock()
 
         # Track inserted data for testing
-        inserted_data = {"data": None}
+        inserted_data: dict[str, Any] = {"data": None}
 
         # Mock select chain
         mock_select = MagicMock()
@@ -58,7 +59,7 @@ def mock_supabase_client() -> MagicMock:
                 ]
             )
 
-        def mock_insert_call(data: dict) -> MagicMock:
+        def mock_insert_call(data: dict[str, Any]) -> MagicMock:
             inserted_data["data"] = data
             return mock_insert
 
@@ -110,7 +111,7 @@ class TestLeadMemoryEventsSchema:
             "lead_memory_id": "00000000-0000-0000-0000-000000000000",
             "event_type": "note",
             "content": "Test event for schema verification",
-            "occurred_at": datetime.now(timezone.utc) - timedelta(hours=1),
+            "occurred_at": datetime.now(UTC) - timedelta(hours=1),
         }
 
         result = reset_client.table("lead_memory_events").insert(test_data).execute()
@@ -130,7 +131,7 @@ class TestLeadMemoryEventsSchema:
             test_data = {
                 "lead_memory_id": "00000000-0000-0000-0000-000000000000",
                 "event_type": event_type,
-                "occurred_at": datetime.now(timezone.utc) - timedelta(hours=1),
+                "occurred_at": datetime.now(UTC) - timedelta(hours=1),
             }
             result = reset_client.table("lead_memory_events").insert(test_data).execute()
             assert result.data[0]["event_type"] == event_type
@@ -144,7 +145,7 @@ class TestLeadMemoryEventsSchema:
             "subject": "Test Subject",
             "content": "Test content",
             "participants": ["test@example.com", "user@example.com"],
-            "occurred_at": datetime.now(timezone.utc) - timedelta(hours=1),
+            "occurred_at": datetime.now(UTC) - timedelta(hours=1),
             "source": "gmail",
             "source_id": "msg-123",
         }
@@ -188,7 +189,7 @@ class TestLeadMemoryEventsAccess:
             "lead_memory_id": "00000000-0000-0000-0000-000000000000",
             "event_type": "note",
             "content": "Service role test",
-            "occurred_at": datetime.now(timezone.utc) - timedelta(hours=1),
+            "occurred_at": datetime.now(UTC) - timedelta(hours=1),
         }
         result = reset_client.table("lead_memory_events").insert(test_data).execute()
         assert len(result.data) == 1
