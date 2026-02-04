@@ -15,9 +15,22 @@ Enables cross-lead queries and pattern detection.
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+class LeadRelationshipType(Enum):
+    """Types of relationships between lead memory nodes."""
+
+    OWNED_BY = "OWNED_BY"  # Lead -> User (owner)
+    CONTRIBUTED_BY = "CONTRIBUTED_BY"  # Lead -> User (contributor)
+    ABOUT_COMPANY = "ABOUT_COMPANY"  # Lead -> Company
+    HAS_CONTACT = "HAS_CONTACT"  # Lead -> Contact/Stakeholder
+    HAS_COMMUNICATION = "HAS_COMMUNICATION"  # Lead -> Event (email/meeting/call)
+    HAS_SIGNAL = "HAS_SIGNAL"  # Lead -> Signal/Insight
+    SYNCED_TO = "SYNCED_TO"  # Lead -> CRM Record
 
 
 @dataclass

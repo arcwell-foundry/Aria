@@ -113,3 +113,16 @@ def test_lead_memory_node_from_dict() -> None:
     assert node.crm_id == "SF-001"
     assert node.expected_value == 50000.0
     assert node.tags == ["enterprise", "healthcare"]
+
+
+def test_lead_relationship_types_exist() -> None:
+    """Test LeadRelationshipType enum has all required types."""
+    from src.memory.lead_memory_graph import LeadRelationshipType
+
+    assert LeadRelationshipType.OWNED_BY.value == "OWNED_BY"
+    assert LeadRelationshipType.CONTRIBUTED_BY.value == "CONTRIBUTED_BY"
+    assert LeadRelationshipType.ABOUT_COMPANY.value == "ABOUT_COMPANY"
+    assert LeadRelationshipType.HAS_CONTACT.value == "HAS_CONTACT"
+    assert LeadRelationshipType.HAS_COMMUNICATION.value == "HAS_COMMUNICATION"
+    assert LeadRelationshipType.HAS_SIGNAL.value == "HAS_SIGNAL"
+    assert LeadRelationshipType.SYNCED_TO.value == "SYNCED_TO"
