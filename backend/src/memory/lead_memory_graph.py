@@ -12,13 +12,14 @@ Stores lead memories as first-class nodes in Graphiti with typed relationships:
 Enables cross-lead queries and pattern detection.
 """
 
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from src.core.exceptions import LeadMemoryGraphError
+from src.core.exceptions import LeadMemoryGraphError, LeadMemoryNotFoundError
 from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 if TYPE_CHECKING:
@@ -199,6 +200,81 @@ class LeadMemoryGraph:
 
         return "\n".join(parts)
 
+    def _parse_content_to_lead(
+        self,
+        lead_id: str,
+        content: str,
+        created_at: datetime,
+    ) -> LeadMemoryNode | None:
+        """Parse lead content string into LeadMemoryNode.
+
+        Args:
+            lead_id: The lead ID.
+            content: The raw content string from Graphiti.
+            created_at: When the lead was created.
+
+        Returns:
+            LeadMemoryNode if parsing succeeds, None otherwise.
+        """
+        try:
+            lines = content.split("\n")
+            user_id = ""
+            company_name = ""
+            company_id = None
+            lifecycle_stage = "lead"
+            status = "active"
+            health_score = 50
+            crm_id = None
+            crm_provider = None
+            expected_value = None
+            tags: list[str] = []
+
+            for line in lines:
+                if line.startswith("OWNED_BY:"):
+                    user_id = line.replace("OWNED_BY:", "").strip()
+                elif line.startswith("Company:"):
+                    company_name = line.replace("Company:", "").strip()
+                elif line.startswith("ABOUT_COMPANY:"):
+                    company_id = line.replace("ABOUT_COMPANY:", "").strip()
+                elif line.startswith("Lifecycle Stage:"):
+                    lifecycle_stage = line.replace("Lifecycle Stage:", "").strip()
+                elif line.startswith("Status:"):
+                    status = line.replace("Status:", "").strip()
+                elif line.startswith("Health Score:"):
+                    with contextlib.suppress(ValueError):
+                        health_score = int(line.replace("Health Score:", "").strip())
+                elif line.startswith("SYNCED_TO:"):
+                    sync_info = line.replace("SYNCED_TO:", "").strip()
+                    if ":" in sync_info:
+                        crm_provider, crm_id = sync_info.split(":", 1)
+                elif line.startswith("Expected Value:"):
+                    with contextlib.suppress(ValueError):
+                        expected_value = float(line.replace("Expected Value:", "").strip())
+                elif line.startswith("Tags:"):
+                    tags_str = line.replace("Tags:", "").strip()
+                    tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+
+            if not user_id or not company_name:
+                return None
+
+            return LeadMemoryNode(
+                id=lead_id,
+                user_id=user_id,
+                company_name=company_name,
+                company_id=company_id,
+                lifecycle_stage=lifecycle_stage,
+                status=status,
+                health_score=health_score,
+                crm_id=crm_id,
+                crm_provider=crm_provider,
+                expected_value=expected_value,
+                tags=tags,
+                created_at=created_at,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse lead content: {e}")
+            return None
+
     async def store_lead(self, lead: LeadMemoryNode) -> str:
         """Store a lead memory node in the knowledge graph.
 
@@ -274,7 +350,60 @@ class LeadMemoryGraph:
             LeadMemoryNotFoundError: If lead doesn't exist.
             LeadMemoryGraphError: If retrieval fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            # Query for specific lead by name
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $lead_name
+            RETURN e
+            """
+
+            lead_name = self._get_graphiti_node_name(lead_id)
+
+            result = await client.driver.execute_query(
+                query,
+                lead_name=lead_name,
+            )
+
+            records = result[0] if result else []
+
+            if not records:
+                raise LeadMemoryNotFoundError(lead_id)
+
+            # Parse the node into a LeadMemoryNode
+            node = records[0]["e"]
+            content = getattr(node, "content", "") or node.get("content", "")
+            created_at = getattr(node, "created_at", None) or node.get("created_at")
+
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            elif created_at is None:
+                created_at = datetime.now(UTC)
+
+            lead = self._parse_content_to_lead(
+                lead_id=lead_id,
+                content=content,
+                created_at=created_at,
+            )
+
+            if lead is None:
+                raise LeadMemoryNotFoundError(lead_id)
+
+            # Verify ownership
+            if lead.user_id != user_id:
+                raise LeadMemoryNotFoundError(lead_id)
+
+            return lead
+
+        except LeadMemoryNotFoundError:
+            raise
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get lead from graph", extra={"lead_id": lead_id})
+            raise LeadMemoryGraphError(f"Failed to get lead: {e}") from e
 
     async def update_lead(self, lead: LeadMemoryNode) -> None:
         """Update an existing lead memory node.

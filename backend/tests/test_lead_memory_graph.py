@@ -224,3 +224,52 @@ async def test_store_lead_creates_ownership_relationship(mock_graphiti_client: M
             episode_body = call_args.kwargs.get("episode_body", "")
             assert "OWNED_BY: user-789" in episode_body
             assert "Company: TechCo" in episode_body
+
+
+# --- get_lead tests ---
+
+
+@pytest.mark.asyncio
+async def test_get_lead_retrieves_by_id() -> None:
+    """Test get_lead retrieves specific lead by ID."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_node = MagicMock()
+    mock_node.content = "Lead ID: lead-123\nCompany: Acme Corp\nOWNED_BY: user-456\nLifecycle Stage: lead\nStatus: active\nHealth Score: 75"
+    mock_node.created_at = now
+    mock_record = {"e": mock_node}
+    mock_driver.execute_query = AsyncMock(return_value=([mock_record], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        lead = await graph.get_lead(user_id="user-456", lead_id="lead-123")
+
+        assert lead is not None
+        assert lead.id == "lead-123"
+        assert lead.company_name == "Acme Corp"
+        mock_driver.execute_query.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_lead_raises_not_found() -> None:
+    """Test get_lead raises LeadMemoryNotFoundError when not found."""
+    from src.core.exceptions import LeadMemoryNotFoundError
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([], None, None))
+    mock_client.driver = mock_driver
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        with pytest.raises(LeadMemoryNotFoundError):
+            await graph.get_lead(user_id="user-456", lead_id="nonexistent")
