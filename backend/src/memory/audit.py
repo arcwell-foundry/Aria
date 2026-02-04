@@ -35,6 +35,7 @@ class MemoryType(Enum):
     SEMANTIC = "semantic"
     PROCEDURAL = "procedural"
     PROSPECTIVE = "prospective"
+    LEAD = "lead"
 
 
 @dataclass
