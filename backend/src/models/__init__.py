@@ -1,5 +1,16 @@
 """Models package for ARIA backend."""
 
+from src.models.prediction import (
+    AccuracySummaryResponse,
+    CalibrationStatsResponse,
+    ExtractedPrediction,
+    PredictionCreate,
+    PredictionResponse,
+    PredictionStatus,
+    PredictionType,
+    PredictionUpdate,
+    PredictionValidate,
+)
 from src.models.email_draft import (
     EmailDraftCreate,
     EmailDraftListResponse,
@@ -35,10 +46,17 @@ from src.models.preferences import (
     PreferenceResponse,
     PreferenceUpdate,
 )
+from src.models.proactive_insight import (
+    InsightType,
+    ProactiveInsight,
+    SurfacedInsightRecord,
+)
 
 __all__ = [
+    "AccuracySummaryResponse",
     "AttendeeProfileResponse",
     "BriefStatus",
+    "CalibrationStatsResponse",
     "CompanyResearchResponse",
     "DefaultTone",
     "EmailDraftCreate",
@@ -50,6 +68,7 @@ __all__ = [
     "EmailDraftUpdate",
     "EmailRegenerateRequest",
     "EmailSendResponse",
+    "ExtractedPrediction",
     "GenerateBriefRequest",
     "MarkReadRequest",
     "MeetingBriefContent",
@@ -62,6 +81,15 @@ __all__ = [
     "PreferenceCreate",
     "PreferenceResponse",
     "PreferenceUpdate",
+    "PredictionCreate",
+    "PredictionResponse",
+    "PredictionStatus",
+    "PredictionType",
+    "PredictionUpdate",
+    "PredictionValidate",
+    "ProactiveInsight",
+    "InsightType",
+    "SurfacedInsightRecord",
     "UnreadCountResponse",
     "UpcomingMeetingResponse",
 ]
