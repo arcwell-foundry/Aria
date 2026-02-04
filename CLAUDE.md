@@ -17,6 +17,7 @@ ARIA (Autonomous Reasoning & Intelligence Agent) is an AI-powered Department Dir
 - **LLM:** Anthropic Claude API (claude-sonnet-4-20250514)
 - **Video:** Tavus + Daily.co
 - **Integrations:** Composio for OAuth
+- **Skills:** skills.sh ecosystem integration
 
 ## Commands
 
@@ -38,6 +39,11 @@ npm run build
 npm run typecheck
 npm run lint
 npm run test
+
+# Database migrations
+supabase migration new <name>
+supabase db push
+supabase migration repair --status applied <version>
 ```
 
 ## Project Structure
@@ -45,18 +51,45 @@ npm run test
 ```
 aria/
 ├── backend/src/
-│   ├── api/routes/      # FastAPI route handlers
-│   ├── agents/          # ARIA's specialized agents
-│   ├── memory/          # Six-type memory system + AGI services
-│   ├── core/            # Config, OODA loop, LLM client
-│   ├── intelligence/    # AGI capabilities (predictive, cognitive, etc.)
-│   └── db/              # Supabase and Graphiti clients
+│   ├── api/routes/        # FastAPI route handlers
+│   ├── agents/            # ARIA's specialized agents
+│   │   ├── base.py
+│   │   ├── skill_aware_agent.py  # Base for skill-enabled agents
+│   │   ├── hunter.py
+│   │   ├── analyst.py
+│   │   ├── strategist.py
+│   │   ├── scribe.py
+│   │   ├── operator.py
+│   │   └── scout.py
+│   ├── memory/            # Six-type memory system
+│   │   ├── working.py
+│   │   ├── episodic.py
+│   │   ├── semantic.py
+│   │   ├── procedural.py
+│   │   ├── prospective.py
+│   │   └── lead_memory.py
+│   ├── skills/            # Skills.sh integration
+│   │   ├── index.py           # Skill discovery & search
+│   │   ├── installer.py       # Skill installation
+│   │   ├── executor.py        # Sandboxed execution
+│   │   ├── orchestrator.py    # Multi-skill coordination
+│   │   ├── context_manager.py # Context budget management
+│   │   └── autonomy.py        # Trust & approval system
+│   ├── security/          # Data protection
+│   │   ├── data_classification.py
+│   │   ├── sanitization.py
+│   │   ├── sandbox.py
+│   │   ├── trust_levels.py
+│   │   └── audit.py
+│   ├── core/              # Config, OODA loop, LLM client
+│   ├── intelligence/      # AGI capabilities
+│   └── db/                # Supabase and Graphiti clients
 ├── frontend/src/
-│   ├── components/      # React components
-│   ├── pages/           # Route pages
-│   ├── hooks/           # Custom React hooks
-│   └── api/             # API client functions
-└── docs/                # PRD and phase documents
+│   ├── components/        # React components
+│   ├── pages/             # Route pages
+│   ├── hooks/             # Custom React hooks
+│   └── api/               # API client functions
+└── docs/                  # PRD and phase documents
 ```
 
 ## Code Style
@@ -75,234 +108,227 @@ aria/
 - React functional components with hooks
 - Tailwind for styling (no custom CSS files)
 
+---
+
 ## Key Patterns
 
 ### Memory System
-ARIA has six memory types. Always consider which memory type applies:
-1. **Working** - Current conversation (in-memory)
-2. **Episodic** - Past events (Graphiti)
-3. **Semantic** - Facts with confidence (Graphiti + pgvector)
-4. **Procedural** - Workflows (Supabase)
-5. **Prospective** - Future tasks (Supabase)
-6. **Lead** - Sales pursuit tracking (Graphiti + Supabase)
+
+ARIA has six memory types. Always consider which applies:
+
+| Type | Purpose | Storage | Retention |
+|------|---------|---------|-----------|
+| Working | Current conversation | In-memory | Session |
+| Episodic | Past events | Graphiti | Permanent |
+| Semantic | Facts with confidence | Graphiti + pgvector | Permanent |
+| Procedural | Learned workflows | Supabase | Permanent |
+| Prospective | Future tasks | Supabase | Until done |
+| Lead | Sales pursuit tracking | Graphiti + Supabase | Permanent |
 
 ### OODA Loop
-ARIA's cognitive process: Observe → Orient → Decide → Act
-Always implement this loop for complex tasks.
+
+ARIA's cognitive process: **Observe → Orient → Decide → Act**
+
+Always implement this loop for complex tasks. Skills participate in the ACT phase.
 
 ### Agents
-Six core agents: Hunter, Analyst, Strategist, Scribe, Operator, Scout
-Extend `BaseAgent` class for any new agents.
+
+Six core agents, all extending `SkillAwareAgent`:
+
+| Agent | Role | Skills Access |
+|-------|------|---------------|
+| Hunter | Lead discovery | competitor-analysis, lead-research |
+| Analyst | Scientific research | clinical-trial-analysis, pubmed-research |
+| Strategist | Planning | market-analysis, competitive-positioning |
+| Scribe | Communication | pdf, docx, pptx, email-sequence |
+| Operator | System ops | calendar-management, crm-operations |
+| Scout | Intelligence | regulatory-monitor, news-aggregation |
+
+---
+
+## Skills System
+
+### Overview
+
+ARIA integrates with skills.sh (200+ community skills) while maintaining enterprise security. Skills extend agent capabilities without compromising data protection.
+
+### Skill Trust Levels
+
+| Level | Source | Data Access | Network |
+|-------|--------|-------------|---------|
+| CORE | Built by ARIA team | All (with permission) | Whitelisted |
+| VERIFIED | Anthropic, Vercel, Supabase | PUBLIC, INTERNAL | None |
+| COMMUNITY | skills.sh community | PUBLIC only | None |
+| USER | User-created | PUBLIC, INTERNAL | None |
+
+### Data Classification
+
+ALL data is classified before skill access:
+
+```python
+class DataClass(Enum):
+    PUBLIC = "public"           # Company names, public info
+    INTERNAL = "internal"       # Goals, strategies, notes
+    CONFIDENTIAL = "confidential"  # Deal details, contacts
+    RESTRICTED = "restricted"   # Revenue, pricing, contracts
+    REGULATED = "regulated"     # PHI, PII (HIPAA, GDPR)
+```
+
+### Security Pipeline
+
+Every skill execution follows this pipeline:
+
+```
+Input Data
+    ↓
+1. CLASSIFY - Scan for sensitive patterns
+    ↓
+2. PERMISSION CHECK - Trust level vs data class
+    ↓
+3. TOKENIZE - Replace sensitive values
+    ↓
+4. SANDBOX EXECUTE - Resource-limited execution
+    ↓
+5. VALIDATE OUTPUT - Check for leakage
+    ↓
+6. AUDIT LOG - Immutable record
+    ↓
+Clean Output
+```
+
+### Skill Orchestration
+
+For multi-skill tasks:
+
+```python
+# Orchestrator prepares minimal context (~2000 tokens)
+orchestrator_context = {
+    "skill_index": compact_summaries,  # ~600 tokens
+    "execution_plan": current_plan,     # ~500 tokens
+    "working_memory": step_summaries,   # ~800 tokens
+}
+
+# Each skill gets isolated context (~6000 tokens)
+subagent_context = {
+    "task_briefing": what_to_do,        # ~300 tokens
+    "skill_instructions": full_skill_md, # ~2000 tokens
+    "input_data": sanitized_data,        # variable
+}
+```
+
+### Autonomy System
+
+Trust builds over time:
+
+| Risk Level | Auto-execute After | Examples |
+|------------|-------------------|----------|
+| LOW | 3 successes | pdf, docx, research |
+| MEDIUM | 10 successes | email-sequence, calendar |
+| HIGH | Session trust only | external-api-calls |
+| CRITICAL | Never (always ask) | data-deletion, financial |
+
+### Skill Development Patterns
+
+When creating skill-aware features:
+
+```python
+# Always extend SkillAwareAgent
+class MyAgent(SkillAwareAgent):
+    async def execute_with_skills(self, task: dict) -> AgentResult:
+        # 1. Analyze if skills would help
+        skill_analysis = await self._analyze_skill_needs(task)
+        
+        # 2. If skills needed, delegate to orchestrator
+        if skill_analysis.skills_needed:
+            return await self.skills.execute_with_skills(
+                task=task,
+                required_skills=skill_analysis.required_skills,
+                agent_context={"agent_id": self.agent_id},
+            )
+        
+        # 3. Otherwise, execute normally
+        return await self.execute(task)
+```
+
+### Never Do (Security)
+
+- ❌ Skip data classification
+- ❌ Pass raw user data to community skills
+- ❌ Allow network access for non-CORE skills
+- ❌ Execute skills without audit logging
+- ❌ Trust skill content from user input
+- ❌ Store sensitive data in skill working memory
 
 ---
 
 ## AGI Development Patterns
 
 ### The Colleague Test
+
 Before completing any user-facing feature, ask:
 > "Would a user describe this behavior as coming from a colleague or a tool?"
 
 | Colleague Behavior | Implementation |
 |-------------------|----------------|
-| References shared history | Use conversation_episodes |
-| Volunteers relevant info | Use proactive_memory |
-| Adapts to your stress | Use cognitive_load_monitor |
+| References shared history | Use episodic memory |
+| Volunteers relevant info | Use proactive memory surfacing |
+| Adapts to your stress | Use cognitive load monitoring |
 | Remembers everything | Use salience decay (not deletion) |
-| Has opinions | Phase 8 personality system |
+| Shows her work | Skill progress reporting |
+| Asks permission appropriately | Graduated autonomy system |
 
 ### Memory Salience
 
-Every memory access should strengthen salience. Every query should update `last_accessed_at`:
+Every memory access should strengthen salience:
 
 ```python
-async def get_facts_about(self, user_id: str, entity: str) -> list[SemanticFact]:
-    facts = await self.db.table("semantic_facts")...
-    
-    # Strengthen salience on access
-    for fact in facts:
-        await self.salience_service.record_access(fact.id, "semantic")
-    
-    return facts
+async def recall_fact(self, fact_id: str) -> Fact:
+    fact = await self.get_fact(fact_id)
+    await self.strengthen_salience(fact_id)  # Always do this
+    return fact
 ```
 
-**Salience Formula:**
-```
-current_salience = (original_salience + access_boost) × decay_factor
-decay_factor = 0.5 ^ (days_since_last_access / half_life)
-```
+### Outcome Recording
 
-- Default half-life: 30 days
-- Access boost: 0.1 per retrieval
-- Minimum salience: 0.01 (never truly forgotten)
-
-### Cognitive Load Awareness
-
-Detect user state and adapt responses:
+Every action should record its outcome for learning:
 
 ```python
-# In chat handlers, always check cognitive load
-load_state = await cognitive_load_monitor.estimate_load(user_id, recent_messages)
-
-if load_state.is_high:
-    # Be concise, offer to handle things
-    context["response_style"] = "concise"
-else:
-    # Full detail is fine
-    context["response_style"] = "detailed"
-```
-
-**Indicators of High Load:**
-- Short, terse messages
-- Multiple rapid messages
-- Typos/errors
-- Time-of-day patterns
-- Calendar density
-
-### Proactive Memory Surfacing
-
-Don't just answer questions - volunteer relevant context:
-
-```python
-# Before generating response, find volunteerable memories
-insights = await proactive_memory.find_volunteerable_context(
-    user_id=user_id,
-    current_message=message.content,
-    conversation=conversation.messages
-)
-
-# Include top insights in LLM context
-if insights:
-    context["proactive_insights"] = insights[:2]
-```
-
-**Trigger Types:**
-- Pattern matches (same topic mentioned in past)
-- Connection discoveries (new link between entities)
-- Temporal triggers (anniversaries, deadlines)
-- Goal relevance (relates to active goals)
-
-### Prediction Registration
-
-When ARIA makes predictions, register them for later validation:
-
-```python
-# After generating response, extract and register predictions
-predictions = await extract_predictions(response)
-for pred in predictions:
-    await prediction_service.register(
-        user_id=user_id,
-        prediction=pred.content,
-        expected_resolution=pred.timeframe,
-        confidence=pred.confidence
+async def execute_action(self, action: Action) -> Result:
+    result = await self._do_action(action)
+    await self.memory.record_action_outcome(
+        action=action,
+        result=result,
+        success=result.success,
     )
-```
-
-### Conversation Continuity
-
-End every conversation by extracting durable content:
-
-```python
-async def end_conversation(conversation_id: str):
-    # 1. Generate summary
-    summary = await summarize_conversation(conversation)
-    
-    # 2. Extract facts to semantic memory
-    facts = await extract_facts(conversation.messages)
-    await store_facts(facts)
-    
-    # 3. Store as episode for future reference
-    await store_conversation_episode(
-        conversation_id=conversation_id,
-        summary=summary,
-        key_topics=extract_topics(conversation),
-        open_threads=find_unresolved_items(conversation)
-    )
-```
-
-### Start of Conversation Priming
-
-Prime new conversations with relevant context:
-
-```python
-async def prime_conversation(user_id: str):
-    # Get recent episodes
-    episodes = await conversation_service.get_recent_episodes(user_id, limit=3)
-    
-    # Find open threads
-    open_threads = [e.open_threads for e in episodes if e.open_threads]
-    
-    # Get high-salience memories
-    salient_facts = await memory.get_by_salience(user_id, threshold=0.7, limit=5)
-    
-    return {
-        "recent_context": episodes,
-        "open_threads": open_threads,
-        "salient_facts": salient_facts
-    }
+    return result
 ```
 
 ---
 
-## AGI Quality Checklist
+## Lead Memory System
 
-When implementing any feature, ask:
+### Health Score Algorithm
 
-- [ ] **Salience:** Does this update memory access timestamps?
-- [ ] **Predictions:** Are we registering any predictions for validation?
-- [ ] **Cognitive Load:** Does response adapt to user state?
-- [ ] **Proactive:** Are we surfacing relevant memories unprompted?
-- [ ] **Continuity:** Will this be remembered next conversation?
-- [ ] **Causal:** Are we capturing cause-effect relationships?
-- [ ] **Outcomes:** Are we recording results for learning?
+5-factor weighted scoring:
 
----
+| Factor | Weight | Source |
+|--------|--------|--------|
+| Engagement | 30% | Recent touchpoints |
+| Momentum | 25% | Stage velocity |
+| Stakeholder | 20% | Champion strength |
+| Fit | 15% | ICP match |
+| Risk | 10% | Identified blockers |
 
-## Intelligence Pulse Patterns
+### Lead Stages
 
-### Salience Scoring
-All signals scored by weighted factors:
-- Goal relevance (0.30)
-- Time sensitivity (0.25)
-- Value impact (0.20)
-- User preference (0.15)
-- Surprise factor (0.10)
-
-### Delivery Routing
 ```
-Score 90-100: Immediate interrupt
-Score 70-89:  Next check-in mention  
-Score 50-69:  Morning brief
-Score 30-49:  Weekly digest
-Score <30:    Silent log only
+IDENTIFIED → QUALIFIED → ENGAGED → PROPOSAL → NEGOTIATION → CLOSED_WON/CLOSED_LOST
 ```
 
----
+### CRM Sync Rules
 
-## Predictive Processing Patterns
-
-### Prediction Types
-```python
-class PredictionType(Enum):
-    USER_ACTION = "user_action"      # What user will do
-    EXTERNAL_EVENT = "external"      # Market/competitor events
-    DEAL_OUTCOME = "deal_outcome"    # Lead progression
-    TIMING = "timing"                # When something will happen
-```
-
-### Confidence Calibration
-Track prediction outcomes to calibrate confidence:
-```python
-async def update_calibration(prediction_id: str, actual_outcome: str):
-    prediction = await get_prediction(prediction_id)
-    was_correct = prediction.predicted_outcome == actual_outcome
-    
-    # Update calibration curve
-    await calibration_service.record_outcome(
-        confidence=prediction.confidence,
-        was_correct=was_correct,
-        prediction_type=prediction.type
-    )
-```
+- CRM wins for: stage, expected_value, close_date
+- ARIA wins for: health_score, insights, stakeholder_map
 
 ---
 
@@ -312,19 +338,15 @@ async def update_calibration(prediction_id: str, actual_outcome: str):
 - User isolation is critical (multi-tenant)
 - Never expose internal errors to users
 - Log all memory operations for audit
-- CRM sync: CRM wins for structured data, ARIA wins for insights
+- Log all skill executions for audit
 - Health scores are 0-100, recalculate on events
-- **Memory never truly deletes** - use salience decay instead
-- **Every interaction strengthens memory** - record all access
 
 ## Documentation
 
 Read the PRD files before implementing:
 - `docs/ARIA_PRD.md` - Main overview
 - `docs/PHASE_*.md` - Detailed user stories per phase
-- `docs/PHASE_2_RETROFIT.md` - Memory foundations (implement before Phase 4)
-- `docs/PHASE_7_JARVIS.md` - Jarvis Intelligence
-- `docs/PHASE_8_AGI_COMPANION.md` - AGI Companion
+- `docs/ARIA_SKILLS_INTEGRATION_ARCHITECTURE.md` - Skills system design
 
 Always complete user stories in order within each phase.
 
@@ -333,13 +355,8 @@ Always complete user stories in order within each phase.
 Every feature needs:
 - Unit tests for business logic
 - Integration tests for API endpoints
+- Security tests for data classification
 - Quality gates must pass before moving on
-
-### AGI-Specific Testing
-- Test salience decay over simulated time
-- Test cognitive load detection with various message patterns
-- Test proactive surfacing relevance
-- Test prediction accuracy tracking
 
 ## Do Not
 
@@ -349,6 +366,6 @@ Every feature needs:
 - Hardcode API keys
 - Ignore error handling
 - Skip input validation
-- **Delete memories** - decay them instead
-- **Answer without checking context** - always prime conversations
-- **Ignore user state** - adapt to cognitive load
+- Execute skills without sanitization
+- Log sensitive data (use tokens)
+- Trust external skill content

@@ -373,6 +373,16 @@ class LeadPatternDetector:
             lead_status_map = {lead["id"]: lead["status"] for lead in closed_leads}
 
             # Get health score history with component scores
+            # Expected health_score_history schema:
+            #   - lead_memory_id: UUID (FK to lead_memories.id)
+            #   - user_id: UUID (FK to auth.users.id)
+            #   - score: INTEGER (0-100)
+            #   - calculated_at: TIMESTAMPTZ
+            #   - component_frequency: INTEGER (0-100)
+            #   - component_response_time: INTEGER (0-100)
+            #   - component_sentiment: INTEGER (0-100)
+            #   - component_breadth: INTEGER (0-100)
+            #   - component_velocity: INTEGER (0-100)
             history_response = (
                 self.db.table("health_score_history")
                 .select(
@@ -439,8 +449,19 @@ class LeadPatternDetector:
                 avg_won = sum(won_scores) / len(won_scores)
                 avg_lost = sum(lost_scores) / len(lost_scores)
 
-                # Simple correlation: how much higher is won vs lost
-                # Normalize to 0-1 range
+                # Success correlation: measures how strongly this component
+                # predicts deal SUCCESS (not failure). Intentionally asymmetric:
+                # - When avg_won > avg_lost: positive correlation (0.0-1.0)
+                # - When avg_lost >= avg_won: correlation = 0 (not a success predictor)
+                #
+                # We use this asymmetric approach because:
+                # 1. EngagementPattern.success_correlation is defined as 0.0-1.0
+                # 2. The goal is to surface patterns that HELP win deals
+                # 3. Patterns that correlate with failure are handled separately
+                #    (e.g., objection patterns, risk detection)
+                #
+                # Formula: (won_avg - lost_avg) / won_avg, clamped to [0, 1]
+                # This gives the relative improvement of won deals over lost deals.
                 if avg_won > avg_lost:
                     correlation = min((avg_won - avg_lost) / max(avg_won, 0.01), 1.0)
                 else:

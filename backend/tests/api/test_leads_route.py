@@ -599,7 +599,9 @@ class TestAddStakeholder:
         with (
             patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
             patch("src.db.supabase.SupabaseClient") as mock_sb_client,
-            patch("src.memory.lead_stakeholders.LeadStakeholderService") as mock_stakeholder_service,
+            patch(
+                "src.memory.lead_stakeholders.LeadStakeholderService"
+            ) as mock_stakeholder_service,
         ):
             # Mock lead verification
             mock_lead_instance = mock_lead_service.return_value

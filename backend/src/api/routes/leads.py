@@ -282,13 +282,9 @@ async def update_lead(
 
         # Convert enum types if provided
         lifecycle_stage = (
-            LifecycleStage(lead_data.lifecycle_stage.value)
-            if lead_data.lifecycle_stage
-            else None
+            LifecycleStage(lead_data.lifecycle_stage.value) if lead_data.lifecycle_stage else None
         )
-        lead_status = (
-            LeadStatus(lead_data.status.value) if lead_data.status else None
-        )
+        lead_status = LeadStatus(lead_data.status.value) if lead_data.status else None
 
         # Perform update
         await service.update(
@@ -395,7 +391,11 @@ async def add_note(
         ) from e
 
 
-@router.post("/{lead_id}/stakeholders", response_model=StakeholderResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{lead_id}/stakeholders",
+    response_model=StakeholderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_stakeholder(
     lead_id: str,
     stakeholder_data: StakeholderCreate,

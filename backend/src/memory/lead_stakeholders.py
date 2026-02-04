@@ -67,7 +67,9 @@ class LeadStakeholder:
             "role": self.role.value if self.role else None,
             "influence_level": self.influence_level,
             "sentiment": self.sentiment.value,
-            "last_contacted_at": self.last_contacted_at.isoformat() if self.last_contacted_at else None,
+            "last_contacted_at": self.last_contacted_at.isoformat()
+            if self.last_contacted_at
+            else None,
             "notes": self.notes,
             "created_at": self.created_at.isoformat(),
         }
@@ -79,9 +81,7 @@ class LeadStakeholder:
         last_contacted_at = None
         if data.get("last_contacted_at"):
             raw = data["last_contacted_at"]
-            last_contacted_at = (
-                datetime.fromisoformat(raw) if isinstance(raw, str) else raw
-            )
+            last_contacted_at = datetime.fromisoformat(raw) if isinstance(raw, str) else raw
 
         created_at_raw = data["created_at"]
         created_at = (
@@ -94,18 +94,10 @@ class LeadStakeholder:
         role = None
         if data.get("role"):
             role_raw = data["role"]
-            role = (
-                StakeholderRole(role_raw)
-                if isinstance(role_raw, str)
-                else role_raw
-            )
+            role = StakeholderRole(role_raw) if isinstance(role_raw, str) else role_raw
 
         sentiment_raw = data["sentiment"]
-        sentiment = (
-            Sentiment(sentiment_raw)
-            if isinstance(sentiment_raw, str)
-            else sentiment_raw
-        )
+        sentiment = Sentiment(sentiment_raw) if isinstance(sentiment_raw, str) else sentiment_raw
 
         return cls(
             id=cast(str, data["id"]),
