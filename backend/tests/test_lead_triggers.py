@@ -565,3 +565,143 @@ class TestOnInboundResponse:
 
         # But add the inbound event
         mock_event_service.add_event.assert_called_once()
+
+
+class TestScanHistoryForLead:
+    """Tests for retroactive history scanning."""
+
+    @pytest.mark.asyncio
+    async def test_scans_conversation_episodes_for_company_mentions(self):
+        """Test scanning conversation history for company mentions."""
+        from src.memory.conversation import ConversationEpisode
+
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock conversation episodes mentioning company
+        episodes = [
+            ConversationEpisode(
+                id="ep-1",
+                user_id="user-abc",
+                conversation_id="conv-1",
+                summary="Discussed Acme Corp partnership opportunity",
+                key_topics=["acme corp", "partnership"],
+                entities_discussed=["Acme Corp"],
+                user_state={},
+                outcomes=[],
+                open_threads=[],
+                message_count=5,
+                duration_minutes=10,
+                started_at=datetime(2025, 1, 15, 10, 0, tzinfo=UTC),
+                ended_at=datetime(2025, 1, 15, 10, 10, tzinfo=UTC),
+            ),
+            ConversationEpisode(
+                id="ep-2",
+                user_id="user-abc",
+                conversation_id="conv-2",
+                summary="Follow up on Acme Corp proposal",
+                key_topics=["acme corp", "proposal"],
+                entities_discussed=["Acme Corp"],
+                user_state={},
+                outcomes=[],
+                open_threads=[],
+                message_count=3,
+                duration_minutes=5,
+                started_at=datetime(2025, 1, 20, 14, 0, tzinfo=UTC),
+                ended_at=datetime(2025, 1, 20, 14, 5, tzinfo=UTC),
+            ),
+        ]
+        mock_conv_service.get_recent_episodes = AsyncMock(return_value=episodes)
+
+        # Mock existing lead
+        existing_lead = LeadMemory(
+            id="lead-acme",
+            user_id="user-abc",
+            company_name="Acme Corp",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=70,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime(2025, 2, 1, tzinfo=UTC),
+            last_activity_at=datetime(2025, 2, 1, tzinfo=UTC),
+            created_at=datetime(2025, 2, 1, tzinfo=UTC),
+            updated_at=datetime(2025, 2, 1, tzinfo=UTC),
+        )
+
+        # Call scan_history_for_lead
+        await service.scan_history_for_lead(
+            lead=existing_lead,
+            user_id="user-abc",
+        )
+
+        # Should have queried conversations
+        mock_conv_service.get_recent_episodes.assert_called_once_with(
+            user_id="user-abc",
+            limit=50,
+        )
+
+    @pytest.mark.asyncio
+    async def test_updates_first_touch_from_earliest_mention(self):
+        """Test updating first_touch_at from earliest historical mention."""
+        from src.memory.conversation import ConversationEpisode
+
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock episode from January
+        episode = ConversationEpisode(
+            id="ep-old",
+            user_id="user-abc",
+            conversation_id="conv-old",
+            summary="First contact with BioTech Inc",
+            key_topics=["biotech inc"],
+            entities_discussed=["BioTech Inc"],
+            user_state={},
+            outcomes=[],
+            open_threads=[],
+            message_count=2,
+            duration_minutes=5,
+            started_at=datetime(2025, 1, 5, 9, 0, tzinfo=UTC),
+            ended_at=datetime(2025, 1, 5, 9, 5, tzinfo=UTC),
+        )
+        mock_conv_service.get_recent_episodes = AsyncMock(return_value=[episode])
+
+        # Mock lead created in February
+        lead = LeadMemory(
+            id="lead-biotech",
+            user_id="user-abc",
+            company_name="BioTech Inc",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime(2025, 2, 1, tzinfo=UTC),
+            last_activity_at=datetime(2025, 2, 4, tzinfo=UTC),
+            created_at=datetime(2025, 2, 4, tzinfo=UTC),
+            updated_at=datetime(2025, 2, 4, tzinfo=UTC),
+        )
+
+        # Call scan_history_for_lead
+        await service.scan_history_for_lead(
+            lead=lead,
+            user_id="user-abc",
+        )
+
+        # Should update first_touch_at to January
+        mock_lead_service.update.assert_called_once()

@@ -10,7 +10,7 @@ Handles deduplication and retroactive history scanning.
 """
 
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -383,3 +383,83 @@ class LeadTriggerService:
                 extra={"user_id": user_id, "company_name": company_name},
             )
             raise
+
+    async def scan_history_for_lead(
+        self,
+        lead: LeadMemory,
+        user_id: str,
+        scan_limit: int = 50,
+    ) -> None:
+        """Scan conversation history for retroactive lead context.
+
+        When a lead is detected late (e.g., manual tracking after emails),
+        scan conversation episodes to find historical mentions and update
+        first_touch_at if earlier contact found.
+
+        Args:
+            lead: The lead to scan history for.
+            user_id: The user who owns the lead.
+            scan_limit: Maximum conversation episodes to scan.
+        """
+        try:
+            # Get recent conversation episodes
+            episodes = await self.conversation_service.get_recent_episodes(
+                user_id=user_id,
+                limit=scan_limit,
+            )
+
+            if not episodes:
+                return
+
+            # Search for company mentions in episodes
+            company_name_normalized = lead.company_name.strip().lower()
+            earliest_mention: datetime | None = None
+
+            for episode in episodes:
+                # Check summary and entities for company mention
+                episode_text = (
+                    episode.summary.lower()
+                    + " "
+                    + " ".join(episode.entities_discussed).lower()
+                    + " "
+                    + " ".join(episode.key_topics).lower()
+                )
+
+                if company_name_normalized in episode_text:
+                    # Found a mention - check if it's earlier than current first_touch
+                    if earliest_mention is None or episode.started_at < earliest_mention:
+                        earliest_mention = episode.started_at
+
+            # If we found earlier contact, update first_touch_at
+            if earliest_mention and earliest_mention < lead.first_touch_at:
+                await self.lead_memory_service.update(
+                    user_id=user_id,
+                    lead_id=lead.id,
+                    metadata={
+                        **(lead.metadata or {}),
+                        "retroactive_first_touch": earliest_mention.isoformat(),
+                        "retroactive_scan_date": datetime.now(UTC).isoformat(),
+                    },
+                )
+
+                logger.info(
+                    "Updated first_touch from retroactive scan",
+                    extra={
+                        "user_id": user_id,
+                        "lead_id": lead.id,
+                        "company_name": lead.company_name,
+                        "previous_first_touch": lead.first_touch_at.isoformat(),
+                        "new_first_touch": earliest_mention.isoformat(),
+                    },
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to scan history for lead",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead.id,
+                    "error": str(e),
+                },
+            )
+            # Don't fail the trigger if history scan fails
