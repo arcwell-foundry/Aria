@@ -1,0 +1,305 @@
+"""Tests for LeadCollaborationService domain models.
+
+This module tests the domain models for lead collaboration, including:
+- ContributionStatus enum
+- ContributionType enum
+- Contribution dataclass for contribution representation
+- Contributor dataclass for contributor representation
+- LeadCollaborationService initialization
+"""
+
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import DatabaseError
+from src.models.lead_memory import (
+    ContributionStatus as ModelContributionStatus,
+)
+from src.models.lead_memory import (
+    ContributionType as ModelContributionType,
+)
+from src.services.lead_collaboration import (
+    Contribution,
+    ContributionStatus,
+    ContributionType,
+    Contributor,
+    LeadCollaborationService,
+)
+
+
+class TestContributionStatusEnum:
+    """Tests for the ContributionStatus enum."""
+
+    def test_contribution_status_enum_values(self):
+        """Test ContributionStatus enum has correct string values."""
+        assert ContributionStatus.PENDING.value == "pending"
+        assert ContributionStatus.MERGED.value == "merged"
+        assert ContributionStatus.REJECTED.value == "rejected"
+
+    def test_contribution_status_enum_count(self):
+        """Test ContributionStatus enum has exactly 3 values."""
+        assert len(ContributionStatus) == 3
+
+
+class TestContributionTypeEnum:
+    """Tests for the ContributionType enum."""
+
+    def test_contribution_type_enum_values(self):
+        """Test ContributionType enum has correct string values."""
+        assert ContributionType.EVENT.value == "event"
+        assert ContributionType.NOTE.value == "note"
+        assert ContributionType.INSIGHT.value == "insight"
+
+    def test_contribution_type_enum_count(self):
+        """Test ContributionType enum has exactly 3 values."""
+        assert len(ContributionType) == 3
+
+
+class TestContributionDataclass:
+    """Tests for the Contribution dataclass."""
+
+    def test_contribution_creation_all_fields(self):
+        """Test creating a Contribution with all fields populated."""
+        created_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+        reviewed_at = datetime(2025, 2, 4, 15, 0, tzinfo=UTC)
+
+        contribution = Contribution(
+            id="cntrb_123",
+            lead_memory_id="lead_456",
+            contributor_id="user_789",
+            contribution_type=ContributionType.EVENT,
+            contribution_id="event_abc",
+            status=ContributionStatus.PENDING,
+            reviewed_by=None,
+            reviewed_at=None,
+            created_at=created_at,
+        )
+
+        assert contribution.id == "cntrb_123"
+        assert contribution.lead_memory_id == "lead_456"
+        assert contribution.contributor_id == "user_789"
+        assert contribution.contribution_type == ContributionType.EVENT
+        assert contribution.contribution_id == "event_abc"
+        assert contribution.status == ContributionStatus.PENDING
+        assert contribution.reviewed_by is None
+        assert contribution.reviewed_at is None
+        assert contribution.created_at == created_at
+
+    def test_contribution_creation_with_review_fields(self):
+        """Test creating a Contribution with review fields populated."""
+        created_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+        reviewed_at = datetime(2025, 2, 4, 16, 0, tzinfo=UTC)
+
+        contribution = Contribution(
+            id="cntrb_456",
+            lead_memory_id="lead_789",
+            contributor_id="user_123",
+            contribution_type=ContributionType.NOTE,
+            contribution_id="note_xyz",
+            status=ContributionStatus.MERGED,
+            reviewed_by="user_owner",
+            reviewed_at=reviewed_at,
+            created_at=created_at,
+        )
+
+        assert contribution.id == "cntrb_456"
+        assert contribution.reviewed_by == "user_owner"
+        assert contribution.reviewed_at == reviewed_at
+        assert contribution.status == ContributionStatus.MERGED
+
+    def test_contribution_to_dict(self):
+        """Test serialization to dict with all fields."""
+        created_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+
+        contribution = Contribution(
+            id="cntrb_789",
+            lead_memory_id="lead_123",
+            contributor_id="user_456",
+            contribution_type=ContributionType.INSIGHT,
+            contribution_id="insight_123",
+            status=ContributionStatus.PENDING,
+            reviewed_by=None,
+            reviewed_at=None,
+            created_at=created_at,
+        )
+
+        result = contribution.to_dict()
+
+        assert result["id"] == "cntrb_789"
+        assert result["lead_memory_id"] == "lead_123"
+        assert result["contributor_id"] == "user_456"
+        assert result["contribution_type"] == "insight"
+        assert result["contribution_id"] == "insight_123"
+        assert result["status"] == "pending"
+        assert result["reviewed_by"] is None
+        assert result["reviewed_at"] is None
+        assert result["created_at"] == "2025-02-04T14:30:00+00:00"
+
+    def test_contribution_to_dict_with_review(self):
+        """Test serialization to dict with review fields."""
+        created_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+        reviewed_at = datetime(2025, 2, 4, 16, 30, tzinfo=UTC)
+
+        contribution = Contribution(
+            id="cntrb_abc",
+            lead_memory_id="lead_def",
+            contributor_id="user_ghi",
+            contribution_type=ContributionType.NOTE,
+            contribution_id="note_123",
+            status=ContributionStatus.REJECTED,
+            reviewed_by="user_reviewer",
+            reviewed_at=reviewed_at,
+            created_at=created_at,
+        )
+
+        result = contribution.to_dict()
+
+        assert result["id"] == "cntrb_abc"
+        assert result["status"] == "rejected"
+        assert result["reviewed_by"] == "user_reviewer"
+        assert result["reviewed_at"] == "2025-02-04T16:30:00+00:00"
+
+    def test_contribution_from_dict(self):
+        """Test creating a Contribution from a dictionary."""
+        data = {
+            "id": "cntrb_xyz",
+            "lead_memory_id": "lead_abc",
+            "contributor_id": "user_def",
+            "contribution_type": "event",
+            "contribution_id": "event_456",
+            "status": "pending",
+            "reviewed_by": None,
+            "reviewed_at": None,
+            "created_at": "2025-02-04T14:30:00+00:00",
+        }
+
+        contribution = Contribution.from_dict(data)
+
+        assert contribution.id == "cntrb_xyz"
+        assert contribution.lead_memory_id == "lead_abc"
+        assert contribution.contributor_id == "user_def"
+        assert contribution.contribution_type == ContributionType.EVENT
+        assert contribution.contribution_id == "event_456"
+        assert contribution.status == ContributionStatus.PENDING
+        assert contribution.reviewed_by is None
+        assert contribution.reviewed_at is None
+        assert contribution.created_at == datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+
+    def test_contribution_from_dict_with_review(self):
+        """Test creating a Contribution from a dictionary with review fields."""
+        data = {
+            "id": "cntrb_qwe",
+            "lead_memory_id": "lead_rty",
+            "contributor_id": "user_uio",
+            "contribution_type": "note",
+            "contribution_id": "note_789",
+            "status": "merged",
+            "reviewed_by": "user_owner",
+            "reviewed_at": "2025-02-04T16:30:00+00:00",
+            "created_at": "2025-02-04T14:30:00+00:00",
+        }
+
+        contribution = Contribution.from_dict(data)
+
+        assert contribution.id == "cntrb_qwe"
+        assert contribution.contribution_type == ContributionType.NOTE
+        assert contribution.status == ContributionStatus.MERGED
+        assert contribution.reviewed_by == "user_owner"
+        assert contribution.reviewed_at == datetime(2025, 2, 4, 16, 30, tzinfo=UTC)
+
+    def test_contribution_from_dict_with_none_contribution_id(self):
+        """Test creating a Contribution with None contribution_id."""
+        data = {
+            "id": "cntrb_asd",
+            "lead_memory_id": "lead_fgh",
+            "contributor_id": "user_jkl",
+            "contribution_type": "insight",
+            "contribution_id": None,
+            "status": "pending",
+            "reviewed_by": None,
+            "reviewed_at": None,
+            "created_at": "2025-02-04T14:30:00+00:00",
+        }
+
+        contribution = Contribution.from_dict(data)
+
+        assert contribution.id == "cntrb_asd"
+        assert contribution.contribution_id is None
+        assert contribution.contribution_type == ContributionType.INSIGHT
+
+
+class TestContributorDataclass:
+    """Tests for the Contributor dataclass."""
+
+    def test_contributor_creation_all_fields(self):
+        """Test creating a Contributor with all fields populated."""
+        added_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+
+        contributor = Contributor(
+            id="cntr_123",
+            lead_memory_id="lead_456",
+            name="Jane Doe",
+            email="jane.doe@example.com",
+            added_at=added_at,
+            contribution_count=5,
+        )
+
+        assert contributor.id == "cntr_123"
+        assert contributor.lead_memory_id == "lead_456"
+        assert contributor.name == "Jane Doe"
+        assert contributor.email == "jane.doe@example.com"
+        assert contributor.added_at == added_at
+        assert contributor.contribution_count == 5
+
+    def test_contributor_creation_zero_contributions(self):
+        """Test creating a Contributor with zero contributions."""
+        added_at = datetime(2025, 2, 4, 14, 30, tzinfo=UTC)
+
+        contributor = Contributor(
+            id="cntr_789",
+            lead_memory_id="lead_012",
+            name="John Smith",
+            email="john.smith@example.com",
+            added_at=added_at,
+            contribution_count=0,
+        )
+
+        assert contributor.contribution_count == 0
+
+
+class TestLeadCollaborationServiceInit:
+    """Tests for the LeadCollaborationService initialization."""
+
+    def test_service_initialization(self):
+        """Test that the service initializes correctly with a db_client."""
+        mock_client = MagicMock()
+
+        service = LeadCollaborationService(db_client=mock_client)
+
+        assert service.db == mock_client
+
+    @patch("src.db.supabase.SupabaseClient.get_client")
+    def test_get_supabase_client_success(self, mock_get_client):
+        """Test _get_supabase_client returns the client successfully."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+        result = service._get_supabase_client()
+
+        assert result == mock_client
+        mock_get_client.assert_called_once()
+
+    @patch("src.db.supabase.SupabaseClient.get_client")
+    def test_get_supabase_client_raises_database_error(self, mock_get_client):
+        """Test _get_supabase_client raises DatabaseError on failure."""
+        mock_get_client.side_effect = Exception("Connection failed")
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            service._get_supabase_client()
+
+        assert "Failed to get Supabase client" in str(exc_info.value)
