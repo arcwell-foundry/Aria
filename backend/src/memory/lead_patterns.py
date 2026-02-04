@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from supabase import Client
@@ -144,10 +144,13 @@ class LeadPatternDetector:
 
         Raises:
             DatabaseError: If query fails.
+            ValueError: If company_id is empty.
         """
-        from datetime import UTC
-
         from src.core.exceptions import DatabaseError
+
+        # Input validation
+        if not company_id:
+            raise ValueError("company_id must not be empty")
 
         try:
             # Query closed/won leads
@@ -166,13 +169,26 @@ class LeadPatternDetector:
 
             # Group by segment (first tag or "untagged")
             segment_data: dict[str, list[float]] = {}
-            for lead in response.data:
+            for item in response.data:
+                # Cast Supabase JSON response to typed dict
+                lead: dict[str, Any] = cast(dict[str, Any], item)
                 tags = lead.get("tags", []) or []
-                segment = tags[0] if tags else "untagged"
+                segment = str(tags[0]) if tags else "untagged"
 
-                first_touch = datetime.fromisoformat(lead["first_touch_at"])
-                closed_at = datetime.fromisoformat(lead["updated_at"])
+                first_touch = datetime.fromisoformat(str(lead["first_touch_at"]))
+                closed_at = datetime.fromisoformat(str(lead["updated_at"]))
                 days_to_close = (closed_at - first_touch).days
+
+                # Skip records with invalid (negative) days to close
+                if days_to_close < 0:
+                    logger.warning(
+                        "Skipping lead with negative days_to_close",
+                        extra={
+                            "lead_id": lead.get("id"),
+                            "days_to_close": days_to_close,
+                        },
+                    )
+                    continue
 
                 if segment not in segment_data:
                     segment_data[segment] = []

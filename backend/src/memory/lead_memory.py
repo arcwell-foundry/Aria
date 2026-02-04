@@ -351,6 +351,8 @@ class LeadMemoryService:
         user_id: str,
         lead_id: str,
         company_name: str | None = None,
+        lifecycle_stage: LifecycleStage | None = None,
+        status: LeadStatus | None = None,
         health_score: int | None = None,
         crm_id: str | None = None,
         crm_provider: str | None = None,
@@ -367,6 +369,8 @@ class LeadMemoryService:
             user_id: The user who owns the lead.
             lead_id: The lead ID to update.
             company_name: Optional new company name.
+            lifecycle_stage: Optional new lifecycle stage.
+            status: Optional new lead status.
             health_score: Optional new health score (0-100).
             crm_id: Optional CRM record ID.
             crm_provider: Optional CRM provider.
@@ -393,6 +397,10 @@ class LeadMemoryService:
 
             if company_name is not None:
                 data["company_name"] = company_name
+            if lifecycle_stage is not None:
+                data["lifecycle_stage"] = lifecycle_stage.value
+            if status is not None:
+                data["status"] = status.value
             if health_score is not None:
                 data["health_score"] = health_score
             if crm_id is not None:

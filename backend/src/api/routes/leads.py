@@ -278,11 +278,23 @@ async def update_lead(
             Decimal(str(lead_data.expected_value)) if lead_data.expected_value else None
         )
 
+        # Convert enum types if provided
+        lifecycle_stage = (
+            LifecycleStage(lead_data.lifecycle_stage.value)
+            if lead_data.lifecycle_stage
+            else None
+        )
+        lead_status = (
+            LeadStatus(lead_data.status.value) if lead_data.status else None
+        )
+
         # Perform update
         await service.update(
             user_id=current_user.id,
             lead_id=lead_id,
             company_name=lead_data.company_name,
+            lifecycle_stage=lifecycle_stage,
+            status=lead_status,
             health_score=lead_data.health_score,
             expected_close_date=lead_data.expected_close_date,
             expected_value=expected_value,

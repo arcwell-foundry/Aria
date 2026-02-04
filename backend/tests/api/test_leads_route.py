@@ -279,3 +279,69 @@ class TestUpdateLead:
             )
 
             assert response.status_code == 404
+
+    def test_update_lead_with_lifecycle_stage_and_status(
+        self, test_client: TestClient
+    ) -> None:
+        """Test updating lifecycle_stage and status fields."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import (
+            LeadMemory,
+            LeadStatus,
+            LifecycleStage,
+            TriggerType,
+        )
+
+        existing_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Test Company",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        updated_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Test Company",
+            lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            status=LeadStatus.WON,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=[existing_lead, updated_lead])
+            mock_instance.update = AsyncMock()
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-123",
+                json={
+                    "lifecycle_stage": "opportunity",
+                    "status": "won",
+                },
+            )
+
+            # Verify the update was called with the correct arguments
+            mock_instance.update.assert_called_once()
+            call_kwargs = mock_instance.update.call_args.kwargs
+
+            assert call_kwargs["lifecycle_stage"] == LifecycleStage.OPPORTUNITY
+            assert call_kwargs["status"] == LeadStatus.WON
+            assert response.status_code == 200
+            data = response.json()
+            assert data["lifecycle_stage"] == "opportunity"
+            assert data["status"] == "won"
