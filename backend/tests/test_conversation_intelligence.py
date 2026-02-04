@@ -5,10 +5,9 @@ actionable insights from lead events using LLM analysis.
 """
 
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
-import pytest
-
-from src.memory.conversation_intelligence import Insight
+from src.memory.conversation_intelligence import ConversationIntelligence, Insight
 from src.models.lead_memory import InsightType
 
 
@@ -209,3 +208,14 @@ class TestInsightDataclass:
         assert restored.detected_at == original.detected_at
         assert restored.addressed_at == original.addressed_at
         assert restored.addressed_by == original.addressed_by
+
+
+class TestConversationIntelligenceService:
+    """Tests for the ConversationIntelligence service class."""
+
+    def test_service_initialization(self):
+        """Test that ConversationIntelligence can be instantiated."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+        assert service is not None
+        assert service.db == mock_client

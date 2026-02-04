@@ -32,7 +32,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from supabase import Client
 
 from src.models.lead_memory import InsightType
 
@@ -137,3 +140,20 @@ class Insight:
             addressed_at=addressed_at,
             addressed_by=cast(str | None, data.get("addressed_by")),
         )
+
+
+class ConversationIntelligence:
+    """Service for extracting insights from lead events using LLM.
+
+    Provides async interface for analyzing lead events and extracting
+    actionable insights. Insights are stored in Supabase with links
+    to their source events.
+    """
+
+    def __init__(self, db_client: Client) -> None:
+        """Initialize the conversation intelligence service.
+
+        Args:
+            db_client: Supabase client for database operations.
+        """
+        self.db = db_client
