@@ -396,9 +396,7 @@ class ProactiveMemoryService:
                     continue
 
                 try:
-                    trigger_date = datetime.fromisoformat(
-                        trigger_date_str.replace("Z", "+00:00")
-                    )
+                    trigger_date = datetime.fromisoformat(trigger_date_str.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     continue
 
