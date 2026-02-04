@@ -1,6 +1,11 @@
 """Tests for LeadTriggerService - lead memory creation from trigger sources."""
 
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+
+from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
 from src.memory.lead_triggers import LeadTriggerService
 
 
@@ -9,8 +14,6 @@ class TestLeadTriggerServiceInit:
 
     def test_service_initialization_with_dependencies(self):
         """Test service can be initialized with required dependencies."""
-        from unittest.mock import MagicMock
-
         mock_lead_service = MagicMock()
         mock_event_service = MagicMock()
         mock_conversation_service = MagicMock()
@@ -25,3 +28,136 @@ class TestLeadTriggerServiceInit:
         assert service.lead_memory_service == mock_lead_service
         assert service.event_service == mock_event_service
         assert service.conversation_service == mock_conversation_service
+
+
+class TestFindOrCreate:
+    """Tests for find_or_create deduplication logic."""
+
+    @pytest.mark.asyncio
+    async def test_find_existing_lead_by_company_name(self):
+        """Test find_or_create returns existing lead for same company."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock existing lead
+        existing_lead = LeadMemory(
+            id="lead-123",
+            user_id="user-abc",
+            company_name="Acme Corp",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=65,
+            trigger=TriggerType.EMAIL_APPROVED,
+            first_touch_at=datetime(2025, 1, 15, tzinfo=UTC),
+            last_activity_at=datetime(2025, 2, 1, tzinfo=UTC),
+            created_at=datetime(2025, 1, 15, tzinfo=UTC),
+            updated_at=datetime(2025, 2, 1, tzinfo=UTC),
+        )
+
+        # Mock list_by_user to return existing lead
+        mock_lead_service.list_by_user = AsyncMock(return_value=[existing_lead])
+
+        # Call find_or_create
+        result = await service.find_or_create(
+            user_id="user-abc",
+            company_name="Acme Corp",
+            trigger=TriggerType.MANUAL,
+        )
+
+        # Should return existing lead, not create new one
+        assert result.id == "lead-123"
+        assert result.company_name == "Acme Corp"
+        mock_lead_service.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_new_lead_when_no_match(self):
+        """Test find_or_create creates new lead for unknown company."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock no existing leads
+        mock_lead_service.list_by_user = AsyncMock(return_value=[])
+
+        # Mock create response
+        new_lead = LeadMemory(
+            id="lead-new",
+            user_id="user-abc",
+            company_name="New Company LLC",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.create = AsyncMock(return_value=new_lead)
+
+        # Call find_or_create
+        result = await service.find_or_create(
+            user_id="user-abc",
+            company_name="New Company LLC",
+            trigger=TriggerType.MANUAL,
+        )
+
+        # Should create new lead
+        assert result.id == "lead-new"
+        mock_lead_service.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_case_insensitive_company_matching(self):
+        """Test find_or_create matches company names case-insensitively."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock existing lead with different case
+        existing_lead = LeadMemory(
+            id="lead-123",
+            user_id="user-abc",
+            company_name="ACME CORPORATION",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=65,
+            trigger=TriggerType.EMAIL_APPROVED,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.list_by_user = AsyncMock(return_value=[existing_lead])
+
+        # Call with different case
+        result = await service.find_or_create(
+            user_id="user-abc",
+            company_name="acme corporation",
+            trigger=TriggerType.INBOUND,
+        )
+
+        # Should find existing match
+        assert result.id == "lead-123"
+        mock_lead_service.create.assert_not_called()
