@@ -16,6 +16,7 @@ from src.models.signal import (
     SignalCreate,
     SignalType,
 )
+from src.services import notification_integration
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,16 @@ class SignalService:
 
         signal = cast(dict[str, Any], result.data[0])
         logger.info("Market signal created", extra={"signal_id": signal["id"]})
+
+        # Notify user about the detected signal
+        await notification_integration.notify_signal_detected(
+            user_id=user_id,
+            company_name=data.company_name,
+            signal_type=data.signal_type.value,
+            headline=data.headline,
+            lead_id=data.linked_lead_id,
+        )
+
         return signal
 
     async def get_signals(

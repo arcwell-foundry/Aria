@@ -16,6 +16,7 @@ import anthropic
 
 from src.core.config import settings
 from src.db.supabase import SupabaseClient
+from src.services import notification_integration
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,12 @@ class BriefingService:
         logger.info(
             "Daily briefing generated",
             extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
+        )
+
+        # Notify user that briefing is ready
+        await notification_integration.notify_briefing_ready(
+            user_id=user_id,
+            briefing_date=briefing_date.isoformat(),
         )
 
         return content

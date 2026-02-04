@@ -14,6 +14,7 @@ from src.agents.scout import ScoutAgent
 from src.core.config import settings
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.services import notification_integration
 from src.services.attendee_profile import AttendeeProfileService
 
 logger = logging.getLogger(__name__)
@@ -257,6 +258,10 @@ class MeetingBriefService:
             )
             return None
 
+        # Store meeting details for notification
+        meeting_title = brief.get("meeting_title")
+        calendar_event_id = brief.get("calendar_event_id")
+
         # Step 2: Update status to generating
         await self.update_brief_status(user_id=user_id, brief_id=brief_id, status="generating")
 
@@ -328,6 +333,14 @@ class MeetingBriefService:
                 status="completed",
                 brief_content=brief_content,
             )
+
+            # Notify user that meeting brief is ready
+            if meeting_title and calendar_event_id:
+                await notification_integration.notify_meeting_brief_ready(
+                    user_id=user_id,
+                    meeting_title=meeting_title,
+                    calendar_event_id=calendar_event_id,
+                )
 
             logger.info(
                 "Generated meeting brief content",

@@ -12,6 +12,7 @@ from src.db.supabase import SupabaseClient
 from src.integrations.oauth import get_oauth_client
 from src.memory.digital_twin import DigitalTwin
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
+from src.services import notification_integration
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,14 @@ class DraftService:
             logger.info(
                 "Email draft created",
                 extra={"user_id": user_id, "draft_id": created_draft["id"]},
+            )
+
+            # Notify user that email draft is ready
+            await notification_integration.notify_draft_ready(
+                user_id=user_id,
+                draft_type=purpose.value,
+                recipient=recipient_name or recipient_email,
+                draft_id=created_draft["id"],
             )
 
             return created_draft
