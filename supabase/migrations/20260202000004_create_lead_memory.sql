@@ -193,6 +193,3 @@ COMMENT ON COLUMN lead_memory_contributions.status IS 'pending (awaiting review)
 
 COMMENT ON TABLE lead_memory_crm_sync IS 'Bidirectional CRM synchronization state and conflict tracking.';
 COMMENT ON COLUMN lead_memory_crm_sync.sync_direction IS 'push (ARIA→CRM), pull (CRM→ARIA), or bidirectional.';
-COMMENT ON COLUMN lead_memory_crm_sync.status IS 'synced, pending, conflict, or error.';
-COMMENT ON COLUMN lead_memory_crm_sync.pending_changes IS 'Array of changes awaiting sync.';
-COMMENT ON COLUMN lead_memory_crm_sync.conflict_log IS 'Array of resolved/unresolved conflicts with timestamps.';
