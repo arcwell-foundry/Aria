@@ -219,3 +219,37 @@ class TestConversationIntelligenceService:
         service = ConversationIntelligence(db_client=mock_client)
         assert service is not None
         assert service.db == mock_client
+
+    def test_build_analysis_prompt_email(self):
+        """Test prompt building for email events."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import Direction, EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        event = LeadEvent(
+            id="event-123",
+            lead_memory_id="lead-456",
+            event_type=EventType.EMAIL_RECEIVED,
+            direction=Direction.INBOUND,
+            subject="Re: Proposal",
+            content="We love the proposal but the timeline seems aggressive. Can we discuss alternatives?",
+            participants=["john@acme.com"],
+            occurred_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+            source="gmail",
+            source_id="msg-abc",
+            created_at=datetime(2025, 2, 3, 14, 30, tzinfo=UTC),
+        )
+
+        prompt = service._build_analysis_prompt(event)
+
+        assert "email_received" in prompt
+        assert "Re: Proposal" in prompt
+        assert "timeline seems aggressive" in prompt
+        assert "objections" in prompt.lower()
+        assert "buying signals" in prompt.lower()
+        assert "commitments" in prompt.lower()
+        assert "risks" in prompt.lower()
+        assert "opportunities" in prompt.lower()
+        assert "JSON" in prompt

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from supabase import Client
 
+from src.memory.lead_memory_events import LeadEvent
 from src.models.lead_memory import InsightType
 
 logger = logging.getLogger(__name__)
@@ -152,3 +153,51 @@ class ConversationIntelligence:
             db_client: Supabase client for database operations.
         """
         self.db = db_client
+
+    def _build_analysis_prompt(self, event: LeadEvent) -> str:
+        """Build the LLM prompt for analyzing a lead event.
+
+        Args:
+            event: The LeadEvent to analyze.
+
+        Returns:
+            Prompt string for the LLM.
+        """
+        content = event.content or ""
+        subject = event.subject or "(no subject)"
+
+        return f"""Analyze this {event.event_type.value} and extract actionable sales insights.
+
+Event Type: {event.event_type.value}
+Direction: {event.direction.value if event.direction else "N/A"}
+Subject: {subject}
+Content: {content}
+
+Extract the following types of insights if present:
+
+1. **Objections**: Any concerns, pushback, or hesitations raised
+2. **Buying Signals**: Indications of readiness or interest to proceed
+3. **Commitments**: Promises or agreements made by either party
+4. **Risks**: Potential threats to the deal or relationship
+5. **Opportunities**: Chances to advance the deal or expand scope
+
+For each insight found, provide:
+- type: one of "objection", "buying_signal", "commitment", "risk", "opportunity"
+- content: A clear, concise description of the insight
+- confidence: A score from 0.0 to 1.0 indicating how confident you are
+
+Return a JSON array of insights. If no insights are found, return an empty array [].
+
+Example response:
+[
+  {{"type": "objection", "content": "Concerned about implementation timeline", "confidence": 0.85}},
+  {{"type": "buying_signal", "content": "Asked about contract terms", "confidence": 0.75}}
+]
+
+Important:
+- Only extract insights that are clearly present in the content
+- Be conservative with confidence scores
+- Focus on actionable intelligence for sales teams
+- Keep content descriptions concise but specific
+
+Respond with ONLY the JSON array, no additional text."""
