@@ -703,3 +703,29 @@ class TestStorePatternsToCorporateMemory:
             assert "user" not in fact.object.lower()
             # created_by should be None (system-generated)
             assert fact.created_by is None
+
+
+class TestLeadPatternsModuleExports:
+    """Tests for module exports."""
+
+    def test_lead_pattern_detector_exported_from_memory_module(self) -> None:
+        """Test LeadPatternDetector is exported from memory module."""
+        from src.memory import LeadPatternDetector
+
+        assert LeadPatternDetector is not None
+
+    def test_pattern_types_exported_from_memory_module(self) -> None:
+        """Test pattern types are exported from memory module."""
+        from src.memory import (
+            ClosingTimePattern,
+            EngagementPattern,
+            LeadWarning,
+            ObjectionPattern,
+            SilentLead,
+        )
+
+        assert ClosingTimePattern is not None
+        assert ObjectionPattern is not None
+        assert EngagementPattern is not None
+        assert SilentLead is not None
+        assert LeadWarning is not None

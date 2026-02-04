@@ -52,6 +52,14 @@ from src.memory.lead_memory_graph import (
     LeadMemoryNode,
     LeadRelationshipType,
 )
+from src.memory.lead_patterns import (
+    ClosingTimePattern,
+    EngagementPattern,
+    LeadPatternDetector,
+    LeadWarning,
+    ObjectionPattern,
+    SilentLead,
+)
 from src.memory.lead_triggers import LeadTriggerService
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
@@ -139,4 +147,11 @@ __all__ = [
     # Conversation Intelligence
     "ConversationIntelligence",
     "Insight",
+    # Lead Pattern Detection
+    "LeadPatternDetector",
+    "ClosingTimePattern",
+    "ObjectionPattern",
+    "EngagementPattern",
+    "SilentLead",
+    "LeadWarning",
 ]
