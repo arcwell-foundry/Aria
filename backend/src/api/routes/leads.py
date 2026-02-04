@@ -29,6 +29,8 @@ from src.models.lead_memory import (
     LeadMemoryCreate,
     LeadMemoryResponse,
     LeadMemoryUpdate,
+    StakeholderCreate,
+    StakeholderResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -387,6 +389,88 @@ async def add_note(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to add note")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/{lead_id}/stakeholders", response_model=StakeholderResponse, status_code=status.HTTP_201_CREATED)
+async def add_stakeholder(
+    lead_id: str,
+    stakeholder_data: StakeholderCreate,
+    current_user: CurrentUser,
+) -> StakeholderResponse:
+    """Add a stakeholder to a lead.
+
+    Args:
+        lead_id: The lead ID to add stakeholder to.
+        stakeholder_data: The stakeholder data.
+        current_user: Current authenticated user.
+
+    Returns:
+        The created stakeholder.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if creation fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_stakeholders import LeadStakeholderService
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Create stakeholder
+        client = SupabaseClient.get_client()
+        stakeholder_service = LeadStakeholderService(db_client=client)
+
+        stakeholder_id = await stakeholder_service.add_stakeholder(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+            contact_email=stakeholder_data.contact_email,
+            contact_name=stakeholder_data.contact_name,
+            title=stakeholder_data.title,
+            role=stakeholder_data.role,
+            influence_level=stakeholder_data.influence_level,
+            sentiment=stakeholder_data.sentiment,
+            notes=stakeholder_data.notes,
+        )
+
+        # Retrieve the created stakeholder
+        stakeholders = await stakeholder_service.list_by_lead(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        # Find the stakeholder we just created
+        created_stakeholder = next((s for s in stakeholders if s.id == stakeholder_id), None)
+
+        if created_stakeholder is None:
+            raise LeadMemoryError("Failed to retrieve created stakeholder")
+
+        return StakeholderResponse(
+            id=created_stakeholder.id,
+            lead_memory_id=created_stakeholder.lead_memory_id,
+            contact_email=created_stakeholder.contact_email,
+            contact_name=created_stakeholder.contact_name,
+            title=created_stakeholder.title,
+            role=created_stakeholder.role,
+            influence_level=created_stakeholder.influence_level,
+            sentiment=created_stakeholder.sentiment,
+            last_contacted_at=created_stakeholder.last_contacted_at,
+            notes=created_stakeholder.notes,
+            created_at=created_stakeholder.created_at,
+        )
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to add stakeholder")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),

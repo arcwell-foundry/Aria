@@ -554,3 +554,86 @@ class TestUpdateLead:
             data = response.json()
             assert data["lifecycle_stage"] == "opportunity"
             assert data["status"] == "won"
+
+
+class TestAddStakeholder:
+    """Tests for POST /api/v1/leads/{lead_id}/stakeholders endpoint."""
+
+    def test_add_stakeholder_requires_auth(self) -> None:
+        """Test that adding a stakeholder requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/leads/some-lead-id/stakeholders",
+            json={
+                "contact_email": "john@example.com",
+                "contact_name": "John Doe",
+                "role": "decision_maker",
+            },
+        )
+        assert response.status_code == 401
+
+    def test_add_stakeholder_success(self, test_client: TestClient) -> None:
+        """Test successfully adding a stakeholder."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.memory.lead_stakeholders import LeadStakeholder
+        from src.models.lead_memory import Sentiment, StakeholderRole
+
+        mock_stakeholder = LeadStakeholder(
+            id="stakeholder-123",
+            lead_memory_id="lead-456",
+            contact_email="john@example.com",
+            contact_name="John Doe",
+            title="CTO",
+            role=StakeholderRole.DECISION_MAKER,
+            influence_level=8,
+            sentiment=Sentiment.POSITIVE,
+            last_contacted_at=None,
+            notes=None,
+            created_at=datetime.now(UTC),
+        )
+
+        # Patch SupabaseClient at the source - both the route and service import from here
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch("src.memory.lead_stakeholders.LeadStakeholderService") as mock_stakeholder_service,
+        ):
+            # Mock lead verification
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            # Mock SupabaseClient.get_client() for both import locations
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            # Mock stakeholder creation
+            mock_stakeholder_instance = mock_stakeholder_service.return_value
+            mock_stakeholder_instance.add_stakeholder = AsyncMock(return_value="stakeholder-123")
+            mock_stakeholder_instance.list_by_lead = AsyncMock(return_value=[mock_stakeholder])
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/stakeholders",
+                json={
+                    "contact_email": "john@example.com",
+                    "contact_name": "John Doe",
+                    "title": "CTO",
+                    "role": "decision_maker",
+                    "influence_level": 8,
+                    "sentiment": "positive",
+                },
+            )
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["id"] == "stakeholder-123"
+            assert data["contact_email"] == "john@example.com"
+
+    def test_add_stakeholder_validation_error(self, test_client: TestClient) -> None:
+        """Test validation when missing required field."""
+        response = test_client.post(
+            "/api/v1/leads/lead-456/stakeholders",
+            json={"contact_name": "John Doe"},  # Missing contact_email
+        )
+        assert response.status_code == 422
