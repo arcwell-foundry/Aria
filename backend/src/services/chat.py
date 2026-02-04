@@ -16,8 +16,10 @@ from src.api.routes.memory import MemoryQueryService
 from src.core.llm import LLMClient
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
+from src.intelligence.proactive_memory import ProactiveMemoryService
 from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
+from src.models.proactive_insight import ProactiveInsight
 from src.services.extraction import ExtractionService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,14 @@ The following information may be relevant to this conversation:
 
 Use this context naturally in your response. If you reference specific facts, note the confidence level if it's below 0.8."""
 
+PROACTIVE_INSIGHTS_TEMPLATE = """## Relevant Context ARIA Can Mention
+
+The following insights may be worth volunteering to the user if relevant:
+
+{insights}
+
+You may naturally mention these in your response when appropriate, without explicitly stating where the information came from."""
+
 HIGH_LOAD_INSTRUCTION = """
 IMPORTANT: The user appears to be under high cognitive load right now. Adapt your response:
 - Be extremely concise and direct
@@ -60,7 +70,9 @@ class ChatService:
         self._llm_client = LLMClient()
         self._working_memory_manager = WorkingMemoryManager()
         self._extraction_service = ExtractionService()
-        self._cognitive_monitor = CognitiveLoadMonitor(db_client=get_supabase_client())
+        db = get_supabase_client()
+        self._cognitive_monitor = CognitiveLoadMonitor(db_client=db)
+        self._proactive_service = ProactiveMemoryService(db_client=db)
 
     async def _ensure_conversation_record(
         self,
@@ -246,8 +258,17 @@ class ChatService:
         )
         memory_ms = (time.perf_counter() - memory_start) * 1000
 
-        # Build system prompt with memory context and load adaptation
-        system_prompt = self._build_system_prompt(memories, load_state)
+        # Get proactive insights to volunteer
+        proactive_start = time.perf_counter()
+        proactive_insights = await self._get_proactive_insights(
+            user_id=user_id,
+            current_message=message,
+            conversation_messages=conversation_messages,
+        )
+        proactive_ms = (time.perf_counter() - proactive_start) * 1000
+
+        # Build system prompt with memory context, load adaptation, and proactive insights
+        system_prompt = self._build_system_prompt(memories, load_state, proactive_insights)
 
         logger.info(
             "Processing chat message",
@@ -255,8 +276,10 @@ class ChatService:
                 "user_id": user_id,
                 "conversation_id": conversation_id,
                 "memory_count": len(memories),
+                "proactive_insight_count": len(proactive_insights),
                 "message_count": len(conversation_messages),
                 "memory_query_ms": memory_ms,
+                "proactive_query_ms": proactive_ms,
                 "cognitive_load_level": load_state.level.value,
             },
         )
@@ -298,6 +321,7 @@ class ChatService:
             "conversation_id": conversation_id,
             "timing": {
                 "memory_query_ms": round(memory_ms, 2),
+                "proactive_query_ms": round(proactive_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
             },
@@ -306,6 +330,7 @@ class ChatService:
                 "score": round(load_state.score, 3),
                 "recommendation": load_state.recommendation,
             },
+            "proactive_insights": [insight.to_dict() for insight in proactive_insights],
         }
 
     async def _query_relevant_memories(
@@ -327,16 +352,44 @@ class ChatService:
             offset=0,
         )
 
+    async def _get_proactive_insights(
+        self,
+        user_id: str,
+        current_message: str,
+        conversation_messages: list[dict[str, Any]] | None = None,
+    ) -> list[ProactiveInsight]:
+        """Get proactive insights for current context.
+
+        Args:
+            user_id: User identifier
+            current_message: Current message content
+            conversation_messages: Optional conversation history
+
+        Returns:
+            List of relevant proactive insights
+        """
+        try:
+            return await self._proactive_service.find_volunteerable_context(
+                user_id=user_id,
+                current_message=current_message,
+                conversation_messages=conversation_messages or [],
+            )
+        except Exception as e:
+            logger.warning("Failed to get proactive insights: %s", e)
+            return []
+
     def _build_system_prompt(
         self,
         memories: list[dict[str, Any]],
         load_state: CognitiveLoadState | None = None,
+        proactive_insights: list[ProactiveInsight] | None = None,
     ) -> str:
-        """Build system prompt with memory context and load adaptation.
+        """Build system prompt with memory context, load adaptation, and proactive insights.
 
         Args:
             memories: List of memory dicts to include as context.
             load_state: Optional cognitive load state for response adaptation.
+            proactive_insights: Optional list of insights to volunteer.
 
         Returns:
             Formatted system prompt string.
@@ -354,6 +407,18 @@ class ChatService:
             memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
 
         base_prompt = ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
+
+        # Add proactive insights if available
+        if proactive_insights:
+            insight_lines = []
+            for insight in proactive_insights:
+                insight_lines.append(
+                    f"- [{insight.insight_type.value}] {insight.content} ({insight.explanation})"
+                )
+            proactive_context = PROACTIVE_INSIGHTS_TEMPLATE.format(
+                insights="\n".join(insight_lines)
+            )
+            base_prompt = base_prompt + "\n\n" + proactive_context
 
         # Add high load instruction if needed
         if load_state and load_state.level in [LoadLevel.HIGH, LoadLevel.CRITICAL]:
