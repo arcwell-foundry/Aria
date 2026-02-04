@@ -236,3 +236,59 @@ class LeadEventService:
         except Exception as e:
             logger.exception("Failed to add lead event")
             raise DatabaseError(f"Failed to add lead event: {e}") from e
+
+    async def get_timeline(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[LeadEvent]:
+        """Get timeline of events for a lead.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            start_date: Optional start date for filtering.
+            end_date: Optional end date for filtering.
+
+        Returns:
+            List of LeadEvent instances ordered by occurred_at descending.
+
+        Raises:
+            DatabaseError: If retrieval fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            query = client.table("lead_memory_events").select("*").eq("lead_memory_id", lead_memory_id)
+
+            if start_date:
+                query = query.gte("occurred_at", start_date.isoformat())
+            if end_date:
+                query = query.lte("occurred_at", end_date.isoformat())
+
+            query = query.order("occurred_at", desc=True)
+
+            response = query.execute()
+
+            events = []
+            for item in response.data:
+                events.append(LeadEvent.from_dict(item))
+
+            logger.info(
+                "Retrieved lead event timeline",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "event_count": len(events),
+                },
+            )
+
+            return events
+
+        except Exception as e:
+            logger.exception("Failed to get lead event timeline")
+            raise DatabaseError(f"Failed to get lead event timeline: {e}") from e

@@ -419,3 +419,135 @@ class TestLeadEventServiceAddEvent:
                     lead_memory_id="lead-456",
                     event_data=event_create,
                 )
+
+
+class TestLeadEventServiceTimeline:
+    """Tests for the get_timeline method."""
+
+    @pytest.mark.asyncio
+    async def test_get_timeline_by_date_range(self):
+        """Test getting timeline filtered by date range."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "event-2",
+                "lead_memory_id": "lead-123",
+                "event_type": "meeting",
+                "direction": None,
+                "subject": "Discovery Call",
+                "content": "Requirements discussion",
+                "participants": ["john@acme.com", "jane@acme.com"],
+                "occurred_at": "2025-02-03T14:00:00+00:00",
+                "source": "calendar",
+                "source_id": "cal-1",
+                "created_at": "2025-02-03T14:00:00+00:00",
+            },
+            {
+                "id": "event-1",
+                "lead_memory_id": "lead-123",
+                "event_type": "email_sent",
+                "direction": "outbound",
+                "subject": "Intro email",
+                "content": "Nice to meet you",
+                "participants": ["john@acme.com"],
+                "occurred_at": "2025-02-01T10:00:00+00:00",
+                "source": "gmail",
+                "source_id": "msg-1",
+                "created_at": "2025-02-01T10:00:00+00:00",
+            },
+        ]
+
+        # Create a mock query builder that returns itself for chaining
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.gte.return_value = mock_query
+        mock_query.lte.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_timeline(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+                start_date=datetime(2025, 2, 1, tzinfo=UTC),
+                end_date=datetime(2025, 2, 28, tzinfo=UTC),
+            )
+
+            assert len(events) == 2
+            assert events[0].event_type == EventType.MEETING
+            assert events[1].event_type == EventType.EMAIL_SENT
+            assert events[0].participants == ["john@acme.com", "jane@acme.com"]
+
+    @pytest.mark.asyncio
+    async def test_get_timeline_empty_result(self):
+        """Test getting timeline when no events match."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+
+        # Create a mock query builder that returns itself for chaining
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.gte.return_value = mock_query
+        mock_query.lte.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_timeline(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+                start_date=datetime(2025, 1, 1, tzinfo=UTC),
+                end_date=datetime(2025, 1, 31, tzinfo=UTC),
+            )
+
+            assert events == []
+
+    @pytest.mark.asyncio
+    async def test_get_timeline_without_date_range(self):
+        """Test getting timeline without date filtering."""
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "event-1",
+                "lead_memory_id": "lead-123",
+                "event_type": "note",
+                "direction": None,
+                "subject": None,
+                "content": "Internal note",
+                "participants": [],
+                "occurred_at": "2025-02-03T12:00:00+00:00",
+                "source": None,
+                "source_id": None,
+                "created_at": "2025-02-03T12:00:00+00:00",
+            },
+        ]
+
+        # Create a mock query builder that returns itself for chaining
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+
+        mock_client.table.return_value.select.return_value = mock_query
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            events = await service.get_timeline(
+                user_id="user-123",
+                lead_memory_id="lead-123",
+            )
+
+            assert len(events) == 1
+            assert events[0].event_type == EventType.NOTE
