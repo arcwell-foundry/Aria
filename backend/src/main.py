@@ -22,6 +22,7 @@ from src.api.routes import (
     integrations,
     meetings,
     memory,
+    preferences,
     signals,
 )
 from src.core.exceptions import ARIAException
@@ -97,6 +98,7 @@ app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")
+app.include_router(preferences.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
