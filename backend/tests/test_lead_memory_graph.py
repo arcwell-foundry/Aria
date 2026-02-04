@@ -501,3 +501,40 @@ async def test_get_leads_for_company_filters_by_company() -> None:
         mock_client.search.assert_called_once()
         call_args = mock_client.search.call_args
         assert "company-789" in call_args[0][0]
+
+
+# --- update_lead tests ---
+
+
+@pytest.mark.asyncio
+async def test_update_lead_updates_in_graphiti() -> None:
+    """Test update_lead updates lead data in Graphiti."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph, LeadMemoryNode
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+
+    mock_driver = MagicMock()
+    mock_driver.execute_query = AsyncMock(return_value=([{"deleted": 1}], None, None))
+    mock_client.driver = mock_driver
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="updated-uuid"))
+
+    updated_lead = LeadMemoryNode(
+        id="lead-123",
+        user_id="user-456",
+        company_name="Acme Corp",
+        lifecycle_stage="opportunity",
+        status="active",
+        health_score=85,
+        created_at=now,
+    )
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+        # Patch the audit logging to avoid database calls
+        with patch("src.memory.audit.log_memory_operation", new_callable=AsyncMock):
+            await graph.update_lead(updated_lead)
+
+            mock_driver.execute_query.assert_called_once()
+            mock_client.add_episode.assert_called_once()

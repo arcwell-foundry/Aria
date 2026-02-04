@@ -451,7 +451,61 @@ class LeadMemoryGraph:
             LeadMemoryNotFoundError: If lead doesn't exist.
             LeadMemoryGraphError: If update fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            lead_name = self._get_graphiti_node_name(lead.id)
+            query = """
+            MATCH (e:Episode)
+            WHERE e.name = $lead_name
+            DETACH DELETE e
+            RETURN count(e) as deleted
+            """
+
+            result = await client.driver.execute_query(
+                query,
+                lead_name=lead_name,
+            )
+
+            records = result[0] if result else []
+            deleted_count = records[0]["deleted"] if records else 0
+
+            if deleted_count == 0:
+                raise LeadMemoryNotFoundError(lead.id)
+
+            lead_body = self._build_lead_body(lead)
+
+            from graphiti_core.nodes import EpisodeType
+
+            await client.add_episode(
+                name=lead_name,
+                episode_body=lead_body,
+                source=EpisodeType.text,
+                source_description=f"lead_memory:{lead.user_id}:{lead.lifecycle_stage}:updated",
+                reference_time=lead.updated_at or datetime.now(UTC),
+            )
+
+            logger.info(
+                "Updated lead in graph",
+                extra={"lead_id": lead.id, "user_id": lead.user_id},
+            )
+
+            await log_memory_operation(
+                user_id=lead.user_id,
+                operation=MemoryOperation.UPDATE,
+                memory_type=MemoryType.LEAD,
+                memory_id=lead.id,
+                metadata={"stage": lead.lifecycle_stage, "status": lead.status},
+                suppress_errors=True,
+            )
+
+        except LeadMemoryNotFoundError:
+            raise
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update lead in graph")
+            raise LeadMemoryGraphError(f"Failed to update lead: {e}") from e
 
     async def add_contact(
         self,
