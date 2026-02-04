@@ -433,3 +433,153 @@ class TestLeadMemoryServiceUpdate:
                     lead_id="nonexistent",
                     company_name="New Name",
                 )
+
+
+class TestLeadMemoryServiceListByUser:
+    """Tests for LeadMemoryService.list_by_user()."""
+
+    @pytest.fixture
+    def mock_supabase_list(self) -> MagicMock:
+        """Create a mocked Supabase client with multiple leads."""
+        mock_client = MagicMock()
+        now = datetime.now(UTC)
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "lead-1",
+                "user_id": "user-456",
+                "company_id": None,
+                "company_name": "Acme Corp",
+                "lifecycle_stage": "lead",
+                "status": "active",
+                "health_score": 75,
+                "crm_id": None,
+                "crm_provider": None,
+                "first_touch_at": now.isoformat(),
+                "last_activity_at": now.isoformat(),
+                "expected_close_date": None,
+                "expected_value": None,
+                "tags": ["enterprise"],
+                "metadata": {"trigger": "manual"},
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            },
+            {
+                "id": "lead-2",
+                "user_id": "user-456",
+                "company_id": None,
+                "company_name": "Beta Inc",
+                "lifecycle_stage": "opportunity",
+                "status": "active",
+                "health_score": 90,
+                "crm_id": None,
+                "crm_provider": None,
+                "first_touch_at": now.isoformat(),
+                "last_activity_at": now.isoformat(),
+                "expected_close_date": None,
+                "expected_value": "50000",
+                "tags": ["smb"],
+                "metadata": {"trigger": "inbound"},
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            },
+        ]
+
+        # Create a proper chain mock
+        mock_table = MagicMock()
+        mock_select = MagicMock()
+        mock_eq = MagicMock()
+        mock_order = MagicMock()
+        mock_limit = MagicMock()
+
+        mock_client.table.return_value = mock_table
+        mock_table.select.return_value = mock_select
+        mock_select.eq.return_value = mock_eq
+        mock_eq.eq.return_value = mock_eq
+        mock_eq.gte.return_value = mock_eq
+        mock_eq.lte.return_value = mock_eq
+        mock_eq.order.return_value = mock_order
+        mock_order.limit.return_value = mock_limit
+        mock_limit.execute.return_value = mock_response
+
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_list_by_user_returns_all_leads(self, mock_supabase_list: MagicMock) -> None:
+        """Test list_by_user returns all leads for a user."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_list):
+            service = LeadMemoryService()
+            leads = await service.list_by_user(user_id="user-456")
+
+        assert len(leads) == 2
+        assert leads[0].id == "lead-1"
+        assert leads[1].id == "lead-2"
+
+    @pytest.mark.asyncio
+    async def test_list_by_user_with_status_filter(self, mock_supabase_list: MagicMock) -> None:
+        """Test list_by_user filters by status."""
+        from src.memory.lead_memory import LeadMemoryService, LeadStatus
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_list):
+            service = LeadMemoryService()
+            leads = await service.list_by_user(
+                user_id="user-456",
+                status=LeadStatus.ACTIVE,
+            )
+
+        # Verify the eq filter was called with status (on the result of first eq)
+        mock_eq = mock_supabase_list.table.return_value.select.return_value.eq.return_value
+        calls = mock_eq.eq.call_args_list
+        status_call = [c for c in calls if c[0][0] == "status"]
+        assert len(status_call) == 1
+        assert status_call[0][0][1] == "active"
+
+    @pytest.mark.asyncio
+    async def test_list_by_user_with_stage_filter(self, mock_supabase_list: MagicMock) -> None:
+        """Test list_by_user filters by lifecycle stage."""
+        from src.memory.lead_memory import LeadMemoryService, LifecycleStage
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_list):
+            service = LeadMemoryService()
+            leads = await service.list_by_user(
+                user_id="user-456",
+                lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            )
+
+        # Verify the eq filter was called with lifecycle_stage (on the result of first eq)
+        mock_eq = mock_supabase_list.table.return_value.select.return_value.eq.return_value
+        calls = mock_eq.eq.call_args_list
+        stage_call = [c for c in calls if c[0][0] == "lifecycle_stage"]
+        assert len(stage_call) == 1
+        assert stage_call[0][0][1] == "opportunity"
+
+    @pytest.mark.asyncio
+    async def test_list_by_user_with_health_range(self, mock_supabase_list: MagicMock) -> None:
+        """Test list_by_user filters by health score range."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_list):
+            service = LeadMemoryService()
+            leads = await service.list_by_user(
+                user_id="user-456",
+                min_health_score=70,
+                max_health_score=95,
+            )
+
+        # The mock should have been called with gte and lte
+        mock_query = mock_supabase_list.table.return_value.select.return_value.eq.return_value
+        mock_query.gte.assert_called()
+        mock_query.lte.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_list_by_user_with_limit(self, mock_supabase_list: MagicMock) -> None:
+        """Test list_by_user respects limit parameter."""
+        from src.memory.lead_memory import LeadMemoryService
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase_list):
+            service = LeadMemoryService()
+            leads = await service.list_by_user(user_id="user-456", limit=10)
+
+        mock_supabase_list.table.return_value.select.return_value.eq.return_value.order.return_value.limit.assert_called_with(10)

@@ -1,8 +1,6 @@
 # backend/tests/test_lead_memory_graph.py
 """Tests for lead memory graph module."""
 
-import pytest
-
 
 def test_lead_memory_graph_error_exists() -> None:
     """Test LeadMemoryGraphError exception class exists."""

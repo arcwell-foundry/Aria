@@ -440,3 +440,81 @@ class LeadMemoryService:
         except Exception as e:
             logger.exception("Failed to update lead", extra={"lead_id": lead_id})
             raise LeadMemoryError(f"Failed to update lead: {e}") from e
+
+    async def list_by_user(
+        self,
+        user_id: str,
+        status: LeadStatus | None = None,
+        lifecycle_stage: LifecycleStage | None = None,
+        min_health_score: int | None = None,
+        max_health_score: int | None = None,
+        limit: int = 50,
+    ) -> list[LeadMemory]:
+        """List all leads for a user with optional filters.
+
+        Args:
+            user_id: The user to list leads for.
+            status: Optional filter by lead status.
+            lifecycle_stage: Optional filter by lifecycle stage.
+            min_health_score: Optional minimum health score.
+            max_health_score: Optional maximum health score.
+            limit: Maximum number of leads to return.
+
+        Returns:
+            List of LeadMemory instances matching the filters.
+
+        Raises:
+            LeadMemoryError: If the query fails.
+        """
+        try:
+            client = self._get_supabase_client()
+
+            query = client.table("lead_memories").select("*").eq("user_id", user_id)
+
+            if status is not None:
+                query = query.eq("status", status.value)
+
+            if lifecycle_stage is not None:
+                query = query.eq("lifecycle_stage", lifecycle_stage.value)
+
+            if min_health_score is not None:
+                query = query.gte("health_score", min_health_score)
+
+            if max_health_score is not None:
+                query = query.lte("health_score", max_health_score)
+
+            response = query.order("last_activity_at", desc=True).limit(limit).execute()
+
+            if not response.data:
+                return []
+
+            leads = []
+            for row in response.data:
+                # Extract trigger from metadata if not present
+                if "trigger" not in row and row.get("metadata", {}).get("trigger"):
+                    row["trigger"] = row["metadata"]["trigger"]
+                elif "trigger" not in row:
+                    row["trigger"] = "manual"
+                leads.append(LeadMemory.from_dict(row))
+
+            logger.info(
+                "Listed leads",
+                extra={
+                    "user_id": user_id,
+                    "count": len(leads),
+                    "filters": {
+                        "status": status.value if status else None,
+                        "lifecycle_stage": lifecycle_stage.value if lifecycle_stage else None,
+                        "min_health_score": min_health_score,
+                        "max_health_score": max_health_score,
+                    },
+                },
+            )
+
+            return leads
+
+        except LeadMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to list leads")
+            raise LeadMemoryError(f"Failed to list leads: {e}") from e
