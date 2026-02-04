@@ -187,3 +187,44 @@ class InsightResponse(BaseModel):
 # Transition Request
 class StageTransitionRequest(BaseModel):
     stage: LifecycleStage = Field(..., description="Target lifecycle stage")
+
+
+# Contributor Models
+class ContributorCreate(BaseModel):
+    contributor_id: str = Field(..., description="User ID to add as contributor")
+    contributor_name: str = Field(..., description="Full name of contributor")
+    contributor_email: str = Field(..., description="Email of contributor")
+
+
+class ContributorResponse(BaseModel):
+    id: str
+    lead_memory_id: str
+    name: str
+    email: str
+    added_at: datetime
+    contribution_count: int
+
+
+# Contribution Models
+class ContributionCreate(BaseModel):
+    contribution_type: ContributionType = Field(..., description="Type of contribution")
+    contribution_id: str | None = Field(None, description="ID of the event/note/insight being contributed")
+    content: str | None = Field(None, description="Content for note/insight contributions")
+
+
+class ContributionResponse(BaseModel):
+    id: str
+    lead_memory_id: str
+    contributor_id: str
+    contributor_name: str
+    contribution_type: ContributionType
+    contribution_id: str | None
+    content: str | None
+    status: ContributionStatus
+    created_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by: str | None
+
+
+class ContributionReviewRequest(BaseModel):
+    action: str = Field(..., description="Action: 'merge' or 'reject'")
