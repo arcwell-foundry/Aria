@@ -13,11 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.memory.health_score import (
-    HealthScoreCalculator,
-    HealthScoreHistory,
-)
-from src.memory.lead_memory import LeadMemory, LifecycleStage, LeadStatus, TriggerType
+from src.memory.health_score import HealthScoreCalculator, HealthScoreHistory
+from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
 from src.memory.lead_memory_events import LeadEvent
 from src.models.lead_memory import Direction, EventType, Sentiment
 

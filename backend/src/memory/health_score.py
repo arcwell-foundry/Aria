@@ -37,9 +37,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from src.models.lead_memory import Sentiment
+from src.models.lead_memory import Direction, Sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +110,7 @@ class HealthScoreCalculator:
             return 0.2
 
         # Count events in last 30 days
-        recent_events = [
-            e for e in events if (now - e.occurred_at).days <= 30
-        ]
+        recent_events = [e for e in events if (now - e.occurred_at).days <= 30]
 
         # Ideal: at least 4 contacts per month (~weekly)
         target_count = 4
@@ -139,16 +137,14 @@ class HealthScoreCalculator:
         """
         # Separate inbound and outbound events
         inbound_events = [
-            e for e in events
-            if hasattr(e, 'direction') and e.direction == "inbound"
+            e for e in events if hasattr(e, "direction") and e.direction == Direction.INBOUND
         ]
 
         if not inbound_events:
             return 0.5  # Neutral if no inbound
 
         outbound_events = [
-            e for e in events
-            if hasattr(e, 'direction') and e.direction == "outbound"
+            e for e in events if hasattr(e, "direction") and e.direction == Direction.OUTBOUND
         ]
 
         if not outbound_events:
@@ -160,14 +156,13 @@ class HealthScoreCalculator:
 
         for inbound in sorted_inbound:
             # Find first outbound after this inbound
-            responses = [
-                o for o in outbound_events
-                if o.occurred_at > inbound.occurred_at
-            ]
+            responses = [o for o in outbound_events if o.occurred_at > inbound.occurred_at]
 
             if responses:
                 first_response = min(responses, key=lambda o: o.occurred_at)
-                response_hours = (first_response.occurred_at - inbound.occurred_at).total_seconds() / 3600
+                response_hours = (
+                    first_response.occurred_at - inbound.occurred_at
+                ).total_seconds() / 3600
                 response_times.append(response_hours)
 
         if not response_times:
@@ -204,10 +199,18 @@ class HealthScoreCalculator:
             return 0.5  # Neutral default
 
         # Count sentiments
-        positive_count = sum(1 for i in insights if getattr(i, 'sentiment', None) == Sentiment.POSITIVE)
-        negative_count = sum(1 for i in insights if getattr(i, 'sentiment', None) == Sentiment.NEGATIVE)
-        neutral_count = sum(1 for i in insights if getattr(i, 'sentiment', None) == Sentiment.NEUTRAL)
-        unknown_count = sum(1 for i in insights if getattr(i, 'sentiment', None) == Sentiment.UNKNOWN)
+        positive_count = sum(
+            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.POSITIVE
+        )
+        negative_count = sum(
+            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEGATIVE
+        )
+        neutral_count = sum(
+            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEUTRAL
+        )
+        unknown_count = sum(
+            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.UNKNOWN
+        )
 
         total = len(insights)
         if total == 0:
@@ -215,9 +218,7 @@ class HealthScoreCalculator:
 
         # Calculate score: positive=1, neutral=0.5, negative=0, unknown=0.5
         sentiment_sum = (
-            positive_count * 1.0 +
-            (neutral_count + unknown_count) * 0.5 +
-            negative_count * 0.0
+            positive_count * 1.0 + (neutral_count + unknown_count) * 0.5 + negative_count * 0.0
         )
 
         return sentiment_sum / total
@@ -238,7 +239,7 @@ class HealthScoreCalculator:
             return 0.0
 
         # Count unique roles
-        roles = set(getattr(s, 'role', None) for s in stakeholders)
+        roles = {getattr(s, "role", None) for s in stakeholders}
         roles.discard(None)  # Remove None values
 
         unique_roles = len(roles)
@@ -327,17 +328,14 @@ class HealthScoreCalculator:
         }
 
         # Calculate weighted sum
-        weighted_sum = sum(
-            scores[factor] * weight
-            for factor, weight in self.WEIGHTS.items()
-        )
+        weighted_sum = sum(scores[factor] * weight for factor, weight in self.WEIGHTS.items())
 
         health_score = int(weighted_sum * 100)
 
         logger.info(
             "Calculated health score",
             extra={
-                "lead_id": getattr(lead, 'id', 'unknown'),
+                "lead_id": getattr(lead, "id", "unknown"),
                 "health_score": health_score,
                 "component_scores": scores,
             },
