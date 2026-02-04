@@ -465,13 +465,16 @@ export function IntegrationsSettingsPage() {
   useEffect(() => {
     const pendingIntegration = sessionStorage.getItem("pending_integration");
     if (pendingIntegration) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with sessionStorage on mount
       setIntegrationToConnect(pendingIntegration as IntegrationType);
       startPolling(pendingIntegration as IntegrationType);
     }
+    // Capture ref value for cleanup
+    const currentPollingRef = pollingRef.current;
     // Cleanup on unmount
     return () => {
-      if (pollingRef.current.timeoutId) {
-        clearTimeout(pollingRef.current.timeoutId);
+      if (currentPollingRef.timeoutId) {
+        clearTimeout(currentPollingRef.timeoutId);
       }
     };
   }, [startPolling]);

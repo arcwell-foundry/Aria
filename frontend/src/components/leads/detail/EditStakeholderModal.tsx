@@ -42,6 +42,7 @@ export function EditStakeholderModal({
   const [notes, setNotes] = useState("");
 
   // Populate form when stakeholder changes
+  /* eslint-disable react-hooks/set-state-in-effect -- syncing form state with prop changes */
   useEffect(() => {
     if (stakeholder) {
       setName(stakeholder.contact_name || "");
@@ -52,6 +53,7 @@ export function EditStakeholderModal({
       setNotes(stakeholder.notes || "");
     }
   }, [stakeholder]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!isOpen || !stakeholder) return null;
 

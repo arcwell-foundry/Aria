@@ -47,6 +47,7 @@ export function BattleCardDetailModal({
 
   // Reset tab when card changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing tab state with prop changes
     setActiveTab("overview");
   }, [card?.id]);
 

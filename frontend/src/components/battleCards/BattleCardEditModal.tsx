@@ -27,6 +27,7 @@ export function BattleCardEditModal({
   const [pricingRange, setPricingRange] = useState("");
 
   // Initialize form when card changes or modal opens
+  /* eslint-disable react-hooks/set-state-in-effect -- syncing form state with prop changes */
   useEffect(() => {
     if (isOpen && card && mode === "edit") {
       setCompetitorName(card.competitor_name);
@@ -46,6 +47,7 @@ export function BattleCardEditModal({
       setPricingRange("");
     }
   }, [isOpen, card, mode]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Handle escape key
   const handleKeyDown = useCallback(

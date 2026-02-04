@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
+import type { IntegrationType } from "@/api/integrations";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useConnectIntegration } from "@/hooks/useIntegrations";
 
@@ -48,7 +49,7 @@ export function IntegrationsCallbackPage() {
 
       try {
         await connectMutation.mutateAsync({
-          integrationType: integrationType as any,
+          integrationType: integrationType as IntegrationType,
           data: {
             code,
             state: state || undefined,
