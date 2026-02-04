@@ -33,23 +33,35 @@ class PreferenceService:
         Returns:
             Preference dict.
         """
-        result = (
-            self._db.table("user_preferences")
-            .select("*")
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-        )
+        logger.info("Fetching preferences", extra={"user_id": user_id})
 
-        if result.data is None:
-            logger.info(
-                "No preferences found, creating defaults",
-                extra={"user_id": user_id},
+        try:
+            result = (
+                self._db.table("user_preferences")
+                .select("*")
+                .eq("user_id", user_id)
+                .single()
+                .execute()
             )
-            return await self._create_default_preferences(user_id)
 
-        logger.info("Preferences retrieved", extra={"user_id": user_id})
-        return cast(dict[str, Any], result.data)
+            if result.data is None:
+                logger.info(
+                    "No preferences found, creating defaults",
+                    extra={"user_id": user_id},
+                )
+                return await self._create_default_preferences(user_id)
+
+            return cast(dict[str, Any], result.data)
+
+        except Exception as e:
+            # Check if it's a "no rows" error (PGRST116)
+            if "PGRST116" in str(e):
+                logger.info(
+                    "No preferences found, creating defaults",
+                    extra={"user_id": user_id},
+                )
+                return await self._create_default_preferences(user_id)
+            raise
 
     async def update_preferences(
         self, user_id: str, data: PreferenceUpdate

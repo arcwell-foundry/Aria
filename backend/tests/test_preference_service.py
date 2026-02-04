@@ -94,6 +94,46 @@ async def test_get_preferences_creates_defaults_when_not_found(mock_db: MagicMoc
 
 
 @pytest.mark.asyncio
+async def test_get_preferences_handles_pgrst116_error(mock_db: MagicMock) -> None:
+    """Test get_preferences handles PGRST116 (no rows found) exception from Supabase."""
+    with patch("src.services.preference_service.SupabaseClient") as mock_db_class:
+        default_prefs = {
+            "id": "pref-new",
+            "user_id": "user-789",
+            "briefing_time": "08:00:00",
+            "meeting_brief_lead_hours": 24,
+            "notification_email": True,
+            "notification_in_app": True,
+            "default_tone": "friendly",
+            "tracked_competitors": [],
+            "timezone": "UTC",
+            "created_at": "2026-02-03T10:00:00Z",
+            "updated_at": "2026-02-03T10:00:00Z",
+        }
+
+        # Mock PGRST116 exception (no rows found with .single())
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = Exception(
+            "PGRST116: The result contains 0 rows"
+        )
+        # Mock insert response
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[default_prefs]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.preference_service import PreferenceService
+
+        service = PreferenceService()
+        result = await service.get_preferences("user-789")
+
+        assert result["id"] == "pref-new"
+        assert result["user_id"] == "user-789"
+
+        # Verify insert was called to create defaults
+        mock_db.table.return_value.insert.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_update_preferences(mock_db: MagicMock) -> None:
     """Test update_preferences updates and returns updated data."""
     with patch("src.services.preference_service.SupabaseClient") as mock_db_class:

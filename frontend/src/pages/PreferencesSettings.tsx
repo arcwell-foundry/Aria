@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect -- syncing local state with fetched server data */
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DashboardLayout } from "@/components/DashboardLayout";

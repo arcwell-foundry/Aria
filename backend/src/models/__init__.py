@@ -20,6 +20,14 @@ from src.models.meeting_brief import (
     MeetingBriefResponse,
     UpcomingMeetingResponse,
 )
+from src.models.notification import (
+    MarkReadRequest,
+    NotificationCreate,
+    NotificationListResponse,
+    NotificationResponse,
+    NotificationType,
+    UnreadCountResponse,
+)
 from src.models.preferences import (
     DefaultTone,
     MeetingBriefLeadHours,
@@ -43,11 +51,17 @@ __all__ = [
     "EmailRegenerateRequest",
     "EmailSendResponse",
     "GenerateBriefRequest",
+    "MarkReadRequest",
     "MeetingBriefContent",
     "MeetingBriefLeadHours",
     "MeetingBriefResponse",
+    "NotificationCreate",
+    "NotificationListResponse",
+    "NotificationResponse",
+    "NotificationType",
     "PreferenceCreate",
     "PreferenceResponse",
     "PreferenceUpdate",
+    "UnreadCountResponse",
     "UpcomingMeetingResponse",
 ]
