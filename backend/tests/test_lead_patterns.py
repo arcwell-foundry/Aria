@@ -128,3 +128,81 @@ class TestAvgTimeToCloseBySegment:
         assert len(patterns) == 1
         assert patterns[0].segment == "untagged"
         assert patterns[0].avg_days_to_close == 20.0
+
+
+class TestCommonObjectionPatterns:
+    """Tests for common_objection_patterns method."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_objections(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test returns empty list when no objections exist."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        patterns = await detector.common_objection_patterns(company_id="company-123")
+
+        assert patterns == []
+
+    @pytest.mark.asyncio
+    async def test_groups_similar_objections(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test groups similar objections together."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        now = datetime.now(UTC)
+        mock_response = MagicMock()
+        mock_response.data = [
+            {"id": "i1", "content": "Budget constraints", "addressed_at": None},
+            {"id": "i2", "content": "Budget constraints", "addressed_at": now.isoformat()},
+            {"id": "i3", "content": "Timeline concerns", "addressed_at": None},
+        ]
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        patterns = await detector.common_objection_patterns(company_id="company-123")
+
+        assert len(patterns) == 2
+        budget = next(p for p in patterns if "Budget" in p.objection_text)
+        assert budget.frequency == 2
+        assert budget.resolution_rate == 0.5  # 1 out of 2 resolved
+
+    @pytest.mark.asyncio
+    async def test_orders_by_frequency(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test patterns are ordered by frequency descending."""
+        from src.memory.lead_patterns import LeadPatternDetector
+
+        mock_response = MagicMock()
+        mock_response.data = [
+            {"id": "i1", "content": "Rare objection", "addressed_at": None},
+            {"id": "i2", "content": "Common objection", "addressed_at": None},
+            {"id": "i3", "content": "Common objection", "addressed_at": None},
+            {"id": "i4", "content": "Common objection", "addressed_at": None},
+        ]
+        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+        patterns = await detector.common_objection_patterns(company_id="company-123")
+
+        assert patterns[0].objection_text == "Common objection"
+        assert patterns[0].frequency == 3
+        assert patterns[1].frequency == 1

@@ -220,3 +220,92 @@ class LeadPatternDetector:
         except Exception as e:
             logger.exception("Failed to calculate closing time patterns")
             raise DatabaseError(f"Failed to calculate closing time patterns: {e}") from e
+
+    async def common_objection_patterns(
+        self,
+        company_id: str,
+        min_frequency: int = 1,
+    ) -> list[ObjectionPattern]:
+        """Detect common objection patterns across leads.
+
+        Analyzes objection-type insights from all leads to identify
+        recurring objection patterns and their resolution rates.
+        Privacy-safe: only aggregated patterns returned.
+
+        Args:
+            company_id: The company to analyze.
+            min_frequency: Minimum occurrences to include (default 1).
+
+        Returns:
+            List of ObjectionPattern ordered by frequency descending.
+
+        Raises:
+            ValueError: If company_id is empty.
+            DatabaseError: If query fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        # Input validation
+        if not company_id:
+            raise ValueError("company_id must not be empty")
+
+        try:
+            # Query objection insights
+            response = (
+                self.db.table("lead_memory_insights")
+                .select("id, content, addressed_at")
+                .eq("insight_type", "objection")
+                .eq("lead_memories.company_id", company_id)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            now = datetime.now(UTC)
+
+            # Group by content
+            objection_data: dict[str, dict[str, Any]] = {}
+            for item in response.data:
+                insight: dict[str, Any] = cast(dict[str, Any], item)
+                content = str(insight.get("content", ""))
+                if not content:
+                    continue
+
+                if content not in objection_data:
+                    objection_data[content] = {"total": 0, "resolved": 0}
+
+                objection_data[content]["total"] += 1
+                if insight.get("addressed_at"):
+                    objection_data[content]["resolved"] += 1
+
+            # Create patterns
+            patterns = []
+            for content, data in objection_data.items():
+                if data["total"] >= min_frequency:
+                    resolution_rate = data["resolved"] / data["total"] if data["total"] > 0 else 0.0
+                    patterns.append(
+                        ObjectionPattern(
+                            objection_text=content,
+                            frequency=data["total"],
+                            resolution_rate=resolution_rate,
+                            calculated_at=now,
+                        )
+                    )
+
+            # Sort by frequency descending
+            patterns.sort(key=lambda p: p.frequency, reverse=True)
+
+            logger.info(
+                "Detected objection patterns",
+                extra={
+                    "company_id": company_id,
+                    "pattern_count": len(patterns),
+                },
+            )
+
+            return patterns
+
+        except Exception as e:
+            logger.exception("Failed to detect objection patterns")
+            raise DatabaseError(f"Failed to detect objection patterns: {e}") from e
