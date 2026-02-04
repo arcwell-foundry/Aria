@@ -16,7 +16,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from src.api.deps import CurrentUser
 from src.core.exceptions import LeadMemoryError, LeadNotFoundError
-from src.memory.lead_memory import LeadMemoryService, LeadStatus, LifecycleStage
+from src.memory.lead_memory import (
+    LeadMemory,
+    LeadMemoryService,
+    LeadStatus,
+    LifecycleStage,
+)
 from src.models.lead_memory import (
     LeadEventCreate,
     LeadEventResponse,
@@ -28,7 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 
-def _lead_to_response(lead: object) -> LeadMemoryResponse:
+def _lead_to_response(lead: LeadMemory) -> LeadMemoryResponse:
     """Convert LeadMemory dataclass to response model.
 
     Args:
