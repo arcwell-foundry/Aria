@@ -95,6 +95,22 @@ CREATE TABLE lead_memory_crm_sync (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Updated at triggers (reuses existing update_updated_at_column function)
+CREATE TRIGGER update_lead_memories_updated_at
+    BEFORE UPDATE ON lead_memories
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_lead_memory_stakeholders_updated_at
+    BEFORE UPDATE ON lead_memory_stakeholders
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_lead_memory_crm_sync_updated_at
+    BEFORE UPDATE ON lead_memory_crm_sync
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- RLS Policies
 ALTER TABLE lead_memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lead_memory_events ENABLE ROW LEVEL SECURITY;
