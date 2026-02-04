@@ -187,9 +187,72 @@ class LeadTriggerService:
 
             return lead
 
-        except Exception as e:
+        except Exception:
             logger.exception(
                 "Failed to process email approval trigger",
+                extra={"user_id": user_id, "company_name": company_name},
+            )
+            raise
+
+    async def on_manual_track(
+        self,
+        user_id: str,
+        company_name: str,
+        notes: str | None = None,
+    ) -> LeadMemory:
+        """Create lead when user manually clicks 'track this'.
+
+        Args:
+            user_id: The user tracking the company.
+            company_name: Name of the company to track.
+            notes: Optional notes about why they're tracking.
+
+        Returns:
+            The created or existing LeadMemory.
+        """
+        try:
+            # Build metadata if notes provided
+            metadata = {"notes": notes} if notes else None
+
+            # Find or create lead
+            lead = await self.find_or_create(
+                user_id=user_id,
+                company_name=company_name,
+                trigger=TriggerType.MANUAL,
+                metadata=metadata,
+            )
+
+            # If new lead and notes provided, add as note event
+            if notes and lead.trigger == TriggerType.MANUAL:
+                from src.models.lead_memory import EventType, LeadEventCreate
+
+                event_data = LeadEventCreate(
+                    event_type=EventType.NOTE,
+                    content=notes,
+                    occurred_at=datetime.now(),
+                    source="manual",
+                )
+
+                await self.event_service.add_event(
+                    user_id=user_id,
+                    lead_memory_id=lead.id,
+                    event_data=event_data,
+                )
+
+            logger.info(
+                "Manual track lead created/found",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead.id,
+                    "company_name": company_name,
+                },
+            )
+
+            return lead
+
+        except Exception:
+            logger.exception(
+                "Failed to process manual track trigger",
                 extra={"user_id": user_id, "company_name": company_name},
             )
             raise

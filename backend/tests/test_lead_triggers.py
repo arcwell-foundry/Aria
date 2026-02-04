@@ -267,3 +267,92 @@ class TestOnEmailApproved:
 
         # But still add the event
         mock_event_service.add_event.assert_called_once()
+
+
+class TestOnManualTrack:
+    """Tests for on_manual_track trigger."""
+
+    @pytest.mark.asyncio
+    async def test_creates_lead_from_manual_track_action(self):
+        """Test creating lead when user clicks 'track this'."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_event_service.add_event = AsyncMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock create response
+        new_lead = LeadMemory(
+            id="lead-manual",
+            user_id="user-abc",
+            company_name="BioTech Inc",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.create = AsyncMock(return_value=new_lead)
+        mock_lead_service.list_by_user = AsyncMock(return_value=[])
+
+        # Call on_manual_track
+        result = await service.on_manual_track(
+            user_id="user-abc",
+            company_name="BioTech Inc",
+            notes="Interested in our enterprise plan",
+        )
+
+        # Verify lead created
+        assert result.id == "lead-manual"
+        mock_lead_service.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_existing_lead_if_already_tracked(self):
+        """Test on_manual_track returns existing lead without duplicate."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_event_service.add_event = AsyncMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock existing lead
+        existing_lead = LeadMemory(
+            id="lead-existing",
+            user_id="user-abc",
+            company_name="BioTech Inc",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=70,
+            trigger=TriggerType.EMAIL_APPROVED,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.list_by_user = AsyncMock(return_value=[existing_lead])
+
+        # Call on_manual_track
+        result = await service.on_manual_track(
+            user_id="user-abc",
+            company_name="BioTech Inc",
+            notes="Following up",
+        )
+
+        # Should return existing, not create
+        assert result.id == "lead-existing"
+        mock_lead_service.create.assert_not_called()
