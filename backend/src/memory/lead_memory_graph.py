@@ -16,7 +16,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from src.core.exceptions import LeadMemoryGraphError
+
+if TYPE_CHECKING:
+    from graphiti_core import Graphiti
 
 logger = logging.getLogger(__name__)
 
@@ -124,3 +129,229 @@ class LeadMemoryNode:
             else None,
             graphiti_node_id=data.get("graphiti_node_id"),
         )
+
+
+class LeadMemoryGraph:
+    """Service for managing lead memories in the knowledge graph.
+
+    Provides methods for storing leads as Graphiti nodes with typed
+    relationships, and querying across leads for patterns and insights.
+    Uses both Supabase (metadata) and Graphiti (semantic content).
+    """
+
+    def _get_graphiti_node_name(self, lead_id: str) -> str:
+        """Generate namespaced node name for Graphiti.
+
+        Args:
+            lead_id: The lead's UUID.
+
+        Returns:
+            Namespaced node name (e.g., "lead:lead-123").
+        """
+        return f"lead:{lead_id}"
+
+    async def _get_graphiti_client(self) -> "Graphiti":
+        """Get the Graphiti client instance.
+
+        Returns:
+            Initialized Graphiti client.
+
+        Raises:
+            LeadMemoryGraphError: If client initialization fails.
+        """
+        from src.db.graphiti import GraphitiClient
+
+        try:
+            return await GraphitiClient.get_instance()
+        except Exception as e:
+            raise LeadMemoryGraphError(f"Failed to get Graphiti client: {e}") from e
+
+    async def store_lead(self, lead: LeadMemoryNode) -> str:
+        """Store a lead memory node in the knowledge graph.
+
+        Args:
+            lead: The lead memory node to store.
+
+        Returns:
+            The ID of the stored lead.
+
+        Raises:
+            LeadMemoryGraphError: If storage fails.
+        """
+        raise NotImplementedError
+
+    async def get_lead(self, user_id: str, lead_id: str) -> LeadMemoryNode:
+        """Retrieve a specific lead by ID.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_id: The lead's UUID.
+
+        Returns:
+            The requested LeadMemoryNode.
+
+        Raises:
+            LeadMemoryNotFoundError: If lead doesn't exist.
+            LeadMemoryGraphError: If retrieval fails.
+        """
+        raise NotImplementedError
+
+    async def update_lead(self, lead: LeadMemoryNode) -> None:
+        """Update an existing lead memory node.
+
+        Args:
+            lead: The lead with updated data.
+
+        Raises:
+            LeadMemoryNotFoundError: If lead doesn't exist.
+            LeadMemoryGraphError: If update fails.
+        """
+        raise NotImplementedError
+
+    async def add_contact(
+        self,
+        lead_id: str,
+        contact_email: str,
+        contact_name: str | None = None,
+        role: str | None = None,
+        influence_level: int = 5,
+    ) -> None:
+        """Add a contact relationship to a lead.
+
+        Args:
+            lead_id: The lead's UUID.
+            contact_email: Contact's email address.
+            contact_name: Contact's name.
+            role: Stakeholder role (decision_maker, influencer, etc.).
+            influence_level: 1-10 influence score.
+
+        Raises:
+            LeadMemoryGraphError: If operation fails.
+        """
+        raise NotImplementedError
+
+    async def add_communication(
+        self,
+        lead_id: str,
+        event_type: str,
+        content: str,
+        occurred_at: datetime,
+        participants: list[str] | None = None,
+    ) -> None:
+        """Add a communication event to a lead.
+
+        Args:
+            lead_id: The lead's UUID.
+            event_type: Type of communication (email, meeting, call).
+            content: Summary of the communication.
+            occurred_at: When the communication happened.
+            participants: List of participant names/emails.
+
+        Raises:
+            LeadMemoryGraphError: If operation fails.
+        """
+        raise NotImplementedError
+
+    async def add_signal(
+        self,
+        lead_id: str,
+        signal_type: str,
+        content: str,
+        confidence: float = 0.7,
+    ) -> None:
+        """Add a market signal or insight to a lead.
+
+        Args:
+            lead_id: The lead's UUID.
+            signal_type: Type of signal (buying_signal, objection, etc.).
+            content: Description of the signal.
+            confidence: Confidence score 0-1.
+
+        Raises:
+            LeadMemoryGraphError: If operation fails.
+        """
+        raise NotImplementedError
+
+    async def search_leads(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 20,
+    ) -> list[LeadMemoryNode]:
+        """Search leads using semantic search.
+
+        Args:
+            user_id: The user whose leads to search.
+            query: Natural language search query.
+            limit: Maximum number of leads to return.
+
+        Returns:
+            List of matching leads.
+
+        Raises:
+            LeadMemoryGraphError: If search fails.
+        """
+        raise NotImplementedError
+
+    async def find_leads_by_topic(
+        self,
+        user_id: str,
+        topic: str,
+        limit: int = 20,
+    ) -> list[LeadMemoryNode]:
+        """Find leads where a specific topic was discussed.
+
+        Args:
+            user_id: The user whose leads to search.
+            topic: Topic to search for (e.g., "pricing", "implementation").
+            limit: Maximum number of leads to return.
+
+        Returns:
+            List of leads where the topic was discussed.
+
+        Raises:
+            LeadMemoryGraphError: If query fails.
+        """
+        raise NotImplementedError
+
+    async def find_silent_leads(
+        self,
+        user_id: str,
+        days_inactive: int = 14,
+        limit: int = 20,
+    ) -> list[LeadMemoryNode]:
+        """Find leads that have gone silent (no recent activity).
+
+        Args:
+            user_id: The user whose leads to check.
+            days_inactive: Number of days without activity to consider silent.
+            limit: Maximum number of leads to return.
+
+        Returns:
+            List of leads with no recent activity.
+
+        Raises:
+            LeadMemoryGraphError: If query fails.
+        """
+        raise NotImplementedError
+
+    async def get_leads_for_company(
+        self,
+        user_id: str,
+        company_id: str,
+        limit: int = 20,
+    ) -> list[LeadMemoryNode]:
+        """Get all leads associated with a company.
+
+        Args:
+            user_id: The user whose leads to search.
+            company_id: The company's UUID.
+            limit: Maximum number of leads to return.
+
+        Returns:
+            List of leads for the company.
+
+        Raises:
+            LeadMemoryGraphError: If query fails.
+        """
+        raise NotImplementedError

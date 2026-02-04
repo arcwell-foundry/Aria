@@ -126,3 +126,26 @@ def test_lead_relationship_types_exist() -> None:
     assert LeadRelationshipType.HAS_COMMUNICATION.value == "HAS_COMMUNICATION"
     assert LeadRelationshipType.HAS_SIGNAL.value == "HAS_SIGNAL"
     assert LeadRelationshipType.SYNCED_TO.value == "SYNCED_TO"
+
+
+def test_lead_memory_graph_has_required_methods() -> None:
+    """Test LeadMemoryGraph class has required interface methods."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    graph = LeadMemoryGraph()
+
+    # Core methods
+    assert hasattr(graph, "store_lead")
+    assert hasattr(graph, "get_lead")
+    assert hasattr(graph, "update_lead")
+
+    # Relationship methods
+    assert hasattr(graph, "add_contact")
+    assert hasattr(graph, "add_communication")
+    assert hasattr(graph, "add_signal")
+
+    # Query methods
+    assert hasattr(graph, "search_leads")
+    assert hasattr(graph, "find_leads_by_topic")
+    assert hasattr(graph, "find_silent_leads")
+    assert hasattr(graph, "get_leads_for_company")
