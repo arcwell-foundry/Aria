@@ -5,6 +5,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import {
   AriaChatPage,
   BattleCardsPage,
+  EmailDraftsPage,
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
   LoginPage,
@@ -68,6 +69,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <BattleCardsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/drafts"
+              element={
+                <ProtectedRoute>
+                  <EmailDraftsPage />
                 </ProtectedRoute>
               }
             />
