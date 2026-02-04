@@ -3,6 +3,7 @@
 Provides REST endpoints for managing sales pursuit leads including:
 - List leads with filtering and sorting
 - Get single lead details
+- Create new leads
 - Add notes to leads
 - Export leads
 """
@@ -25,6 +26,7 @@ from src.memory.lead_memory import (
 from src.models.lead_memory import (
     LeadEventCreate,
     LeadEventResponse,
+    LeadMemoryCreate,
     LeadMemoryResponse,
 )
 
@@ -185,6 +187,56 @@ async def get_lead(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to get lead")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.post("", response_model=LeadMemoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_lead(
+    lead_data: LeadMemoryCreate,
+    current_user: CurrentUser,
+) -> LeadMemoryResponse:
+    """Create a new lead.
+
+    Args:
+        lead_data: The lead data to create.
+        current_user: Current authenticated user.
+
+    Returns:
+        The created lead.
+
+    Raises:
+        HTTPException: 500 if creation fails.
+    """
+    from decimal import Decimal
+
+    from src.memory.lead_memory import TriggerType
+
+    try:
+        service = LeadMemoryService()
+
+        # Convert expected_value to Decimal if provided
+        expected_value = (
+            Decimal(str(lead_data.expected_value)) if lead_data.expected_value else None
+        )
+
+        lead = await service.create(
+            user_id=current_user.id,
+            company_name=lead_data.company_name,
+            trigger=TriggerType.MANUAL,
+            company_id=lead_data.company_id,
+            expected_close_date=lead_data.expected_close_date,
+            expected_value=expected_value,
+            tags=lead_data.tags,
+            metadata=lead_data.metadata,
+        )
+
+        return _lead_to_response(lead)
+
+    except LeadMemoryError as e:
+        logger.exception("Failed to create lead")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
