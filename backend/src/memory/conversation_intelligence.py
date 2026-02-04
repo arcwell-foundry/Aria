@@ -465,3 +465,64 @@ Respond with ONLY the JSON array, no additional text."""
         except Exception as e:
             logger.exception("Failed to mark insight as addressed")
             raise DatabaseError(f"Failed to mark insight as addressed: {e}") from e
+
+    async def get_insights_for_lead(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        insight_type: InsightType | None = None,
+        unaddressed_only: bool = False,
+    ) -> list[Insight]:
+        """Get insights for a lead with optional filtering.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            insight_type: Optional filter by insight type.
+            unaddressed_only: If True, only return unaddressed insights.
+
+        Returns:
+            List of Insight instances ordered by detected_at descending.
+
+        Raises:
+            DatabaseError: If retrieval fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            query = (
+                self.db.table("lead_memory_insights")
+                .select("*")
+                .eq("lead_memory_id", lead_memory_id)
+            )
+
+            if insight_type:
+                query = query.eq("insight_type", insight_type.value)
+
+            if unaddressed_only:
+                query = query.is_("addressed_at", "null")
+
+            query = query.order("detected_at", desc=True)
+            response = query.execute()
+
+            insights = []
+            for item in response.data:
+                insight_dict = cast(dict[str, Any], item)
+                insights.append(Insight.from_dict(insight_dict))
+
+            logger.info(
+                "Retrieved insights for lead",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "insight_count": len(insights),
+                    "insight_type": insight_type.value if insight_type else None,
+                    "unaddressed_only": unaddressed_only,
+                },
+            )
+
+            return insights
+
+        except Exception as e:
+            logger.exception("Failed to get insights for lead")
+            raise DatabaseError(f"Failed to get insights for lead: {e}") from e

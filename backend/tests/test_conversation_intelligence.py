@@ -643,3 +643,150 @@ class TestBatchAnalysis:
         assert len(results) == 2
         assert results["event-1"] == []
         assert len(results["event-2"]) == 1
+
+
+class TestGetInsights:
+    """Tests for the get_insights_for_lead method."""
+
+    @pytest.mark.asyncio
+    async def test_get_insights_for_lead(self):
+        """Test retrieving all insights for a lead."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "insight-1",
+                "lead_memory_id": "lead-456",
+                "insight_type": "objection",
+                "content": "Timeline concerns",
+                "confidence": 0.85,
+                "source_event_id": "event-1",
+                "detected_at": "2025-02-03T14:00:00+00:00",
+                "addressed_at": None,
+                "addressed_by": None,
+            },
+            {
+                "id": "insight-2",
+                "lead_memory_id": "lead-456",
+                "insight_type": "buying_signal",
+                "content": "Positive response",
+                "confidence": 0.90,
+                "source_event_id": "event-2",
+                "detected_at": "2025-02-03T15:00:00+00:00",
+                "addressed_at": "2025-02-04T10:00:00+00:00",
+                "addressed_by": "user-123",
+            },
+        ]
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+        mock_client.table.return_value.select.return_value = mock_query
+
+        insights = await service.get_insights_for_lead(
+            user_id="user-123",
+            lead_memory_id="lead-456",
+        )
+
+        assert len(insights) == 2
+        assert insights[0].insight_type == InsightType.OBJECTION
+        assert insights[1].insight_type == InsightType.BUYING_SIGNAL
+        assert insights[1].addressed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_get_insights_for_lead_filtered_by_type(self):
+        """Test retrieving insights filtered by type."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "insight-1",
+                "lead_memory_id": "lead-456",
+                "insight_type": "objection",
+                "content": "Timeline concerns",
+                "confidence": 0.85,
+                "source_event_id": "event-1",
+                "detected_at": "2025-02-03T14:00:00+00:00",
+                "addressed_at": None,
+                "addressed_by": None,
+            },
+        ]
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+        mock_client.table.return_value.select.return_value = mock_query
+
+        insights = await service.get_insights_for_lead(
+            user_id="user-123",
+            lead_memory_id="lead-456",
+            insight_type=InsightType.OBJECTION,
+        )
+
+        assert len(insights) == 1
+        assert insights[0].insight_type == InsightType.OBJECTION
+
+    @pytest.mark.asyncio
+    async def test_get_insights_for_lead_unaddressed_only(self):
+        """Test retrieving only unaddressed insights."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "insight-1",
+                "lead_memory_id": "lead-456",
+                "insight_type": "risk",
+                "content": "Budget freeze",
+                "confidence": 0.75,
+                "source_event_id": "event-1",
+                "detected_at": "2025-02-03T14:00:00+00:00",
+                "addressed_at": None,
+                "addressed_by": None,
+            },
+        ]
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.is_.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+        mock_client.table.return_value.select.return_value = mock_query
+
+        insights = await service.get_insights_for_lead(
+            user_id="user-123",
+            lead_memory_id="lead-456",
+            unaddressed_only=True,
+        )
+
+        assert len(insights) == 1
+        assert insights[0].addressed_at is None
+
+    @pytest.mark.asyncio
+    async def test_get_insights_for_lead_empty_result(self):
+        """Test retrieving insights when none exist."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = []
+
+        mock_query = MagicMock()
+        mock_query.eq.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+        mock_client.table.return_value.select.return_value = mock_query
+
+        insights = await service.get_insights_for_lead(
+            user_id="user-123",
+            lead_memory_id="lead-456",
+        )
+
+        assert insights == []
