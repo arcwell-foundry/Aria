@@ -67,6 +67,63 @@ export interface ExportResult {
   content_type: string;
 }
 
+// Stakeholder types
+export type StakeholderRole = "decision_maker" | "influencer" | "champion" | "blocker" | "user";
+export type Sentiment = "positive" | "neutral" | "negative" | "unknown";
+
+export interface Stakeholder {
+  id: string;
+  lead_memory_id: string;
+  contact_email: string;
+  contact_name: string | null;
+  title: string | null;
+  role: StakeholderRole | null;
+  influence_level: number;
+  sentiment: Sentiment;
+  last_contacted_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface StakeholderCreate {
+  contact_email: string;
+  contact_name?: string;
+  title?: string;
+  role?: StakeholderRole;
+  influence_level?: number;
+  sentiment?: Sentiment;
+  notes?: string;
+}
+
+export interface StakeholderUpdate {
+  contact_name?: string;
+  title?: string;
+  role?: StakeholderRole;
+  influence_level?: number;
+  sentiment?: Sentiment;
+  notes?: string;
+}
+
+// Insight types
+export type InsightType = "objection" | "buying_signal" | "commitment" | "risk" | "opportunity";
+
+export interface Insight {
+  id: string;
+  lead_memory_id: string;
+  insight_type: InsightType;
+  content: string;
+  confidence: number;
+  source_event_id: string | null;
+  detected_at: string;
+  addressed_at: string | null;
+}
+
+// Stage transition
+export interface StageTransition {
+  new_stage: LifecycleStage;
+  reason?: string;
+}
+
 // API functions
 export async function listLeads(filters?: LeadFilters): Promise<Lead[]> {
   const params = new URLSearchParams();
@@ -120,4 +177,65 @@ export function downloadCsv(result: ExportResult): void {
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+}
+
+// Get lead timeline (events)
+export async function getLeadTimeline(leadId: string): Promise<LeadEvent[]> {
+  const response = await apiClient.get<LeadEvent[]>(`/leads/${leadId}/timeline`);
+  return response.data;
+}
+
+// Add event to lead
+export async function addLeadEvent(
+  leadId: string,
+  event: Omit<LeadEvent, "id" | "lead_memory_id" | "created_at">
+): Promise<LeadEvent> {
+  const response = await apiClient.post<LeadEvent>(`/leads/${leadId}/events`, event);
+  return response.data;
+}
+
+// Get lead stakeholders
+export async function getLeadStakeholders(leadId: string): Promise<Stakeholder[]> {
+  const response = await apiClient.get<Stakeholder[]>(`/leads/${leadId}/stakeholders`);
+  return response.data;
+}
+
+// Add stakeholder
+export async function addStakeholder(
+  leadId: string,
+  stakeholder: StakeholderCreate
+): Promise<Stakeholder> {
+  const response = await apiClient.post<Stakeholder>(
+    `/leads/${leadId}/stakeholders`,
+    stakeholder
+  );
+  return response.data;
+}
+
+// Update stakeholder
+export async function updateStakeholder(
+  leadId: string,
+  stakeholderId: string,
+  updates: StakeholderUpdate
+): Promise<Stakeholder> {
+  const response = await apiClient.patch<Stakeholder>(
+    `/leads/${leadId}/stakeholders/${stakeholderId}`,
+    updates
+  );
+  return response.data;
+}
+
+// Get lead insights
+export async function getLeadInsights(leadId: string): Promise<Insight[]> {
+  const response = await apiClient.get<Insight[]>(`/leads/${leadId}/insights`);
+  return response.data;
+}
+
+// Transition lead stage
+export async function transitionLeadStage(
+  leadId: string,
+  transition: StageTransition
+): Promise<Lead> {
+  const response = await apiClient.post<Lead>(`/leads/${leadId}/transition`, transition);
+  return response.data;
 }
