@@ -720,6 +720,36 @@ class TestGetInsights:
             assert response.status_code == 404
 
 
+class TestContributionTypeEnum:
+    """Tests for ContributionType enum."""
+
+    def test_contribution_type_enum_exists(self) -> None:
+        """Test that ContributionType enum has all required values."""
+        from src.models.lead_memory import ContributionType
+
+        assert hasattr(ContributionType, "EVENT")
+        assert ContributionType.EVENT.value == "event"
+        assert hasattr(ContributionType, "NOTE")
+        assert ContributionType.NOTE.value == "note"
+        assert hasattr(ContributionType, "INSIGHT")
+        assert ContributionType.INSIGHT.value == "insight"
+
+
+class TestContributionStatusEnum:
+    """Tests for ContributionStatus enum."""
+
+    def test_contribution_status_enum_exists(self) -> None:
+        """Test that ContributionStatus enum has all required values."""
+        from src.models.lead_memory import ContributionStatus
+
+        assert hasattr(ContributionStatus, "PENDING")
+        assert ContributionStatus.PENDING.value == "pending"
+        assert hasattr(ContributionStatus, "MERGED")
+        assert ContributionStatus.MERGED.value == "merged"
+        assert hasattr(ContributionStatus, "REJECTED")
+        assert ContributionStatus.REJECTED.value == "rejected"
+
+
 class TestTransitionStage:
     """Tests for POST /api/v1/leads/{lead_id}/transition endpoint."""
 

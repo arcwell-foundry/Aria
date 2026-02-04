@@ -54,6 +54,18 @@ class InsightType(str, Enum):
     OPPORTUNITY = "opportunity"
 
 
+class ContributionType(str, Enum):
+    EVENT = "event"
+    NOTE = "note"
+    INSIGHT = "insight"
+
+
+class ContributionStatus(str, Enum):
+    PENDING = "pending"
+    MERGED = "merged"
+    REJECTED = "rejected"
+
+
 # Lead Memory Models
 class LeadMemoryCreate(BaseModel):
     company_name: str
