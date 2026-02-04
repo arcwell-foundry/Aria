@@ -12,11 +12,16 @@ and integration with the CRM sync system.
 """
 
 import logging
+import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
+
+from src.core.exceptions import LeadMemoryError
+from src.db.supabase import SupabaseClient
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 logger = logging.getLogger(__name__)
 
@@ -147,3 +152,143 @@ class LeadMemory:
             if isinstance(data["updated_at"], str)
             else data["updated_at"],
         )
+
+
+class LeadMemoryService:
+    """Service class for lead memory operations.
+
+    Provides async interface for storing, retrieving, and managing
+    lead memories. Uses Supabase as the underlying storage for
+    structured querying and CRM integration.
+    """
+
+    def _get_supabase_client(self) -> Any:
+        """Get the Supabase client instance.
+
+        Returns:
+            Initialized Supabase client.
+
+        Raises:
+            LeadMemoryError: If client initialization fails.
+        """
+        try:
+            return SupabaseClient.get_client()
+        except Exception as e:
+            raise LeadMemoryError(f"Failed to get Supabase client: {e}") from e
+
+    async def create(
+        self,
+        user_id: str,
+        company_name: str,
+        trigger: TriggerType,
+        company_id: str | None = None,
+        crm_id: str | None = None,
+        crm_provider: str | None = None,
+        expected_close_date: date | None = None,
+        expected_value: Decimal | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LeadMemory:
+        """Create a new lead in memory.
+
+        Args:
+            user_id: The user creating the lead.
+            company_name: Name of the company/lead.
+            trigger: Source that triggered lead creation.
+            company_id: Optional company UUID reference.
+            crm_id: Optional external CRM record ID.
+            crm_provider: Optional CRM provider (salesforce, hubspot).
+            expected_close_date: Optional expected close date.
+            expected_value: Optional expected deal value.
+            tags: Optional list of tags.
+            metadata: Optional additional metadata.
+
+        Returns:
+            The created LeadMemory instance.
+
+        Raises:
+            LeadMemoryError: If creation fails.
+        """
+        try:
+            lead_id = str(uuid.uuid4())
+            now = datetime.now(UTC)
+
+            # Create lead with defaults
+            lead = LeadMemory(
+                id=lead_id,
+                user_id=user_id,
+                company_id=company_id,
+                company_name=company_name,
+                lifecycle_stage=LifecycleStage.LEAD,
+                status=LeadStatus.ACTIVE,
+                health_score=50,  # Default health score
+                trigger=trigger,
+                crm_id=crm_id,
+                crm_provider=crm_provider,
+                first_touch_at=now,
+                last_activity_at=now,
+                expected_close_date=expected_close_date,
+                expected_value=expected_value,
+                tags=tags or [],
+                metadata=metadata or {},
+                created_at=now,
+                updated_at=now,
+            )
+
+            # Prepare data for database
+            data = {
+                "id": lead.id,
+                "user_id": lead.user_id,
+                "company_id": lead.company_id,
+                "company_name": lead.company_name,
+                "lifecycle_stage": lead.lifecycle_stage.value,
+                "status": lead.status.value,
+                "health_score": lead.health_score,
+                "crm_id": lead.crm_id,
+                "crm_provider": lead.crm_provider,
+                "first_touch_at": lead.first_touch_at.isoformat(),
+                "last_activity_at": lead.last_activity_at.isoformat(),
+                "expected_close_date": lead.expected_close_date.isoformat()
+                if lead.expected_close_date
+                else None,
+                "expected_value": float(lead.expected_value) if lead.expected_value else None,
+                "tags": lead.tags,
+                "metadata": {
+                    **lead.metadata,
+                    "trigger": trigger.value,
+                },
+            }
+
+            client = self._get_supabase_client()
+            response = client.table("lead_memories").insert(data).execute()
+
+            if not response.data or len(response.data) == 0:
+                raise LeadMemoryError("Failed to insert lead")
+
+            logger.info(
+                "Created lead",
+                extra={
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "company_name": company_name,
+                    "trigger": trigger.value,
+                },
+            )
+
+            # Audit log the creation
+            await log_memory_operation(
+                user_id=user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.LEAD,
+                memory_id=lead_id,
+                metadata={"company_name": company_name, "trigger": trigger.value},
+                suppress_errors=True,
+            )
+
+            return lead
+
+        except LeadMemoryError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to create lead")
+            raise LeadMemoryError(f"Failed to create lead: {e}") from e

@@ -2,6 +2,9 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestLifecycleStageEnum:
@@ -189,3 +192,106 @@ class TestLeadMemoryDataclass:
         assert lead.trigger == TriggerType.CRM_IMPORT
         assert lead.crm_id == "sf-opp-123"
         assert lead.expected_value == Decimal("100000.00")
+
+
+class TestLeadMemoryServiceCreate:
+    """Tests for LeadMemoryService.create()."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "generated-uuid"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_create_lead_with_minimal_fields(self, mock_supabase: MagicMock) -> None:
+        """Test creating a lead with only required fields."""
+        from src.memory.lead_memory import LeadMemoryService, TriggerType
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                lead = await service.create(
+                    user_id="user-123",
+                    company_name="Acme Corp",
+                    trigger=TriggerType.MANUAL,
+                )
+
+        assert lead.user_id == "user-123"
+        assert lead.company_name == "Acme Corp"
+        assert lead.trigger == TriggerType.MANUAL
+        assert lead.lifecycle_stage.value == "lead"
+        assert lead.status.value == "active"
+        assert lead.health_score == 50  # Default health score
+
+    @pytest.mark.asyncio
+    async def test_create_lead_with_all_fields(self, mock_supabase: MagicMock) -> None:
+        """Test creating a lead with all optional fields."""
+        from datetime import date
+        from decimal import Decimal
+        from src.memory.lead_memory import LeadMemoryService, TriggerType
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                lead = await service.create(
+                    user_id="user-123",
+                    company_name="Enterprise Inc",
+                    trigger=TriggerType.CRM_IMPORT,
+                    company_id="company-456",
+                    crm_id="sf-lead-789",
+                    crm_provider="salesforce",
+                    expected_close_date=date(2025, 6, 30),
+                    expected_value=Decimal("250000.00"),
+                    tags=["enterprise", "healthcare"],
+                    metadata={"source": "conference"},
+                )
+
+        assert lead.company_name == "Enterprise Inc"
+        assert lead.trigger == TriggerType.CRM_IMPORT
+        assert lead.company_id == "company-456"
+        assert lead.crm_id == "sf-lead-789"
+        assert lead.crm_provider == "salesforce"
+        assert lead.expected_value == Decimal("250000.00")
+        assert "enterprise" in lead.tags
+
+    @pytest.mark.asyncio
+    async def test_create_lead_sets_timestamps(self, mock_supabase: MagicMock) -> None:
+        """Test that create sets first_touch_at and last_activity_at."""
+        from src.memory.lead_memory import LeadMemoryService, TriggerType
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            with patch("src.memory.lead_memory.log_memory_operation"):
+                service = LeadMemoryService()
+                lead = await service.create(
+                    user_id="user-123",
+                    company_name="Test Corp",
+                    trigger=TriggerType.INBOUND,
+                )
+
+        assert lead.first_touch_at is not None
+        assert lead.last_activity_at is not None
+        assert lead.created_at is not None
+        assert lead.first_touch_at == lead.last_activity_at
+
+    @pytest.mark.asyncio
+    async def test_create_lead_logs_audit(self, mock_supabase: MagicMock) -> None:
+        """Test that create logs to audit trail."""
+        from src.memory.lead_memory import LeadMemoryService, TriggerType
+
+        with patch("src.memory.lead_memory.SupabaseClient.get_client", return_value=mock_supabase):
+            with patch("src.memory.lead_memory.log_memory_operation") as mock_audit:
+                service = LeadMemoryService()
+                lead = await service.create(
+                    user_id="user-123",
+                    company_name="Test Corp",
+                    trigger=TriggerType.MANUAL,
+                )
+
+                mock_audit.assert_called_once()
+                call_kwargs = mock_audit.call_args.kwargs
+                assert call_kwargs["user_id"] == "user-123"
+                assert call_kwargs["memory_id"] == lead.id
