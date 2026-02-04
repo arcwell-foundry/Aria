@@ -8,8 +8,10 @@ can be merged or rejected by the lead owner.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import UTC
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -244,3 +246,73 @@ class LeadCollaborationService:
         except Exception as e:
             logger.exception("Failed to add contributor")
             raise DatabaseError(f"Failed to add contributor: {e}") from e
+
+    async def submit_contribution(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        contribution_type: ContributionType,
+        contribution_id: str | None = None,
+        content: str | None = None,
+    ) -> str:
+        """Submit a contribution to a lead for owner review.
+
+        Args:
+            user_id: The user submitting the contribution.
+            lead_memory_id: The lead memory ID.
+            contribution_type: Type of contribution (event, note, insight).
+            contribution_id: Optional ID of existing event/note/insight.
+            content: Optional content for note/insight contributions.
+
+        Returns:
+            The ID of the created contribution record.
+
+        Raises:
+            DatabaseError: If submission fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            data = {
+                "id": str(uuid.uuid4()),
+                "lead_memory_id": lead_memory_id,
+                "contributor_id": user_id,
+                "contribution_type": contribution_type.value,
+                "contribution_id": contribution_id,
+                "status": ContributionStatus.PENDING.value,
+                "reviewed_by": None,
+                "reviewed_at": None,
+                "created_at": now.isoformat(),
+            }
+
+            response = client.table("lead_memory_contributions").insert(data).execute()
+
+            if not response.data or len(response.data) == 0:
+                raise DatabaseError("Failed to insert contribution")
+
+            first_record: dict[str, Any] = cast(dict[str, Any], response.data[0])
+            new_contribution_id = cast(str, first_record.get("id"))
+
+            if not new_contribution_id:
+                raise DatabaseError("Failed to insert contribution")
+
+            logger.info(
+                "Contribution submitted",
+                extra={
+                    "contribution_id": new_contribution_id,
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "contribution_type": contribution_type.value,
+                },
+            )
+
+            return new_contribution_id
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to submit contribution")
+            raise DatabaseError(f"Failed to submit contribution: {e}") from e

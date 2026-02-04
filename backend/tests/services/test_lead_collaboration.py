@@ -432,3 +432,128 @@ class TestAddContributor:
             )
 
         assert "Custom database error" in str(exc_info.value)
+
+
+class TestSubmitContribution:
+    """Tests for the submit_contribution method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_note_contribution(self, mock_get_client):
+        """Test submitting a note contribution."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "cntrb_123", "lead_memory_id": "lead_456"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.submit_contribution(
+            user_id="user_789",
+            lead_memory_id="lead_456",
+            contribution_type=ContributionType.NOTE,
+            contribution_id=None,
+            content="This is a note contribution",
+        )
+
+        assert result == "cntrb_123"
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        insert_call = mock_client.table.return_value.insert
+        assert insert_call.called
+        inserted_data = insert_call.call_args[0][0]
+        assert inserted_data["lead_memory_id"] == "lead_456"
+        assert inserted_data["contributor_id"] == "user_789"
+        assert inserted_data["contribution_type"] == "note"
+        assert inserted_data["status"] == "pending"
+        assert inserted_data["contribution_id"] is None
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_event_contribution_with_id(self, mock_get_client):
+        """Test submitting an event contribution with a contribution_id."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "cntrb_456", "lead_memory_id": "lead_789"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.submit_contribution(
+            user_id="user_123",
+            lead_memory_id="lead_789",
+            contribution_type=ContributionType.EVENT,
+            contribution_id="event_abc",
+        )
+
+        assert result == "cntrb_456"
+        insert_call = mock_client.table.return_value.insert
+        inserted_data = insert_call.call_args[0][0]
+        assert inserted_data["lead_memory_id"] == "lead_789"
+        assert inserted_data["contributor_id"] == "user_123"
+        assert inserted_data["contribution_type"] == "event"
+        assert inserted_data["contribution_id"] == "event_abc"
+        assert inserted_data["status"] == "pending"
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_handles_database_error(self, mock_get_client):
+        """Test that submit_contribution raises DatabaseError on database failure."""
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Database connection failed")
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.submit_contribution(
+                user_id="user_123",
+                lead_memory_id="lead_456",
+                contribution_type=ContributionType.INSIGHT,
+            )
+
+        assert "Failed to submit contribution" in str(exc_info.value)
+        mock_get_client.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_empty_response_data(self, mock_get_client):
+        """Test that submit_contribution handles empty response data."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.submit_contribution(
+                user_id="user_123",
+                lead_memory_id="lead_456",
+                contribution_type=ContributionType.NOTE,
+            )
+
+        assert "Failed to insert contribution" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_missing_id_in_response(self, mock_get_client):
+        """Test that submit_contribution handles missing id in response."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"lead_memory_id": "lead_456"}]  # Missing id
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.submit_contribution(
+                user_id="user_123",
+                lead_memory_id="lead_456",
+                contribution_type=ContributionType.EVENT,
+            )
+
+        assert "Failed to insert contribution" in str(exc_info.value)
