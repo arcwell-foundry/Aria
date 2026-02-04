@@ -298,7 +298,8 @@ class ProactiveMemoryService:
         Returns:
             List of pattern-matched insights (currently empty)
         """
-        # Placeholder - to be implemented with Graphiti integration
+        # TODO: Implement Graphiti integration to query episodic/semantic memories
+        # matching current conversation topics (Phase 8 AGI Companion)
         _ = user_id, current_message, conversation_messages
         return []
 
@@ -319,7 +320,8 @@ class ProactiveMemoryService:
         Returns:
             List of temporal trigger insights (currently empty)
         """
-        # Placeholder - to be implemented in future task
+        # TODO: Implement temporal trigger detection for deadlines,
+        # anniversaries, and scheduled follow-ups (Phase 8 AGI Companion)
         _ = user_id
         return []
 
@@ -342,7 +344,8 @@ class ProactiveMemoryService:
         Returns:
             List of goal-relevant insights (currently empty)
         """
-        # Placeholder - to be implemented in future task
+        # TODO: Implement goal relevance matching - query active goals and
+        # find memories that could help achieve them (Phase 8 AGI Companion)
         _ = user_id, current_message
         return []
 
