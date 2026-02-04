@@ -63,11 +63,11 @@ class TestGetLead:
         assert response.status_code == 401
 
 
-class TestAddNote:
+class TestAddEvent:
     """Tests for POST /api/v1/leads/{lead_id}/notes endpoint."""
 
-    def test_add_note_requires_auth(self) -> None:
-        """Test that adding a note requires authentication."""
+    def test_add_event_requires_auth(self) -> None:
+        """Test that adding an event requires authentication."""
         app = create_test_app()
         client = TestClient(app)
         response = client.post(
@@ -79,6 +79,217 @@ class TestAddNote:
             },
         )
         assert response.status_code == 401
+
+    def test_add_event_success(self, test_client: TestClient) -> None:
+        """Test successfully adding an event."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import EventType
+
+        mock_event = LeadEvent(
+            id="event-123",
+            lead_memory_id="lead-456",
+            event_type=EventType.NOTE,
+            direction=None,
+            subject=None,
+            content="Test note content",
+            participants=[],
+            occurred_at=datetime.now(UTC),
+            source="manual",
+            source_id=None,
+            created_at=datetime.now(UTC),
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch("src.memory.lead_memory_events.LeadEventService") as mock_event_service,
+        ):
+            # Mock lead verification
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            # Mock SupabaseClient.get_client()
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            # Mock event creation
+            mock_event_instance = mock_event_service.return_value
+            mock_event_instance.add_event = AsyncMock(return_value="event-123")
+            mock_event_instance.get_timeline = AsyncMock(return_value=[mock_event])
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/notes",
+                json={
+                    "event_type": "note",
+                    "content": "Test note content",
+                    "occurred_at": "2025-01-01T00:00:00Z",
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["id"] == "event-123"
+            assert data["content"] == "Test note content"
+
+    def test_add_event_lead_not_found(self, test_client: TestClient) -> None:
+        """Test adding event to non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.post(
+                "/api/v1/leads/lead-999/notes",
+                json={
+                    "event_type": "note",
+                    "content": "Test",
+                    "occurred_at": "2025-01-01T00:00:00Z",
+                },
+            )
+
+            assert response.status_code == 404
+
+    def test_add_event_with_email_sent(self, test_client: TestClient) -> None:
+        """Test adding an email_sent event with all fields."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import Direction, EventType
+
+        mock_event = LeadEvent(
+            id="event-456",
+            lead_memory_id="lead-789",
+            event_type=EventType.EMAIL_SENT,
+            direction=Direction.OUTBOUND,
+            subject="Follow up on proposal",
+            content="Hi John, checking in on the proposal...",
+            participants=["john@example.com", "jane@example.com"],
+            occurred_at=datetime.now(UTC),
+            source="gmail",
+            source_id="gmail-msg-123",
+            created_at=datetime.now(UTC),
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch("src.memory.lead_memory_events.LeadEventService") as mock_event_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            # Mock SupabaseClient.get_client()
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_event_instance = mock_event_service.return_value
+            mock_event_instance.add_event = AsyncMock(return_value="event-456")
+            mock_event_instance.get_timeline = AsyncMock(return_value=[mock_event])
+
+            response = test_client.post(
+                "/api/v1/leads/lead-789/notes",
+                json={
+                    "event_type": "email_sent",
+                    "direction": "outbound",
+                    "subject": "Follow up on proposal",
+                    "content": "Hi John, checking in on the proposal...",
+                    "participants": ["john@example.com", "jane@example.com"],
+                    "occurred_at": "2025-01-15T10:30:00Z",
+                    "source": "gmail",
+                    "source_id": "gmail-msg-123",
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["id"] == "event-456"
+            assert data["event_type"] == "email_sent"
+            assert data["direction"] == "outbound"
+            assert data["subject"] == "Follow up on proposal"
+            assert len(data["participants"]) == 2
+
+    def test_add_event_with_meeting(self, test_client: TestClient) -> None:
+        """Test adding a meeting event."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import EventType
+
+        mock_event = LeadEvent(
+            id="event-789",
+            lead_memory_id="lead-101",
+            event_type=EventType.MEETING,
+            direction=None,
+            subject="Product Demo",
+            content="Discussed key features and pricing",
+            participants=["cto@example.com", "ceo@example.com"],
+            occurred_at=datetime.now(UTC),
+            source="calendar",
+            source_id="cal-event-456",
+            created_at=datetime.now(UTC),
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch("src.memory.lead_memory_events.LeadEventService") as mock_event_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            # Mock SupabaseClient.get_client()
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_event_instance = mock_event_service.return_value
+            mock_event_instance.add_event = AsyncMock(return_value="event-789")
+            mock_event_instance.get_timeline = AsyncMock(return_value=[mock_event])
+
+            response = test_client.post(
+                "/api/v1/leads/lead-101/notes",
+                json={
+                    "event_type": "meeting",
+                    "subject": "Product Demo",
+                    "content": "Discussed key features and pricing",
+                    "participants": ["cto@example.com", "ceo@example.com"],
+                    "occurred_at": "2025-01-20T14:00:00Z",
+                    "source": "calendar",
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["id"] == "event-789"
+            assert data["event_type"] == "meeting"
+            assert data["subject"] == "Product Demo"
+
+    def test_add_event_validation_error(self, test_client: TestClient) -> None:
+        """Test validation error when required fields are missing."""
+        response = test_client.post(
+            "/api/v1/leads/lead-123/notes",
+            json={
+                "event_type": "note",
+                # Missing occurred_at which is required
+            },
+        )
+        assert response.status_code == 422
+
+    def test_add_event_invalid_event_type(self, test_client: TestClient) -> None:
+        """Test validation error with invalid event type."""
+        response = test_client.post(
+            "/api/v1/leads/lead-123/notes",
+            json={
+                "event_type": "invalid_type",
+                "content": "Test",
+                "occurred_at": "2025-01-01T00:00:00Z",
+            },
+        )
+        assert response.status_code == 422
 
 
 class TestExportLeads:
@@ -280,9 +491,7 @@ class TestUpdateLead:
 
             assert response.status_code == 404
 
-    def test_update_lead_with_lifecycle_stage_and_status(
-        self, test_client: TestClient
-    ) -> None:
+    def test_update_lead_with_lifecycle_stage_and_status(self, test_client: TestClient) -> None:
         """Test updating lifecycle_stage and status fields."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock, patch
