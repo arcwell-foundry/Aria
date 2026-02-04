@@ -253,3 +253,72 @@ class TestConversationIntelligenceService:
         assert "risks" in prompt.lower()
         assert "opportunities" in prompt.lower()
         assert "JSON" in prompt
+
+    def test_parse_llm_response_valid(self):
+        """Test parsing valid LLM JSON response."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        llm_response = """[
+            {"type": "objection", "content": "Timeline concerns", "confidence": 0.85},
+            {"type": "buying_signal", "content": "Asked about pricing", "confidence": 0.75}
+        ]"""
+
+        insights = service._parse_llm_response(llm_response)
+
+        assert len(insights) == 2
+        assert insights[0]["type"] == "objection"
+        assert insights[0]["content"] == "Timeline concerns"
+        assert insights[0]["confidence"] == 0.85
+        assert insights[1]["type"] == "buying_signal"
+
+    def test_parse_llm_response_empty_array(self):
+        """Test parsing empty array response."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        llm_response = "[]"
+        insights = service._parse_llm_response(llm_response)
+
+        assert insights == []
+
+    def test_parse_llm_response_with_markdown(self):
+        """Test parsing response wrapped in markdown code block."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        llm_response = """```json
+[{"type": "risk", "content": "Budget freeze", "confidence": 0.70}]
+```"""
+
+        insights = service._parse_llm_response(llm_response)
+
+        assert len(insights) == 1
+        assert insights[0]["type"] == "risk"
+
+    def test_parse_llm_response_invalid_json(self):
+        """Test parsing invalid JSON returns empty list."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        llm_response = "This is not valid JSON"
+        insights = service._parse_llm_response(llm_response)
+
+        assert insights == []
+
+    def test_parse_llm_response_filters_invalid_types(self):
+        """Test that invalid insight types are filtered out."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        llm_response = """[
+            {"type": "objection", "content": "Valid", "confidence": 0.85},
+            {"type": "invalid_type", "content": "Invalid", "confidence": 0.75},
+            {"type": "commitment", "content": "Also valid", "confidence": 0.80}
+        ]"""
+
+        insights = service._parse_llm_response(llm_response)
+
+        assert len(insights) == 2
+        assert insights[0]["type"] == "objection"
+        assert insights[1]["type"] == "commitment"

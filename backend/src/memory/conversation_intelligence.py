@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -146,6 +147,9 @@ class ConversationIntelligence:
     to their source events.
     """
 
+    # Valid insight types (must match InsightType enum values)
+    VALID_INSIGHT_TYPES = {"objection", "buying_signal", "commitment", "risk", "opportunity"}
+
     def __init__(self, db_client: Client) -> None:
         """Initialize the conversation intelligence service.
 
@@ -201,3 +205,55 @@ Important:
 - Keep content descriptions concise but specific
 
 Respond with ONLY the JSON array, no additional text."""
+
+    def _parse_llm_response(self, response: str) -> list[dict[str, Any]]:
+        """Parse the LLM response JSON into insight dictionaries.
+
+        Handles common LLM response formatting issues like markdown
+        code blocks and validates insight types.
+
+        Args:
+            response: Raw LLM response string.
+
+        Returns:
+            List of validated insight dictionaries.
+        """
+        # Strip markdown code blocks if present
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            # Remove opening ```json or ``` and closing ```
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines)
+
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse LLM response as JSON",
+                extra={"response": response[:200]},
+            )
+            return []
+
+        if not isinstance(parsed, list):
+            logger.warning(
+                "LLM response is not a list",
+                extra={"response_type": type(parsed).__name__},
+            )
+            return []
+
+        # Filter to valid insight types
+        valid_insights = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            insight_type = item.get("type")
+            if insight_type not in self.VALID_INSIGHT_TYPES:
+                logger.debug("Skipping invalid insight type", extra={"type": insight_type})
+                continue
+            valid_insights.append(item)
+
+        return valid_insights
