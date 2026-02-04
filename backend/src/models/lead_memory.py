@@ -26,6 +26,11 @@ class EventType(str, Enum):
     SIGNAL = "signal"
 
 
+class Direction(str, Enum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+
 class StakeholderRole(str, Enum):
     DECISION_MAKER = "decision_maker"
     INFLUENCER = "influencer"
@@ -92,7 +97,7 @@ class LeadMemoryResponse(BaseModel):
 # Event Models
 class LeadEventCreate(BaseModel):
     event_type: EventType
-    direction: str | None = None
+    direction: Direction | None = None
     subject: str | None = None
     content: str | None = None
     participants: list[str] = []
@@ -105,7 +110,7 @@ class LeadEventResponse(BaseModel):
     id: str
     lead_memory_id: str
     event_type: EventType
-    direction: str | None
+    direction: Direction | None
     subject: str | None
     content: str | None
     participants: list[str]

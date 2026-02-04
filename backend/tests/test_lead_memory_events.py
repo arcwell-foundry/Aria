@@ -13,12 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.exceptions import DatabaseError
-from src.memory.lead_memory_events import (
-    Direction,
-    EventType,
-    LeadEvent,
-    LeadEventService,
-)
+from src.memory.lead_memory_events import LeadEvent, LeadEventService
+from src.models.lead_memory import Direction, EventType
 
 
 class TestEventTypeEnum:

@@ -11,31 +11,14 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from supabase import Client
 
+from src.models.lead_memory import Direction, EventType
+
 logger = logging.getLogger(__name__)
-
-
-class EventType(str, Enum):
-    """Types of events that can occur on a lead."""
-
-    EMAIL_SENT = "email_sent"
-    EMAIL_RECEIVED = "email_received"
-    MEETING = "meeting"
-    CALL = "call"
-    NOTE = "note"
-    SIGNAL = "signal"
-
-
-class Direction(str, Enum):
-    """Direction of communication for bidirectional events."""
-
-    INBOUND = "inbound"
-    OUTBOUND = "outbound"
 
 
 @dataclass
