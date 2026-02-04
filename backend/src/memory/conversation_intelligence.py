@@ -358,6 +358,63 @@ Respond with ONLY the JSON array, no additional text."""
             logger.exception("Failed to store insights")
             raise DatabaseError(f"Failed to store insights: {e}") from e
 
+    async def analyze_batch(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        events: list[LeadEvent],
+    ) -> dict[str, list[Insight]]:
+        """Analyze multiple lead events for retroactive insight extraction.
+
+        Processes events sequentially, continuing even if individual events
+        fail. This is useful for backfilling insights on historical data.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            events: List of LeadEvents to analyze.
+
+        Returns:
+            Dictionary mapping event IDs to their extracted insights.
+            Events that fail analysis will have empty lists.
+        """
+        if not events:
+            return {}
+
+        results: dict[str, list[Insight]] = {}
+
+        for event in events:
+            try:
+                insights = await self.analyze_event(
+                    user_id=user_id,
+                    lead_memory_id=lead_memory_id,
+                    event=event,
+                )
+                results[event.id] = insights
+            except Exception as e:
+                logger.warning(
+                    "Failed to analyze event in batch",
+                    extra={
+                        "user_id": user_id,
+                        "lead_memory_id": lead_memory_id,
+                        "event_id": event.id,
+                        "error": str(e),
+                    },
+                )
+                results[event.id] = []
+
+        logger.info(
+            "Completed batch analysis",
+            extra={
+                "user_id": user_id,
+                "lead_memory_id": lead_memory_id,
+                "event_count": len(events),
+                "total_insights": sum(len(insights) for insights in results.values()),
+            },
+        )
+
+        return results
+
     async def mark_addressed(
         self,
         user_id: str,

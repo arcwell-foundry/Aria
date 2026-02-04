@@ -502,3 +502,144 @@ class TestMarkAddressed:
         )
 
         assert result is False
+
+
+class TestBatchAnalysis:
+    """Tests for the analyze_batch method."""
+
+    @pytest.mark.asyncio
+    async def test_analyze_batch_multiple_events(self):
+        """Test batch analysis of multiple events."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import Direction, EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        events = [
+            LeadEvent(
+                id="event-1",
+                lead_memory_id="lead-456",
+                event_type=EventType.EMAIL_SENT,
+                direction=Direction.OUTBOUND,
+                subject="Proposal",
+                content="Here's our proposal for your review.",
+                participants=["john@acme.com"],
+                occurred_at=datetime(2025, 2, 1, 10, 0, tzinfo=UTC),
+                source="gmail",
+                source_id="msg-1",
+                created_at=datetime(2025, 2, 1, 10, 0, tzinfo=UTC),
+            ),
+            LeadEvent(
+                id="event-2",
+                lead_memory_id="lead-456",
+                event_type=EventType.EMAIL_RECEIVED,
+                direction=Direction.INBOUND,
+                subject="Re: Proposal",
+                content="Looks good! But we need to discuss pricing.",
+                participants=["john@acme.com"],
+                occurred_at=datetime(2025, 2, 2, 14, 0, tzinfo=UTC),
+                source="gmail",
+                source_id="msg-2",
+                created_at=datetime(2025, 2, 2, 14, 0, tzinfo=UTC),
+            ),
+        ]
+
+        # Mock LLM to return different insights for each event
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.side_effect = [
+            "[]",  # No insights for first event
+            '[{"type": "buying_signal", "content": "Positive response", "confidence": 0.85}]',
+        ]
+
+        # Mock database insert
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "insight-1", "detected_at": "2025-02-02T14:00:00+00:00"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.conversation_intelligence.LLMClient", return_value=mock_llm):
+            results = await service.analyze_batch(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                events=events,
+            )
+
+        assert len(results) == 2
+        assert len(results["event-1"]) == 0
+        assert len(results["event-2"]) == 1
+        assert results["event-2"][0].insight_type == InsightType.BUYING_SIGNAL
+
+    @pytest.mark.asyncio
+    async def test_analyze_batch_empty_events(self):
+        """Test batch analysis with no events."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        results = await service.analyze_batch(
+            user_id="user-123",
+            lead_memory_id="lead-456",
+            events=[],
+        )
+
+        assert results == {}
+
+    @pytest.mark.asyncio
+    async def test_analyze_batch_continues_on_error(self):
+        """Test that batch analysis continues even if one event fails."""
+        from src.memory.lead_memory_events import LeadEvent
+        from src.models.lead_memory import EventType
+
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        events = [
+            LeadEvent(
+                id="event-1",
+                lead_memory_id="lead-456",
+                event_type=EventType.NOTE,
+                direction=None,
+                subject=None,
+                content="First note",
+                participants=[],
+                occurred_at=datetime(2025, 2, 1, 10, 0, tzinfo=UTC),
+                source=None,
+                source_id=None,
+                created_at=datetime(2025, 2, 1, 10, 0, tzinfo=UTC),
+            ),
+            LeadEvent(
+                id="event-2",
+                lead_memory_id="lead-456",
+                event_type=EventType.NOTE,
+                direction=None,
+                subject=None,
+                content="Second note with commitment",
+                participants=[],
+                occurred_at=datetime(2025, 2, 2, 10, 0, tzinfo=UTC),
+                source=None,
+                source_id=None,
+                created_at=datetime(2025, 2, 2, 10, 0, tzinfo=UTC),
+            ),
+        ]
+
+        # First call fails, second succeeds
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.side_effect = [
+            Exception("API error"),
+            '[{"type": "commitment", "content": "Agreed to pilot", "confidence": 0.90}]',
+        ]
+
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "insight-1", "detected_at": "2025-02-02T10:00:00+00:00"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch("src.memory.conversation_intelligence.LLMClient", return_value=mock_llm):
+            results = await service.analyze_batch(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                events=events,
+            )
+
+        # First event should have empty list due to error, second should succeed
+        assert len(results) == 2
+        assert results["event-1"] == []
+        assert len(results["event-2"]) == 1
