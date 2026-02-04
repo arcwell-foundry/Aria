@@ -10,7 +10,8 @@ Handles deduplication and retroactive history scanning.
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from src.memory.lead_memory import LeadMemory, LeadMemoryService, TriggerType
@@ -254,5 +255,63 @@ class LeadTriggerService:
             logger.exception(
                 "Failed to process manual track trigger",
                 extra={"user_id": user_id, "company_name": company_name},
+            )
+            raise
+
+    async def on_crm_import(
+        self,
+        user_id: str,
+        company_name: str,
+        crm_id: str,
+        crm_provider: str,
+        expected_value: Decimal | None = None,
+        expected_close_date: date | None = None,
+    ) -> LeadMemory:
+        """Create lead from CRM import (Salesforce, HubSpot, etc.).
+
+        Args:
+            user_id: The user importing from CRM.
+            company_name: Name of the company from CRM.
+            crm_id: External CRM record ID.
+            crm_provider: CRM provider name (salesforce, hubspot).
+            expected_value: Optional deal value from CRM.
+            expected_close_date: Optional close date from CRM.
+
+        Returns:
+            The created or existing LeadMemory.
+        """
+        try:
+            # Find or create lead with CRM fields
+            lead = await self.find_or_create(
+                user_id=user_id,
+                company_name=company_name,
+                trigger=TriggerType.CRM_IMPORT,
+                crm_id=crm_id,
+                crm_provider=crm_provider,
+                expected_value=expected_value,
+                expected_close_date=expected_close_date,
+            )
+
+            logger.info(
+                "CRM import lead created/found",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead.id,
+                    "company_name": company_name,
+                    "crm_provider": crm_provider,
+                    "crm_id": crm_id,
+                },
+            )
+
+            return lead
+
+        except Exception:
+            logger.exception(
+                "Failed to process CRM import trigger",
+                extra={
+                    "user_id": user_id,
+                    "company_name": company_name,
+                    "crm_provider": crm_provider,
+                },
             )
             raise

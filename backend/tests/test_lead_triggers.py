@@ -1,6 +1,7 @@
 """Tests for LeadTriggerService - lead memory creation from trigger sources."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -356,3 +357,110 @@ class TestOnManualTrack:
         # Should return existing, not create
         assert result.id == "lead-existing"
         mock_lead_service.create.assert_not_called()
+
+
+class TestOnCrmImport:
+    """Tests for on_crm_import trigger."""
+
+    @pytest.mark.asyncio
+    async def test_creates_lead_from_crm_import(self):
+        """Test creating lead from CRM bulk import."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock create response
+        new_lead = LeadMemory(
+            id="lead-crm",
+            user_id="user-abc",
+            company_name="PharmaCo",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.CRM_IMPORT,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            crm_id="sf-0012345678",
+            crm_provider="salesforce",
+            expected_close_date=None,
+            expected_value=Decimal("150000.00"),
+        )
+        mock_lead_service.create = AsyncMock(return_value=new_lead)
+        mock_lead_service.list_by_user = AsyncMock(return_value=[])
+
+        # Call on_crm_import
+        result = await service.on_crm_import(
+            user_id="user-abc",
+            company_name="PharmaCo",
+            crm_id="sf-0012345678",
+            crm_provider="salesforce",
+            expected_value=Decimal("150000.00"),
+            expected_close_date=None,
+        )
+
+        # Verify lead created with CRM fields
+        assert result.id == "lead-crm"
+        mock_lead_service.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bulk_crm_import(self):
+        """Test importing multiple leads from CRM."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock responses for different companies
+        def mock_create_side_effect(*args, **kwargs):
+            company = kwargs.get("company_name", "")
+            return LeadMemory(
+                id=f"lead-{company.lower().replace(' ', '-')}",
+                user_id="user-abc",
+                company_name=company,
+                lifecycle_stage=LifecycleStage.LEAD,
+                status=LeadStatus.ACTIVE,
+                health_score=50,
+                trigger=TriggerType.CRM_IMPORT,
+                first_touch_at=datetime.now(UTC),
+                last_activity_at=datetime.now(UTC),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+        mock_lead_service.create = AsyncMock(side_effect=mock_create_side_effect)
+        mock_lead_service.list_by_user = AsyncMock(return_value=[])
+
+        # Import data
+        import_data = [
+            {"company_name": "Company A", "crm_id": "hub-001", "crm_provider": "hubspot"},
+            {"company_name": "Company B", "crm_id": "hub-002", "crm_provider": "hubspot"},
+            {"company_name": "Company C", "crm_id": "hub-003", "crm_provider": "hubspot"},
+        ]
+
+        # Call on_crm_import for each
+        results = []
+        for data in import_data:
+            lead = await service.on_crm_import(
+                user_id="user-abc",
+                **data,
+            )
+            results.append(lead)
+
+        # Verify all created
+        assert len(results) == 3
+        assert mock_lead_service.create.call_count == 3
