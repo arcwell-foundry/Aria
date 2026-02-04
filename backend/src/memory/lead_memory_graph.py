@@ -795,11 +795,13 @@ class LeadMemoryGraph:
             client = await self._get_graphiti_client()
             cutoff_date = datetime.now(UTC) - timedelta(days=days_inactive)
 
-            search_query = f"lead memory for user {user_id} active status silent inactive no recent activity"
+            search_query = (
+                f"lead memory for user {user_id} active status silent inactive no recent activity"
+            )
             results = await client.search(search_query)
 
             leads = []
-            for edge in results[:limit * 2]:
+            for edge in results[: limit * 2]:
                 lead = self._parse_edge_to_lead(edge, user_id)
                 if (
                     lead
