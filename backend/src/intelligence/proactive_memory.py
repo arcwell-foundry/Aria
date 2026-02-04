@@ -307,23 +307,70 @@ class ProactiveMemoryService:
         self,
         user_id: str,
     ) -> list[ProactiveInsight]:
-        """Find time-based memory triggers.
+        """Find time-based triggers (deadlines, follow-ups).
 
-        Placeholder implementation - will be enhanced to find:
-        - Upcoming deadlines from prospective memory
-        - Anniversaries (e.g., "one year since deal closed")
-        - Scheduled follow-ups
+        Checks prospective memory for upcoming tasks within
+        the next 3 days.
 
         Args:
             user_id: User identifier
 
         Returns:
-            List of temporal trigger insights (currently empty)
+            List of temporal trigger insights
         """
-        # TODO: Implement temporal trigger detection for deadlines,
-        # anniversaries, and scheduled follow-ups (Phase 8 AGI Companion)
-        _ = user_id
-        return []
+        from src.models.proactive_insight import InsightType
+
+        insights: list[ProactiveInsight] = []
+
+        try:
+            now = datetime.now(UTC)
+            three_days = now + timedelta(days=3)
+
+            result = (
+                self._db.table("prospective_tasks")
+                .select("id, task, description, trigger_config, status, priority")
+                .eq("user_id", user_id)
+                .eq("status", "pending")
+                .execute()
+            )
+
+            for task in result.data or []:
+                # Check trigger_config for trigger_date
+                trigger_config = task.get("trigger_config", {})
+                trigger_date_str = trigger_config.get("trigger_date")
+
+                if not trigger_date_str:
+                    continue
+
+                try:
+                    trigger_date = datetime.fromisoformat(
+                        trigger_date_str.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+                if now <= trigger_date <= three_days:
+                    days_until = (trigger_date - now).days
+                    # Higher urgency = higher score
+                    urgency = 1.0 - (days_until / 3.0)
+
+                    insights.append(
+                        ProactiveInsight(
+                            insight_type=InsightType.TEMPORAL,
+                            content=task.get("task", "Upcoming task"),
+                            relevance_score=max(0.6, urgency),
+                            source_memory_id=task["id"],
+                            source_memory_type="prospective",
+                            explanation=f"Due in {days_until} day(s)"
+                            if days_until > 0
+                            else "Due today",
+                        )
+                    )
+
+        except Exception as e:
+            logger.warning("Failed to find temporal triggers: %s", e)
+
+        return insights
 
     def _find_goal_relevant(
         self,

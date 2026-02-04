@@ -488,6 +488,63 @@ class TestPlaceholderMethods:
         assert result == []
 
 
+class TestTemporalTriggers:
+    """Tests for temporal trigger detection."""
+
+    @pytest.fixture
+    def mock_db_with_upcoming_task(self) -> MagicMock:
+        """Mock DB with upcoming prospective task."""
+        from datetime import UTC, datetime, timedelta
+
+        mock = MagicMock()
+        tomorrow = datetime.now(UTC) + timedelta(days=1)
+        mock.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": "task-123",
+                    "task": "Follow up with Dr. Smith",
+                    "description": "Regarding budget proposal",
+                    "trigger_config": {"trigger_date": tomorrow.isoformat()},
+                    "status": "pending",
+                    "priority": "high",
+                }
+            ]
+        )
+        return mock
+
+    def test_finds_upcoming_tasks(self, mock_db_with_upcoming_task: MagicMock) -> None:
+        """Should find tasks due within 3 days."""
+        from src.intelligence.proactive_memory import ProactiveMemoryService
+        from src.models.proactive_insight import InsightType
+
+        service = ProactiveMemoryService(db_client=mock_db_with_upcoming_task)
+
+        insights = service._find_temporal_triggers(user_id="user-123")
+
+        assert len(insights) == 1
+        assert insights[0].insight_type == InsightType.TEMPORAL
+        assert "Follow up" in insights[0].content
+
+    @pytest.fixture
+    def mock_db_no_upcoming(self) -> MagicMock:
+        """Mock DB with no upcoming tasks."""
+        mock = MagicMock()
+        mock.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        return mock
+
+    def test_returns_empty_when_no_upcoming(self, mock_db_no_upcoming: MagicMock) -> None:
+        """Should return empty list when no upcoming tasks."""
+        from src.intelligence.proactive_memory import ProactiveMemoryService
+
+        service = ProactiveMemoryService(db_client=mock_db_no_upcoming)
+
+        insights = service._find_temporal_triggers(user_id="user-123")
+
+        assert insights == []
+
+
 class TestModuleExports:
     """Tests for module-level exports."""
 
