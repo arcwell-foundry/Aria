@@ -273,3 +273,98 @@ async def test_get_lead_raises_not_found() -> None:
         mock_get.return_value = mock_client
         with pytest.raises(LeadMemoryNotFoundError):
             await graph.get_lead(user_id="user-456", lead_id="nonexistent")
+
+
+# --- add_communication tests ---
+
+
+@pytest.mark.asyncio
+async def test_add_communication_stores_event() -> None:
+    """Test add_communication stores communication event with HAS_COMMUNICATION relationship."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    now = datetime.now(UTC)
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="comm-uuid"))
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await graph.add_communication(
+            lead_id="lead-123",
+            event_type="email",
+            content="Discussed pricing options for enterprise tier",
+            occurred_at=now,
+            participants=["john@acme.com", "sarah@techco.com"],
+        )
+
+        mock_client.add_episode.assert_called_once()
+        call_args = mock_client.add_episode.call_args
+        episode_body = call_args.kwargs.get("episode_body", "")
+        assert "HAS_COMMUNICATION: lead-123" in episode_body
+        assert "Event Type: email" in episode_body
+        assert "pricing" in episode_body
+
+
+# --- add_contact tests ---
+
+
+@pytest.mark.asyncio
+async def test_add_contact_stores_stakeholder() -> None:
+    """Test add_contact stores contact with HAS_CONTACT relationship."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="contact-uuid"))
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await graph.add_contact(
+            lead_id="lead-123",
+            contact_email="john.smith@acme.com",
+            contact_name="John Smith",
+            role="decision_maker",
+            influence_level=9,
+        )
+
+        mock_client.add_episode.assert_called_once()
+        call_args = mock_client.add_episode.call_args
+        episode_body = call_args.kwargs.get("episode_body", "")
+        assert "HAS_CONTACT: lead-123" in episode_body
+        assert "Contact: john.smith@acme.com" in episode_body
+        assert "Role: decision_maker" in episode_body
+        assert "Influence: 9" in episode_body
+
+
+# --- add_signal tests ---
+
+
+@pytest.mark.asyncio
+async def test_add_signal_stores_insight() -> None:
+    """Test add_signal stores market signal with HAS_SIGNAL relationship."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph
+
+    graph = LeadMemoryGraph()
+    mock_client = MagicMock()
+    mock_client.add_episode = AsyncMock(return_value=MagicMock(uuid="signal-uuid"))
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_client
+
+        await graph.add_signal(
+            lead_id="lead-123",
+            signal_type="buying_signal",
+            content="CEO mentioned expanding to EU market next quarter",
+            confidence=0.85,
+        )
+
+        mock_client.add_episode.assert_called_once()
+        call_args = mock_client.add_episode.call_args
+        episode_body = call_args.kwargs.get("episode_body", "")
+        assert "HAS_SIGNAL: lead-123" in episode_body
+        assert "Signal Type: buying_signal" in episode_body
+        assert "EU market" in episode_body
+        assert "Confidence: 0.85" in episode_body

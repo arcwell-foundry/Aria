@@ -437,7 +437,45 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If operation fails.
         """
-        raise NotImplementedError
+        try:
+            client = await self._get_graphiti_client()
+
+            parts = [
+                f"HAS_CONTACT: {lead_id}",
+                f"Contact: {contact_email}",
+            ]
+
+            if contact_name:
+                parts.append(f"Name: {contact_name}")
+
+            if role:
+                parts.append(f"Role: {role}")
+
+            parts.append(f"Influence: {influence_level}")
+
+            contact_body = "\n".join(parts)
+
+            from graphiti_core.nodes import EpisodeType
+
+            contact_id = contact_email.replace("@", "_at_").replace(".", "_")
+            await client.add_episode(
+                name=f"contact:{lead_id}:{contact_id}",
+                episode_body=contact_body,
+                source=EpisodeType.text,
+                source_description=f"lead_contact:{lead_id}:{role or 'unknown'}",
+                reference_time=datetime.now(UTC),
+            )
+
+            logger.info(
+                "Added contact to lead",
+                extra={"lead_id": lead_id, "contact_email": contact_email, "role": role},
+            )
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to add contact to lead")
+            raise LeadMemoryGraphError(f"Failed to add contact: {e}") from e
 
     async def add_communication(
         self,
@@ -459,7 +497,44 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If operation fails.
         """
-        raise NotImplementedError
+        try:
+            import uuid as uuid_module
+
+            client = await self._get_graphiti_client()
+
+            parts = [
+                f"HAS_COMMUNICATION: {lead_id}",
+                f"Event Type: {event_type}",
+                f"Content: {content}",
+                f"Occurred At: {occurred_at.isoformat()}",
+            ]
+
+            if participants:
+                parts.append(f"Participants: {', '.join(participants)}")
+
+            comm_body = "\n".join(parts)
+
+            from graphiti_core.nodes import EpisodeType
+
+            comm_id = str(uuid_module.uuid4())
+            await client.add_episode(
+                name=f"comm:{lead_id}:{comm_id}",
+                episode_body=comm_body,
+                source=EpisodeType.text,
+                source_description=f"lead_communication:{lead_id}:{event_type}",
+                reference_time=occurred_at,
+            )
+
+            logger.info(
+                "Added communication to lead",
+                extra={"lead_id": lead_id, "event_type": event_type},
+            )
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to add communication to lead")
+            raise LeadMemoryGraphError(f"Failed to add communication: {e}") from e
 
     async def add_signal(
         self,
@@ -479,7 +554,42 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If operation fails.
         """
-        raise NotImplementedError
+        try:
+            import uuid as uuid_module
+
+            client = await self._get_graphiti_client()
+
+            parts = [
+                f"HAS_SIGNAL: {lead_id}",
+                f"Signal Type: {signal_type}",
+                f"Content: {content}",
+                f"Confidence: {confidence}",
+                f"Detected At: {datetime.now(UTC).isoformat()}",
+            ]
+
+            signal_body = "\n".join(parts)
+
+            from graphiti_core.nodes import EpisodeType
+
+            signal_id = str(uuid_module.uuid4())
+            await client.add_episode(
+                name=f"signal:{lead_id}:{signal_id}",
+                episode_body=signal_body,
+                source=EpisodeType.text,
+                source_description=f"lead_signal:{lead_id}:{signal_type}",
+                reference_time=datetime.now(UTC),
+            )
+
+            logger.info(
+                "Added signal to lead",
+                extra={"lead_id": lead_id, "signal_type": signal_type, "confidence": confidence},
+            )
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to add signal to lead")
+            raise LeadMemoryGraphError(f"Failed to add signal: {e}") from e
 
     async def search_leads(
         self,
