@@ -2,6 +2,15 @@
 """Tests for lead memory graph module."""
 
 
+def test_lead_memory_graph_exported_from_memory() -> None:
+    """Test LeadMemoryGraph is exported from src.memory."""
+    from src.memory import LeadMemoryGraph, LeadMemoryNode, LeadRelationshipType
+
+    assert LeadMemoryGraph is not None
+    assert LeadMemoryNode is not None
+    assert LeadRelationshipType is not None
+
+
 def test_lead_memory_graph_error_exists() -> None:
     """Test LeadMemoryGraphError exception class exists."""
     from src.core.exceptions import LeadMemoryGraphError
