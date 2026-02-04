@@ -1,7 +1,8 @@
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LifecycleStage(str, Enum):
@@ -193,14 +194,14 @@ class StageTransitionRequest(BaseModel):
 class ContributorCreate(BaseModel):
     contributor_id: str = Field(..., description="User ID to add as contributor")
     contributor_name: str = Field(..., description="Full name of contributor")
-    contributor_email: str = Field(..., description="Email of contributor")
+    contributor_email: EmailStr = Field(..., description="Email of contributor")
 
 
 class ContributorResponse(BaseModel):
     id: str
     lead_memory_id: str
     name: str
-    email: str
+    email: EmailStr
     added_at: datetime
     contribution_count: int
 
@@ -227,4 +228,4 @@ class ContributionResponse(BaseModel):
 
 
 class ContributionReviewRequest(BaseModel):
-    action: str = Field(..., description="Action: 'merge' or 'reject'")
+    action: Literal["merge", "reject"] = Field(..., description="Action: 'merge' or 'reject'")
