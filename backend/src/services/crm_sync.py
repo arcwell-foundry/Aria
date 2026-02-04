@@ -99,7 +99,7 @@ class CRMSyncService:
             client = self._get_supabase_client()
 
             response = (
-                client.table("crm_sync_state")
+                client.table("lead_memory_crm_sync")
                 .select("*")
                 .eq("lead_memory_id", lead_memory_id)
                 .single()
@@ -146,7 +146,7 @@ class CRMSyncService:
                 "retry_count": 0,
             }
 
-            response = client.table("crm_sync_state").insert(data).execute()
+            response = client.table("lead_memory_crm_sync").insert(data).execute()
 
             if not response.data or len(response.data) == 0:
                 raise DatabaseError("Failed to create sync state: no data returned")
@@ -208,7 +208,7 @@ class CRMSyncService:
                 data["pending_changes"] = []
 
             response = (
-                client.table("crm_sync_state")
+                client.table("lead_memory_crm_sync")
                 .update(data)
                 .eq("lead_memory_id", lead_memory_id)
                 .execute()
@@ -219,7 +219,7 @@ class CRMSyncService:
                 await self.create_sync_state(lead_memory_id)
                 # Retry the update
                 response = (
-                    client.table("crm_sync_state")
+                    client.table("lead_memory_crm_sync")
                     .update(data)
                     .eq("lead_memory_id", lead_memory_id)
                     .execute()
@@ -425,16 +425,19 @@ class CRMSyncService:
             return {"success": True, "action": action, "crm_id": crm_id}
 
         except (CRMConnectionError, CRMSyncError) as exc:
-            # Log error audit
+            # Log error audit - wrapped to ensure original error is preserved
             if provider:
-                await audit_service.log_sync_operation(
-                    user_id=user_id,
-                    lead_memory_id=lead_memory_id,
-                    operation=CRMAuditOperation.ERROR,
-                    provider=provider,
-                    success=False,
-                    error_message=str(exc),
-                )
+                try:
+                    await audit_service.log_sync_operation(
+                        user_id=user_id,
+                        lead_memory_id=lead_memory_id,
+                        operation=CRMAuditOperation.ERROR,
+                        provider=provider,
+                        success=False,
+                        error_message=str(exc),
+                    )
+                except Exception:
+                    logger.warning("Failed to log audit entry for sync error")
             raise
         except Exception as e:
             # Update sync status to error
@@ -572,9 +575,9 @@ class CRMSyncService:
                 try:
                     client = self._get_supabase_client()
                     update_data["updated_at"] = datetime.now(UTC).isoformat()
-                    client.table("lead_memories").update(update_data).eq(
-                        "id", lead_memory_id
-                    ).eq("user_id", user_id).execute()
+                    client.table("lead_memories").update(update_data).eq("id", lead_memory_id).eq(
+                        "user_id", user_id
+                    ).execute()
                 except Exception as e:
                     logger.exception("Failed to update lead memory")
                     raise DatabaseError(f"Failed to update lead memory: {e}") from e
@@ -724,7 +727,7 @@ class CRMSyncService:
                         lead_memory_id=lead_memory_id,
                     )
 
-                    client.table("lead_events").insert(event_data).execute()
+                    client.table("lead_memory_events").insert(event_data).execute()
                     activities_imported += 1
                 except Exception as e:
                     logger.warning(
@@ -780,50 +783,58 @@ class CRMSyncService:
         self,
         activity: dict[str, Any],
         provider: str,
-        user_id: str,
+        user_id: str,  # noqa: ARG002 - kept for future user tracking
         lead_memory_id: str,
     ) -> dict[str, Any]:
         """Map CRM activity to lead event data.
 
+        Maps CRM activity fields to lead_memory_events table schema:
+        - event_type, direction, subject, content, participants,
+        - occurred_at, source, source_id, metadata
+
         Args:
             activity: CRM activity data.
             provider: CRM provider name.
-            user_id: User ID.
+            user_id: User ID (for future user tracking).
             lead_memory_id: Lead memory ID.
 
         Returns:
-            Lead event data dictionary.
+            Lead event data dictionary matching lead_memory_events schema.
         """
         now = datetime.now(UTC)
 
         if provider == "salesforce":
             return {
                 "id": str(uuid.uuid4()),
-                "user_id": user_id,
                 "lead_memory_id": lead_memory_id,
                 "event_type": activity.get("Type", "other").lower(),
-                "title": activity.get("Subject", "CRM Activity"),
-                "description": activity.get("Description", ""),
-                "event_date": activity.get("ActivityDate", now.isoformat()),
+                "direction": "inbound",  # CRM activities are typically inbound
+                "subject": activity.get("Subject", "CRM Activity"),
+                "content": activity.get("Description", ""),
+                "participants": [],  # Salesforce doesn't have direct participants
+                "occurred_at": activity.get("ActivityDate", now.isoformat()),
                 "source": "crm_import",
+                "source_id": activity.get("Id"),
                 "metadata": {
-                    "crm_id": activity.get("Id"),
                     "crm_provider": provider,
+                    "original_type": activity.get("Type"),
                 },
             }
         else:  # hubspot
             return {
                 "id": str(uuid.uuid4()),
-                "user_id": user_id,
                 "lead_memory_id": lead_memory_id,
                 "event_type": activity.get("type", "other").lower(),
-                "title": activity.get("title", "CRM Activity"),
-                "description": activity.get("body", ""),
-                "event_date": activity.get("timestamp", now.isoformat()),
+                "direction": "inbound",
+                "subject": activity.get("title", "CRM Activity"),
+                "content": activity.get("body", ""),
+                "participants": [],
+                "occurred_at": activity.get("timestamp", now.isoformat()),
                 "source": "crm_import",
+                "source_id": activity.get("id"),
                 "metadata": {
-                    "crm_id": activity.get("id"),
                     "crm_provider": provider,
+                    "original_type": activity.get("type"),
                 },
             }
 
@@ -981,7 +992,7 @@ class CRMSyncService:
             new_count = current_count + 1
             client = self._get_supabase_client()
 
-            client.table("crm_sync_state").update(
+            client.table("lead_memory_crm_sync").update(
                 {
                     "retry_count": new_count,
                     "status": SyncStatus.PENDING.value,

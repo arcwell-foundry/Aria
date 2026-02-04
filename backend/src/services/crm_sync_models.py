@@ -116,9 +116,7 @@ class CRMSyncState:
     def __post_init__(self) -> None:
         """Validate the dataclass after initialization."""
         if self.retry_count < 0:
-            raise CRMSyncModelError(
-                f"retry_count must be non-negative, got {self.retry_count}"
-            )
+            raise CRMSyncModelError(f"retry_count must be non-negative, got {self.retry_count}")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize sync state to dictionary."""
@@ -154,9 +152,7 @@ class CRMSyncState:
         required_fields = ["id", "lead_memory_id", "status", "created_at", "updated_at"]
         missing_fields = [f for f in required_fields if f not in data]
         if missing_fields:
-            raise CRMSyncModelError(
-                f"Missing required fields: {', '.join(missing_fields)}"
-            )
+            raise CRMSyncModelError(f"Missing required fields: {', '.join(missing_fields)}")
 
         try:
             return cls(

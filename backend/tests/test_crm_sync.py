@@ -143,7 +143,7 @@ class TestCRMSyncServiceGetSyncState:
         assert state is not None
         assert state.lead_memory_id == "lead-456"
         assert state.status == SyncStatus.SYNCED
-        mock_supabase.table.assert_called_with("crm_sync_state")
+        mock_supabase.table.assert_called_with("lead_memory_crm_sync")
 
     @pytest.mark.asyncio
     async def test_get_sync_state_returns_none_when_not_found(self) -> None:
@@ -203,7 +203,7 @@ class TestCRMSyncServiceCreateSyncState:
         assert state is not None
         assert state.lead_memory_id == "lead-456"
         assert state.status == SyncStatus.SYNCED
-        mock_supabase.table.assert_called_with("crm_sync_state")
+        mock_supabase.table.assert_called_with("lead_memory_crm_sync")
         mock_supabase.table.return_value.insert.assert_called_once()
 
     @pytest.mark.asyncio
@@ -334,7 +334,7 @@ class TestCRMSyncServicePushSummary:
                 mock_select.eq.return_value = mock_eq1
                 mock_table.select.return_value = mock_select
 
-            elif name == "crm_sync_state":
+            elif name == "lead_memory_crm_sync":
                 # For get_sync_state
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
@@ -596,7 +596,7 @@ class TestCRMSyncServicePullChanges:
                 mock_select.eq.return_value = mock_eq1
                 mock_table.select.return_value = mock_select
 
-            elif name == "crm_sync_state":
+            elif name == "lead_memory_crm_sync":
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
                 mock_single = MagicMock()
@@ -850,7 +850,7 @@ class TestCRMSyncServiceManualSync:
                 mock_select.eq.return_value = mock_eq1
                 mock_table.select.return_value = mock_select
 
-            elif name == "crm_sync_state":
+            elif name == "lead_memory_crm_sync":
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
                 mock_single = MagicMock()
@@ -938,7 +938,7 @@ class TestCRMSyncServiceRetryLogic:
         def table_router(name: str) -> MagicMock:
             mock_table = MagicMock()
 
-            if name == "crm_sync_state":
+            if name == "lead_memory_crm_sync":
                 # For get_sync_state
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
@@ -1020,7 +1020,7 @@ class TestCRMSyncServiceRetryLogic:
 
         def table_router(name: str) -> MagicMock:
             mock_table = MagicMock()
-            if name == "crm_sync_state":
+            if name == "lead_memory_crm_sync":
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
                 mock_single = MagicMock()
@@ -1100,7 +1100,7 @@ class TestCRMSyncServicePullActivities:
                 mock_select.eq.return_value = mock_eq1
                 mock_table.select.return_value = mock_select
 
-            elif name == "crm_sync_state":
+            elif name == "lead_memory_crm_sync":
                 mock_select = MagicMock()
                 mock_eq = MagicMock()
                 mock_single = MagicMock()
@@ -1115,7 +1115,7 @@ class TestCRMSyncServicePullActivities:
                 mock_update.eq.return_value = mock_update_eq
                 mock_table.update.return_value = mock_update
 
-            elif name == "lead_events":
+            elif name == "lead_memory_events":
                 mock_insert = MagicMock()
                 mock_insert.execute.return_value = MagicMock(
                     data=[{"id": "event-123"}]

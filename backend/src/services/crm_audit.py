@@ -9,7 +9,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, cast
 
@@ -226,12 +226,7 @@ class CRMAuditService:
             if date_end is not None:
                 query = query.lte("created_at", date_end.isoformat())
 
-            response = (
-                query.order("created_at", desc=True)
-                .limit(limit)
-                .offset(offset)
-                .execute()
-            )
+            response = query.order("created_at", desc=True).limit(limit).offset(offset).execute()
 
             return cast(list[dict[str, Any]], response.data or [])
 
