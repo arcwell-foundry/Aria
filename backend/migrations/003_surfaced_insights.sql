@@ -32,3 +32,7 @@ ALTER TABLE surfaced_insights ENABLE ROW LEVEL SECURITY;
 -- RLS Policy: Users can only access their own surfaced insights
 CREATE POLICY "Users can only access own surfaced insights" ON surfaced_insights
     FOR ALL USING (auth.uid() = user_id);
+
+-- Service role bypass for backend operations
+CREATE POLICY "Service role full access to surfaced insights" ON surfaced_insights
+    FOR ALL USING (auth.role() = 'service_role');
