@@ -357,3 +357,54 @@ Respond with ONLY the JSON array, no additional text."""
         except Exception as e:
             logger.exception("Failed to store insights")
             raise DatabaseError(f"Failed to store insights: {e}") from e
+
+    async def mark_addressed(
+        self,
+        user_id: str,
+        insight_id: str,
+    ) -> bool:
+        """Mark an insight as addressed.
+
+        Args:
+            user_id: The user marking the insight.
+            insight_id: The ID of the insight to mark.
+
+        Returns:
+            True if the insight was found and updated, False otherwise.
+
+        Raises:
+            DatabaseError: If the update fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            now = datetime.now(UTC)
+            response = (
+                self.db.table("lead_memory_insights")
+                .update({
+                    "addressed_at": now.isoformat(),
+                    "addressed_by": user_id,
+                })
+                .eq("id", insight_id)
+                .execute()
+            )
+
+            if not response.data:
+                logger.info(
+                    "Insight not found for marking addressed",
+                    extra={"user_id": user_id, "insight_id": insight_id},
+                )
+                return False
+
+            logger.info(
+                "Marked insight as addressed",
+                extra={
+                    "user_id": user_id,
+                    "insight_id": insight_id,
+                },
+            )
+            return True
+
+        except Exception as e:
+            logger.exception("Failed to mark insight as addressed")
+            raise DatabaseError(f"Failed to mark insight as addressed: {e}") from e

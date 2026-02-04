@@ -462,3 +462,43 @@ class TestAnalyzeEvent:
         inserted_data = insert_call[0][0]
         assert isinstance(inserted_data, list)
         assert inserted_data[0]["source_event_id"] == "event-789"
+
+
+class TestMarkAddressed:
+    """Tests for the mark_addressed method."""
+
+    @pytest.mark.asyncio
+    async def test_mark_addressed_success(self):
+        """Test marking an insight as addressed."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "insight-123", "addressed_at": "2025-02-04T10:00:00+00:00"}]
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = mock_response
+
+        result = await service.mark_addressed(
+            user_id="user-123",
+            insight_id="insight-123",
+        )
+
+        assert result is True
+        mock_client.table.assert_called_with("lead_memory_insights")
+        mock_client.table.return_value.update.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_mark_addressed_not_found(self):
+        """Test marking non-existent insight returns False."""
+        mock_client = MagicMock()
+        service = ConversationIntelligence(db_client=mock_client)
+
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = mock_response
+
+        result = await service.mark_addressed(
+            user_id="user-123",
+            insight_id="nonexistent-id",
+        )
+
+        assert result is False
