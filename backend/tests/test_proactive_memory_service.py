@@ -450,19 +450,32 @@ class TestGetSurfacedHistory:
 class TestPlaceholderMethods:
     """Tests for placeholder finder methods."""
 
-    def test_find_pattern_matches_returns_empty_list(self) -> None:
-        """_find_pattern_matches placeholder should return empty list."""
+    @pytest.mark.asyncio
+    async def test_find_pattern_matches_returns_empty_when_graphiti_not_available(
+        self,
+    ) -> None:
+        """_find_pattern_matches should return empty list when Graphiti unavailable."""
+        from unittest.mock import patch
+
         from src.intelligence.proactive_memory import ProactiveMemoryService
 
         service = ProactiveMemoryService(db_client=MagicMock())
 
-        result = service._find_pattern_matches(
-            user_id="user-123",
-            current_message="Test",
-            conversation_messages=[],
-        )
+        # Mock GraphitiClient at the source module level
+        mock_graphiti_class = MagicMock()
+        mock_graphiti_class.is_initialized.return_value = False
 
-        assert result == []
+        with patch.dict(
+            "sys.modules",
+            {"src.db.graphiti": MagicMock(GraphitiClient=mock_graphiti_class)},
+        ):
+            result = await service._find_pattern_matches(
+                user_id="user-123",
+                current_message="Test",
+                conversation_messages=[],
+            )
+
+            assert result == []
 
     def test_find_temporal_triggers_returns_empty_list(self) -> None:
         """_find_temporal_triggers placeholder should return empty list."""

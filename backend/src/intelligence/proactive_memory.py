@@ -241,8 +241,8 @@ class ProactiveMemoryService:
         # Gather candidates from all finder methods
         candidates: list[ProactiveInsight] = []
 
-        # Pattern matches (placeholder - returns [])
-        pattern_matches = self._find_pattern_matches(
+        # Pattern matches from Graphiti knowledge graph
+        pattern_matches = await self._find_pattern_matches(
             user_id=user_id,
             current_message=current_message,
             conversation_messages=conversation_messages,
@@ -278,30 +278,83 @@ class ProactiveMemoryService:
 
         return sorted_insights[: self.MAX_INSIGHTS_PER_RESPONSE]
 
-    def _find_pattern_matches(
+    async def _find_pattern_matches(
         self,
         user_id: str,
         current_message: str,
         conversation_messages: list[dict[str, Any]],
     ) -> list[ProactiveInsight]:
-        """Find memories with topic pattern matches.
+        """Find past discussions on similar topics.
 
-        Placeholder implementation - will be enhanced in future tasks
-        to query Graphiti for episodic/semantic memories matching
-        current conversation topics.
+        Searches conversation episodes in Graphiti for topic overlap with
+        the current conversation. Returns insights about past discussions
+        that may be relevant to the current context.
+
+        This method integrates with the Graphiti knowledge graph to find
+        semantic matches. When Graphiti is unavailable, returns empty list.
 
         Args:
             user_id: User identifier
-            current_message: The current user message
+            current_message: Current message being processed
             conversation_messages: Recent conversation history
 
         Returns:
-            List of pattern-matched insights (currently empty)
+            List of pattern match insights from past conversations
         """
-        # TODO: Implement Graphiti integration to query episodic/semantic memories
-        # matching current conversation topics (Phase 8 AGI Companion)
-        _ = user_id, current_message, conversation_messages
-        return []
+        from src.models.proactive_insight import InsightType
+
+        insights: list[ProactiveInsight] = []
+        _ = conversation_messages  # Reserved for future use
+
+        try:
+            # Import Graphiti client (only when needed to avoid circular imports)
+            from src.db.graphiti import GraphitiClient
+
+            # Check if Graphiti is initialized
+            if not GraphitiClient.is_initialized():
+                logger.debug("Graphiti not initialized, skipping pattern matching")
+                return []
+
+            # Get Graphiti client instance
+            graphiti = await GraphitiClient.get_instance()
+            if not graphiti:
+                logger.debug("Graphiti client unavailable, skipping pattern matching")
+                return []
+
+            # Search for relevant conversation episodes
+            # Note: This uses Graphiti's semantic search on conversation summaries
+            results = await graphiti.search(
+                query=current_message,
+                num_results=5,
+                group_ids=[user_id],  # Scope to user's memories
+            )
+
+            # Convert results to ProactiveInsight objects
+            for result in results:
+                # Skip results with low relevance (below 0.5)
+                if hasattr(result, "score") and result.score < 0.5:
+                    continue
+
+                # Extract the fact/summary from the result
+                content = getattr(result, "fact", None) or str(result)
+
+                insights.append(
+                    ProactiveInsight(
+                        insight_type=InsightType.PATTERN_MATCH,
+                        content=content[:500],  # Truncate long content
+                        relevance_score=min(getattr(result, "score", 0.7), 1.0),
+                        source_memory_id=getattr(result, "uuid", str(id(result))),
+                        source_memory_type="episodic",
+                        explanation="Similar topic discussed previously",
+                    )
+                )
+
+        except ImportError:
+            logger.debug("Graphiti not available, skipping pattern matching")
+        except Exception as e:
+            logger.warning("Pattern matching failed: %s", e)
+
+        return insights
 
     def _find_temporal_triggers(
         self,
