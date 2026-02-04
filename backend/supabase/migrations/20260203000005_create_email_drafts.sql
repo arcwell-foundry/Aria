@@ -2,27 +2,39 @@
 -- Stores email drafts created by ARIA with Digital Twin style matching
 -- Supports tracking of draft status, sending via Composio, and lead association
 
--- Create enum types for email metadata
-CREATE TYPE email_purpose AS ENUM (
-    'intro',
-    'follow_up',
-    'proposal',
-    'thank_you',
-    'check_in',
-    'other'
-);
+-- Create enum types for email metadata (idempotent)
+DO $$ BEGIN
+    CREATE TYPE email_purpose AS ENUM (
+        'intro',
+        'follow_up',
+        'proposal',
+        'thank_you',
+        'check_in',
+        'other'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE email_tone AS ENUM (
-    'formal',
-    'friendly',
-    'urgent'
-);
+DO $$ BEGIN
+    CREATE TYPE email_tone AS ENUM (
+        'formal',
+        'friendly',
+        'urgent'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE email_draft_status AS ENUM (
-    'draft',
-    'sent',
-    'failed'
-);
+DO $$ BEGIN
+    CREATE TYPE email_draft_status AS ENUM (
+        'draft',
+        'sent',
+        'failed'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Main email drafts table
 CREATE TABLE email_drafts (
