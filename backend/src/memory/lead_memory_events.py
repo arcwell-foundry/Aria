@@ -7,13 +7,17 @@ Events represent the timeline of activity for each lead in the system.
 
 from __future__ import annotations
 
+import logging
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(str, Enum):
@@ -180,3 +184,72 @@ class LeadEventService:
             return SupabaseClient.get_client()
         except Exception as e:
             raise DatabaseError(f"Failed to get Supabase client: {e}") from e
+
+    async def add_event(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+        event_data: Any,  # LeadEventCreate from src.models.lead_memory
+    ) -> str:
+        """Add a new event to a lead's timeline.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+            event_data: Event data from LeadEventCreate model.
+
+        Returns:
+            The ID of the created event.
+
+        Raises:
+            DatabaseError: If storage fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            data = {
+                "id": str(uuid.uuid4()),
+                "lead_memory_id": lead_memory_id,
+                "event_type": event_data.event_type.value,
+                "direction": event_data.direction,
+                "subject": event_data.subject,
+                "content": event_data.content,
+                "participants": event_data.participants,
+                "occurred_at": event_data.occurred_at.isoformat(),
+                "source": event_data.source,
+                "source_id": event_data.source_id,
+                "created_at": now.isoformat(),
+            }
+
+            response = client.table("lead_memory_events").insert(data).execute()
+
+            if not response.data or len(response.data) == 0:
+                raise DatabaseError("Failed to insert event")
+
+            # Cast the response data to dict for type safety
+            first_record: dict[str, Any] = cast(dict[str, Any], response.data[0])
+            event_id = cast(str, first_record.get("id"))
+
+            if not event_id:
+                raise DatabaseError("Failed to insert event")
+
+            logger.info(
+                "Added lead event",
+                extra={
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "event_type": event_data.event_type.value,
+                },
+            )
+
+            return event_id
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to add lead event")
+            raise DatabaseError(f"Failed to add lead event: {e}") from e

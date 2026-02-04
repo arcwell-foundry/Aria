@@ -330,3 +330,96 @@ class TestLeadEventService:
 
         assert "Failed to get Supabase client" in str(exc_info.value)
         assert "Connection failed" in str(exc_info.value)
+
+
+class TestLeadEventServiceAddEvent:
+    """Tests for the add_event method."""
+
+    @pytest.mark.asyncio
+    async def test_add_email_sent_event(self):
+        """Test adding an email sent event with all fields."""
+        from src.models.lead_memory import LeadEventCreate
+
+        service = LeadEventService(db_client=MagicMock())
+        occurred_at = datetime(2025, 2, 3, 12, 0, 0, tzinfo=UTC)
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "new-event-id", "created_at": occurred_at.isoformat()}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            event_create = LeadEventCreate(
+                event_type=EventType.EMAIL_SENT,
+                direction="outbound",
+                subject="Follow up",
+                content="Checking in",
+                participants=["john@acme.com"],
+                occurred_at=occurred_at,
+                source="gmail",
+                source_id="msg-123",
+            )
+
+            event_id = await service.add_event(
+                user_id="user-123",
+                lead_memory_id="lead-456",
+                event_data=event_create,
+            )
+
+            assert event_id == "new-event-id"
+            mock_client.table.assert_called_once_with("lead_memory_events")
+            mock_client.table.return_value.insert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_add_meeting_event_without_direction(self):
+        """Test adding a meeting event without direction field."""
+        from src.models.lead_memory import LeadEventCreate
+
+        service = LeadEventService(db_client=MagicMock())
+        occurred_at = datetime(2025, 2, 3, 14, 0, 0, tzinfo=UTC)
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "meeting-event-id", "created_at": occurred_at.isoformat()}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            event_create = LeadEventCreate(
+                event_type=EventType.MEETING,
+                subject="Discovery Call",
+                participants=["john@acme.com", "jane@acme.com"],
+                occurred_at=occurred_at,
+                source="calendar",
+            )
+
+            event_id = await service.add_event(
+                user_id="user-123",
+                lead_memory_id="lead-789",
+                event_data=event_create,
+            )
+
+            assert event_id == "meeting-event-id"
+
+    @pytest.mark.asyncio
+    async def test_add_event_handles_database_error(self):
+        """Test that database errors are properly wrapped."""
+        from src.models.lead_memory import LeadEventCreate
+
+        service = LeadEventService(db_client=MagicMock())
+
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Connection lost")
+
+        with patch.object(service, "_get_supabase_client", return_value=mock_client):
+            event_create = LeadEventCreate(
+                event_type=EventType.NOTE,
+                content="Internal note",
+                occurred_at=datetime.now(UTC),
+            )
+
+            with pytest.raises(DatabaseError):
+                await service.add_event(
+                    user_id="user-123",
+                    lead_memory_id="lead-456",
+                    event_data=event_create,
+                )
