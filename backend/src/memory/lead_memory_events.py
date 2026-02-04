@@ -5,10 +5,15 @@ including interactions like emails, meetings, calls, notes, and signals.
 Events represent the timeline of activity for each lead in the system.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from supabase import Client
 
 
 class EventType(str, Enum):
@@ -87,7 +92,7 @@ class LeadEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LeadEvent":
+    def from_dict(cls, data: dict[str, Any]) -> LeadEvent:
         """Create a LeadEvent from a dictionary.
 
         Deserializes a dictionary back into a LeadEvent instance,
@@ -151,7 +156,15 @@ class LeadEventService:
     via RLS policies.
     """
 
-    def _get_supabase_client(self) -> Any:
+    def __init__(self, db_client: Client) -> None:
+        """Initialize the lead event service.
+
+        Args:
+            db_client: Supabase client for database operations.
+        """
+        self.db = db_client
+
+    def _get_supabase_client(self) -> Client:
         """Get the Supabase client instance.
 
         Returns:

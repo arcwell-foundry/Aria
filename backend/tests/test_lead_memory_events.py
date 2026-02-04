@@ -4,10 +4,15 @@ This module tests the domain model for lead memory events, including:
 - EventType enum for categorizing event types
 - Direction enum for tracking inbound/outbound events
 - LeadEvent dataclass for event representation and serialization
+- LeadEventService for managing lead event operations
 """
 
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.core.exceptions import DatabaseError
 from src.memory.lead_memory_events import (
     Direction,
     EventType,
@@ -289,6 +294,39 @@ class TestLeadEventService:
     """Tests for the LeadEventService class."""
 
     def test_service_initialization(self):
-        """Test that LeadEventService can be instantiated."""
-        service = LeadEventService()
+        """Test that LeadEventService can be instantiated with a db client."""
+        mock_client = MagicMock()
+        service = LeadEventService(db_client=mock_client)
         assert service is not None
+        assert service.db == mock_client
+
+    @patch("src.db.supabase.SupabaseClient.get_client")
+    def test_get_supabase_client_success(self, mock_get_client):
+        """Test _get_supabase_client returns client successfully."""
+        # Setup mock
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        # Create service and get client
+        service = LeadEventService(db_client=mock_client)
+        result = service._get_supabase_client()
+
+        # Verify
+        assert result == mock_client
+        mock_get_client.assert_called_once()
+
+    @patch("src.db.supabase.SupabaseClient.get_client")
+    def test_get_supabase_client_failure_raises_database_error(self, mock_get_client):
+        """Test _get_supabase_client raises DatabaseError on failure."""
+        # Setup mock to raise exception
+        mock_get_client.side_effect = Exception("Connection failed")
+
+        # Create service and verify exception
+        mock_client = MagicMock()
+        service = LeadEventService(db_client=mock_client)
+
+        with pytest.raises(DatabaseError) as exc_info:
+            service._get_supabase_client()
+
+        assert "Failed to get Supabase client" in str(exc_info.value)
+        assert "Connection failed" in str(exc_info.value)
