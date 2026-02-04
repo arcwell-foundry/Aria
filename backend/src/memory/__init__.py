@@ -20,6 +20,7 @@ from src.memory.audit import (
 )
 from src.memory.confidence import ConfidenceScorer
 from src.memory.conversation import ConversationEpisode, ConversationService
+from src.memory.conversation_intelligence import ConversationIntelligence, Insight
 from src.memory.corporate import (
     CORPORATE_SOURCE_CONFIDENCE,
     CorporateFact,
@@ -133,4 +134,7 @@ __all__ = [
     # Health Score
     "HealthScoreCalculator",
     "HealthScoreHistory",
+    # Conversation Intelligence
+    "ConversationIntelligence",
+    "Insight",
 ]
