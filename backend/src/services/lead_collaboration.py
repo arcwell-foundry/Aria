@@ -368,3 +368,70 @@ class LeadCollaborationService:
         except Exception as e:
             logger.exception("Failed to get pending contributions")
             raise DatabaseError(f"Failed to get pending contributions: {e}") from e
+
+    async def review_contribution(
+        self,
+        user_id: str,
+        contribution_id: str,
+        action: str,
+    ) -> None:
+        """Review a contribution (merge or reject).
+
+        Args:
+            user_id: The user reviewing the contribution (lead owner).
+            contribution_id: The contribution ID to review.
+            action: Action to take - "merge" or "reject".
+
+        Raises:
+            ValidationError: If action is invalid.
+            DatabaseError: If review fails.
+        """
+        from src.core.exceptions import DatabaseError, ValidationError
+
+        # Validate action
+        if action not in ("merge", "reject"):
+            raise ValidationError(
+                f"Invalid action: {action}. Must be 'merge' or 'reject'.",
+                field="action"
+            )
+
+        # Map action to status
+        status = ContributionStatus.MERGED if action == "merge" else ContributionStatus.REJECTED
+
+        try:
+            client = self._get_supabase_client()
+
+            now = datetime.now(UTC)
+            update_data = {
+                "status": status.value,
+                "reviewed_by": user_id,
+                "reviewed_at": now.isoformat(),
+            }
+
+            response = (
+                client.table("lead_memory_contributions")
+                .update(update_data)
+                .eq("id", contribution_id)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                raise DatabaseError(f"Contribution {contribution_id} not found")
+
+            logger.info(
+                "Contribution reviewed",
+                extra={
+                    "contribution_id": contribution_id,
+                    "user_id": user_id,
+                    "action": action,
+                    "status": status.value,
+                },
+            )
+
+        except ValidationError:
+            raise
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to review contribution")
+            raise DatabaseError(f"Failed to review contribution: {e}") from e

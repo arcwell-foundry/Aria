@@ -682,3 +682,143 @@ class TestGetPendingContributions:
 
         assert "Failed to get pending contributions" in str(exc_info.value)
         mock_get_client.assert_called_once()
+
+
+class TestReviewContribution:
+    """Tests for the review_contribution method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_review_merge_contribution(self, mock_get_client):
+        """Test that review_contribution updates status to MERGED for merge action."""
+        from src.core.exceptions import ValidationError
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "cntrb_123",
+                "lead_memory_id": "lead_456",
+                "status": "merged",
+                "reviewed_by": "user_owner",
+                "reviewed_at": "2025-02-04T16:00:00+00:00",
+            }
+        ]
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        await service.review_contribution(
+            user_id="user_owner",
+            contribution_id="cntrb_123",
+            action="merge",
+        )
+
+        # Verify update was called with correct data
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        update_call = mock_client.table.return_value.update
+        update_data = update_call.call_args[0][0]
+        assert update_data["status"] == "merged"
+        assert update_data["reviewed_by"] == "user_owner"
+        assert "reviewed_at" in update_data
+        mock_get_client.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_review_reject_contribution(self, mock_get_client):
+        """Test that review_contribution updates status to REJECTED for reject action."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [
+            {
+                "id": "cntrb_456",
+                "lead_memory_id": "lead_789",
+                "status": "rejected",
+                "reviewed_by": "user_owner",
+                "reviewed_at": "2025-02-04T16:00:00+00:00",
+            }
+        ]
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        await service.review_contribution(
+            user_id="user_owner",
+            contribution_id="cntrb_456",
+            action="reject",
+        )
+
+        # Verify update was called with correct data
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        update_call = mock_client.table.return_value.update
+        update_data = update_call.call_args[0][0]
+        assert update_data["status"] == "rejected"
+        assert update_data["reviewed_by"] == "user_owner"
+        assert "reviewed_at" in update_data
+
+    @pytest.mark.asyncio
+    async def test_review_invalid_action_raises(self):
+        """Test that review_contribution raises ValidationError for invalid action."""
+        from src.core.exceptions import ValidationError
+
+        mock_client = MagicMock()
+        service = LeadCollaborationService(db_client=mock_client)
+
+        with pytest.raises(ValidationError) as exc_info:
+            await service.review_contribution(
+                user_id="user_owner",
+                contribution_id="cntrb_123",
+                action="invalid",
+            )
+
+        assert "Invalid action" in str(exc_info.value)
+        assert exc_info.value.details.get("field") == "action"
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_review_contribution_not_found_raises_database_error(self, mock_get_client):
+        """Test that review_contribution raises DatabaseError when contribution not found."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            mock_response
+        )
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.review_contribution(
+                user_id="user_owner",
+                contribution_id="nonexistent",
+                action="merge",
+            )
+
+        assert "not found" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_review_contribution_handles_database_error(self, mock_get_client):
+        """Test that review_contribution raises DatabaseError on database failure."""
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Database connection failed")
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.review_contribution(
+                user_id="user_owner",
+                contribution_id="cntrb_123",
+                action="merge",
+            )
+
+        assert "Failed to review contribution" in str(exc_info.value)
+        mock_get_client.assert_called_once()
