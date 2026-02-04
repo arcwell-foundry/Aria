@@ -1,7 +1,7 @@
 """Tests for Lead Pattern Detection module (US-516)."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -584,3 +584,122 @@ class TestApplyWarningsToLead:
         )
         assert budget_warning is not None
         assert budget_warning.severity == "high"
+
+
+class TestStorePatternsToCorporateMemory:
+    """Tests for store_patterns_to_corporate_memory method."""
+
+    @pytest.fixture
+    def mock_supabase(self) -> MagicMock:
+        """Create a mocked Supabase client."""
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_stores_closing_time_patterns(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test stores closing time patterns to corporate memory."""
+        from src.memory.lead_patterns import ClosingTimePattern, LeadPatternDetector
+
+        now = datetime.now(UTC)
+        patterns = [
+            ClosingTimePattern(
+                segment="enterprise",
+                avg_days_to_close=45.0,
+                sample_size=10,
+                calculated_at=now,
+            ),
+        ]
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+
+        with patch("src.memory.corporate.CorporateMemory") as mock_corp_mem:
+            mock_instance = MagicMock()
+            mock_instance.add_fact = AsyncMock(return_value="fact-123")
+            mock_corp_mem.return_value = mock_instance
+
+            result = await detector.store_patterns_to_corporate_memory(
+                company_id="company-123",
+                closing_patterns=patterns,
+            )
+
+            mock_instance.add_fact.assert_called_once()
+            call_args = mock_instance.add_fact.call_args
+            fact = call_args.kwargs.get("fact") or call_args.args[0]
+            assert fact.predicate == "avg_closing_time"
+            assert fact.subject == "segment:enterprise"
+            assert "45" in fact.object
+
+    @pytest.mark.asyncio
+    async def test_stores_objection_patterns(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test stores objection patterns to corporate memory."""
+        from src.memory.lead_patterns import LeadPatternDetector, ObjectionPattern
+
+        now = datetime.now(UTC)
+        patterns = [
+            ObjectionPattern(
+                objection_text="Budget constraints",
+                frequency=15,
+                resolution_rate=0.4,
+                calculated_at=now,
+            ),
+        ]
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+
+        with patch("src.memory.corporate.CorporateMemory") as mock_corp_mem:
+            mock_instance = MagicMock()
+            mock_instance.add_fact = AsyncMock(return_value="fact-456")
+            mock_corp_mem.return_value = mock_instance
+
+            await detector.store_patterns_to_corporate_memory(
+                company_id="company-123",
+                objection_patterns=patterns,
+            )
+
+            mock_instance.add_fact.assert_called_once()
+            call_args = mock_instance.add_fact.call_args
+            fact = call_args.kwargs.get("fact") or call_args.args[0]
+            assert fact.predicate == "common_objection"
+            assert "Budget" in fact.object
+
+    @pytest.mark.asyncio
+    async def test_privacy_no_user_data_in_patterns(
+        self, mock_supabase: MagicMock
+    ) -> None:
+        """Test no user-identifiable data is stored in patterns."""
+        from src.memory.lead_patterns import EngagementPattern, LeadPatternDetector
+
+        now = datetime.now(UTC)
+        patterns = [
+            EngagementPattern(
+                pattern_type="response_time",
+                description="Fast response correlates with success",
+                success_correlation=0.8,
+                sample_size=20,
+                calculated_at=now,
+            ),
+        ]
+
+        detector = LeadPatternDetector(db_client=mock_supabase)
+
+        with patch("src.memory.corporate.CorporateMemory") as mock_corp_mem:
+            mock_instance = MagicMock()
+            mock_instance.add_fact = AsyncMock(return_value="fact-789")
+            mock_corp_mem.return_value = mock_instance
+
+            await detector.store_patterns_to_corporate_memory(
+                company_id="company-123",
+                engagement_patterns=patterns,
+            )
+
+            call_args = mock_instance.add_fact.call_args
+            fact = call_args.kwargs.get("fact") or call_args.args[0]
+
+            # Verify no user_id in fact
+            assert "user" not in fact.subject.lower()
+            assert "user" not in fact.object.lower()
+            # created_by should be None (system-generated)
+            assert fact.created_by is None

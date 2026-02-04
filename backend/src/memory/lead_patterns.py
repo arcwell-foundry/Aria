@@ -714,3 +714,108 @@ class LeadPatternDetector:
         except Exception as e:
             logger.exception("Failed to apply warnings to lead")
             raise DatabaseError(f"Failed to apply warnings to lead: {e}") from e
+
+    async def store_patterns_to_corporate_memory(
+        self,
+        company_id: str,
+        closing_patterns: list[ClosingTimePattern] | None = None,
+        objection_patterns: list[ObjectionPattern] | None = None,
+        engagement_patterns: list[EngagementPattern] | None = None,
+    ) -> list[str]:
+        """Store detected patterns to Corporate Memory via Graphiti.
+
+        Patterns are stored as company-level facts that can be shared
+        across all users. Privacy is enforced: no user-identifiable
+        data is included in stored patterns.
+
+        Args:
+            company_id: The company to store patterns for.
+            closing_patterns: Optional closing time patterns to store.
+            objection_patterns: Optional objection patterns to store.
+            engagement_patterns: Optional engagement patterns to store.
+
+        Returns:
+            List of created fact IDs.
+
+        Raises:
+            ValueError: If company_id is empty.
+            CorporateMemoryError: If storage fails.
+        """
+        import uuid
+
+        from src.memory.corporate import CorporateFact, CorporateFactSource, CorporateMemory
+
+        # Input validation
+        if not company_id:
+            raise ValueError("company_id must not be empty")
+
+        fact_ids: list[str] = []
+        now = datetime.now(UTC)
+        corp_memory = CorporateMemory()
+
+        # Store closing time patterns
+        if closing_patterns:
+            for pattern in closing_patterns:
+                fact = CorporateFact(
+                    id=str(uuid.uuid4()),
+                    company_id=company_id,
+                    subject=f"segment:{pattern.segment}",
+                    predicate="avg_closing_time",
+                    object=f"{pattern.avg_days_to_close:.1f} days (n={pattern.sample_size})",
+                    confidence=min(0.5 + (pattern.sample_size / 100), 0.95),
+                    source=CorporateFactSource.AGGREGATED,
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                    created_by=None,  # System-generated, no user
+                )
+                fact_id = await corp_memory.add_fact(fact=fact)
+                fact_ids.append(fact_id)
+
+        # Store objection patterns
+        if objection_patterns:
+            for pattern in objection_patterns:
+                fact = CorporateFact(
+                    id=str(uuid.uuid4()),
+                    company_id=company_id,
+                    subject="lead_objections",
+                    predicate="common_objection",
+                    object=f"{pattern.objection_text} (freq={pattern.frequency}, resolution={pattern.resolution_rate:.0%})",
+                    confidence=min(0.5 + (pattern.frequency / 50), 0.90),
+                    source=CorporateFactSource.AGGREGATED,
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                    created_by=None,
+                )
+                fact_id = await corp_memory.add_fact(fact=fact)
+                fact_ids.append(fact_id)
+
+        # Store engagement patterns
+        if engagement_patterns:
+            for pattern in engagement_patterns:
+                fact = CorporateFact(
+                    id=str(uuid.uuid4()),
+                    company_id=company_id,
+                    subject=f"engagement:{pattern.pattern_type}",
+                    predicate="success_correlation",
+                    object=f"{pattern.description} (r={pattern.success_correlation:.2f}, n={pattern.sample_size})",
+                    confidence=pattern.success_correlation,
+                    source=CorporateFactSource.AGGREGATED,
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                    created_by=None,
+                )
+                fact_id = await corp_memory.add_fact(fact=fact)
+                fact_ids.append(fact_id)
+
+        logger.info(
+            "Stored patterns to corporate memory",
+            extra={
+                "company_id": company_id,
+                "fact_count": len(fact_ids),
+            },
+        )
+
+        return fact_ids
