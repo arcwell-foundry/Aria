@@ -315,3 +315,71 @@ class LeadTriggerService:
                 },
             )
             raise
+
+    async def on_inbound_response(
+        self,
+        user_id: str,
+        company_name: str,
+        email_subject: str,
+        email_content: str,
+        sender_email: str,
+        occurred_at: datetime,
+    ) -> LeadMemory:
+        """Create lead when prospect sends inbound response.
+
+        Args:
+            user_id: The user who received the response.
+            company_name: Name of prospect's company.
+            email_subject: Subject line of inbound email.
+            email_content: Body content of inbound email.
+            sender_email: Email address of prospect.
+            occurred_at: When the email was received.
+
+        Returns:
+            The created or existing LeadMemory.
+        """
+        try:
+            # Find or create lead
+            lead = await self.find_or_create(
+                user_id=user_id,
+                company_name=company_name,
+                trigger=TriggerType.INBOUND,
+            )
+
+            # Add inbound email event
+            from src.models.lead_memory import Direction, EventType, LeadEventCreate
+
+            event_data = LeadEventCreate(
+                event_type=EventType.EMAIL_RECEIVED,
+                direction=Direction.INBOUND,
+                subject=email_subject,
+                content=email_content,
+                participants=[sender_email],
+                occurred_at=occurred_at,
+                source="gmail",
+            )
+
+            await self.event_service.add_event(
+                user_id=user_id,
+                lead_memory_id=lead.id,
+                event_data=event_data,
+            )
+
+            logger.info(
+                "Created lead from inbound response",
+                extra={
+                    "user_id": user_id,
+                    "lead_id": lead.id,
+                    "company_name": company_name,
+                    "sender": sender_email,
+                },
+            )
+
+            return lead
+
+        except Exception:
+            logger.exception(
+                "Failed to process inbound response trigger",
+                extra={"user_id": user_id, "company_name": company_name},
+            )
+            raise

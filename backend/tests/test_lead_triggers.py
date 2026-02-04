@@ -464,3 +464,104 @@ class TestOnCrmImport:
         # Verify all created
         assert len(results) == 3
         assert mock_lead_service.create.call_count == 3
+
+
+class TestOnInboundResponse:
+    """Tests for on_inbound_response trigger."""
+
+    @pytest.mark.asyncio
+    async def test_creates_lead_from_inbound_email(self):
+        """Test creating lead when prospect replies."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_event_service.add_event = AsyncMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock create response
+        new_lead = LeadMemory(
+            id="lead-inbound",
+            user_id="user-abc",
+            company_name="StartupXYZ",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=60,
+            trigger=TriggerType.INBOUND,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.create = AsyncMock(return_value=new_lead)
+        mock_lead_service.list_by_user = AsyncMock(return_value=[])
+
+        # Call on_inbound_response
+        result = await service.on_inbound_response(
+            user_id="user-abc",
+            company_name="StartupXYZ",
+            email_subject="Re: Product inquiry",
+            email_content="Thanks for reaching out, we're interested...",
+            sender_email="founder@startupxyz.com",
+            occurred_at=datetime.now(UTC),
+        )
+
+        # Verify lead created
+        assert result.id == "lead-inbound"
+        mock_lead_service.create.assert_called_once()
+
+        # Verify inbound email event added
+        mock_event_service.add_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_adds_inbound_event_to_existing_lead(self):
+        """Test on_inbound_response adds event to existing lead."""
+        # Setup services
+        mock_lead_service = MagicMock()
+        mock_event_service = MagicMock()
+        mock_event_service.add_event = AsyncMock()
+        mock_conv_service = MagicMock()
+
+        service = LeadTriggerService(
+            lead_memory_service=mock_lead_service,
+            event_service=mock_event_service,
+            conversation_service=mock_conv_service,
+        )
+
+        # Mock existing lead
+        existing_lead = LeadMemory(
+            id="lead-existing",
+            user_id="user-abc",
+            company_name="StartupXYZ",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=65,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead_service.list_by_user = AsyncMock(return_value=[existing_lead])
+
+        # Call on_inbound_response
+        result = await service.on_inbound_response(
+            user_id="user-abc",
+            company_name="StartupXYZ",
+            email_subject="Interested in demo",
+            email_content="Can we schedule a demo?",
+            sender_email="founder@startupxyz.com",
+            occurred_at=datetime.now(UTC),
+        )
+
+        # Should reuse existing lead
+        assert result.id == "lead-existing"
+        mock_lead_service.create.assert_not_called()
+
+        # But add the inbound event
+        mock_event_service.add_event.assert_called_once()
