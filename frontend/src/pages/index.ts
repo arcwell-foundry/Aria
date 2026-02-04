@@ -4,6 +4,7 @@ export { DashboardPage } from "./Dashboard";
 export { EmailDraftsPage } from "./EmailDrafts";
 export { GoalsPage } from "./Goals";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";
+export { LeadDetailPage } from "./LeadDetail";
 export { LeadsPage } from "./Leads";
 export { IntegrationsSettingsPage } from "./IntegrationsSettings";
 export { LoginPage } from "./Login";

@@ -8,6 +8,7 @@ import {
   EmailDraftsPage,
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
+  LeadDetailPage,
   LeadsPage,
   LoginPage,
   MeetingBriefPage,
@@ -64,6 +65,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <LeadsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/leads/:id"
+              element={
+                <ProtectedRoute>
+                  <LeadDetailPage />
                 </ProtectedRoute>
               }
             />
