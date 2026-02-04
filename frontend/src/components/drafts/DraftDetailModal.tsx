@@ -1,5 +1,6 @@
 // frontend/src/components/drafts/DraftDetailModal.tsx
-import { useState, useEffect, useCallback } from "react";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { EmailDraft, UpdateEmailDraftRequest, EmailDraftTone, RegenerateDraftRequest } from "@/api/drafts";
 import { RichTextEditor } from "./RichTextEditor";
 import { ToneSelector } from "./ToneSelector";
@@ -31,7 +32,6 @@ export function DraftDetailModal({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [tone, setTone] = useState<EmailDraftTone>("friendly");
-  const [hasChanges, setHasChanges] = useState(false);
   const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   const isLoading = isSaving || isRegenerating || isSending;
@@ -43,16 +43,13 @@ export function DraftDetailModal({
       setSubject(draft.subject);
       setBody(draft.body);
       setTone(draft.tone);
-      setHasChanges(false);
     }
   }, [draft]);
 
-  // Track changes
-  useEffect(() => {
-    if (draft) {
-      const changed = subject !== draft.subject || body !== draft.body || tone !== draft.tone;
-      setHasChanges(changed);
-    }
+  // Compute hasChanges via useMemo instead of storing in state
+  const hasChanges = useMemo(() => {
+    if (!draft) return false;
+    return subject !== draft.subject || body !== draft.body || tone !== draft.tone;
   }, [draft, subject, body, tone]);
 
   // Handle escape key

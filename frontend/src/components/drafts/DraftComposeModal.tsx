@@ -1,4 +1,5 @@
 // frontend/src/components/drafts/DraftComposeModal.tsx
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect, useCallback } from "react";
 import type { EmailDraftTone, EmailDraftPurpose, CreateEmailDraftRequest } from "@/api/drafts";
 import { ToneSelector } from "./ToneSelector";

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { EmailDraftPurpose } from "@/api/drafts";
 
 interface PurposeSelectorProps {
@@ -6,7 +7,7 @@ interface PurposeSelectorProps {
   disabled?: boolean;
 }
 
-const purposes: { value: EmailDraftPurpose; label: string; icon: JSX.Element }[] = [
+const purposes: { value: EmailDraftPurpose; label: string; icon: ReactNode }[] = [
   {
     value: "intro",
     label: "Introduction",
