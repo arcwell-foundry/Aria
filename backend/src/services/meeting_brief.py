@@ -3,11 +3,18 @@
 Manages meeting brief CRUD operations and coordinates research generation.
 """
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import anthropic
+
+from src.agents.scout import ScoutAgent
+from src.core.config import settings
+from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.services.attendee_profile import AttendeeProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -226,3 +233,169 @@ class MeetingBriefService:
         )
 
         return cast(dict[str, Any], result.data[0])
+
+    async def generate_brief_content(
+        self,
+        user_id: str,
+        brief_id: str,
+    ) -> dict[str, Any] | None:
+        """Generate brief content using Scout agent and Claude.
+
+        Args:
+            user_id: The user's ID.
+            brief_id: The brief's ID.
+
+        Returns:
+            Brief content dict with summary, agenda, and risks, or None if failed.
+        """
+        # Step 1: Get the brief
+        brief = await self.get_brief_by_id(user_id, brief_id)
+        if not brief:
+            logger.warning(
+                "Brief not found for generation",
+                extra={"brief_id": brief_id, "user_id": user_id},
+            )
+            return None
+
+        # Step 2: Update status to generating
+        await self.update_brief_status(user_id=user_id, brief_id=brief_id, status="generating")
+
+        try:
+            # Step 3: Get attendee profiles from cache
+            attendees = brief.get("attendees", [])
+            profile_service = AttendeeProfileService()
+            attendee_profiles = await profile_service.get_profiles_batch(attendees)
+
+            # Step 4: Research companies via Scout agent
+            companies = list(
+                {
+                    profile.get("company")
+                    for profile in attendee_profiles.values()
+                    if profile.get("company")
+                }
+            )
+
+            company_signals: list[dict[str, Any]] = []
+            if companies:
+                llm_client = LLMClient()
+                scout = ScoutAgent(llm_client=llm_client, user_id=user_id)
+                if scout.validate_input({"entities": companies}):
+                    scout_result = await scout.execute({"entities": companies})
+                    if scout_result.success:
+                        company_signals = scout_result.data
+
+            # Step 5: Build context and call Claude
+            context = self._build_brief_context(brief, attendee_profiles, company_signals)
+
+            # Call Claude to synthesize the brief
+            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2048,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": context,
+                    }
+                ],
+            )
+
+            # Parse Claude's response
+            first_block = response.content[0]
+            response_text = first_block.text if hasattr(first_block, "text") else ""
+            try:
+                llm_output = json.loads(response_text)
+            except json.JSONDecodeError:
+                llm_output = {
+                    "summary": response_text,
+                    "suggested_agenda": [],
+                    "risks_opportunities": [],
+                }
+
+            # Step 6: Build complete brief content
+            brief_content: dict[str, Any] = {
+                "summary": llm_output.get("summary", ""),
+                "suggested_agenda": llm_output.get("suggested_agenda", []),
+                "risks_opportunities": llm_output.get("risks_opportunities", []),
+                "attendee_profiles": attendee_profiles,
+                "company_signals": company_signals,
+            }
+
+            # Step 7: Update brief status to completed
+            await self.update_brief_status(
+                user_id=user_id,
+                brief_id=brief_id,
+                status="completed",
+                brief_content=brief_content,
+            )
+
+            logger.info(
+                "Generated meeting brief content",
+                extra={
+                    "brief_id": brief_id,
+                    "user_id": user_id,
+                    "attendee_count": len(attendee_profiles),
+                    "signal_count": len(company_signals),
+                },
+            )
+
+            return brief_content
+
+        except Exception as e:
+            logger.exception(
+                "Failed to generate brief content",
+                extra={"brief_id": brief_id, "user_id": user_id, "error": str(e)},
+            )
+            await self.update_brief_status(
+                user_id=user_id,
+                brief_id=brief_id,
+                status="failed",
+                error_message=str(e),
+            )
+            return None
+
+    def _build_brief_context(
+        self,
+        brief: dict[str, Any],
+        attendee_profiles: dict[str, dict[str, Any]],
+        company_signals: list[dict[str, Any]],
+    ) -> str:
+        """Build context string for Claude to generate the brief.
+
+        Args:
+            brief: The meeting brief data.
+            attendee_profiles: Dict of attendee email to profile data.
+            company_signals: List of company signals from Scout.
+
+        Returns:
+            Formatted context string for the LLM.
+        """
+        context_parts = [
+            "Generate a pre-meeting brief for the following meeting.",
+            "Return a JSON object with 'summary', 'suggested_agenda', and 'risks_opportunities'.",
+            "",
+            f"Meeting Title: {brief.get('meeting_title', 'Unknown')}",
+            f"Meeting Time: {brief.get('meeting_time', 'Unknown')}",
+            "",
+            "Attendees:",
+        ]
+
+        for email, profile in attendee_profiles.items():
+            name = profile.get("name", email)
+            title = profile.get("title", "Unknown")
+            company = profile.get("company", "Unknown")
+            context_parts.append(f"- {name} ({title} at {company})")
+
+        if not attendee_profiles:
+            for email in brief.get("attendees", []):
+                context_parts.append(f"- {email}")
+
+        if company_signals:
+            context_parts.append("")
+            context_parts.append("Recent Company News/Signals:")
+            for signal in company_signals[:5]:  # Limit to top 5 signals
+                headline = signal.get("headline", "")
+                company_name = signal.get("company_name", "")
+                context_parts.append(f"- {company_name}: {headline}")
+
+        return "\n".join(context_parts)

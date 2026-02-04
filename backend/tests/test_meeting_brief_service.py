@@ -386,3 +386,84 @@ async def test_get_upcoming_meetings_orders_by_meeting_time() -> None:
 
         # Verify order was called with meeting_time ascending
         mock_order.assert_called_once_with("meeting_time", desc=False)
+
+
+@pytest.mark.asyncio
+async def test_generate_brief_content_creates_brief() -> None:
+    """Test generate_brief_content calls LLM and updates brief."""
+    with (
+        patch("src.services.meeting_brief.SupabaseClient") as mock_db_class,
+        patch("src.services.meeting_brief.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.meeting_brief.AttendeeProfileService") as mock_profile_class,
+        patch("src.services.meeting_brief.ScoutAgent") as mock_scout_class,
+    ):
+        # Setup DB mock
+        mock_db = MagicMock()
+        mock_brief = {
+            "id": "brief-123",
+            "user_id": "user-123",
+            "calendar_event_id": "evt-456",
+            "meeting_title": "Discovery Call",
+            "meeting_time": "2026-02-04T14:00:00Z",
+            "status": "pending",
+            "attendees": ["john@acme.com"],
+        }
+        # For get_brief_by_id
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=mock_brief
+        )
+        # For update calls
+        mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{**mock_brief, "status": "completed"}]
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        # Setup LLM mock
+        mock_llm_response = MagicMock()
+        mock_llm_content = MagicMock()
+        mock_llm_content.text = '{"summary": "Meeting with Acme Corp", "suggested_agenda": ["Intro"], "risks_opportunities": []}'
+        mock_llm_response.content = [mock_llm_content]
+        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+
+        # Setup profile service mock - make it async
+        mock_profile_service = MagicMock()
+
+        async def mock_get_profiles(
+            *_args: object, **_kwargs: object
+        ) -> dict[str, dict[str, object]]:
+            return {
+                "john@acme.com": {
+                    "email": "john@acme.com",
+                    "name": "John Smith",
+                    "title": "VP Sales",
+                    "company": "Acme Corp",
+                    "profile_data": {},
+                }
+            }
+
+        mock_profile_service.get_profiles_batch = mock_get_profiles
+        mock_profile_class.return_value = mock_profile_service
+
+        # Setup Scout agent mock - make it async
+        mock_scout = MagicMock()
+
+        async def mock_execute(*_args: object, **_kwargs: object) -> MagicMock:
+            return MagicMock(
+                success=True,
+                data=[{"company_name": "Acme Corp", "headline": "Raised funding"}],
+            )
+
+        mock_scout.execute = mock_execute
+        mock_scout.validate_input.return_value = True
+        mock_scout_class.return_value = mock_scout
+
+        from src.services.meeting_brief import MeetingBriefService
+
+        service = MeetingBriefService()
+        result = await service.generate_brief_content(
+            user_id="user-123",
+            brief_id="brief-123",
+        )
+
+        assert result is not None
+        assert "summary" in result

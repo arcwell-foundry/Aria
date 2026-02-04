@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 
-from src.api.routes.auth import get_current_user
+from src.api.deps import get_current_user
 from src.models.notification import (
     MarkReadRequest,
     NotificationListResponse,
