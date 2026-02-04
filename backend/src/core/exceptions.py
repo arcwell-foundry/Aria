@@ -401,6 +401,59 @@ class CorporateFactNotFoundError(NotFoundError):
         super().__init__(resource="Corporate fact", resource_id=fact_id)
 
 
+class LeadMemoryError(ARIAException):
+    """Lead memory operation error (500).
+
+    Used for failures in lead memory operations.
+    """
+
+    def __init__(self, message: str = "Unknown error") -> None:
+        """Initialize lead memory error.
+
+        Args:
+            message: Error details.
+        """
+        super().__init__(
+            message=f"Lead memory error: {message}",
+            code="LEAD_MEMORY_ERROR",
+            status_code=500,
+        )
+
+
+class LeadNotFoundError(NotFoundError):
+    """Lead not found error (404)."""
+
+    def __init__(self, lead_id: str) -> None:
+        """Initialize lead not found error.
+
+        Args:
+            lead_id: The ID of the lead that was not found.
+        """
+        super().__init__(resource="Lead", resource_id=lead_id)
+
+
+class InvalidStageTransitionError(ARIAException):
+    """Invalid lifecycle stage transition error (400).
+
+    Raised when attempting an invalid stage transition
+    (e.g., account -> lead).
+    """
+
+    def __init__(self, current_stage: str, target_stage: str) -> None:
+        """Initialize invalid stage transition error.
+
+        Args:
+            current_stage: The current lifecycle stage.
+            target_stage: The attempted target stage.
+        """
+        super().__init__(
+            message=f"Cannot transition from '{current_stage}' to '{target_stage}'",
+            code="INVALID_STAGE_TRANSITION",
+            status_code=400,
+            details={"current_stage": current_stage, "target_stage": target_stage},
+        )
+
+
 class OODALoopError(ARIAException):
     """OODA loop processing error (500).
 
