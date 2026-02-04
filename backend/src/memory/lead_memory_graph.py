@@ -19,6 +19,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import LeadMemoryGraphError
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -166,6 +167,38 @@ class LeadMemoryGraph:
         except Exception as e:
             raise LeadMemoryGraphError(f"Failed to get Graphiti client: {e}") from e
 
+    def _build_lead_body(self, lead: LeadMemoryNode) -> str:
+        """Build structured lead body for Graphiti storage.
+
+        Args:
+            lead: The LeadMemoryNode to serialize.
+
+        Returns:
+            Structured text representation with relationship markers.
+        """
+        parts = [
+            f"Lead ID: {lead.id}",
+            f"Company: {lead.company_name}",
+            f"OWNED_BY: {lead.user_id}",
+            f"Lifecycle Stage: {lead.lifecycle_stage}",
+            f"Status: {lead.status}",
+            f"Health Score: {lead.health_score}",
+        ]
+
+        if lead.company_id:
+            parts.append(f"ABOUT_COMPANY: {lead.company_id}")
+
+        if lead.crm_id:
+            parts.append(f"SYNCED_TO: {lead.crm_provider}:{lead.crm_id}")
+
+        if lead.expected_value:
+            parts.append(f"Expected Value: {lead.expected_value}")
+
+        if lead.tags:
+            parts.append(f"Tags: {', '.join(lead.tags)}")
+
+        return "\n".join(parts)
+
     async def store_lead(self, lead: LeadMemoryNode) -> str:
         """Store a lead memory node in the knowledge graph.
 
@@ -178,7 +211,54 @@ class LeadMemoryGraph:
         Raises:
             LeadMemoryGraphError: If storage fails.
         """
-        raise NotImplementedError
+        try:
+            import uuid as uuid_module
+
+            lead_id = lead.id if lead.id else str(uuid_module.uuid4())
+
+            # Get Graphiti client
+            client = await self._get_graphiti_client()
+
+            # Build lead body with relationships
+            lead_body = self._build_lead_body(lead)
+
+            # Store in Graphiti
+            from graphiti_core.nodes import EpisodeType
+
+            await client.add_episode(
+                name=self._get_graphiti_node_name(lead_id),
+                episode_body=lead_body,
+                source=EpisodeType.text,
+                source_description=f"lead_memory:{lead.user_id}:{lead.lifecycle_stage}",
+                reference_time=lead.created_at,
+            )
+
+            logger.info(
+                "Stored lead memory in graph",
+                extra={
+                    "lead_id": lead_id,
+                    "user_id": lead.user_id,
+                    "company_name": lead.company_name,
+                },
+            )
+
+            # Audit log
+            await log_memory_operation(
+                user_id=lead.user_id,
+                operation=MemoryOperation.CREATE,
+                memory_type=MemoryType.LEAD,
+                memory_id=lead_id,
+                metadata={"company_name": lead.company_name, "stage": lead.lifecycle_stage},
+                suppress_errors=True,
+            )
+
+            return lead_id
+
+        except LeadMemoryGraphError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to store lead in graph")
+            raise LeadMemoryGraphError(f"Failed to store lead: {e}") from e
 
     async def get_lead(self, user_id: str, lead_id: str) -> LeadMemoryNode:
         """Retrieve a specific lead by ID.

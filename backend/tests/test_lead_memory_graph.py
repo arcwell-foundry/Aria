@@ -149,3 +149,78 @@ def test_lead_memory_graph_has_required_methods() -> None:
     assert hasattr(graph, "find_leads_by_topic")
     assert hasattr(graph, "find_silent_leads")
     assert hasattr(graph, "get_leads_for_company")
+
+
+# --- store_lead tests ---
+
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+
+@pytest.fixture
+def mock_graphiti_client() -> MagicMock:
+    """Create a mock GraphitiClient for testing."""
+    mock_instance = MagicMock()
+    mock_instance.add_episode = AsyncMock(return_value=MagicMock(uuid="graphiti-lead-123"))
+    return mock_instance
+
+
+@pytest.mark.asyncio
+async def test_store_lead_stores_in_graphiti(mock_graphiti_client: MagicMock) -> None:
+    """Test that store_lead stores lead in Graphiti."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph, LeadMemoryNode
+
+    now = datetime.now(UTC)
+    lead = LeadMemoryNode(
+        id="lead-123",
+        user_id="user-456",
+        company_name="Acme Corp",
+        lifecycle_stage="lead",
+        status="active",
+        health_score=75,
+        created_at=now,
+    )
+
+    graph = LeadMemoryGraph()
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_graphiti_client
+        # Patch the audit logging to avoid database calls
+        with patch("src.memory.audit.log_memory_operation", new_callable=AsyncMock):
+            result = await graph.store_lead(lead)
+
+            assert result == "lead-123"
+            mock_graphiti_client.add_episode.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_store_lead_creates_ownership_relationship(mock_graphiti_client: MagicMock) -> None:
+    """Test that store_lead creates OWNED_BY relationship in episode body."""
+    from src.memory.lead_memory_graph import LeadMemoryGraph, LeadMemoryNode
+
+    now = datetime.now(UTC)
+    lead = LeadMemoryNode(
+        id="lead-456",
+        user_id="user-789",
+        company_name="TechCo",
+        lifecycle_stage="opportunity",
+        status="active",
+        health_score=80,
+        created_at=now,
+    )
+
+    graph = LeadMemoryGraph()
+
+    with patch.object(graph, "_get_graphiti_client", new_callable=AsyncMock) as mock_get_client:
+        mock_get_client.return_value = mock_graphiti_client
+        # Patch the audit logging to avoid database calls
+        with patch("src.memory.audit.log_memory_operation", new_callable=AsyncMock):
+            await graph.store_lead(lead)
+
+            # Check the episode body contains ownership info
+            call_args = mock_graphiti_client.add_episode.call_args
+            episode_body = call_args.kwargs.get("episode_body", "")
+            assert "OWNED_BY: user-789" in episode_body
+            assert "Company: TechCo" in episode_body
