@@ -187,3 +187,82 @@ class TestHashComputation:
 
         assert len(result) == 64
         assert all(c in "0123456789abcdef" for c in result)
+
+
+class TestGetLatestHash:
+    """Tests for get_latest_hash method."""
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_hash_for_new_user(self) -> None:
+        """Test returns zero hash when user has no audit entries."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.limit.return_value = mock_query_builder
+        mock_query_builder.single.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.get_latest_hash("new-user-123")
+
+        # Zero hash for genesis entry
+        assert result == "0" * 64
+
+    @pytest.mark.asyncio
+    async def test_returns_last_entry_hash(self) -> None:
+        """Test returns entry_hash of most recent entry."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        expected_hash = "a" * 64
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.limit.return_value = mock_query_builder
+        mock_query_builder.single.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(
+            return_value=MagicMock(data={"entry_hash": expected_hash})
+        )
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.get_latest_hash("user-123")
+
+        assert result == expected_hash
+
+    @pytest.mark.asyncio
+    async def test_queries_correct_table_and_order(self) -> None:
+        """Test queries skill_audit_log ordered by timestamp DESC."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.limit.return_value = mock_query_builder
+        mock_query_builder.single.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        await service.get_latest_hash("user-456")
+
+        # Verify table name
+        mock_client.table.assert_called_once_with("skill_audit_log")
+        # Verify select column
+        mock_client.table.return_value.select.assert_called_once_with("entry_hash")
+        # Verify ordering
+        mock_query_builder.order.assert_called_once_with("timestamp", desc=True)
+        # Verify limit
+        mock_query_builder.limit.assert_called_once_with(1)

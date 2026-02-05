@@ -104,3 +104,36 @@ class SkillAuditService:
         combined = f"{canonical}:{previous_hash}"
         # Return SHA256 as hex string
         return hashlib.sha256(combined.encode()).hexdigest()
+
+    async def get_latest_hash(self, user_id: str) -> str:
+        """Get the entry_hash of the most recent audit entry for a user.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            The entry_hash of the most recent entry, or zero hash if none exist.
+        """
+        try:
+            response = await (
+                self._client.table("skill_audit_log")
+                .select("entry_hash")
+                .eq("user_id", user_id)
+                .order("timestamp", desc=True)
+                .limit(1)
+                .single()
+                .execute()
+            )
+
+            if response.data and response.data.get("entry_hash"):
+                return str(response.data["entry_hash"])
+
+            # No entries: return zero hash for genesis block
+            return "0" * 64
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch latest hash, using zero hash",
+                extra={"user_id": user_id, "error": str(e), "error_type": type(e).__name__},
+            )
+            return "0" * 64
