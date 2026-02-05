@@ -175,3 +175,59 @@ def test_estimate_tokens_unicode() -> None:
     # "Hello 世界 🌍" is 10 chars (len() counts codepoints)
     # 10 // 4 = 2
     assert result == 2
+
+
+def test_compact_if_needed_returns_original_when_under_budget() -> None:
+    """Test compact_if_needed returns original when under max_tokens."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # Short text, well under budget
+    context = "This is short"
+    result = manager.compact_if_needed(context, max_tokens=100)
+
+    assert result == "This is short"
+
+
+def test_compact_if_needed_returns_original_when_exactly_at_budget() -> None:
+    """Test compact_if_needed returns original when exactly at max_tokens."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # Text that's exactly at budget
+    context = "x" * 400  # 400 chars ≈ 100 tokens
+    result = manager.compact_if_needed(context, max_tokens=100)
+
+    assert result == context
+
+
+def test_compact_if_needed_truncates_when_over_budget() -> None:
+    """Test compact_if_needed truncates and adds ... when over budget."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # Long text over budget
+    context = "x" * 800  # 800 chars ≈ 200 tokens, but budget is 100
+    result = manager.compact_if_needed(context, max_tokens=100)
+
+    # Should be truncated to fit budget with "..." indicator
+    assert result.endswith("...")
+    # Result should be shorter than original
+    assert len(result) < len(context)
+    # Should not exceed budget significantly
+    estimated_tokens = manager.estimate_tokens(result)
+    assert estimated_tokens <= 100
+
+
+def test_compact_if_needed_handles_empty_string() -> None:
+    """Test compact_if_needed handles empty string."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    result = manager.compact_if_needed("", max_tokens=100)
+
+    assert result == ""

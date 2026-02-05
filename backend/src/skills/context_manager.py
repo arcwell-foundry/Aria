@@ -134,3 +134,30 @@ class SkillContextManager:
             Estimated token count (integer).
         """
         return len(text) // 4
+
+    def compact_if_needed(self, context: str, max_tokens: int) -> str:
+        """Compact context to fit within max_tokens budget.
+
+        If the context is already under the budget, returns it unchanged.
+        If over budget, truncates the context and adds a "..." indicator.
+
+        Args:
+            context: The context string to potentially compact.
+            max_tokens: Maximum token budget allowed.
+
+        Returns:
+            Original context if under budget, or truncated context with "..."
+            suffix if over budget.
+        """
+        estimated = self.estimate_tokens(context)
+
+        if estimated <= max_tokens:
+            return context
+
+        # Need to truncate - leave room for "..." suffix
+        # Calculate target character count (leave 3 chars for "...")
+        target_chars = (max_tokens * 4) - 3
+        if target_chars < 0:
+            target_chars = 0
+
+        return context[:target_chars] + "..."
