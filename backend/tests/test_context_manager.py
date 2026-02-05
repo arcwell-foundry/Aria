@@ -415,3 +415,140 @@ def test_prepare_subagent_context_respects_section_order() -> None:
     input_pos = result.find("## Input Data")
 
     assert task_pos < skill_pos < input_pos
+
+
+def test_build_working_memory_entry_minimal_verbosity() -> None:
+    """Test build_working_memory_entry with MINIMAL verbosity."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    step_result = {
+        "step": "extract_pdf_text",
+        "status": "completed",
+        "result": "Extracted 1500 words from PDF",
+    }
+
+    result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.MINIMAL,
+    )
+
+    # Should contain status and brief info
+    assert "✓" in result or "completed" in result.lower()
+    assert "extract_pdf_text" in result
+
+
+def test_build_working_memory_entry_standard_verbosity() -> None:
+    """Test build_working_memory_entry with STANDARD verbosity."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    step_result = {
+        "step": "analyze_content",
+        "status": "completed",
+        "result": "Found 3 key insights about market trends",
+        "details": "Analysis took 2.5 seconds and processed 15 pages",
+    }
+
+    result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.STANDARD,
+    )
+
+    # Should contain more detail than MINIMAL
+    assert "analyze_content" in result
+    assert "key insights" in result or "result" in result.lower()
+
+
+def test_build_working_memory_entry_detailed_verbosity() -> None:
+    """Test build_working_memory_entry with DETAILED verbosity."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    step_result = {
+        "step": "generate_summary",
+        "status": "completed",
+        "result": "Generated executive summary",
+        "details": "Processed 50 pages of content",
+        "metadata": {"model": "claude-3-5-sonnet", "tokens": 1500},
+    }
+
+    result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.DETAILED,
+    )
+
+    # Should contain full details including metadata
+    assert "generate_summary" in result
+    assert "executive summary" in result.lower()
+
+
+def test_build_working_memory_entry_failed_step() -> None:
+    """Test build_working_memory_entry with failed step."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    step_result = {
+        "step": "process_document",
+        "status": "failed",
+        "error": "File format not supported",
+    }
+
+    result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.STANDARD,
+    )
+
+    # Should indicate failure
+    assert "✗" in result or "failed" in result.lower() or "error" in result.lower()
+    assert "process_document" in result
+
+
+def test_build_working_memory_entry_in_progress_step() -> None:
+    """Test build_working_memory_entry with in-progress step."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    step_result = {
+        "step": "download_file",
+        "status": "in_progress",
+        "progress": "45%",
+    }
+
+    result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.MINIMAL,
+    )
+
+    # Should indicate in-progress status
+    assert "⟳" in result or "in_progress" in result.lower() or "in progress" in result.lower() or "45%" in result
+
+
+def test_build_working_memory_entry_respects_token_targets() -> None:
+    """Test build_working_memory_entry respects verbosity token targets."""
+    from src.skills.context_manager import SkillContextManager, SummaryVerbosity
+
+    manager = SkillContextManager()
+
+    # Create a long result
+    step_result = {
+        "step": "long_task",
+        "status": "completed",
+        "result": "x" * 1000,  # Long result
+        "details": "y" * 1000,  # Long details
+    }
+
+    # Test with MINIMAL (300 token target)
+    minimal_result = manager.build_working_memory_entry(
+        step_result=step_result,
+        verbosity=SummaryVerbosity.MINIMAL,
+    )
+    minimal_tokens = manager.estimate_tokens(minimal_result)
+
+    # Should be reasonably close to target (within 50% fudge factor)
+    assert minimal_tokens <= SummaryVerbosity.MINIMAL.token_target + 150

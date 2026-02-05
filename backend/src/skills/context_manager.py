@@ -17,6 +17,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Status indicators for working memory entries
+STATUS_INDICATORS = {
+    "completed": "✓",
+    "failed": "✗",
+    "in_progress": "⟳",
+    "pending": "○",
+}
+
 # Context budget constants (in tokens)
 # These budgets ensure ARIA stays within practical token limits
 # while maintaining effective skill coordination.
@@ -252,3 +260,59 @@ class SkillContextManager:
 
         # Compact the entire context to fit subagent budget
         return self.compact_if_needed(full_context, self.subagent_budget)
+
+    def build_working_memory_entry(
+        self,
+        step_result: dict[str, Any],
+        verbosity: SummaryVerbosity,
+    ) -> str:
+        """Build a working memory entry with controlled verbosity.
+
+        Creates summaries of step results with status indicators and
+        detail levels controlled by the verbosity parameter.
+
+        Args:
+            step_result: Dictionary containing step information with keys:
+                - step: Name of the step
+                - status: One of "completed", "failed", "in_progress", "pending"
+                - result: Result description (optional)
+                - error: Error message (optional, for failed steps)
+                - details: Additional details (optional)
+                - metadata: Additional metadata (optional)
+            verbosity: How detailed the summary should be.
+
+        Returns:
+            A formatted working memory entry string.
+        """
+        step = step_result.get("step", "unknown_step")
+        status = step_result.get("status", "pending")
+        result = step_result.get("result", "")
+        error = step_result.get("error", "")
+        details = step_result.get("details", "")
+        metadata = step_result.get("metadata", {})
+
+        # Get status indicator
+        indicator = STATUS_INDICATORS.get(status, "○")
+
+        # Build base entry
+        parts = [f"{indicator} {step}"]
+
+        # Add content based on verbosity
+        if status == "failed" and error:
+            parts.append(f"Error: {error}")
+        elif result:
+            parts.append(result)
+
+        # Add details for STANDARD and DETAILED
+        if verbosity != SummaryVerbosity.MINIMAL and details:
+            parts.append(details)
+
+        # Add metadata for DETAILED
+        if verbosity == SummaryVerbosity.DETAILED and metadata:
+            metadata_str = ", ".join(f"{k}: {v}" for k, v in metadata.items())
+            parts.append(f"({metadata_str})")
+
+        entry = " - ".join(parts)
+
+        # Compact to fit verbosity token target
+        return self.compact_if_needed(entry, verbosity.token_target)
