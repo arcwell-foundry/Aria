@@ -790,3 +790,107 @@ class TestCanBeTokenized:
         )
 
         assert result.can_be_tokenized is True
+
+
+class TestModuleExports:
+    """Tests for module exports."""
+
+    def test_security_module_exports_data_class(self) -> None:
+        """Test DataClass is exported from security module."""
+        from src.security import DataClass
+
+        assert DataClass.PUBLIC.value == "public"
+
+    def test_security_module_exports_classified_data(self) -> None:
+        """Test ClassifiedData is exported from security module."""
+        from src.security import ClassifiedData, DataClass
+
+        data = ClassifiedData(
+            data="test",
+            classification=DataClass.PUBLIC,
+            data_type="test",
+            source="test",
+        )
+        assert data.data == "test"
+
+    def test_security_module_exports_data_classifier(self) -> None:
+        """Test DataClassifier is exported from security module."""
+        from src.security import DataClassifier
+
+        classifier = DataClassifier()
+        assert hasattr(classifier, "PATTERNS")
+        assert hasattr(classifier, "classify")
+
+
+class TestDataClassificationIntegration:
+    """Integration tests for data classification system."""
+
+    @pytest.mark.asyncio
+    async def test_full_classification_workflow(self) -> None:
+        """Test complete classification workflow with various data types."""
+        from src.security import ClassifiedData, DataClass, DataClassifier
+
+        classifier = DataClassifier()
+
+        # Test various data types
+        test_cases = [
+            # (data, context, expected_class, expected_tokenizable)
+            ("SSN: 123-45-6789", {"source": "user"}, DataClass.REGULATED, False),
+            ("Card: 1234567890123456", {"source": "payment"}, DataClass.REGULATED, False),
+            ("DOB: 01/15/1990", {"source": "form"}, DataClass.REGULATED, False),
+            ("Patient diagnosis is stable", {"source": "ehr"}, DataClass.REGULATED, True),
+            ("Revenue: $4.2M", {"source": "report"}, DataClass.RESTRICTED, True),
+            ("Deal size estimate", {"source": "crm"}, DataClass.RESTRICTED, True),
+            ("Contact: john@example.com", {"source": "email"}, DataClass.CONFIDENTIAL, True),
+            ("Call 555-123-4567", {"source": "notes"}, DataClass.CONFIDENTIAL, True),
+            ("Meeting scheduled", {"source": "calendar"}, DataClass.INTERNAL, True),
+        ]
+
+        for data, context, expected_class, expected_tokenizable in test_cases:
+            result = await classifier.classify(data, context)
+            assert isinstance(result, ClassifiedData), f"Failed for: {data}"
+            assert result.classification == expected_class, f"Wrong class for: {data}"
+            assert result.can_be_tokenized == expected_tokenizable, f"Wrong tokenizable for: {data}"
+
+    @pytest.mark.asyncio
+    async def test_classifier_handles_complex_mixed_data(self) -> None:
+        """Test classifier with complex data containing multiple patterns."""
+        from src.security import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+
+        # Data with multiple sensitive items - should get most sensitive
+        mixed_data = """
+        Customer Record:
+        Name: John Doe
+        Email: john.doe@company.com
+        SSN: 123-45-6789
+        Revenue Target: $5M
+        """
+
+        result = await classifier.classify(mixed_data, {"source": "crm"})
+
+        # Should be REGULATED due to SSN
+        assert result.classification == DataClass.REGULATED
+        assert result.can_be_tokenized is False
+
+    @pytest.mark.asyncio
+    async def test_classifier_performance_with_large_text(self) -> None:
+        """Test classifier handles large text efficiently."""
+        import time
+
+        from src.security import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+
+        # Generate large text (100KB)
+        large_text = "This is a test sentence. " * 5000
+        large_text += " SSN: 123-45-6789"  # Add sensitive data at end
+
+        start = time.time()
+        result = await classifier.classify(large_text, {"source": "test"})
+        elapsed = time.time() - start
+
+        assert result.classification == DataClass.REGULATED
+        # Should complete in under 1 second
+        assert elapsed < 1.0, f"Classification took too long: {elapsed}s"
