@@ -897,3 +897,360 @@ class TestAddContributor:
             )
 
             assert response.status_code == 404
+
+
+class TestListContributors:
+    """Tests for GET /api/v1/leads/{lead_id}/contributors endpoint."""
+
+    def test_list_contributors_requires_auth(self) -> None:
+        """Test that listing contributors requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.get("/api/v1/leads/some-lead-id/contributors")
+        assert response.status_code == 401
+
+    def test_list_contributors_success(self, test_client: TestClient) -> None:
+        """Test successfully listing contributors."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.services.lead_collaboration import Contributor
+
+        mock_contributors = [
+            Contributor(
+                id="contributor-1",
+                lead_memory_id="lead-456",
+                name="Jane Smith",
+                email="jane@example.com",
+                added_at=datetime.now(UTC),
+                contribution_count=3,
+            ),
+            Contributor(
+                id="contributor-2",
+                lead_memory_id="lead-456",
+                name="Bob Jones",
+                email="bob@example.com",
+                added_at=datetime.now(UTC),
+                contribution_count=1,
+            ),
+        ]
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.get_contributors = AsyncMock(return_value=mock_contributors)
+
+            response = test_client.get("/api/v1/leads/lead-456/contributors")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data) == 2
+            assert data[0]["name"] == "Jane Smith"
+            assert data[0]["contribution_count"] == 3
+            assert data[1]["name"] == "Bob Jones"
+
+    def test_list_contributors_lead_not_found(self, test_client: TestClient) -> None:
+        """Test listing contributors for non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.get("/api/v1/leads/lead-999/contributors")
+
+            assert response.status_code == 404
+
+
+class TestSubmitContribution:
+    """Tests for POST /api/v1/leads/{lead_id}/contributions endpoint."""
+
+    def test_submit_contribution_requires_auth(self) -> None:
+        """Test that submitting a contribution requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/leads/some-lead-id/contributions",
+            json={
+                "contribution_type": "note",
+                "content": "This is a note contribution",
+            },
+        )
+        assert response.status_code == 401
+
+    def test_submit_contribution_success(self, test_client: TestClient) -> None:
+        """Test successfully submitting a contribution."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        with (
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.submit_contribution = AsyncMock(return_value="contribution-123")
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/contributions",
+                json={
+                    "contribution_type": "note",
+                    "content": "This is a note contribution",
+                },
+            )
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["id"] == "contribution-123"
+
+    def test_submit_contribution_validation_error(self, test_client: TestClient) -> None:
+        """Test validation when missing required field."""
+        response = test_client.post(
+            "/api/v1/leads/lead-456/contributions",
+            json={},
+        )
+        assert response.status_code == 422
+
+    def test_submit_contribution_with_event_type(self, test_client: TestClient) -> None:
+        """Test submitting an event contribution."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        with (
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.submit_contribution = AsyncMock(return_value="contribution-456")
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/contributions",
+                json={
+                    "contribution_type": "event",
+                    "contribution_id": "event-789",
+                },
+            )
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["id"] == "contribution-456"
+
+
+class TestListContributions:
+    """Tests for GET /api/v1/leads/{lead_id}/contributions endpoint."""
+
+    def test_list_contributions_requires_auth(self) -> None:
+        """Test that listing contributions requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.get("/api/v1/leads/some-lead-id/contributions")
+        assert response.status_code == 401
+
+    def test_list_contributions_success(self, test_client: TestClient) -> None:
+        """Test successfully listing contributions."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.services.lead_collaboration import Contribution, ContributionType, ContributionStatus
+
+        mock_contributions = [
+            Contribution(
+                id="contribution-1",
+                lead_memory_id="lead-456",
+                contributor_id="contributor-1",
+                contribution_type=ContributionType.NOTE,
+                contribution_id=None,
+                status=ContributionStatus.PENDING,
+                reviewed_by=None,
+                reviewed_at=None,
+                created_at=datetime.now(UTC),
+            ),
+            Contribution(
+                id="contribution-2",
+                lead_memory_id="lead-456",
+                contributor_id="contributor-2",
+                contribution_type=ContributionType.EVENT,
+                contribution_id="event-123",
+                status=ContributionStatus.PENDING,
+                reviewed_by=None,
+                reviewed_at=None,
+                created_at=datetime.now(UTC),
+            ),
+        ]
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.get_pending_contributions = AsyncMock(return_value=mock_contributions)
+
+            response = test_client.get("/api/v1/leads/lead-456/contributions")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data) == 2
+            assert data[0]["id"] == "contribution-1"
+            assert data[0]["contribution_type"] == "note"
+            assert data[1]["contribution_type"] == "event"
+
+    def test_list_contributions_lead_not_found(self, test_client: TestClient) -> None:
+        """Test listing contributions for non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.get("/api/v1/leads/lead-999/contributions")
+
+            assert response.status_code == 404
+
+
+class TestReviewContribution:
+    """Tests for POST /api/v1/leads/{lead_id}/contributions/{contribution_id}/review endpoint."""
+
+    def test_review_contribution_requires_auth(self) -> None:
+        """Test that reviewing a contribution requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/leads/some-lead-id/contributions/contribution-123/review",
+            json={"action": "merge"},
+        )
+        assert response.status_code == 401
+
+    def test_review_contribution_merge_success(self, test_client: TestClient) -> None:
+        """Test successfully merging a contribution."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.review_contribution = AsyncMock()
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/contributions/contribution-123/review",
+                json={"action": "merge"},
+            )
+
+            assert response.status_code == 204
+            assert response.content == b""
+
+    def test_review_contribution_reject_success(self, test_client: TestClient) -> None:
+        """Test successfully rejecting a contribution."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.review_contribution = AsyncMock()
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/contributions/contribution-123/review",
+                json={"action": "reject"},
+            )
+
+            assert response.status_code == 204
+
+    def test_review_contribution_invalid_action(self, test_client: TestClient) -> None:
+        """Test reviewing with invalid action returns 400."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.core.exceptions import ValidationError
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+            patch(
+                "src.services.lead_collaboration.LeadCollaborationService"
+            ) as mock_collab_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_sb_client.get_client = MagicMock(return_value=MagicMock())
+
+            mock_collab_instance = mock_collab_service.return_value
+            mock_collab_instance.review_contribution = AsyncMock(
+                side_effect=ValidationError("Invalid action", field="action")
+            )
+
+            response = test_client.post(
+                "/api/v1/leads/lead-456/contributions/contribution-123/review",
+                json={"action": "merge"},  # Valid Pydantic value, but service will reject
+            )
+
+            assert response.status_code == 400
+
+    def test_review_contribution_lead_not_found(self, test_client: TestClient) -> None:
+        """Test reviewing contribution for non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.post(
+                "/api/v1/leads/lead-999/contributions/contribution-123/review",
+                json={"action": "merge"},
+            )
+
+            assert response.status_code == 404
+
+    def test_review_contribution_validation_error(self, test_client: TestClient) -> None:
+        """Test validation when action is missing."""
+        response = test_client.post(
+            "/api/v1/leads/lead-456/contributions/contribution-123/review",
+            json={},
+        )
+        assert response.status_code == 422

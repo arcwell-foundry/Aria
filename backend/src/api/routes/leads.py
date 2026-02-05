@@ -20,6 +20,7 @@ from src.core.exceptions import (
     InvalidStageTransitionError,
     LeadMemoryError,
     LeadNotFoundError,
+    ValidationError,
 )
 from src.memory.lead_memory import (
     LeadMemory,
@@ -28,7 +29,11 @@ from src.memory.lead_memory import (
     LifecycleStage,
 )
 from src.models.lead_memory import (
+    ContributionCreate,
+    ContributionResponse,
+    ContributionReviewRequest,
     ContributorCreate,
+    ContributorResponse,
     InsightResponse,
     InsightType,
     LeadEventCreate,
@@ -865,6 +870,213 @@ async def add_contributor(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         ) from e
+
+
+@router.get("/{lead_id}/contributors", response_model=list[ContributorResponse])
+async def list_contributors(
+    lead_id: str,
+    current_user: CurrentUser,
+) -> list[ContributorResponse]:
+    """List all contributors for a lead.
+
+    Args:
+        lead_id: The lead ID to list contributors for.
+        current_user: Current authenticated user.
+
+    Returns:
+        List of contributors for the lead.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if retrieval fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.lead_collaboration import LeadCollaborationService
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Get contributors
+        client = SupabaseClient.get_client()
+        collab_service = LeadCollaborationService(db_client=client)
+
+        contributors = await collab_service.get_contributors(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        return [ContributorResponse(**c.to_dict()) for c in contributors]
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to list contributors")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.post(
+    "/{lead_id}/contributions",
+    response_model=dict[str, str],
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_contribution(
+    lead_id: str,
+    contribution_data: ContributionCreate,
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """Submit a contribution to a lead for owner review.
+
+    Args:
+        lead_id: The lead ID to submit contribution to.
+        contribution_data: The contribution data.
+        current_user: Current authenticated user.
+
+    Returns:
+        The ID of the created contribution.
+
+    Raises:
+        HTTPException: 500 if submission fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.lead_collaboration import ContributionType as ServiceContributionType
+    from src.services.lead_collaboration import LeadCollaborationService
+
+    try:
+        client = SupabaseClient.get_client()
+        collab_service = LeadCollaborationService(db_client=client)
+
+        # Convert model enum to service enum
+        service_contribution_type = ServiceContributionType(contribution_data.contribution_type.value)
+
+        contribution_id = await collab_service.submit_contribution(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+            contribution_type=service_contribution_type,
+            contribution_id=contribution_data.contribution_id,
+            content=contribution_data.content,
+        )
+        return {"id": contribution_id}
+
+    except LeadMemoryError as e:
+        logger.exception("Failed to submit contribution")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.get("/{lead_id}/contributions", response_model=list[ContributionResponse])
+async def list_contributions(
+    lead_id: str,
+    current_user: CurrentUser,
+    status_filter: str | None = Query(None, alias="status", description="Filter by contribution status"),
+) -> list[ContributionResponse]:
+    """List contributions for a lead.
+
+    Args:
+        lead_id: The lead ID to list contributions for.
+        current_user: Current authenticated user.
+        status_filter: Optional filter by contribution status.
+
+    Returns:
+        List of contributions for the lead.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if retrieval fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.models.lead_memory import ContributionStatus as ModelContributionStatus, ContributionType as ModelContributionType
+    from src.services.lead_collaboration import LeadCollaborationService
+
+    try:
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        client = SupabaseClient.get_client()
+        collab_service = LeadCollaborationService(db_client=client)
+        contributions = await collab_service.get_pending_contributions(
+            user_id=current_user.id, lead_memory_id=lead_id
+        )
+
+        return [
+            ContributionResponse(
+                id=c.id,
+                lead_memory_id=c.lead_memory_id,
+                contributor_id=c.contributor_id,
+                contributor_name="",
+                contribution_type=ModelContributionType(c.contribution_type.value),
+                contribution_id=c.contribution_id,
+                content=None,
+                status=ModelContributionStatus(c.status.value),
+                created_at=c.created_at,
+                reviewed_at=c.reviewed_at,
+                reviewed_by=c.reviewed_by,
+            )
+            for c in contributions
+        ]
+
+    except HTTPException:
+        raise
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found"
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to list contributions")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+
+
+@router.post(
+    "/{lead_id}/contributions/{contribution_id}/review",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def review_contribution(
+    lead_id: str,
+    contribution_id: str,
+    review_data: ContributionReviewRequest,
+    current_user: CurrentUser,
+) -> None:
+    """Review a contribution (merge or reject).
+
+    Args:
+        lead_id: The lead ID the contribution belongs to.
+        contribution_id: The contribution ID to review.
+        review_data: The review action (merge or reject).
+        current_user: Current authenticated user.
+
+    Raises:
+        HTTPException: 400 if invalid action, 404 if lead not found, 500 if review fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.lead_collaboration import LeadCollaborationService
+
+    try:
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        client = SupabaseClient.get_client()
+        collab_service = LeadCollaborationService(db_client=client)
+        await collab_service.review_contribution(
+            user_id=current_user.id, contribution_id=contribution_id, action=review_data.action
+        )
+        return None
+
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found"
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to review contribution")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @router.post("/export")
