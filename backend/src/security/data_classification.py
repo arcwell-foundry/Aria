@@ -52,6 +52,15 @@ class DataClassifier:
     Uses pattern matching to detect sensitive data types.
     """
 
+    # Patterns that indicate data that CANNOT be tokenized (must be fully redacted)
+    NON_TOKENIZABLE_PATTERNS: set[str] = {
+        r"\b\d{3}-\d{2}-\d{4}\b",  # SSN with dashes
+        r"\b\d{9}\b",  # SSN without dashes
+        r"\b(?:\d{4}[-\s]?){3}\d{4}\b",  # Credit card
+        r"\b\d{16}\b",  # Credit card without separators
+        r"\bDOB\s*[:\-]?\s*\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b",  # Date of birth
+    }
+
     # Patterns that indicate sensitive data
     PATTERNS: dict[DataClass, list[str]] = {
         DataClass.REGULATED: [
@@ -122,6 +131,7 @@ class DataClassifier:
                         classification=classification,
                         data_type=self._infer_data_type(text, pattern),
                         source=context.get("source", "unknown"),
+                        can_be_tokenized=self._can_be_tokenized(pattern),
                     )
 
         # Context-based classification fallback
@@ -133,6 +143,7 @@ class DataClassifier:
                 classification=DataClass.CONFIDENTIAL,
                 data_type="deal_info",
                 source=source,
+                can_be_tokenized=True,
             )
 
         if source == "financial_report":
@@ -141,6 +152,7 @@ class DataClassifier:
                 classification=DataClass.RESTRICTED,
                 data_type="financial",
                 source=source,
+                can_be_tokenized=True,
             )
 
         # Default to INTERNAL if no sensitive patterns or context found
@@ -149,6 +161,7 @@ class DataClassifier:
             classification=DataClass.INTERNAL,
             data_type="general",
             source=source,
+            can_be_tokenized=True,
         )
 
     def _infer_data_type(self, text: str, matched_pattern: str) -> str:
@@ -200,3 +213,16 @@ class DataClassifier:
             return "contact"
 
         return "sensitive"
+
+    def _can_be_tokenized(self, pattern: str) -> bool:
+        """Determine if data matching this pattern can be tokenized.
+
+        Some data (like SSNs) should never be tokenized, only fully redacted.
+
+        Args:
+            pattern: The regex pattern that matched.
+
+        Returns:
+            True if data can be tokenized, False if it must be redacted.
+        """
+        return pattern not in self.NON_TOKENIZABLE_PATTERNS

@@ -695,3 +695,98 @@ class TestContextBasedClassification:
 
         assert result.source == "unknown"
         assert result.classification == DataClass.INTERNAL
+
+
+class TestCanBeTokenized:
+    """Tests for can_be_tokenized logic."""
+
+    @pytest.mark.asyncio
+    async def test_ssn_cannot_be_tokenized(self) -> None:
+        """Test SSNs are marked as not tokenizable."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "SSN: 123-45-6789",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is False
+
+    @pytest.mark.asyncio
+    async def test_credit_card_cannot_be_tokenized(self) -> None:
+        """Test credit cards are marked as not tokenizable."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Card: 1234-5678-9012-3456",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is False
+
+    @pytest.mark.asyncio
+    async def test_dob_cannot_be_tokenized(self) -> None:
+        """Test DOB is marked as not tokenizable."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "DOB: 01/15/1990",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is False
+
+    @pytest.mark.asyncio
+    async def test_email_can_be_tokenized(self) -> None:
+        """Test emails can be tokenized."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Contact: john@example.com",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is True
+
+    @pytest.mark.asyncio
+    async def test_phone_can_be_tokenized(self) -> None:
+        """Test phone numbers can be tokenized."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Call 555-123-4567",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is True
+
+    @pytest.mark.asyncio
+    async def test_financial_can_be_tokenized(self) -> None:
+        """Test financial data can be tokenized."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Revenue: $4.2M",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is True
+
+    @pytest.mark.asyncio
+    async def test_internal_data_can_be_tokenized(self) -> None:
+        """Test internal data can be tokenized."""
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Meeting notes",
+            {"source": "user_input"},
+        )
+
+        assert result.can_be_tokenized is True
