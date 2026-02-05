@@ -6,9 +6,40 @@ access system resources or data beyond their permissions.
 """
 
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Any, Final
 
 from src.security.trust_levels import SkillTrustLevel
+
+
+class SandboxViolation(Exception):
+    """Exception raised when a skill violates sandbox constraints.
+
+    Raised when a skill attempts to exceed resource limits or access
+    restricted capabilities (network, files, code execution).
+
+    Attributes:
+        violation_type: Category of violation (timeout, memory, network, file, code).
+        message: Human-readable description of the violation.
+        details: Optional dict with additional violation details.
+    """
+
+    def __init__(
+        self,
+        violation_type: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize SandboxViolation.
+
+        Args:
+            violation_type: Category of violation.
+            message: Human-readable description.
+            details: Optional additional details.
+        """
+        self.violation_type = violation_type
+        self.message = message
+        self.details = details
+        super().__init__(f"{violation_type}: {message}")
 
 
 @dataclass

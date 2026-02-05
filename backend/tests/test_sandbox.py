@@ -111,3 +111,38 @@ class TestSandboxByTrust:
         assert user_config.can_read_files is True
         assert user_config.can_write_files is True
         assert user_config.can_execute_code is False
+
+
+class TestSandboxViolation:
+    """Tests for SandboxViolation exception."""
+
+    def test_sandbox_violation_is_exception(self) -> None:
+        """SandboxViolation should be an Exception subclass."""
+        from src.security.sandbox import SandboxViolation
+
+        assert issubclass(SandboxViolation, Exception)
+
+    def test_sandbox_violation_stores_details(self) -> None:
+        """SandboxViolation should store violation details."""
+        from src.security.sandbox import SandboxViolation
+
+        violation = SandboxViolation(
+            violation_type="timeout",
+            message="Execution exceeded 30 second limit",
+            details={"elapsed_seconds": 35, "limit_seconds": 30},
+        )
+        assert violation.violation_type == "timeout"
+        assert violation.message == "Execution exceeded 30 second limit"
+        assert violation.details == {"elapsed_seconds": 35, "limit_seconds": 30}
+        assert str(violation) == "timeout: Execution exceeded 30 second limit"
+
+    def test_sandbox_violation_optional_details(self) -> None:
+        """SandboxViolation should work without details."""
+        from src.security.sandbox import SandboxViolation
+
+        violation = SandboxViolation(
+            violation_type="network_access",
+            message="Network access not permitted",
+        )
+        assert violation.violation_type == "network_access"
+        assert violation.details is None
