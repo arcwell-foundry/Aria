@@ -490,3 +490,116 @@ class TestSkillExecutorExecuteFullPipeline:
         )
 
         assert result.execution_time_ms == 150  # From mock
+
+
+class TestSkillExecutorErrorHandling:
+    """Tests for SkillExecutor error handling."""
+
+    @pytest.fixture
+    def executor_with_full_mocks(self) -> tuple:
+        """Create executor with fully mocked pipeline."""
+        from src.security.data_classification import DataClassifier
+        from src.security.sanitization import DataSanitizer
+        from src.security.sandbox import SkillSandbox, SandboxResult
+        from src.security.trust_levels import SkillTrustLevel
+        from src.skills.executor import SkillExecutor
+        from src.skills.index import SkillIndexEntry
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        sandbox = MagicMock(spec=SkillSandbox)
+        index = MagicMock()
+        installer = MagicMock()
+        audit = MagicMock()
+
+        mock_entry = MagicMock(spec=SkillIndexEntry)
+        mock_entry.id = "skill-123"
+        mock_entry.skill_path = "test/skill"
+        mock_entry.skill_name = "Test"
+        mock_entry.trust_level = SkillTrustLevel.COMMUNITY
+        mock_entry.full_content = "# Test"
+        index.get_skill = AsyncMock(return_value=mock_entry)
+        installer.is_installed = AsyncMock(return_value=True)
+        installer.record_usage = AsyncMock(return_value=None)
+        audit.get_latest_hash = AsyncMock(return_value="0" * 64)
+        audit.log_execution = AsyncMock(return_value=None)
+        audit._compute_hash = MagicMock(return_value="a" * 64)
+
+        executor = SkillExecutor(
+            classifier=classifier,
+            sanitizer=sanitizer,
+            sandbox=sandbox,
+            index=index,
+            installer=installer,
+            audit_service=audit,
+        )
+
+        return executor, sandbox, audit, installer
+
+    @pytest.mark.asyncio
+    async def test_execute_handles_sandbox_violation(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute handles SandboxViolation gracefully."""
+        from src.security.sandbox import SandboxViolation
+
+        executor, sandbox, audit, installer = executor_with_full_mocks
+
+        sandbox.execute = AsyncMock(
+            side_effect=SandboxViolation("timeout", "Skill timed out after 30s")
+        )
+
+        result = await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"test": "data"},
+        )
+
+        assert result.success is False
+        assert "timeout" in result.error.lower()
+        # Should still log audit
+        audit.log_execution.assert_called_once()
+        # Should record failed usage
+        installer.record_usage.assert_called_once_with(
+            "user-123", "skill-123", success=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_handles_sandbox_exception(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute handles unexpected sandbox exceptions."""
+        executor, sandbox, audit, installer = executor_with_full_mocks
+
+        sandbox.execute = AsyncMock(side_effect=RuntimeError("Unexpected error"))
+
+        result = await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"test": "data"},
+        )
+
+        assert result.success is False
+        assert "Unexpected error" in result.error
+
+    @pytest.mark.asyncio
+    async def test_execute_logs_failed_execution_to_audit(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test failed executions are still logged to audit."""
+        from src.security.skill_audit import SkillAuditEntry
+
+        executor, sandbox, audit, installer = executor_with_full_mocks
+
+        sandbox.execute = AsyncMock(side_effect=RuntimeError("Boom"))
+
+        await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"test": "data"},
+        )
+
+        audit.log_execution.assert_called_once()
+        audit_entry = audit.log_execution.call_args[0][0]
+        assert audit_entry.success is False
+        assert audit_entry.error is not None
