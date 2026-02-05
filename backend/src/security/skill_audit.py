@@ -263,3 +263,73 @@ class SkillAuditService:
         except Exception as e:
             logger.exception("Failed to verify hash chain", extra={"user_id": user_id})
             return False
+
+    async def get_audit_log(
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get audit log entries for a user.
+
+        Args:
+            user_id: The user's UUID.
+            limit: Maximum number of entries to return.
+            offset: Number of entries to skip.
+
+        Returns:
+            List of audit entry dictionaries.
+        """
+        try:
+            response = await (
+                self._client.table("skill_audit_log")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("timestamp", desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+            )
+
+            return response.data or []
+
+        except Exception as e:
+            logger.exception("Failed to fetch audit log", extra={"user_id": user_id})
+            raise DatabaseError(f"Failed to fetch audit log: {e}") from e
+
+    async def get_audit_for_skill(
+        self,
+        user_id: str,
+        skill_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get audit log entries for a specific skill.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill identifier to filter by.
+            limit: Maximum number of entries to return.
+            offset: Number of entries to skip.
+
+        Returns:
+            List of audit entry dictionaries for the specified skill.
+        """
+        try:
+            response = await (
+                self._client.table("skill_audit_log")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .order("timestamp", desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+            )
+
+            return response.data or []
+
+        except Exception as e:
+            logger.exception(
+                "Failed to fetch audit log for skill",
+                extra={"user_id": user_id, "skill_id": skill_id},
+            )
+            raise DatabaseError(f"Failed to fetch audit log for skill: {e}") from e

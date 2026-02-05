@@ -587,3 +587,100 @@ class TestVerifyChain:
         result = await service.verify_chain("user123")
 
         assert result is True
+
+
+class TestQueryMethods:
+    """Tests for audit log query methods."""
+
+    @pytest.mark.asyncio
+    async def test_get_audit_log_returns_entries(self) -> None:
+        """Test get_audit_log returns user's audit entries."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_entries = [
+            {
+                "id": "1",
+                "user_id": "user-123",
+                "skill_id": "skill-a",
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "id": "2",
+                "user_id": "user-123",
+                "skill_id": "skill-b",
+                "timestamp": "2024-01-02T00:00:00Z",
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.range.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=mock_entries))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.get_audit_log("user-123", limit=10, offset=0)
+
+        assert len(result) == 2
+        assert result[0]["skill_id"] == "skill-a"
+        assert result[1]["skill_id"] == "skill-b"
+
+    @pytest.mark.asyncio
+    async def test_get_audit_log_applies_limit_and_offset(self) -> None:
+        """Test get_audit_log applies pagination."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.range.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        await service.get_audit_log("user-123", limit=20, offset=40)
+
+        # Verify range was called with correct offset/limit
+        mock_query_builder.range.assert_called_once_with(40, 59)  # offset to offset + limit - 1
+
+    @pytest.mark.asyncio
+    async def test_get_audit_for_skill_filters_by_skill_id(self) -> None:
+        """Test get_audit_for_skill filters by skill_id."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_entries = [
+            {
+                "id": "1",
+                "user_id": "user-123",
+                "skill_id": "pdf",
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.range.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=mock_entries))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.get_audit_for_skill("user-123", "pdf", limit=10, offset=0)
+
+        # Verify eq was called twice: once for user_id, once for skill_id
+        assert mock_query_builder.eq.call_count == 2
+        # Second call should be with skill_id
+        mock_query_builder.eq.assert_any_call("user_id", "user-123")
+        mock_query_builder.eq.assert_any_call("skill_id", "pdf")
+        assert len(result) == 1
+        assert result[0]["skill_id"] == "pdf"
