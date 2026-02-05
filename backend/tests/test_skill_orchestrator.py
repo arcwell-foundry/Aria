@@ -1,7 +1,7 @@
 """Tests for skill orchestrator service."""
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -310,3 +310,200 @@ class TestBuildWorkingMemorySummary:
         assert "drug" in result
         assert "Keytruda" in result
         assert "Use drug name for search" in result
+
+
+@pytest.mark.asyncio
+class TestExecuteStep:
+    """Tests for SkillOrchestrator._execute_step method."""
+
+    def _make_orchestrator(
+        self,
+        executor: MagicMock | None = None,
+        autonomy: MagicMock | None = None,
+    ) -> SkillOrchestrator:
+        """Create orchestrator with mocked dependencies."""
+        return SkillOrchestrator(
+            executor=executor or MagicMock(),
+            index=MagicMock(),
+            autonomy=autonomy or MagicMock(),
+        )
+
+    async def test_execute_step_success(self) -> None:
+        """Successful step execution produces a completed WorkingMemoryEntry."""
+        mock_executor = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.success = True
+        mock_execution.result = {"summary": "Parsed report", "tables": 3}
+        mock_execution.execution_time_ms = 1500
+        mock_executor.execute = AsyncMock(return_value=mock_execution)
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = self._make_orchestrator(executor=mock_executor, autonomy=mock_autonomy)
+
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="skill-abc",
+            skill_path="anthropics/skills/pdf",
+            depends_on=[],
+            status="pending",
+            input_data={"file": "report.pdf"},
+        )
+
+        entry = await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=[],
+        )
+
+        assert entry.step_number == 1
+        assert entry.skill_id == "skill-abc"
+        assert entry.status == "completed"
+        assert len(entry.summary) > 0
+        mock_executor.execute.assert_awaited_once()
+        mock_autonomy.record_execution_outcome.assert_awaited_once_with(
+            "user-123", "skill-abc", success=True
+        )
+
+    async def test_execute_step_failure(self) -> None:
+        """Failed skill execution produces a failed WorkingMemoryEntry."""
+        mock_executor = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.success = False
+        mock_execution.result = None
+        mock_execution.error = "Sandbox timeout"
+        mock_execution.execution_time_ms = 30000
+        mock_executor.execute = AsyncMock(return_value=mock_execution)
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = self._make_orchestrator(executor=mock_executor, autonomy=mock_autonomy)
+
+        step = ExecutionStep(
+            step_number=2,
+            skill_id="skill-def",
+            skill_path="community/skills/csv",
+            depends_on=[1],
+            status="pending",
+            input_data={"data": "raw"},
+        )
+
+        entry = await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=[],
+        )
+
+        assert entry.status == "failed"
+        assert "timeout" in entry.summary.lower() or "failed" in entry.summary.lower()
+        mock_autonomy.record_execution_outcome.assert_awaited_once_with(
+            "user-123", "skill-def", success=False
+        )
+
+    async def test_execute_step_skipped_when_approval_required(self) -> None:
+        """Step is skipped when approval is required but not granted."""
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=True)
+
+        orch = self._make_orchestrator(autonomy=mock_autonomy)
+
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="skill-abc",
+            skill_path="community/skills/risky",
+            depends_on=[],
+            status="pending",
+            input_data={},
+        )
+
+        entry = await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=[],
+        )
+
+        assert entry.status == "skipped"
+        assert "approval" in entry.summary.lower()
+
+    async def test_execute_step_includes_working_memory_context(self) -> None:
+        """Step execution passes working memory summary to executor context."""
+        mock_executor = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.success = True
+        mock_execution.result = {"output": "done"}
+        mock_execution.execution_time_ms = 500
+        mock_executor.execute = AsyncMock(return_value=mock_execution)
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = self._make_orchestrator(executor=mock_executor, autonomy=mock_autonomy)
+
+        prior_memory = [
+            WorkingMemoryEntry(
+                step_number=1, skill_id="s1", status="completed",
+                summary="Found 5 leads.", artifacts=[], extracted_facts={"leads": 5},
+                next_step_hints=["Filter by region"],
+            ),
+        ]
+
+        step = ExecutionStep(
+            step_number=2,
+            skill_id="skill-filter",
+            skill_path="a/b/filter",
+            depends_on=[1],
+            status="pending",
+            input_data={"action": "filter"},
+        )
+
+        await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=prior_memory,
+        )
+
+        call_kwargs = mock_executor.execute.call_args
+        context = call_kwargs.kwargs.get("context") or call_kwargs[1].get("context", {})
+        assert "working_memory" in context
+        assert "Found 5 leads." in context["working_memory"]
+
+    async def test_execute_step_calls_progress_callback(self) -> None:
+        """Progress callback is invoked during step execution."""
+        mock_executor = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.success = True
+        mock_execution.result = {}
+        mock_execution.execution_time_ms = 100
+        mock_executor.execute = AsyncMock(return_value=mock_execution)
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = self._make_orchestrator(executor=mock_executor, autonomy=mock_autonomy)
+
+        callback_calls: list[tuple[int, str, str]] = []
+
+        async def mock_callback(step_num: int, status: str, msg: str) -> None:
+            callback_calls.append((step_num, status, msg))
+
+        step = ExecutionStep(
+            step_number=1, skill_id="s1", skill_path="a/b/c",
+            depends_on=[], status="pending", input_data={},
+        )
+
+        await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=[],
+            progress_callback=mock_callback,
+        )
+
+        statuses = [c[1] for c in callback_calls]
+        assert "running" in statuses
+        assert "completed" in statuses
