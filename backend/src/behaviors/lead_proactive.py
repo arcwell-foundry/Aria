@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from src.memory.lead_patterns import LeadPatternDetector
@@ -128,6 +129,123 @@ class LeadProactiveBehaviors:
             extra={
                 "user_id": user_id,
                 "silent_count": len(silent_leads),
+                "notifications_sent": notification_count,
+            },
+        )
+
+        return notification_count
+
+    async def check_health_drops(
+        self,
+        user_id: str,
+        threshold: int = DEFAULT_HEALTH_DROP_THRESHOLD,
+    ) -> int:
+        """Check for leads with significant health score drops.
+
+        Compares current health scores to recent history and sends
+        notifications for leads that have dropped by the threshold or more.
+
+        Args:
+            user_id: The user to check leads for.
+            threshold: Minimum score drop to trigger alert (default 20).
+
+        Returns:
+            Number of notifications sent.
+        """
+        from src.memory.health_score import HealthScoreCalculator, HealthScoreHistory
+
+        # Get active leads for user with current health scores
+        leads_response = (
+            self._db.table("lead_memories")
+            .select("id, company_name, health_score")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .execute()
+        )
+
+        if not leads_response.data:
+            return 0
+
+        lead_ids = [lead["id"] for lead in leads_response.data]
+        lead_map = {lead["id"]: lead for lead in leads_response.data}
+
+        # Get recent health score history for these leads
+        history_response = (
+            self._db.table("health_score_history")
+            .select("lead_memory_id, score, calculated_at")
+            .in_("lead_memory_id", lead_ids)
+            .order("calculated_at", desc=True)
+            .execute()
+        )
+
+        # Group history by lead_id and build HealthScoreHistory objects
+        history_by_lead: dict[str, list[HealthScoreHistory]] = {}
+        for item in history_response.data or []:
+            lead_id = item["lead_memory_id"]
+            if lead_id not in history_by_lead:
+                history_by_lead[lead_id] = []
+            history_by_lead[lead_id].append(
+                HealthScoreHistory(
+                    score=item["score"],
+                    calculated_at=datetime.fromisoformat(item["calculated_at"]),
+                )
+            )
+
+        calculator = HealthScoreCalculator()
+        notification_count = 0
+
+        for lead_id, lead_data in lead_map.items():
+            current_score = lead_data.get("health_score", 0) or 0
+            history = history_by_lead.get(lead_id, [])
+
+            if not history:
+                continue
+
+            # Use calculator's alert logic
+            if calculator._should_alert(current_score, history, threshold=threshold):
+                # Calculate the actual drop for the message
+                previous_score = max(history, key=lambda h: h.calculated_at).score
+                drop_amount = previous_score - current_score
+
+                # Determine recommended action based on drop severity
+                if drop_amount >= 30:
+                    action = "Immediate attention required - major engagement issue"
+                elif drop_amount >= 25:
+                    action = "Review recent interactions for concerns"
+                else:
+                    action = "Check for engagement opportunities"
+
+                try:
+                    await NotificationService.create_notification(
+                        user_id=user_id,
+                        type=NotificationType.LEAD_HEALTH_DROP,
+                        title=f"Health Drop: {lead_data['company_name']}",
+                        message=f"Health score dropped {drop_amount} points (from {previous_score} to {current_score}). {action}",
+                        link=f"/leads/{lead_id}",
+                        metadata={
+                            "lead_id": lead_id,
+                            "company_name": lead_data["company_name"],
+                            "current_score": current_score,
+                            "previous_score": previous_score,
+                            "drop_amount": drop_amount,
+                        },
+                    )
+                    notification_count += 1
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send health drop notification",
+                        extra={
+                            "user_id": user_id,
+                            "lead_id": lead_id,
+                            "error": str(e),
+                        },
+                    )
+
+        logger.info(
+            "Checked health drops",
+            extra={
+                "user_id": user_id,
+                "leads_checked": len(lead_map),
                 "notifications_sent": notification_count,
             },
         )
