@@ -474,3 +474,78 @@ class TestSkillInstallerInit:
 
         assert installer._client is not None
         mock_get_client.assert_called_once()
+
+
+class TestSkillInstallerUninstall:
+    """Tests for SkillInstaller.uninstall method."""
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_uninstall_removes_skill(self, mock_get_client: MagicMock) -> None:
+        """Test uninstall removes a skill installation."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock delete response
+        mock_delete_response = MagicMock()
+        mock_delete_response.count = 1
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_delete_response
+        )
+
+        result = await installer.uninstall("user-abc", "skill-id-123")
+
+        assert result is True
+        mock_client.table.assert_called_once_with("user_skills")
+        mock_client.table.return_value.delete.assert_called_once()
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_uninstall_nonexistent_skill_returns_false(self, mock_get_client: MagicMock) -> None:
+        """Test uninstall returns False when skill not installed."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock delete response (no rows deleted)
+        mock_delete_response = MagicMock()
+        mock_delete_response.count = 0
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_delete_response
+        )
+
+        result = await installer.uninstall("user-abc", "nonexistent-skill")
+
+        assert result is False
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_uninstall_handles_database_error(self, mock_get_client: MagicMock) -> None:
+        """Test uninstall returns False on database error."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock database error
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.side_effect = (
+            Exception("Database connection error")
+        )
+
+        result = await installer.uninstall("user-abc", "skill-id-123")
+
+        assert result is False
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_uninstall_response_without_count_attribute(self, mock_get_client: MagicMock) -> None:
+        """Test uninstall handles response without count attribute."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock delete response without count attribute
+        mock_delete_response = MagicMock(spec=[])
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_delete_response
+        )
+
+        result = await installer.uninstall("user-abc", "skill-id-123")
+
+        assert result is False

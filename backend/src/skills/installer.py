@@ -207,3 +207,28 @@ class SkillInstaller:
         except Exception as e:
             logger.error(f"Failed to install skill {skill_id} for user {user_id}: {e}")
             raise
+
+    async def uninstall(self, user_id: str, skill_id: str) -> bool:
+        """Uninstall a skill for a user.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+
+        Returns:
+            True if the skill was uninstalled, False if it wasn't installed.
+        """
+        try:
+            response = (
+                self._client.table("user_skills")
+                .delete()
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+            # Check if any rows were deleted
+            count = getattr(response, "count", None)
+            return count is not None and count > 0
+        except Exception as e:
+            logger.error(f"Error uninstalling skill {skill_id} for user {user_id}: {e}")
+            return False
