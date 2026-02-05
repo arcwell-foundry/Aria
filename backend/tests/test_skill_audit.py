@@ -70,3 +70,69 @@ def test_skill_audit_entry_optional_fields_default() -> None:
     assert entry.error is None
     assert entry.sandbox_config is None
     assert entry.security_flags == []
+
+
+class TestHashComputation:
+    """Tests for hash computation logic."""
+
+    def test_compute_hash_creates_sha256(self) -> None:
+        """Test _compute_hash creates a valid SHA256 hash."""
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        entry_dict = {
+            "skill_id": "test-skill",
+            "user_id": "user-123",
+            "success": True,
+        }
+        previous_hash = "prev-hash"
+
+        result = service._compute_hash(entry_dict, previous_hash)
+
+        # SHA256 hashes are 64 hex characters
+        assert len(result) == 64
+        # Should be valid hex
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_compute_hash_is_deterministic(self) -> None:
+        """Test same input produces same hash."""
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        entry_dict = {
+            "skill_id": "test-skill",
+            "user_id": "user-123",
+            "success": True,
+        }
+        previous_hash = "prev-hash"
+
+        hash1 = service._compute_hash(entry_dict, previous_hash)
+        hash2 = service._compute_hash(entry_dict, previous_hash)
+
+        assert hash1 == hash2
+
+    def test_compute_hash_different_input_different_hash(self) -> None:
+        """Test different input produces different hash."""
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        entry_dict1 = {"skill_id": "skill-a", "user_id": "user-123", "success": True}
+        entry_dict2 = {"skill_id": "skill-b", "user_id": "user-123", "success": True}
+        previous_hash = "prev-hash"
+
+        hash1 = service._compute_hash(entry_dict1, previous_hash)
+        hash2 = service._compute_hash(entry_dict2, previous_hash)
+
+        assert hash1 != hash2
+
+    def test_compute_hash_includes_previous_hash(self) -> None:
+        """Test hash changes when previous_hash changes."""
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        entry_dict = {"skill_id": "test-skill", "user_id": "user-123", "success": True}
+
+        hash1 = service._compute_hash(entry_dict, "prev-hash-1")
+        hash2 = service._compute_hash(entry_dict, "prev-hash-2")
+
+        assert hash1 != hash2

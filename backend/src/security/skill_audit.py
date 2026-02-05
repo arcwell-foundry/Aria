@@ -69,3 +69,37 @@ class SkillAuditEntry:
     error: str | None = None
     sandbox_config: dict[str, Any] | None = None
     security_flags: list[str] = field(default_factory=list)
+
+
+class SkillAuditService:
+    """Service for managing skill audit trail with hash chain integrity."""
+
+    def __init__(self, supabase_client: Client | None = None) -> None:
+        """Initialize the audit service.
+
+        Args:
+            supabase_client: Optional Supabase client. If None, uses default.
+        """
+        from src.db.supabase import SupabaseClient
+
+        self._client = supabase_client or SupabaseClient.get_client()
+
+    def _compute_hash(self, entry_data: dict[str, Any], previous_hash: str) -> str:
+        """Compute SHA256 hash of entry data including previous hash.
+
+        This creates the cryptographic link between entries in the chain.
+
+        Args:
+            entry_data: Dictionary of entry data to hash.
+            previous_hash: Hash of the previous entry in the chain.
+
+        Returns:
+            64-character hex SHA256 hash.
+        """
+        # Create deterministic string representation
+        # Sort keys for consistent ordering
+        canonical = json.dumps(entry_data, sort_keys=True, default=str)
+        # Include previous hash to chain entries together
+        combined = f"{canonical}:{previous_hash}"
+        # Return SHA256 as hex string
+        return hashlib.sha256(combined.encode()).hexdigest()
