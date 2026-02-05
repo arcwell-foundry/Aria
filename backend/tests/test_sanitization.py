@@ -599,3 +599,51 @@ class TestIntegrationScenarios:
         # Verify detokenization works
         restored = sanitizer.detokenize(sanitized_core, token_map_core)
         assert "$4.2M" in str(restored["summary"])
+
+    @pytest.mark.asyncio
+    async def test_contact_list_scenario(self) -> None:
+        """Test sanitizing a contact list with emails and phones."""
+        from src.security import DataSanitizer, DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        contact_list = [
+            {
+                "name": "John Smith",
+                "title": "VP of Sales",
+                "email": "john.smith@acmecorp.com",
+                "phone": "555-123-4567",
+                "notes": "Key decision maker",
+            },
+            {
+                "name": "Jane Doe",
+                "title": "Director of Procurement",
+                "email": "jane.doe@acmecorp.com",
+                "phone": "555-987-6543",
+                "notes": "Budget holder, prefers email",
+            },
+        ]
+
+        # VERIFIED skill can access INTERNAL but not CONFIDENTIAL
+        sanitized, token_map = await sanitizer.sanitize(
+            contact_list,
+            SkillTrustLevel.VERIFIED,
+        )
+
+        # Names and titles are INTERNAL - accessible
+        assert sanitized[0]["name"] == "John Smith"
+        assert sanitized[1]["title"] == "Director of Procurement"
+
+        # Emails and phones are CONFIDENTIAL - should be REDACTED
+        assert "[REDACTED:" in sanitized[0]["email"]
+        assert "[REDACTED:" in sanitized[0]["phone"]
+        assert "[REDACTED:" in sanitized[1]["email"]
+
+        # Notes don't contain sensitive patterns - unchanged
+        assert sanitized[0]["notes"] == "Key decision maker"
+
+        # Verify no leakage
+        report = sanitizer.validate_output(sanitized, token_map)
+        assert report.leaked is False
