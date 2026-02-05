@@ -8,6 +8,7 @@ This module manages integration with skills.sh, providing:
 - Multi-skill orchestration
 """
 
+from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor
 from src.skills.index import (
     TIER_1_CORE_SKILLS,
     TIER_2_RELEVANT_TAG,
@@ -18,12 +19,18 @@ from src.skills.index import (
 from src.skills.installer import InstalledSkill, SkillInstaller, SkillNotFoundError
 
 __all__ = [
+    # Index
     "SkillIndex",
     "SkillIndexEntry",
     "TIER_1_CORE_SKILLS",
     "TIER_2_RELEVANT_TAG",
     "TIER_3_DISCOVERY_ALL",
+    # Installer
     "SkillInstaller",
     "InstalledSkill",
     "SkillNotFoundError",
+    # Executor
+    "SkillExecutor",
+    "SkillExecution",
+    "SkillExecutionError",
 ]

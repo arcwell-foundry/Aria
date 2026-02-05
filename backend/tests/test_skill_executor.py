@@ -603,3 +603,25 @@ class TestSkillExecutorErrorHandling:
         audit_entry = audit.log_execution.call_args[0][0]
         assert audit_entry.success is False
         assert audit_entry.error is not None
+
+
+class TestModuleExports:
+    """Tests for skills module exports."""
+
+    def test_skill_executor_exported_from_skills_module(self) -> None:
+        """Test SkillExecutor is exported from skills module."""
+        from src.skills import SkillExecutor
+
+        assert SkillExecutor is not None
+
+    def test_skill_execution_exported_from_skills_module(self) -> None:
+        """Test SkillExecution is exported from skills module."""
+        from src.skills import SkillExecution
+
+        assert SkillExecution is not None
+
+    def test_skill_execution_error_exported_from_skills_module(self) -> None:
+        """Test SkillExecutionError is exported from skills module."""
+        from src.skills import SkillExecutionError
+
+        assert SkillExecutionError is not None
