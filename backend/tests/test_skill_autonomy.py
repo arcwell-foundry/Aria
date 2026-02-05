@@ -680,3 +680,253 @@ class TestSkillAutonomyServiceTrustManagement:
         assert result is not None
         assert result.session_trust_granted is False
         assert result.globally_approved is False
+
+
+class TestSkillAutonomyIntegration:
+    """Integration tests for full autonomy workflow."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_full_trust_building_workflow(self, mock_get_client: MagicMock) -> None:
+        """Test complete workflow: approval needed -> build trust -> auto-approve."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        user_id = "user-123"
+        skill_id = "skill-pdf"
+        now = datetime.now(UTC)
+
+        # Step 1: First execution - no history, needs approval
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
+        assert needs_approval is True
+
+        # Step 2: Record first success
+        mock_insert_response = MagicMock()
+        mock_insert_response.data = [{
+            "id": "123",
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "successful_executions": 1,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+        result = await service.record_execution_outcome(user_id, skill_id, success=True)
+        assert result.successful_executions == 1
+
+        # Step 3: Second execution - still needs approval (only 1 success)
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            mock_insert_response.data[0]
+        )
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
+        assert needs_approval is True  # Need 3 for LOW risk
+
+        # Step 4: Record two more successes
+        for i in range(2, 4):  # Executions 2 and 3
+            mock_client.reset_mock()
+
+            # Current state
+            current_row = {
+                "id": "123",
+                "user_id": user_id,
+                "skill_id": skill_id,
+                "successful_executions": i - 1,
+                "failed_executions": 0,
+                "last_success": now.isoformat(),
+                "last_failure": None,
+                "session_trust_granted": False,
+                "globally_approved": False,
+                "globally_approved_at": None,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+            mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+                current_row
+            )
+
+            # Updated state
+            updated_row = current_row.copy()
+            updated_row["successful_executions"] = i
+            mock_update_response = MagicMock()
+            mock_update_response.data = [updated_row]
+            mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                mock_update_response
+            )
+
+            await service.record_execution_outcome(user_id, skill_id, success=True)
+
+        # Step 5: Now should auto-approve (3 successes)
+        mock_client.reset_mock()
+        final_row = {
+            "id": "123",
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "successful_executions": 3,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            final_row
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
+        assert needs_approval is False  # Auto-approved after 3 successes
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_session_trust_workflow(self, mock_get_client: MagicMock) -> None:
+        """Test session trust: grant -> use -> revoke."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        user_id = "user-123"
+        skill_id = "skill-high-risk"
+        now = datetime.now(UTC)
+
+        # Initial state: no trust, needs approval
+        base_row = {
+            "id": "123",
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "last_success": None,
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            base_row
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.HIGH)
+        assert needs_approval is True
+
+        # Grant session trust
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            base_row
+        )
+
+        trusted_row = base_row.copy()
+        trusted_row["session_trust_granted"] = True
+        mock_update_response = MagicMock()
+        mock_update_response.data = [trusted_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.grant_session_trust(user_id, skill_id)
+        assert result.session_trust_granted is True
+
+        # Now doesn't need approval
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            trusted_row
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.HIGH)
+        assert needs_approval is False  # Session trust bypasses
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_revocation_workflow(self, mock_get_client: MagicMock) -> None:
+        """Test global approval then revocation."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        user_id = "user-123"
+        skill_id = "skill-email"
+        now = datetime.now(UTC)
+
+        # Grant global approval
+        base_row = {
+            "id": "123",
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "successful_executions": 5,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": True,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            base_row
+        )
+
+        approved_row = base_row.copy()
+        approved_row["globally_approved"] = True
+        approved_row["globally_approved_at"] = now.isoformat()
+        mock_update_response = MagicMock()
+        mock_update_response.data = [approved_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.grant_global_approval(user_id, skill_id)
+        assert result.globally_approved is True
+
+        # Verify no approval needed
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            approved_row
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.MEDIUM)
+        assert needs_approval is False
+
+        # Revoke trust
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            approved_row
+        )
+
+        revoked_row = approved_row.copy()
+        revoked_row["session_trust_granted"] = False
+        revoked_row["globally_approved"] = False
+        revoked_row["globally_approved_at"] = None
+        mock_update_response = MagicMock()
+        mock_update_response.data = [revoked_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.revoke_trust(user_id, skill_id)
+        assert result.globally_approved is False
+        assert result.session_trust_granted is False
+
+        # Now needs approval again (not enough successes for MEDIUM)
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            revoked_row
+        )
+
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.MEDIUM)
+        assert needs_approval is True  # MEDIUM needs 10 successes, only has 5

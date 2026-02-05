@@ -15,9 +15,9 @@ Session trust resets when user logs out or new session starts.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from src.db.supabase import SupabaseClient
 
@@ -140,8 +140,8 @@ class SkillAutonomyService:
             session_trust_granted=bool(row.get("session_trust_granted", False)),
             globally_approved=bool(row.get("globally_approved", False)),
             globally_approved_at=parse_dt(row.get("globally_approved_at")),
-            created_at=parse_dt(row["created_at"]) or datetime.now(timezone.utc),
-            updated_at=parse_dt(row["updated_at"]) or datetime.now(timezone.utc),
+            created_at=parse_dt(row["created_at"]) or datetime.now(UTC),
+            updated_at=parse_dt(row["updated_at"]) or datetime.now(UTC),
         )
 
     async def get_trust_history(self, user_id: str, skill_id: str) -> TrustHistory | None:
@@ -164,7 +164,7 @@ class SkillAutonomyService:
                 .execute()
             )
             if response.data:
-                return self._db_row_to_trust_history(response.data)
+                return self._db_row_to_trust_history(cast(dict[str, Any], response.data))
             return None
         except Exception as e:
             logger.debug(f"Trust history not found for user {user_id}, skill {skill_id}: {e}")
@@ -207,7 +207,7 @@ class SkillAutonomyService:
 
         # Get auto-approval threshold for this risk level
         threshold_config = SKILL_RISK_THRESHOLDS.get(risk_level, {})
-        auto_approve_after = threshold_config.get("auto_approve_after")
+        auto_approve_after: int | None = threshold_config.get("auto_approve_after")
 
         # HIGH and CRITICAL risk never auto-approve
         if auto_approve_after is None:
@@ -233,14 +233,14 @@ class SkillAutonomyService:
             The updated TrustHistory, or None on error.
         """
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Check if history exists
             existing = await self.get_trust_history(user_id, skill_id)
 
             if existing is None:
                 # Create new trust history record
-                record = {
+                record: dict[str, Any] = {
                     "user_id": user_id,
                     "skill_id": skill_id,
                     "successful_executions": 1 if success else 0,
@@ -258,11 +258,11 @@ class SkillAutonomyService:
                         f"Created trust history for user {user_id}, skill {skill_id} "
                         f"(success={success})"
                     )
-                    return self._db_row_to_trust_history(response.data[0])
+                    return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
                 return None
 
             # Update existing record
-            update_data = {
+            update_data: dict[str, Any] = {
                 "successful_executions": existing.successful_executions + (1 if success else 0),
                 "failed_executions": existing.failed_executions + (0 if success else 1),
             }
@@ -285,7 +285,7 @@ class SkillAutonomyService:
                     f"Updated trust history for user {user_id}, skill {skill_id} "
                     f"(success={success}, total_successes={update_data['successful_executions']})"
                 )
-                return self._db_row_to_trust_history(response.data[0])
+                return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
 
             return None
 
@@ -311,8 +311,7 @@ class SkillAutonomyService:
 
             if existing is None:
                 # Create new record with session trust
-                now = datetime.now(timezone.utc)
-                record = {
+                record: dict[str, Any] = {
                     "user_id": user_id,
                     "skill_id": skill_id,
                     "successful_executions": 0,
@@ -327,7 +326,7 @@ class SkillAutonomyService:
                 response = self._client.table("skill_trust_history").insert(record).execute()
                 if response.data:
                     logger.info(f"Granted session trust for user {user_id}, skill {skill_id}")
-                    return self._db_row_to_trust_history(response.data[0])
+                    return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
                 return None
 
             # Update existing record
@@ -341,7 +340,7 @@ class SkillAutonomyService:
 
             if response.data:
                 logger.info(f"Granted session trust for user {user_id}, skill {skill_id}")
-                return self._db_row_to_trust_history(response.data[0])
+                return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
 
             return None
 
@@ -364,11 +363,11 @@ class SkillAutonomyService:
         """
         try:
             existing = await self.get_trust_history(user_id, skill_id)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             if existing is None:
                 # Create new record with global approval
-                record = {
+                record: dict[str, Any] = {
                     "user_id": user_id,
                     "skill_id": skill_id,
                     "successful_executions": 0,
@@ -383,7 +382,7 @@ class SkillAutonomyService:
                 response = self._client.table("skill_trust_history").insert(record).execute()
                 if response.data:
                     logger.info(f"Granted global approval for user {user_id}, skill {skill_id}")
-                    return self._db_row_to_trust_history(response.data[0])
+                    return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
                 return None
 
             # Update existing record
@@ -397,7 +396,7 @@ class SkillAutonomyService:
 
             if response.data:
                 logger.info(f"Granted global approval for user {user_id}, skill {skill_id}")
-                return self._db_row_to_trust_history(response.data[0])
+                return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
 
             return None
 
@@ -423,8 +422,7 @@ class SkillAutonomyService:
 
             if existing is None:
                 # Create new revoked record (for future use)
-                now = datetime.now(timezone.utc)
-                record = {
+                record: dict[str, Any] = {
                     "user_id": user_id,
                     "skill_id": skill_id,
                     "successful_executions": 0,
@@ -439,7 +437,7 @@ class SkillAutonomyService:
                 response = self._client.table("skill_trust_history").insert(record).execute()
                 if response.data:
                     logger.info(f"Revoked trust for user {user_id}, skill {skill_id} (new record)")
-                    return self._db_row_to_trust_history(response.data[0])
+                    return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
                 return None
 
             # Update existing record - clear all trust flags
@@ -457,7 +455,7 @@ class SkillAutonomyService:
 
             if response.data:
                 logger.info(f"Revoked trust for user {user_id}, skill {skill_id}")
-                return self._db_row_to_trust_history(response.data[0])
+                return self._db_row_to_trust_history(cast(dict[str, Any], response.data[0]))
 
             return None
 
