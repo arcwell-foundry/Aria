@@ -542,3 +542,60 @@ class TestModuleExports:
         classifier = DataClassifier()
         sanitizer = DataSanitizer(classifier)
         assert sanitizer.classifier is classifier
+
+
+class TestIntegrationScenarios:
+    """Integration tests with real-world scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_financial_report_scenario(self) -> None:
+        """Test sanitizing a financial report with revenue figures."""
+        from src.security import DataSanitizer, DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        financial_report = {
+            "company": "Acme Corp",
+            "quarter": "Q4 2025",
+            "summary": "Strong quarter with revenue of $4.2M and profit margin of 35%.",
+            "metrics": {
+                "revenue": "$4.2M",
+                "profit": "$1.47M",
+                "growth": "15% YoY",
+            },
+            "notes": "Confidential: Do not share externally.",
+        }
+
+        # Scenario 1: COMMUNITY skill (only PUBLIC access)
+        sanitized, token_map = await sanitizer.sanitize(
+            financial_report,
+            SkillTrustLevel.COMMUNITY,
+        )
+
+        # Company and quarter are PUBLIC - unchanged
+        assert sanitized["company"] == "Acme Corp"
+        assert sanitized["quarter"] == "Q4 2025"
+
+        # Financial data should be REDACTED (not tokenized)
+        assert "[REDACTED:" in sanitized["summary"]
+        assert "[REDACTED:" in str(sanitized["metrics"]["revenue"])
+        assert "[REDACTED:" in str(sanitized["metrics"]["profit"])
+
+        # "Confidential" marker triggers RESTRICTED classification
+        assert "[REDACTED:" in sanitized["notes"]
+
+        # Scenario 2: CORE skill (can access RESTRICTED)
+        sanitized_core, token_map_core = await sanitizer.sanitize(
+            financial_report,
+            SkillTrustLevel.CORE,
+        )
+
+        # Financial data should be TOKENIZED (not redacted)
+        assert "[FINANCIAL_" in sanitized_core["summary"]
+        assert "[FINANCIAL_" in str(sanitized_core["metrics"]["revenue"])
+
+        # Verify detokenization works
+        restored = sanitizer.detokenize(sanitized_core, token_map_core)
+        assert "$4.2M" in str(restored["summary"])
