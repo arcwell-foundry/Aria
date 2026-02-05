@@ -8,6 +8,7 @@ Coordinates execution of multiple skills with:
 - Autonomy integration for approval checks
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -283,3 +284,65 @@ class SkillOrchestrator:
             await progress_callback(step.step_number, "failed", entry.summary)
 
         return entry
+
+    async def execute_plan(
+        self,
+        user_id: str,
+        plan: ExecutionPlan,
+        *,
+        progress_callback: ProgressCallback | None = None,
+    ) -> list[WorkingMemoryEntry]:
+        """Execute a full plan respecting dependency order and parallelism.
+
+        Iterates through parallel_groups in order. Within each group,
+        executes all steps concurrently via asyncio.gather. Accumulates
+        working memory entries to pass context to subsequent steps.
+
+        Args:
+            user_id: ID of the user requesting execution.
+            plan: The execution plan to run.
+            progress_callback: Optional callback for real-time status updates.
+
+        Returns:
+            List of WorkingMemoryEntry, one per step (in execution order).
+        """
+        if not plan.steps:
+            return []
+
+        # Build step lookup
+        step_map: dict[int, ExecutionStep] = {s.step_number: s for s in plan.steps}
+        working_memory: list[WorkingMemoryEntry] = []
+        completed_steps: dict[int, bool] = {}
+
+        for group in plan.parallel_groups:
+            # Filter to steps that are actually executable in this group
+            group_steps = [step_map[num] for num in group if num in step_map]
+
+            if len(group_steps) == 1:
+                # Single step - execute directly
+                step = group_steps[0]
+                entry = await self._execute_step(
+                    user_id=user_id,
+                    step=step,
+                    working_memory=working_memory,
+                    progress_callback=progress_callback,
+                )
+                working_memory.append(entry)
+                completed_steps[step.step_number] = True
+            elif len(group_steps) > 1:
+                # Multiple steps - execute in parallel
+                tasks = [
+                    self._execute_step(
+                        user_id=user_id,
+                        step=step,
+                        working_memory=working_memory,
+                        progress_callback=progress_callback,
+                    )
+                    for step in group_steps
+                ]
+                entries = await asyncio.gather(*tasks)
+                for entry in entries:
+                    working_memory.append(entry)
+                    completed_steps[entry.step_number] = True
+
+        return working_memory

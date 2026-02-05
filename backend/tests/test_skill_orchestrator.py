@@ -1,6 +1,8 @@
 """Tests for skill orchestrator service."""
 
+import asyncio
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -507,3 +509,207 @@ class TestExecuteStep:
         statuses = [c[1] for c in callback_calls]
         assert "running" in statuses
         assert "completed" in statuses
+
+
+@pytest.mark.asyncio
+class TestExecutePlan:
+    """Tests for SkillOrchestrator.execute_plan method."""
+
+    def _make_orchestrator(
+        self,
+        executor: MagicMock | None = None,
+        autonomy: MagicMock | None = None,
+    ) -> SkillOrchestrator:
+        """Create orchestrator with mocked dependencies."""
+        mock_executor = executor or MagicMock()
+        mock_autonomy = autonomy or MagicMock()
+
+        if executor is None:
+            mock_execution = MagicMock()
+            mock_execution.success = True
+            mock_execution.result = {"output": "done"}
+            mock_execution.execution_time_ms = 100
+            mock_executor.execute = AsyncMock(return_value=mock_execution)
+
+        if autonomy is None:
+            mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+            mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        return SkillOrchestrator(
+            executor=mock_executor,
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+
+    async def test_execute_plan_single_step(self) -> None:
+        """Execute a plan with a single step."""
+        orch = self._make_orchestrator()
+        plan = ExecutionPlan(
+            task_description="Simple task",
+            steps=[
+                ExecutionStep(
+                    step_number=1, skill_id="s1", skill_path="a/b/c",
+                    depends_on=[], status="pending", input_data={"key": "val"},
+                ),
+            ],
+            parallel_groups=[[1]],
+            estimated_duration_ms=1000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        results = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert len(results) == 1
+        assert results[0].status == "completed"
+        assert results[0].step_number == 1
+
+    async def test_execute_plan_sequential_steps(self) -> None:
+        """Steps in separate parallel groups execute sequentially."""
+        orch = self._make_orchestrator()
+        plan = ExecutionPlan(
+            task_description="Sequential task",
+            steps=[
+                ExecutionStep(step_number=1, skill_id="s1", skill_path="a/b/c", depends_on=[], status="pending", input_data={}),
+                ExecutionStep(step_number=2, skill_id="s2", skill_path="d/e/f", depends_on=[1], status="pending", input_data={}),
+            ],
+            parallel_groups=[[1], [2]],
+            estimated_duration_ms=2000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        results = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert len(results) == 2
+        assert results[0].step_number == 1
+        assert results[1].step_number == 2
+
+    async def test_execute_plan_parallel_steps(self) -> None:
+        """Steps in the same parallel group execute concurrently."""
+        mock_executor = MagicMock()
+
+        async def mock_execute(**kwargs):
+            result = MagicMock()
+            result.success = True
+            result.result = {"step": kwargs.get("skill_id")}
+            result.execution_time_ms = 100
+            return result
+
+        mock_executor.execute = mock_execute
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = SkillOrchestrator(
+            executor=mock_executor,
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+
+        plan = ExecutionPlan(
+            task_description="Parallel task",
+            steps=[
+                ExecutionStep(step_number=1, skill_id="s1", skill_path="a/b/c", depends_on=[], status="pending", input_data={}),
+                ExecutionStep(step_number=2, skill_id="s2", skill_path="d/e/f", depends_on=[], status="pending", input_data={}),
+                ExecutionStep(step_number=3, skill_id="s3", skill_path="g/h/i", depends_on=[1, 2], status="pending", input_data={}),
+            ],
+            parallel_groups=[[1, 2], [3]],
+            estimated_duration_ms=3000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        results = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert len(results) == 3
+        step_3_entry = [r for r in results if r.step_number == 3][0]
+        assert step_3_entry.status == "completed"
+
+    async def test_execute_plan_empty_plan(self) -> None:
+        """Empty plan returns empty results."""
+        orch = self._make_orchestrator()
+        plan = ExecutionPlan(
+            task_description="Empty",
+            steps=[],
+            parallel_groups=[],
+            estimated_duration_ms=0,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        results = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert results == []
+
+    async def test_execute_plan_with_progress_callback(self) -> None:
+        """Progress callback receives updates during execution."""
+        orch = self._make_orchestrator()
+
+        callback_calls: list[tuple[int, str, str]] = []
+
+        async def mock_callback(step_num: int, status: str, msg: str) -> None:
+            callback_calls.append((step_num, status, msg))
+
+        plan = ExecutionPlan(
+            task_description="Tracked task",
+            steps=[
+                ExecutionStep(step_number=1, skill_id="s1", skill_path="a/b/c", depends_on=[], status="pending", input_data={}),
+            ],
+            parallel_groups=[[1]],
+            estimated_duration_ms=1000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        await orch.execute_plan(
+            user_id="user-123",
+            plan=plan,
+            progress_callback=mock_callback,
+        )
+
+        assert len(callback_calls) >= 2
+
+    async def test_execute_plan_continues_after_step_failure(self) -> None:
+        """Plan continues executing independent steps even if one fails."""
+        mock_executor = MagicMock()
+
+        async def mock_execute(**kwargs):
+            result = MagicMock()
+            if kwargs.get("skill_id") == "s1":
+                result.success = False
+                result.result = None
+                result.error = "Skill s1 failed"
+                result.execution_time_ms = 100
+            else:
+                result.success = True
+                result.result = {"ok": True}
+                result.execution_time_ms = 100
+            return result
+
+        mock_executor.execute = mock_execute
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = SkillOrchestrator(
+            executor=mock_executor,
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+
+        plan = ExecutionPlan(
+            task_description="Mixed results",
+            steps=[
+                ExecutionStep(step_number=1, skill_id="s1", skill_path="a/b/c", depends_on=[], status="pending", input_data={}),
+                ExecutionStep(step_number=2, skill_id="s2", skill_path="d/e/f", depends_on=[], status="pending", input_data={}),
+            ],
+            parallel_groups=[[1, 2]],
+            estimated_duration_ms=2000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        results = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert len(results) == 2
+        statuses = {r.step_number: r.status for r in results}
+        assert statuses[1] == "failed"
+        assert statuses[2] == "completed"
