@@ -15,6 +15,13 @@ from src.skills.autonomy import (
     SkillRiskLevel,
     TrustHistory,
 )
+from src.skills.context_manager import (
+    ORCHESTRATOR_BUDGET,
+    SKILL_INDEX_BUDGET,
+    WORKING_MEMORY_BUDGET,
+    SUBAGENT_BUDGET,
+    SkillContextManager,
+)
 from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor
 from src.skills.index import (
     TIER_1_CORE_SKILLS,
@@ -31,6 +38,12 @@ __all__ = [
     "SkillAutonomyService",
     "SkillRiskLevel",
     "TrustHistory",
+    # Context Manager
+    "ORCHESTRATOR_BUDGET",
+    "SKILL_INDEX_BUDGET",
+    "WORKING_MEMORY_BUDGET",
+    "SUBAGENT_BUDGET",
+    "SkillContextManager",
     # Index
     "SkillIndex",
     "SkillIndexEntry",
