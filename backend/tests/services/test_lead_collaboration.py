@@ -822,3 +822,202 @@ class TestReviewContribution:
 
         assert "Failed to review contribution" in str(exc_info.value)
         mock_get_client.assert_called_once()
+
+
+class TestGetContributors:
+    """Tests for the get_contributors method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_returns_list(self, mock_get_client):
+        """Test that get_contributors returns a list of Contributor instances with counts."""
+        mock_client = MagicMock()
+
+        # Mock contributions response
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = [
+            {"contributor_id": "user_123", "created_at": "2025-02-04T10:00:00+00:00"},
+            {"contributor_id": "user_123", "created_at": "2025-02-04T11:00:00+00:00"},
+            {"contributor_id": "user_456", "created_at": "2025-02-04T12:00:00+00:00"},
+            {"contributor_id": "user_789", "created_at": "2025-02-04T13:00:00+00:00"},
+            {"contributor_id": "user_789", "created_at": "2025-02-04T14:00:00+00:00"},
+            {"contributor_id": "user_789", "created_at": "2025-02-04T15:00:00+00:00"},
+        ]
+
+        # Mock user profiles response
+        mock_users_response = MagicMock()
+        mock_users_response.data = [
+            {"id": "user_123", "full_name": "Alice Johnson", "email": "alice@example.com"},
+            {"id": "user_456", "full_name": "Bob Smith", "email": "bob@example.com"},
+            {"id": "user_789", "full_name": "Carol Davis", "email": "carol@example.com"},
+        ]
+
+        # Set up the mock chain for contributions query
+        mock_contributions_query = MagicMock()
+        mock_contributions_query.execute.return_value = mock_contributions_response
+        mock_contributions_eq = MagicMock()
+        mock_contributions_eq.eq.return_value = mock_contributions_query
+        mock_contributions_select = MagicMock()
+        mock_contributions_select.select.return_value = mock_contributions_eq
+
+        # Set up the mock chain for users query
+        mock_users_query = MagicMock()
+        mock_users_query.execute.return_value = mock_users_response
+        mock_users_in = MagicMock()
+        mock_users_in.in_.return_value = mock_users_query
+        mock_users_select = MagicMock()
+        mock_users_select.select.return_value = mock_users_in
+
+        # Configure table to return different mocks based on call
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memory_contributions" and table_call_count[0] == 1:
+                return mock_contributions_select
+            elif table_name == "user_profiles":
+                return mock_users_select
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        assert len(result) == 3
+        assert all(isinstance(c, Contributor) for c in result)
+
+        # Find each contributor by ID
+        alice = next(c for c in result if c.id == "user_123")
+        bob = next(c for c in result if c.id == "user_456")
+        carol = next(c for c in result if c.id == "user_789")
+
+        # Verify Alice has 2 contributions
+        assert alice.name == "Alice Johnson"
+        assert alice.email == "alice@example.com"
+        assert alice.contribution_count == 2
+        assert alice.lead_memory_id == "lead_456"
+
+        # Verify Bob has 1 contribution
+        assert bob.name == "Bob Smith"
+        assert bob.email == "bob@example.com"
+        assert bob.contribution_count == 1
+
+        # Verify Carol has 3 contributions
+        assert carol.name == "Carol Davis"
+        assert carol.email == "carol@example.com"
+        assert carol.contribution_count == 3
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_empty(self, mock_get_client):
+        """Test that get_contributors returns an empty list when no contributors."""
+        mock_client = MagicMock()
+
+        # Mock empty contributions response
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = []
+
+        mock_query = MagicMock()
+        mock_query.execute.return_value = mock_contributions_response
+        mock_eq = MagicMock()
+        mock_eq.eq.return_value = mock_query
+        mock_select = MagicMock()
+        mock_select.select.return_value = mock_eq
+
+        mock_client.table.return_value = mock_select
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        assert result == []
+        mock_client.table.assert_called_once_with("lead_memory_contributions")
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_handles_missing_user_profile(self, mock_get_client):
+        """Test that get_contributors handles missing user profiles gracefully."""
+        mock_client = MagicMock()
+
+        # Mock contributions response
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = [
+            {"contributor_id": "user_123", "created_at": "2025-02-04T10:00:00+00:00"},
+        ]
+
+        # Mock user profiles response - user not found
+        mock_users_response = MagicMock()
+        mock_users_response.data = []
+
+        # Set up the mock chain for contributions query
+        mock_contributions_query = MagicMock()
+        mock_contributions_query.execute.return_value = mock_contributions_response
+        mock_contributions_eq = MagicMock()
+        mock_contributions_eq.eq.return_value = mock_contributions_query
+        mock_contributions_select = MagicMock()
+        mock_contributions_select.select.return_value = mock_contributions_eq
+
+        # Set up the mock chain for users query
+        mock_users_query = MagicMock()
+        mock_users_query.execute.return_value = mock_users_response
+        mock_users_in = MagicMock()
+        mock_users_in.in_.return_value = mock_users_query
+        mock_users_select = MagicMock()
+        mock_users_select.select.return_value = mock_users_in
+
+        # Configure table to return different mocks based on call
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memory_contributions" and table_call_count[0] == 1:
+                return mock_contributions_select
+            elif table_name == "user_profiles":
+                return mock_users_select
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        # Should still return a contributor with empty name/email
+        assert len(result) == 1
+        assert result[0].id == "user_123"
+        assert result[0].name == ""
+        assert result[0].email == ""
+        assert result[0].contribution_count == 1
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_handles_database_error(self, mock_get_client):
+        """Test that get_contributors raises DatabaseError on database failure."""
+        mock_client = MagicMock()
+        mock_client.table.side_effect = Exception("Database connection failed")
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        with pytest.raises(DatabaseError) as exc_info:
+            await service.get_contributors(
+                user_id="user_owner",
+                lead_memory_id="lead_456",
+            )
+
+        assert "Failed to get contributors" in str(exc_info.value)
+        mock_get_client.assert_called_once()

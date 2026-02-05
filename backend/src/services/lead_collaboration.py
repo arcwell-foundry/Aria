@@ -435,3 +435,103 @@ class LeadCollaborationService:
         except Exception as e:
             logger.exception("Failed to review contribution")
             raise DatabaseError(f"Failed to review contribution: {e}") from e
+
+    async def get_contributors(
+        self,
+        user_id: str,
+        lead_memory_id: str,
+    ) -> list[Contributor]:
+        """Get all contributors for a lead.
+
+        Contributors are users who have submitted at least one contribution
+        to the lead. Includes contribution counts.
+
+        Args:
+            user_id: The user who owns the lead.
+            lead_memory_id: The lead memory ID.
+
+        Returns:
+            List of Contributor instances with contribution counts.
+
+        Raises:
+            DatabaseError: If retrieval fails.
+        """
+        from src.core.exceptions import DatabaseError
+
+        try:
+            client = self._get_supabase_client()
+
+            # Get all contributions for this lead
+            response = (
+                client.table("lead_memory_contributions")
+                .select("contributor_id, created_at")
+                .eq("lead_memory_id", lead_memory_id)
+                .execute()
+            )
+
+            # Aggregate unique contributors with counts
+            contributor_data: dict[str, dict[str, Any]] = {}
+            for item in response.data:
+                contrib = cast(dict[str, Any], item)
+                contributor_id = cast(str, contrib["contributor_id"])
+
+                if contributor_id not in contributor_data:
+                    contributor_data[contributor_id] = {
+                        "count": 0,
+                        "added_at": contrib.get("created_at"),
+                    }
+                contributor_data[contributor_id]["count"] += 1
+
+            # Get user profiles for names/emails
+            contributors = []
+            if contributor_data:
+                user_ids = list(contributor_data.keys())
+                users_response = (
+                    client.table("user_profiles")
+                    .select("id, full_name, email")
+                    .in_("id", user_ids)
+                    .execute()
+                )
+
+                user_map: dict[str, dict[str, str]] = {}
+                for user in users_response.data:
+                    user_dict = cast(dict[str, Any], user)
+                    user_map[cast(str, user_dict["id"])] = {
+                        "name": cast(str, user_dict.get("full_name", "")),
+                        "email": cast(str, user_dict.get("email", "")),
+                    }
+
+                for contributor_id, data in contributor_data.items():
+                    user_info = user_map.get(contributor_id, {"name": "", "email": ""})
+                    added_at_raw = data["added_at"]
+                    added_at = (
+                        datetime.fromisoformat(added_at_raw)
+                        if isinstance(added_at_raw, str)
+                        else added_at_raw
+                    ) if added_at_raw else datetime.now(UTC)
+
+                    contributors.append(
+                        Contributor(
+                            id=contributor_id,
+                            lead_memory_id=lead_memory_id,
+                            name=user_info["name"],
+                            email=user_info["email"],
+                            added_at=added_at,
+                            contribution_count=data["count"],
+                        )
+                    )
+
+            logger.info(
+                "Retrieved contributors",
+                extra={
+                    "user_id": user_id,
+                    "lead_memory_id": lead_memory_id,
+                    "count": len(contributors),
+                },
+            )
+
+            return contributors
+
+        except Exception as e:
+            logger.exception("Failed to get contributors")
+            raise DatabaseError(f"Failed to get contributors: {e}") from e
