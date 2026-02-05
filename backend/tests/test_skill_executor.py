@@ -1,7 +1,51 @@
 """Tests for skill executor service."""
 
 from src.security.trust_levels import SkillTrustLevel
-from src.skills.executor import SkillExecution, SkillExecutionError
+from src.skills.executor import SkillExecution, SkillExecutionError, _hash_data
+
+
+class TestHashDataHelper:
+    """Tests for _hash_data helper function."""
+
+    def test_hash_data_returns_sha256(self) -> None:
+        """Test _hash_data returns a valid SHA256 hex string."""
+        result = _hash_data({"key": "value"})
+        assert len(result) == 64  # SHA256 hex is 64 chars
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_hash_data_is_deterministic(self) -> None:
+        """Test same input always produces same hash."""
+        data = {"name": "test", "value": 123}
+        hash1 = _hash_data(data)
+        hash2 = _hash_data(data)
+        assert hash1 == hash2
+
+    def test_hash_data_different_input_different_hash(self) -> None:
+        """Test different inputs produce different hashes."""
+        hash1 = _hash_data({"a": 1})
+        hash2 = _hash_data({"a": 2})
+        assert hash1 != hash2
+
+    def test_hash_data_handles_string(self) -> None:
+        """Test _hash_data works with string input."""
+        result = _hash_data("test string")
+        assert len(result) == 64
+
+    def test_hash_data_handles_list(self) -> None:
+        """Test _hash_data works with list input."""
+        result = _hash_data([1, 2, 3])
+        assert len(result) == 64
+
+    def test_hash_data_handles_none(self) -> None:
+        """Test _hash_data works with None input."""
+        result = _hash_data(None)
+        assert len(result) == 64
+
+    def test_hash_data_sorted_keys(self) -> None:
+        """Test dict key order doesn't affect hash."""
+        hash1 = _hash_data({"a": 1, "b": 2})
+        hash2 = _hash_data({"b": 2, "a": 1})
+        assert hash1 == hash2
 
 
 class TestSkillExecutionError:

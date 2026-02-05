@@ -4,10 +4,32 @@ Orchestrates the full security pipeline for skill execution:
 classify -> sanitize -> sandbox execute -> validate -> detokenize -> audit.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from src.security.trust_levels import SkillTrustLevel
+
+
+def _hash_data(data: Any) -> str:
+    """Compute SHA256 hash of data for audit purposes.
+
+    Uses deterministic JSON serialization with sorted keys.
+
+    Args:
+        data: Any data type to hash.
+
+    Returns:
+        64-character hex SHA256 hash string.
+    """
+    # Convert to deterministic string representation
+    if data is None:
+        canonical = "null"
+    else:
+        canonical = json.dumps(data, sort_keys=True, default=str)
+
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 @dataclass
