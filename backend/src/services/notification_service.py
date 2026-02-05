@@ -5,13 +5,12 @@ It also handles sending email notifications when user preferences allow.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from src.db.supabase import SupabaseClient
 from src.core.exceptions import DatabaseError, NotFoundError
+from src.db.supabase import SupabaseClient
 from src.models.notification import (
-    NotificationCreate,
     NotificationListResponse,
     NotificationResponse,
     NotificationType,
@@ -63,14 +62,20 @@ class NotificationService:
             if response.data and len(response.data) > 0:
                 logger.info(
                     "Notification created",
-                    extra={"user_id": user_id, "type": type.value, "notification_id": response.data[0]["id"]},
+                    extra={
+                        "user_id": user_id,
+                        "type": type.value,
+                        "notification_id": response.data[0]["id"],
+                    },
                 )
                 return NotificationResponse(**response.data[0])
             raise DatabaseError("Failed to create notification")
         except DatabaseError:
             raise
         except Exception as e:
-            logger.exception("Error creating notification", extra={"user_id": user_id, "type": type.value})
+            logger.exception(
+                "Error creating notification", extra={"user_id": user_id, "type": type.value}
+            )
             raise DatabaseError(f"Failed to create notification: {e}") from e
 
     @staticmethod
@@ -171,7 +176,7 @@ class NotificationService:
             client = SupabaseClient.get_client()
             response = (
                 client.table("notifications")
-                .update({"read_at": datetime.now(timezone.utc).isoformat()})
+                .update({"read_at": datetime.now(UTC).isoformat()})
                 .eq("id", notification_id)
                 .eq("user_id", user_id)
                 .execute()
@@ -182,7 +187,9 @@ class NotificationService:
         except NotFoundError:
             raise
         except Exception as e:
-            logger.exception("Error marking notification as read", extra={"notification_id": notification_id})
+            logger.exception(
+                "Error marking notification as read", extra={"notification_id": notification_id}
+            )
             raise DatabaseError(f"Failed to mark notification as read: {e}") from e
 
     @staticmethod
@@ -202,13 +209,15 @@ class NotificationService:
             client = SupabaseClient.get_client()
             response = (
                 client.table("notifications")
-                .update({"read_at": datetime.now(timezone.utc).isoformat()})
+                .update({"read_at": datetime.now(UTC).isoformat()})
                 .eq("user_id", user_id)
                 .is_("read_at", "null")
                 .execute()
             )
             count = len(response.data or [])
-            logger.info("Marked all notifications as read", extra={"user_id": user_id, "count": count})
+            logger.info(
+                "Marked all notifications as read", extra={"user_id": user_id, "count": count}
+            )
             return count
         except Exception as e:
             logger.exception("Error marking all as read", extra={"user_id": user_id})
@@ -229,13 +238,22 @@ class NotificationService:
         try:
             client = SupabaseClient.get_client()
             response = (
-                client.table("notifications").delete().eq("id", notification_id).eq("user_id", user_id).execute()
+                client.table("notifications")
+                .delete()
+                .eq("id", notification_id)
+                .eq("user_id", user_id)
+                .execute()
             )
             if not response.data or len(response.data) == 0:
                 raise NotFoundError("Notification", notification_id)
-            logger.info("Notification deleted", extra={"notification_id": notification_id, "user_id": user_id})
+            logger.info(
+                "Notification deleted",
+                extra={"notification_id": notification_id, "user_id": user_id},
+            )
         except NotFoundError:
             raise
         except Exception as e:
-            logger.exception("Error deleting notification", extra={"notification_id": notification_id})
+            logger.exception(
+                "Error deleting notification", extra={"notification_id": notification_id}
+            )
             raise DatabaseError(f"Failed to delete notification: {e}") from e

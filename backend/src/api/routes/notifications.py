@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 from src.api.deps import get_current_user
 from src.models.notification import (
-    MarkReadRequest,
     NotificationListResponse,
     NotificationResponse,
     UnreadCountResponse,

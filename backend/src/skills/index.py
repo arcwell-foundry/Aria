@@ -162,7 +162,11 @@ class SkillIndex:
         """
         try:
             response = (
-                self._client.table("skills_index").select("*").eq("skill_path", skill_path).single().execute()
+                self._client.table("skills_index")
+                .select("*")
+                .eq("skill_path", skill_path)
+                .single()
+                .execute()
             )
             if response.data:
                 return self._db_row_to_entry(response.data)

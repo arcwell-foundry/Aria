@@ -10,8 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
-from datetime import UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -253,7 +252,7 @@ class LeadCollaborationService:
         lead_memory_id: str,
         contribution_type: ContributionType,
         contribution_id: str | None = None,
-        content: str | None = None,
+        content: str | None = None,  # noqa: ARG002
     ) -> str:
         """Submit a contribution to a lead for owner review.
 
@@ -279,10 +278,7 @@ class LeadCollaborationService:
 
             # Get lead owner to send notification
             lead_response = (
-                client.table("lead_memories")
-                .select("user_id")
-                .eq("id", lead_memory_id)
-                .execute()
+                client.table("lead_memories").select("user_id").eq("id", lead_memory_id).execute()
             )
 
             owner_id: str | None = None
@@ -439,8 +435,7 @@ class LeadCollaborationService:
         # Validate action
         if action not in ("merge", "reject"):
             raise ValidationError(
-                f"Invalid action: {action}. Must be 'merge' or 'reject'.",
-                field="action"
+                f"Invalid action: {action}. Must be 'merge' or 'reject'.", field="action"
             )
 
         # Map action to status
@@ -537,9 +532,12 @@ class LeadCollaborationService:
                     # Track the earliest (first) contribution timestamp
                     current = created_at
                     existing = contributor_data[contributor_id]["added_at"]
-                    if isinstance(current, str) and isinstance(existing, str):
-                        if current < existing:
-                            contributor_data[contributor_id]["added_at"] = current
+                    if (
+                        isinstance(current, str)
+                        and isinstance(existing, str)
+                        and current < existing
+                    ):
+                        contributor_data[contributor_id]["added_at"] = current
 
                 contributor_data[contributor_id]["count"] += 1
 

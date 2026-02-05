@@ -953,7 +953,9 @@ async def submit_contribution(
         collab_service = LeadCollaborationService(db_client=client)
 
         # Convert model enum to service enum
-        service_contribution_type = ServiceContributionType(contribution_data.contribution_type.value)
+        service_contribution_type = ServiceContributionType(
+            contribution_data.contribution_type.value
+        )
 
         contribution_id = await collab_service.submit_contribution(
             user_id=current_user.id,
@@ -976,7 +978,9 @@ async def submit_contribution(
 async def list_contributions(
     lead_id: str,
     current_user: CurrentUser,
-    status_filter: str | None = Query(None, alias="status", description="Filter by contribution status"),
+    status_filter: str | None = Query(  # noqa: ARG001
+        None, alias="status", description="Filter by contribution status"
+    ),
 ) -> list[ContributionResponse]:
     """List contributions for a lead.
 
@@ -992,7 +996,12 @@ async def list_contributions(
         HTTPException: 404 if lead not found, 500 if retrieval fails.
     """
     from src.db.supabase import SupabaseClient
-    from src.models.lead_memory import ContributionStatus as ModelContributionStatus, ContributionType as ModelContributionType
+    from src.models.lead_memory import (
+        ContributionStatus as ModelContributionStatus,
+    )
+    from src.models.lead_memory import (
+        ContributionType as ModelContributionType,
+    )
     from src.services.lead_collaboration import LeadCollaborationService
 
     try:

@@ -65,5 +65,6 @@ class MarkReadRequest(BaseModel):
     """Request model for marking notifications as read."""
 
     notification_ids: list[str] | None = Field(
-        None, description="List of specific notification IDs to mark as read. Null means mark all as read."
+        None,
+        description="List of specific notification IDs to mark as read. Null means mark all as read.",
     )

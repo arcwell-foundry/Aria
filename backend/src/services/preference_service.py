@@ -63,9 +63,7 @@ class PreferenceService:
                 return await self._create_default_preferences(user_id)
             raise
 
-    async def update_preferences(
-        self, user_id: str, data: PreferenceUpdate
-    ) -> dict[str, Any]:
+    async def update_preferences(self, user_id: str, data: PreferenceUpdate) -> dict[str, Any]:
         """Update user preferences.
 
         Args:
@@ -100,10 +98,7 @@ class PreferenceService:
         update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         result = (
-            self._db.table("user_preferences")
-            .update(update_data)
-            .eq("user_id", user_id)
-            .execute()
+            self._db.table("user_preferences").update(update_data).eq("user_id", user_id).execute()
         )
 
         logger.info(
@@ -125,11 +120,7 @@ class PreferenceService:
         Returns:
             Created preference dict with defaults.
         """
-        result = (
-            self._db.table("user_preferences")
-            .insert({"user_id": user_id})
-            .execute()
-        )
+        result = self._db.table("user_preferences").insert({"user_id": user_id}).execute()
 
         logger.info(
             "Created default preferences",

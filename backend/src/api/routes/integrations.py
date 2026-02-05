@@ -304,7 +304,7 @@ async def disconnect_integration(
 @router.post("/{integration_id}/sync", response_model=IntegrationResponse)
 async def sync_integration(
     integration_id: str,
-    current_user: CurrentUser,
+    current_user: CurrentUser,  # noqa: ARG001
 ) -> dict[str, Any]:
     """Manually trigger a sync for an integration.
 

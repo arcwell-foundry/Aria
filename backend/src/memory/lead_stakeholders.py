@@ -366,12 +366,7 @@ class LeadStakeholderService:
         try:
             client = self._get_supabase_client()
 
-            response = (
-                client.table("lead_stakeholders")
-                .delete()
-                .eq("id", stakeholder_id)
-                .execute()
-            )
+            response = client.table("lead_stakeholders").delete().eq("id", stakeholder_id).execute()
 
             if not response.data or len(response.data) == 0:
                 raise DatabaseError(f"Stakeholder {stakeholder_id} not found")

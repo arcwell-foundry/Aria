@@ -1,16 +1,5 @@
 """Models package for ARIA backend."""
 
-from src.models.prediction import (
-    AccuracySummaryResponse,
-    CalibrationStatsResponse,
-    ExtractedPrediction,
-    PredictionCreate,
-    PredictionResponse,
-    PredictionStatus,
-    PredictionType,
-    PredictionUpdate,
-    PredictionValidate,
-)
 from src.models.email_draft import (
     EmailDraftCreate,
     EmailDraftListResponse,
@@ -38,6 +27,17 @@ from src.models.notification import (
     NotificationResponse,
     NotificationType,
     UnreadCountResponse,
+)
+from src.models.prediction import (
+    AccuracySummaryResponse,
+    CalibrationStatsResponse,
+    ExtractedPrediction,
+    PredictionCreate,
+    PredictionResponse,
+    PredictionStatus,
+    PredictionType,
+    PredictionUpdate,
+    PredictionValidate,
 )
 from src.models.preferences import (
     DefaultTone,

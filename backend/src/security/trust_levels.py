@@ -108,7 +108,11 @@ def determine_trust_level(skill_path: str) -> SkillTrustLevel:
     # Check for CORE skills (built-in to ARIA)
     # These are identified by having an explicit "aria:" prefix
     # and not matching other patterns
-    if "/" not in skill_path and not skill_path.startswith("user:") and skill_path.startswith("aria:"):
+    if (
+        "/" not in skill_path
+        and not skill_path.startswith("user:")
+        and skill_path.startswith("aria:")
+    ):
         return SkillTrustLevel.CORE
 
     # Default to COMMUNITY for all other skills

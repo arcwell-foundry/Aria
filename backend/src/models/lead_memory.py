@@ -209,7 +209,9 @@ class ContributorResponse(BaseModel):
 # Contribution Models
 class ContributionCreate(BaseModel):
     contribution_type: ContributionType = Field(..., description="Type of contribution")
-    contribution_id: str | None = Field(None, description="ID of the event/note/insight being contributed")
+    contribution_id: str | None = Field(
+        None, description="ID of the event/note/insight being contributed"
+    )
     content: str | None = Field(None, description="Content for note/insight contributions")
 
 

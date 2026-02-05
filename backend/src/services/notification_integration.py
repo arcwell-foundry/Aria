@@ -29,7 +29,9 @@ async def notify_briefing_ready(user_id: str, briefing_date: str) -> None:
         )
         logger.info("Briefing ready notification created", extra={"user_id": user_id})
     except Exception as e:
-        logger.error("Failed to create briefing notification", extra={"user_id": user_id, "error": str(e)})
+        logger.error(
+            "Failed to create briefing notification", extra={"user_id": user_id, "error": str(e)}
+        )
 
 
 async def notify_signal_detected(
@@ -63,7 +65,9 @@ async def notify_signal_detected(
             extra={"user_id": user_id, "company": company_name},
         )
     except Exception as e:
-        logger.error("Failed to create signal notification", extra={"user_id": user_id, "error": str(e)})
+        logger.error(
+            "Failed to create signal notification", extra={"user_id": user_id, "error": str(e)}
+        )
 
 
 async def notify_task_due(user_id: str, task_title: str, task_id: str, due_date: str) -> None:
@@ -86,10 +90,14 @@ async def notify_task_due(user_id: str, task_title: str, task_id: str, due_date:
         )
         logger.info("Task due notification created", extra={"user_id": user_id, "task_id": task_id})
     except Exception as e:
-        logger.error("Failed to create task notification", extra={"user_id": user_id, "error": str(e)})
+        logger.error(
+            "Failed to create task notification", extra={"user_id": user_id, "error": str(e)}
+        )
 
 
-async def notify_meeting_brief_ready(user_id: str, meeting_title: str, calendar_event_id: str) -> None:
+async def notify_meeting_brief_ready(
+    user_id: str, meeting_title: str, calendar_event_id: str
+) -> None:
     """Notify user that a meeting brief is ready.
 
     Args:
@@ -140,6 +148,10 @@ async def notify_draft_ready(
             link=f"/drafts/{draft_id}",
             metadata={"draft_id": draft_id, "draft_type": draft_type, "recipient": recipient},
         )
-        logger.info("Draft ready notification created", extra={"user_id": user_id, "draft_id": draft_id})
+        logger.info(
+            "Draft ready notification created", extra={"user_id": user_id, "draft_id": draft_id}
+        )
     except Exception as e:
-        logger.error("Failed to create draft notification", extra={"user_id": user_id, "error": str(e)})
+        logger.error(
+            "Failed to create draft notification", extra={"user_id": user_id, "error": str(e)}
+        )
