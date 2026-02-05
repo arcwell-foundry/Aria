@@ -7,11 +7,16 @@ including PubMed, ClinicalTrials.gov, FDA, and ChEMBL.
 import asyncio
 import logging
 from datetime import UTC
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
 from src.agents.skill_aware_agent import SkillAwareAgent
+
+if TYPE_CHECKING:
+    from src.core.llm import LLMClient
+    from src.skills.index import SkillIndex
+    from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +54,10 @@ class AnalystAgent(SkillAwareAgent):
 
     def __init__(
         self,
-        llm_client: Any,
+        llm_client: "LLMClient",
         user_id: str,
-        skill_orchestrator: Any = None,
-        skill_index: Any = None,
+        skill_orchestrator: "SkillOrchestrator | None" = None,
+        skill_index: "SkillIndex | None" = None,
     ) -> None:
         """Initialize the Analyst agent.
 
