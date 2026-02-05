@@ -223,3 +223,45 @@ class DataSanitizer:
             return self.redact_value(classified), token_map
 
         return classified.data, token_map
+
+    def detokenize(self, output: Any, token_map: TokenMap) -> Any:
+        """Restore tokenized values in skill output.
+
+        Args:
+            output: The output data containing tokens to restore.
+            token_map: The token map containing token-to-value mappings.
+
+        Returns:
+            The output with tokens replaced by original values.
+        """
+        return self._detokenize_recursive(output, token_map)
+
+    def _detokenize_recursive(self, data: Any, token_map: TokenMap) -> Any:
+        """Recursively detokenize data structures.
+
+        Args:
+            data: The data to detokenize.
+            token_map: The token map containing token-to-value mappings.
+
+        Returns:
+            The data with tokens replaced by original values.
+        """
+        if isinstance(data, str):
+            result = data
+            for token, original in token_map.tokens.items():
+                result = result.replace(token, str(original))
+            return result
+
+        if isinstance(data, dict):
+            return {
+                key: self._detokenize_recursive(value, token_map)
+                for key, value in data.items()
+            }
+
+        if isinstance(data, list):
+            return [
+                self._detokenize_recursive(item, token_map)
+                for item in data
+            ]
+
+        return data

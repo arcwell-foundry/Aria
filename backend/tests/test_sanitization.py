@@ -364,3 +364,72 @@ class TestDataSanitizer:
         assert len(sanitized) == 2
         assert sanitized[0]["name"] == "John"
         assert "[CONTACT_" in sanitized[0]["email"]
+
+    def test_detokenize_string_restores_values(self) -> None:
+        """Test detokenize restores tokenized values in string."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("financial", "$4.2M")
+        token_map.add_token("contact", "john@example.com")
+
+        output = "The deal is [FINANCIAL_001] and contact [CONTACT_001]"
+
+        restored = sanitizer.detokenize(output, token_map)
+
+        assert restored == "The deal is $4.2M and contact john@example.com"
+
+    def test_detokenize_preserves_redaction_markers(self) -> None:
+        """Test detokenize does not affect redaction markers."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        token_map = TokenMap()
+
+        output = "SSN is [REDACTED: ssn] and name is John"
+
+        restored = sanitizer.detokenize(output, token_map)
+
+        assert restored == "SSN is [REDACTED: ssn] and name is John"
+
+    def test_detokenize_handles_dict(self) -> None:
+        """Test detokenize restores values in dict."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("contact", "john@example.com")
+
+        output = {"result": "Contact is [CONTACT_001]", "status": "ok"}
+
+        restored = sanitizer.detokenize(output, token_map)
+
+        assert restored["result"] == "Contact is john@example.com"
+        assert restored["status"] == "ok"
+
+    def test_detokenize_handles_list(self) -> None:
+        """Test detokenize restores values in list."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("financial", "$4.2M")
+
+        output = ["Revenue is [FINANCIAL_001]", "Target achieved"]
+
+        restored = sanitizer.detokenize(output, token_map)
+
+        assert restored[0] == "Revenue is $4.2M"
+        assert restored[1] == "Target achieved"
