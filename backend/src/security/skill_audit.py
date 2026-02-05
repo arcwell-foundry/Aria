@@ -137,3 +137,56 @@ class SkillAuditService:
                 extra={"user_id": user_id, "error": str(e), "error_type": type(e).__name__},
             )
             return "0" * 64
+
+    async def log_execution(self, entry: SkillAuditEntry) -> None:
+        """Log a skill execution to the audit trail.
+
+        Args:
+            entry: The audit entry to log.
+
+        Raises:
+            DatabaseError: If logging fails.
+        """
+        try:
+            # Convert dataclass to dict for database insertion
+            data = {
+                "user_id": entry.user_id,
+                "tenant_id": entry.tenant_id,
+                "skill_id": entry.skill_id,
+                "skill_path": entry.skill_path,
+                "skill_trust_level": entry.skill_trust_level,
+                "task_id": entry.task_id,
+                "agent_id": entry.agent_id,
+                "trigger_reason": entry.trigger_reason,
+                "data_classes_requested": entry.data_classes_requested,
+                "data_classes_granted": entry.data_classes_granted,
+                "data_redacted": entry.data_redacted,
+                "tokens_used": entry.tokens_used,
+                "input_hash": entry.input_hash,
+                "output_hash": entry.output_hash,
+                "execution_time_ms": entry.execution_time_ms,
+                "success": entry.success,
+                "error": entry.error,
+                "sandbox_config": entry.sandbox_config,
+                "security_flags": entry.security_flags,
+                "previous_hash": entry.previous_hash,
+                "entry_hash": entry.entry_hash,
+            }
+
+            self._client.table("skill_audit_log").insert(data).execute()
+
+            logger.info(
+                "Skill execution logged",
+                extra={
+                    "user_id": entry.user_id,
+                    "skill_id": entry.skill_id,
+                    "success": entry.success,
+                },
+            )
+
+        except Exception as e:
+            logger.exception(
+                "Failed to log skill execution",
+                extra={"user_id": entry.user_id, "skill_id": entry.skill_id},
+            )
+            raise DatabaseError(f"Failed to log skill execution: {e}") from e

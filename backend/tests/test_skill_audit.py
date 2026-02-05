@@ -266,3 +266,160 @@ class TestGetLatestHash:
         mock_query_builder.order.assert_called_once_with("timestamp", desc=True)
         # Verify limit
         mock_query_builder.limit.assert_called_once_with(1)
+
+
+class TestLogExecution:
+    """Tests for log_execution method."""
+
+    @pytest.mark.asyncio
+    async def test_logs_entry_to_database(self) -> None:
+        """Test entry is saved to database."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditEntry, SkillAuditService
+
+        entry = SkillAuditEntry(
+            user_id="user-123",
+            skill_id="skill-456",
+            skill_path="/skills/test",
+            skill_trust_level="core",
+            trigger_reason="user_request",
+            data_classes_requested=["public"],
+            data_classes_granted=["public"],
+            input_hash="input123",
+            previous_hash="0" * 64,
+            entry_hash="entry456",
+            success=True,
+        )
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.data = [{"id": "audit-id-123"}]
+        mock_client.table.return_value.insert.return_value.execute = AsyncMock(
+            return_value=mock_response
+        )
+
+        service = SkillAuditService(supabase_client=mock_client)
+        await service.log_execution(entry)
+
+        # Verify table name
+        mock_client.table.assert_called_once_with("skill_audit_log")
+        # Verify insert was called
+        mock_client.table.return_value.insert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_entry_hash_matches_computation(self) -> None:
+        """Test logged entry has correct entry_hash computed by service."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditEntry, SkillAuditService
+
+        # Create entry with a known hash
+        service = SkillAuditService()
+        entry_data = {
+            "user_id": "user-123",
+            "skill_id": "skill-456",
+            "skill_path": "/skills/test",
+            "skill_trust_level": "core",
+            "trigger_reason": "user_request",
+            "data_classes_requested": ["public"],
+            "data_classes_granted": ["public"],
+            "input_hash": "input123",
+            "success": True,
+        }
+        previous_hash = "0" * 64
+        expected_hash = service._compute_hash(entry_data, previous_hash)
+
+        entry = SkillAuditEntry(
+            **entry_data,
+            previous_hash=previous_hash,
+            entry_hash=expected_hash,
+        )
+
+        insert_args = None
+
+        def capture_insert(data):
+            nonlocal insert_args
+            insert_args = data
+            mock_response = MagicMock()
+            mock_response.data = [{"id": "audit-id"}]
+            return MagicMock(execute=AsyncMock(return_value=mock_response))
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.insert = capture_insert
+
+        service2 = SkillAuditService(supabase_client=mock_client)
+        await service2.log_execution(entry)
+
+        assert insert_args is not None
+        assert insert_args["entry_hash"] == expected_hash
+        assert insert_args["previous_hash"] == previous_hash
+
+    @pytest.mark.asyncio
+    async def test_includes_all_entry_fields(self) -> None:
+        """Test all entry fields are included in database record."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditEntry, SkillAuditService
+
+        entry = SkillAuditEntry(
+            user_id="user-123",
+            tenant_id="tenant-456",
+            skill_id="skill-789",
+            skill_path="/skills/test",
+            skill_trust_level="verified",
+            task_id="task-123",
+            agent_id="agent-456",
+            trigger_reason="automation",
+            data_classes_requested=["public", "internal"],
+            data_classes_granted=["public"],
+            data_redacted=True,
+            tokens_used=["1000", "500"],
+            input_hash="input123",
+            output_hash="output456",
+            execution_time_ms=1500,
+            success=True,
+            error=None,
+            sandbox_config={"timeout": 30},
+            security_flags=["large_output"],
+            previous_hash="0" * 64,
+            entry_hash="hash123",
+        )
+
+        insert_args = None
+
+        def capture_insert(data):
+            nonlocal insert_args
+            insert_args = data
+            mock_response = MagicMock()
+            mock_response.data = [{"id": "audit-id"}]
+            return MagicMock(execute=AsyncMock(return_value=mock_response))
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.insert = capture_insert
+
+        service = SkillAuditService(supabase_client=mock_client)
+        await service.log_execution(entry)
+
+        assert insert_args is not None
+        assert insert_args["user_id"] == "user-123"
+        assert insert_args["tenant_id"] == "tenant-456"
+        assert insert_args["skill_id"] == "skill-789"
+        assert insert_args["skill_path"] == "/skills/test"
+        assert insert_args["skill_trust_level"] == "verified"
+        assert insert_args["task_id"] == "task-123"
+        assert insert_args["agent_id"] == "agent-456"
+        assert insert_args["trigger_reason"] == "automation"
+        assert insert_args["data_classes_requested"] == ["public", "internal"]
+        assert insert_args["data_classes_granted"] == ["public"]
+        assert insert_args["data_redacted"] is True
+        assert insert_args["tokens_used"] == ["1000", "500"]
+        assert insert_args["input_hash"] == "input123"
+        assert insert_args["output_hash"] == "output456"
+        assert insert_args["execution_time_ms"] == 1500
+        assert insert_args["success"] is True
+        assert insert_args["error"] is None
+        assert insert_args["sandbox_config"] == {"timeout": 30}
+        assert insert_args["security_flags"] == ["large_output"]
+        assert insert_args["previous_hash"] == "0" * 64
+        assert insert_args["entry_hash"] == "hash123"
