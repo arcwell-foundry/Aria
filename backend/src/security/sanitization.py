@@ -49,3 +49,18 @@ class TokenMap:
             The original value, or None if token not found.
         """
         return self.tokens.get(token)
+
+
+@dataclass
+class LeakageReport:
+    """Report of potential data leakage in skill output.
+
+    Attributes:
+        leaked: Whether any sensitive data was found in output.
+        leaked_values: List of leaked values that were detected.
+        severity: Severity level - "none", "low", "medium", "high", "critical".
+    """
+
+    leaked: bool
+    leaked_values: list[Any]
+    severity: str

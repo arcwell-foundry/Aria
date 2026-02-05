@@ -90,3 +90,35 @@ class TestTokenMap:
         original = token_map.get_original(token)
 
         assert original == {"amount": 4200000, "currency": "USD"}
+
+
+class TestLeakageReport:
+    """Tests for LeakageReport dataclass."""
+
+    def test_leakage_report_initializes_with_required_fields(self) -> None:
+        """Test LeakageReport initializes with required fields."""
+        from src.security.sanitization import LeakageReport
+
+        report = LeakageReport(
+            leaked=True,
+            leaked_values=["$4.2M", "john@example.com"],
+            severity="high",
+        )
+
+        assert report.leaked is True
+        assert report.leaked_values == ["$4.2M", "john@example.com"]
+        assert report.severity == "high"
+
+    def test_leakage_report_no_leak(self) -> None:
+        """Test LeakageReport for clean output."""
+        from src.security.sanitization import LeakageReport
+
+        report = LeakageReport(
+            leaked=False,
+            leaked_values=[],
+            severity="none",
+        )
+
+        assert report.leaked is False
+        assert report.leaked_values == []
+        assert report.severity == "none"
