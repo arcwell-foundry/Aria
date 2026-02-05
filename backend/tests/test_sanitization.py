@@ -516,3 +516,29 @@ class TestDataSanitizer:
         token_map2.add_token("contact", "john@example.com")
         report2 = sanitizer.validate_output("$4.2M and john@example.com", token_map2)
         assert report2.severity == "critical"
+
+
+class TestModuleExports:
+    """Tests for sanitization module exports."""
+
+    def test_security_module_exports_token_map(self) -> None:
+        """Test TokenMap is exported from security module."""
+        from src.security import TokenMap
+
+        token_map = TokenMap()
+        assert token_map.tokens == {}
+
+    def test_security_module_exports_leakage_report(self) -> None:
+        """Test LeakageReport is exported from security module."""
+        from src.security import LeakageReport
+
+        report = LeakageReport(leaked=False, leaked_values=[], severity="none")
+        assert report.leaked is False
+
+    def test_security_module_exports_data_sanitizer(self) -> None:
+        """Test DataSanitizer is exported from security module."""
+        from src.security import DataSanitizer, DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        assert sanitizer.classifier is classifier

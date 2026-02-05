@@ -9,6 +9,11 @@ from src.security.data_classification import (
     DataClass,
     DataClassifier,
 )
+from src.security.sanitization import (
+    DataSanitizer,
+    LeakageReport,
+    TokenMap,
+)
 from src.security.trust_levels import (
     TRUST_DATA_ACCESS,
     TRUSTED_SKILL_SOURCES,
@@ -27,4 +32,8 @@ __all__ = [
     "TRUSTED_SKILL_SOURCES",
     "determine_trust_level",
     "can_access_data",
+    # Sanitization
+    "TokenMap",
+    "LeakageReport",
+    "DataSanitizer",
 ]
