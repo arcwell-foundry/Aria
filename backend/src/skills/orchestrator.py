@@ -160,9 +160,7 @@ class SkillOrchestrator:
         summaries = await self._index.get_summaries(skill_ids)
 
         # Build summaries text for LLM
-        summaries_text = "\n".join(
-            f"- {sid}: {summary}" for sid, summary in summaries.items()
-        )
+        summaries_text = "\n".join(f"- {sid}: {summary}" for sid, summary in summaries.items())
 
         system_prompt = (
             "You are a skill orchestration planner. Given a task and available skills, "
@@ -231,9 +229,7 @@ class SkillOrchestrator:
             approval_required=plan_data.get("approval_required", False),
         )
 
-    def _can_execute(
-        self, step: ExecutionStep, completed_steps: dict[int, bool]
-    ) -> bool:
+    def _can_execute(self, step: ExecutionStep, completed_steps: dict[int, bool]) -> bool:
         """Check if a step's dependencies are satisfied.
 
         Args:
@@ -262,7 +258,9 @@ class SkillOrchestrator:
 
         parts: list[str] = []
         for entry in entries:
-            section = f"Step {entry.step_number} ({entry.skill_id}) [{entry.status}]: {entry.summary}"
+            section = (
+                f"Step {entry.step_number} ({entry.skill_id}) [{entry.status}]: {entry.summary}"
+            )
             if entry.extracted_facts:
                 facts_str = ", ".join(f"{k}={v}" for k, v in entry.extracted_facts.items())
                 section += f"\n  Facts: {facts_str}"
@@ -317,9 +315,7 @@ class SkillOrchestrator:
 
         # Notify running
         if progress_callback:
-            await progress_callback(
-                step.step_number, "running", f"Executing {step.skill_path}"
-            )
+            await progress_callback(step.step_number, "running", f"Executing {step.skill_path}")
 
         step.status = "running"
         step.started_at = datetime.now(UTC)
@@ -347,7 +343,11 @@ class SkillOrchestrator:
 
         if execution.success:
             step.status = "completed"
-            step.output_data = execution.result if isinstance(execution.result, dict) else {"result": execution.result}
+            step.output_data = (
+                execution.result
+                if isinstance(execution.result, dict)
+                else {"result": execution.result}
+            )
 
             # Build working memory entry
             extracted = step.output_data if step.output_data else {}
