@@ -1,7 +1,5 @@
 """Tests for skill context manager."""
 
-import pytest
-
 
 def test_summary_verbosity_enum_has_three_levels() -> None:
     """Test SummaryVerbosity enum has MINIMAL, STANDARD, DETAILED."""
@@ -526,7 +524,12 @@ def test_build_working_memory_entry_in_progress_step() -> None:
     )
 
     # Should indicate in-progress status
-    assert "⟳" in result or "in_progress" in result.lower() or "in progress" in result.lower() or "45%" in result
+    assert (
+        "⟳" in result
+        or "in_progress" in result.lower()
+        or "in progress" in result.lower()
+        or "45%" in result
+    )
 
 
 def test_build_working_memory_entry_respects_token_targets() -> None:
@@ -613,13 +616,13 @@ def test_skills_module_context_manager_imports_work() -> None:
     """Test that context manager imports are accessible from skills module."""
     # This should work without errors
     from src.skills import (
-        ContextAllocation,
         ORCHESTRATOR_BUDGET,
         SKILL_INDEX_BUDGET,
         SUBAGENT_BUDGET,
-        SummaryVerbosity,
-        SkillContextManager,
         WORKING_MEMORY_BUDGET,
+        ContextAllocation,
+        SkillContextManager,
+        SummaryVerbosity,
     )
 
     # Verify they're the right types
