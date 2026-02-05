@@ -8,7 +8,6 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from src.core.exceptions import DatabaseError
@@ -260,7 +259,7 @@ class SkillAuditService:
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to verify hash chain", extra={"user_id": user_id})
             return False
 
