@@ -1,7 +1,7 @@
 """Tests for skill installer service and InstalledSkill dataclass."""
 
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,7 +14,7 @@ class TestInstalledSkillDataclass:
 
     def test_create_minimal_installed_skill(self) -> None:
         """Test creating an InstalledSkill with all required fields."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -41,7 +41,7 @@ class TestInstalledSkillDataclass:
 
     def test_create_installed_skill_with_all_fields(self) -> None:
         """Test creating an InstalledSkill with all fields populated."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         used_at = now - timedelta(hours=1)
         skill = InstalledSkill(
             id="123",
@@ -68,7 +68,7 @@ class TestInstalledSkillDataclass:
 
     def test_installed_skill_is_frozen(self) -> None:
         """Test InstalledSkill is frozen (immutable)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -90,7 +90,7 @@ class TestInstalledSkillDataclass:
 
     def test_trust_level_enum_accepts_all_levels(self) -> None:
         """Test trust_level accepts all SkillTrustLevel enum values."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for level in SkillTrustLevel:
             skill = InstalledSkill(
                 id="123",
@@ -112,7 +112,7 @@ class TestInstalledSkillDataclass:
 
     def test_tenant_id_can_be_none(self) -> None:
         """Test tenant_id can be None for single-tenant installations."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -133,7 +133,7 @@ class TestInstalledSkillDataclass:
 
     def test_last_used_at_can_be_none(self) -> None:
         """Test last_used_at can be None for never-used skills."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -155,7 +155,7 @@ class TestInstalledSkillDataclass:
 
     def test_permissions_granted_can_be_empty_list(self) -> None:
         """Test permissions_granted can be an empty list."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -176,7 +176,7 @@ class TestInstalledSkillDataclass:
 
     def test_success_rate_calculation(self) -> None:
         """Test success rate can be calculated from execution_count and success_count."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -198,7 +198,7 @@ class TestInstalledSkillDataclass:
 
     def test_success_rate_for_zero_executions(self) -> None:
         """Test success rate is 0 when execution_count is 0."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         skill = InstalledSkill(
             id="123",
             user_id="user-abc",
@@ -229,7 +229,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -266,7 +266,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -294,7 +294,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -323,7 +323,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -351,7 +351,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -411,7 +411,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -439,7 +439,7 @@ class TestSkillInstallerDbConversion:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -561,7 +561,7 @@ class TestSkillInstallerGetInstalled:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -614,7 +614,7 @@ class TestSkillInstallerGetInstalled:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -653,7 +653,7 @@ class TestSkillInstallerIsInstalled:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -722,7 +722,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -768,7 +768,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -812,7 +812,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -855,7 +855,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -913,7 +913,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -951,7 +951,7 @@ class TestSkillInstallerRecordUsage:
         mock_get_client.return_value = mock_client
         installer = SkillInstaller()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_row = {
             "id": "123",
             "user_id": "user-abc",
@@ -994,10 +994,11 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_full_workflow_install_is_installed_record_usage_uninstall(self, mock_get_client: MagicMock) -> None:
         """Test complete workflow: install -> is_installed -> record_usage -> uninstall."""
-        from src.skills.installer import SkillInstaller
-        from src.skills.index import SkillIndex, SkillIndexEntry
+        from datetime import datetime
+
         from src.security.trust_levels import SkillTrustLevel
-        from datetime import datetime, timezone
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.skills.installer import SkillInstaller
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1005,7 +1006,7 @@ class TestSkillInstallerIntegration:
 
         user_id = "user-123"
         skill_id = "skill-456"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Step 1: Install - skill not yet installed, skill index lookup succeeds
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
@@ -1117,10 +1118,11 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_install_idempotent_reinstall_returns_existing(self, mock_get_client: MagicMock) -> None:
         """Test installing an already-installed skill returns existing installation."""
-        from src.skills.installer import SkillInstaller
-        from src.skills.index import SkillIndex, SkillIndexEntry
+        from datetime import datetime
+
         from src.security.trust_levels import SkillTrustLevel
-        from datetime import datetime, timezone
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.skills.installer import SkillInstaller
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1128,7 +1130,7 @@ class TestSkillInstallerIntegration:
 
         user_id = "user-123"
         skill_id = "skill-456"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Existing installation
         existing_row = {
@@ -1189,8 +1191,9 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_record_usage_multiple_executions_builds_history(self, mock_get_client: MagicMock) -> None:
         """Test recording multiple usages builds accurate execution history."""
+        from datetime import datetime
+
         from src.skills.installer import SkillInstaller
-        from datetime import datetime, timezone
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1198,7 +1201,7 @@ class TestSkillInstallerIntegration:
 
         user_id = "user-123"
         skill_id = "skill-456"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Initial state
         base_row = {
@@ -1266,10 +1269,11 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_install_with_tenant_and_permissions(self, mock_get_client: MagicMock) -> None:
         """Test installing a skill with tenant ID and custom permissions."""
-        from src.skills.installer import SkillInstaller
-        from src.skills.index import SkillIndex, SkillIndexEntry
+        from datetime import datetime
+
         from src.security.trust_levels import SkillTrustLevel
-        from datetime import datetime, timezone
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.skills.installer import SkillInstaller
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1279,7 +1283,7 @@ class TestSkillInstallerIntegration:
         skill_id = "skill-456"
         tenant_id = "tenant-abc"
         custom_permissions = ["network_read", "file_write"]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Mock: skill not yet installed
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = [
@@ -1348,8 +1352,8 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_install_nonexistent_skill_raises_error(self, mock_get_client: MagicMock) -> None:
         """Test installing a non-existent skill raises SkillNotFoundError."""
-        from src.skills.installer import SkillInstaller, SkillNotFoundError
         from src.skills.index import SkillIndex
+        from src.skills.installer import SkillInstaller, SkillNotFoundError
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1420,10 +1424,11 @@ class TestSkillInstallerIntegration:
     @patch("src.skills.installer.SupabaseClient.get_client")
     async def test_workflow_get_installed_before_install(self, mock_get_client: MagicMock) -> None:
         """Test calling get_installed before install returns None, then returns value after install."""
-        from src.skills.installer import SkillInstaller
-        from src.skills.index import SkillIndex, SkillIndexEntry
+        from datetime import datetime
+
         from src.security.trust_levels import SkillTrustLevel
-        from datetime import datetime, timezone
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.skills.installer import SkillInstaller
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -1431,7 +1436,7 @@ class TestSkillInstallerIntegration:
 
         user_id = "user-123"
         skill_id = "skill-456"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Before install: get_installed returns None
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
