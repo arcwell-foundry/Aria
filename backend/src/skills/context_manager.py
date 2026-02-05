@@ -50,3 +50,37 @@ class SummaryVerbosity(Enum):
             SummaryVerbosity.DETAILED: 1500,
         }
         return targets[self]
+
+
+@dataclass(frozen=True)
+class ContextAllocation:
+    """Tracks token allocation and usage for a context component.
+
+    Used by SkillContextManager to track budget usage across components
+    like skill_index, working_memory, execution_plan.
+
+    Attributes:
+        component: Name of the context component (e.g., "skill_index").
+        allocated_tokens: Token budget allocated to this component.
+        used_tokens: Actual tokens used by this component's content.
+        content: The context string for this component.
+    """
+
+    component: str
+    allocated_tokens: int
+    used_tokens: int
+    content: str
+
+    @property
+    def remaining_tokens(self) -> int:
+        """Calculate remaining tokens in budget.
+
+        Returns 0 if over budget (never negative).
+        """
+        remaining = self.allocated_tokens - self.used_tokens
+        return max(0, remaining)
+
+    @property
+    def is_over_budget(self) -> bool:
+        """Check if this component has exceeded its budget."""
+        return self.used_tokens > self.allocated_tokens
