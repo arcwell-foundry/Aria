@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     COMPOSIO_API_KEY: SecretStr | None = None
     COMPOSIO_BASE_URL: str = "https://api.composio.dev"
 
+    # Skills.sh Integration Configuration
+    SKILLS_SH_API_URL: str = "https://api.skills.sh/v1"
+    SKILLS_SH_GITHUB_URL: str = "https://raw.githubusercontent.com/skills-sh/skills/main"
+    SKILLS_SYNC_INTERVAL_HOURS: int = 24
+    SKILLS_MAX_CONTEXT_SUMMARIES: int = 50
+
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
