@@ -128,3 +128,50 @@ def test_skill_context_manager_accepts_custom_budgets() -> None:
     assert manager.skill_index_budget == 1000
     assert manager.working_memory_budget == 2000
     assert manager.subagent_budget == 10000
+
+
+def test_estimate_tokens_simple_text() -> None:
+    """Test estimate_tokens returns approximate count for simple text."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # "Hello world" is 11 chars, approximately 3 tokens
+    result = manager.estimate_tokens("Hello world")
+    assert result == 2  # 11 // 4 = 2
+
+
+def test_estimate_tokens_empty_string() -> None:
+    """Test estimate_tokens returns 0 for empty string."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    result = manager.estimate_tokens("")
+    assert result == 0
+
+
+def test_estimate_tokens_longer_text() -> None:
+    """Test estimate_tokens scales with longer text."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # 400 characters should be approximately 100 tokens
+    text = "x" * 400
+    result = manager.estimate_tokens(text)
+    assert result == 100  # 400 // 4 = 100
+
+
+def test_estimate_tokens_unicode() -> None:
+    """Test estimate_tokens handles unicode characters."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    # Unicode characters should still count as characters
+    text = "Hello 世界 🌍"
+    result = manager.estimate_tokens(text)
+    # "Hello 世界 🌍" is 10 chars (len() counts codepoints)
+    # 10 // 4 = 2
+    assert result == 2

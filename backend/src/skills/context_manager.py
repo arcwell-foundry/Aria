@@ -119,3 +119,18 @@ class SkillContextManager:
         self.skill_index_budget = skill_index_budget
         self.working_memory_budget = working_memory_budget
         self.subagent_budget = subagent_budget
+
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text using a simple heuristic.
+
+        A rough approximation assuming ~4 characters per token on average.
+        This is a simple heuristic and not perfectly accurate, but sufficient
+        for budget management purposes.
+
+        Args:
+            text: The text to estimate tokens for.
+
+        Returns:
+            Estimated token count (integer).
+        """
+        return len(text) // 4
