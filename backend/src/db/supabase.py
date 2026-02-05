@@ -218,7 +218,7 @@ class SupabaseClient:
         except DatabaseError:
             raise
         except Exception as e:
-            logger.exception("Error creating company", extra={"name": name})
+            logger.exception("Error creating company", extra={"company_name": name})
             raise DatabaseError(f"Failed to create company: {e}") from e
 
 
