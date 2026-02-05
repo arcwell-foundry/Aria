@@ -265,3 +265,60 @@ class DataSanitizer:
             ]
 
         return data
+
+    def validate_output(self, output: Any, token_map: TokenMap) -> LeakageReport:
+        """Validate skill output for data leakage.
+
+        Checks whether any original values that were tokenized appear in the
+        skill output, which would indicate potential data leakage.
+
+        Args:
+            output: The skill output to validate.
+            token_map: The token map containing original values to check for.
+
+        Returns:
+            LeakageReport indicating if any sensitive data was leaked.
+        """
+        leaked_values: list[Any] = []
+
+        output_str = self._to_string_for_scan(output)
+
+        for token, original in token_map.tokens.items():
+            original_str = str(original)
+            if original_str in output_str:
+                leaked_values.append(original)
+
+        if len(leaked_values) == 0:
+            severity = "none"
+        elif len(leaked_values) == 1:
+            severity = "high"
+        else:
+            severity = "critical"
+
+        return LeakageReport(
+            leaked=len(leaked_values) > 0,
+            leaked_values=leaked_values,
+            severity=severity,
+        )
+
+    def _to_string_for_scan(self, data: Any) -> str:
+        """Convert data structure to string for leakage scanning.
+
+        Args:
+            data: The data to convert.
+
+        Returns:
+            String representation suitable for substring searching.
+        """
+        if isinstance(data, str):
+            return data
+
+        if isinstance(data, dict):
+            parts = [self._to_string_for_scan(v) for v in data.values()]
+            return " ".join(parts)
+
+        if isinstance(data, list):
+            parts = [self._to_string_for_scan(item) for item in data]
+            return " ".join(parts)
+
+        return str(data) if data is not None else ""

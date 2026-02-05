@@ -433,3 +433,86 @@ class TestDataSanitizer:
 
         assert restored[0] == "Revenue is $4.2M"
         assert restored[1] == "Target achieved"
+
+    def test_validate_output_detects_leaked_values(self) -> None:
+        """Test validate_output detects leaked original values."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("financial", "$4.2M")
+        token_map.add_token("contact", "john@example.com")
+
+        output = "The revenue is $4.2M and target is [FINANCIAL_002]"
+
+        report = sanitizer.validate_output(output, token_map)
+
+        assert report.leaked is True
+        assert "$4.2M" in report.leaked_values
+        assert report.severity == "high"
+
+    def test_validate_output_clean_output(self) -> None:
+        """Test validate_output reports clean for safe output."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("financial", "$4.2M")
+
+        output = "The revenue is [FINANCIAL_001] as expected"
+
+        report = sanitizer.validate_output(output, token_map)
+
+        assert report.leaked is False
+        assert report.leaked_values == []
+        assert report.severity == "none"
+
+    def test_validate_output_checks_nested_structures(self) -> None:
+        """Test validate_output checks nested dicts and lists."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        token_map = TokenMap()
+        token_map.add_token("contact", "john@example.com")
+
+        output = {
+            "summary": "Contact info",
+            "details": {
+                "email": "john@example.com",
+            },
+        }
+
+        report = sanitizer.validate_output(output, token_map)
+
+        assert report.leaked is True
+        assert "john@example.com" in report.leaked_values
+
+    def test_validate_output_severity_levels(self) -> None:
+        """Test validate_output assigns correct severity levels."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        # Single leak - high severity
+        token_map = TokenMap()
+        token_map.add_token("financial", "$4.2M")
+        report = sanitizer.validate_output("Revenue: $4.2M", token_map)
+        assert report.severity == "high"
+
+        # Multiple leaks - critical severity
+        token_map2 = TokenMap()
+        token_map2.add_token("financial", "$4.2M")
+        token_map2.add_token("contact", "john@example.com")
+        report2 = sanitizer.validate_output("$4.2M and john@example.com", token_map2)
+        assert report2.severity == "critical"
