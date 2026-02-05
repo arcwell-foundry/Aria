@@ -866,3 +866,27 @@ class TestCreateExecutionPlan:
                 task="Some task",
                 available_skills=available_skills,
             )
+
+
+class TestModuleExports:
+    """Tests for orchestrator exports from skills module."""
+
+    def test_execution_step_importable_from_skills(self) -> None:
+        """ExecutionStep is importable from src.skills."""
+        from src.skills import ExecutionStep as ES
+        assert ES is not None
+
+    def test_execution_plan_importable_from_skills(self) -> None:
+        """ExecutionPlan is importable from src.skills."""
+        from src.skills import ExecutionPlan as EP
+        assert EP is not None
+
+    def test_working_memory_entry_importable_from_skills(self) -> None:
+        """WorkingMemoryEntry is importable from src.skills."""
+        from src.skills import WorkingMemoryEntry as WME
+        assert WME is not None
+
+    def test_skill_orchestrator_importable_from_skills(self) -> None:
+        """SkillOrchestrator is importable from src.skills."""
+        from src.skills import SkillOrchestrator as SO
+        assert SO is not None

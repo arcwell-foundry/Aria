@@ -18,8 +18,8 @@ from src.skills.autonomy import (
 from src.skills.context_manager import (
     ORCHESTRATOR_BUDGET,
     SKILL_INDEX_BUDGET,
-    WORKING_MEMORY_BUDGET,
     SUBAGENT_BUDGET,
+    WORKING_MEMORY_BUDGET,
     SkillContextManager,
 )
 from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor
@@ -31,6 +31,12 @@ from src.skills.index import (
     SkillIndexEntry,
 )
 from src.skills.installer import InstalledSkill, SkillInstaller, SkillNotFoundError
+from src.skills.orchestrator import (
+    ExecutionPlan,
+    ExecutionStep,
+    SkillOrchestrator,
+    WorkingMemoryEntry,
+)
 
 __all__ = [
     # Autonomy
@@ -58,4 +64,9 @@ __all__ = [
     "SkillExecutor",
     "SkillExecution",
     "SkillExecutionError",
+    # Orchestrator
+    "SkillOrchestrator",
+    "ExecutionPlan",
+    "ExecutionStep",
+    "WorkingMemoryEntry",
 ]
