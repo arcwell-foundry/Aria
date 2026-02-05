@@ -8,7 +8,7 @@ until proven otherwise.
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class DataClass(Enum):
@@ -42,7 +42,7 @@ class ClassifiedData:
     data_type: str
     source: str
     can_be_tokenized: bool = True
-    retention_days: Optional[int] = None
+    retention_days: int | None = None
 
 
 class DataClassifier:
@@ -129,7 +129,7 @@ class DataClassifier:
                     return ClassifiedData(
                         data=data,
                         classification=classification,
-                        data_type=self._infer_data_type(text, pattern),
+                        data_type=self._infer_data_type(pattern),
                         source=context.get("source", "unknown"),
                         can_be_tokenized=self._can_be_tokenized(pattern),
                     )
@@ -164,11 +164,10 @@ class DataClassifier:
             can_be_tokenized=True,
         )
 
-    def _infer_data_type(self, text: str, matched_pattern: str) -> str:
+    def _infer_data_type(self, matched_pattern: str) -> str:
         """Infer the data type based on which pattern matched.
 
         Args:
-            text: The text that was classified.
             matched_pattern: The regex pattern that matched.
 
         Returns:
@@ -179,7 +178,9 @@ class DataClassifier:
             return "ssn"
 
         # Credit card patterns
-        if "\\d{4}" in matched_pattern and ("\\d{16}" in matched_pattern or "{3}" in matched_pattern):
+        if "\\d{4}" in matched_pattern and (
+            "\\d{16}" in matched_pattern or "{3}" in matched_pattern
+        ):
             return "credit_card"
 
         # DOB pattern
