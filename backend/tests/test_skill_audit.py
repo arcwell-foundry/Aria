@@ -686,6 +686,139 @@ class TestQueryMethods:
         assert result[0]["skill_id"] == "pdf"
 
 
+class TestSkillAuditIntegration:
+    """Integration tests for full audit workflow."""
+
+    @pytest.mark.asyncio
+    async def test_full_audit_workflow_with_chain_verification(self) -> None:
+        """Test complete workflow: log entries, verify chain, query logs."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditEntry, SkillAuditService
+
+        service = SkillAuditService()
+        zero_hash = "0" * 64
+
+        # Mock database responses
+        logged_entries = []
+
+        def mock_insert(data):
+            logged_entries.append(data)
+            mock_response = MagicMock()
+            mock_response.data = [{"id": f"audit-{len(logged_entries)}"}]
+            return MagicMock(execute=AsyncMock(return_value=mock_response))
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.insert = mock_insert
+
+        # Mock get_latest_hash to return our tracked chain
+        async def mock_get_latest_hash(user_id: str) -> str:
+            if not logged_entries:
+                return zero_hash
+            return logged_entries[-1]["entry_hash"]
+
+        # Mock get_audit_log to return logged entries
+        async def mock_get_audit_log(user_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
+            return list(reversed(logged_entries))  # Return newest first
+
+        service_with_mock = SkillAuditService(supabase_client=mock_client)
+        service_with_mock.get_latest_hash = mock_get_latest_hash
+        service_with_mock.get_audit_log = mock_get_audit_log
+
+        # Log first entry
+        entry1_data = {
+            "user_id": "user-123",
+            "skill_id": "skill-a",
+            "skill_path": "/skills/a",
+            "skill_trust_level": "core",
+            "trigger_reason": "test",
+            "data_classes_requested": ["public"],
+            "data_classes_granted": ["public"],
+            "input_hash": "input1",
+        }
+        entry1_hash = service._compute_hash(entry1_data, zero_hash)
+
+        entry1 = SkillAuditEntry(
+            **entry1_data,
+            previous_hash=zero_hash,
+            entry_hash=entry1_hash,
+            success=True,
+        )
+        await service_with_mock.log_execution(entry1)
+
+        # Log second entry
+        entry2_data = {
+            "user_id": "user-123",
+            "skill_id": "skill-b",
+            "skill_path": "/skills/b",
+            "skill_trust_level": "verified",
+            "trigger_reason": "test",
+            "data_classes_requested": ["internal"],
+            "data_classes_granted": ["internal"],
+            "input_hash": "input2",
+        }
+        entry2_hash = service._compute_hash(entry2_data, entry1_hash)
+
+        entry2 = SkillAuditEntry(
+            **entry2_data,
+            previous_hash=entry1_hash,
+            entry_hash=entry2_hash,
+            success=True,
+        )
+        await service_with_mock.log_execution(entry2)
+
+        # Query logs
+        logs = await service_with_mock.get_audit_log("user-123")
+        assert len(logs) == 2
+
+        # Verify chain - need to properly mock the query chain
+        # The issue is that verify_chain calls the real method which uses the mock_client
+        # Let's create a fresh service with proper mock setup for the verify query
+        mock_verify_client = MagicMock()
+        mock_verify_query_builder = MagicMock()
+        mock_verify_query_builder.eq.return_value = mock_verify_query_builder
+        mock_verify_query_builder.order.return_value = mock_verify_query_builder
+        mock_verify_query_builder.execute = AsyncMock(
+            return_value=MagicMock(
+                data=[
+                    {
+                        "id": "1",
+                        "user_id": "user-123",
+                        "skill_id": "skill-a",
+                        "skill_path": "/skills/a",
+                        "skill_trust_level": "core",
+                        "trigger_reason": "test",
+                        "data_classes_requested": ["public"],
+                        "data_classes_granted": ["public"],
+                        "input_hash": "input1",
+                        "previous_hash": zero_hash,
+                        "entry_hash": entry1_hash,
+                    },
+                    {
+                        "id": "2",
+                        "user_id": "user-123",
+                        "skill_id": "skill-b",
+                        "skill_path": "/skills/b",
+                        "skill_trust_level": "verified",
+                        "trigger_reason": "test",
+                        "data_classes_requested": ["internal"],
+                        "data_classes_granted": ["internal"],
+                        "input_hash": "input2",
+                        "previous_hash": entry1_hash,
+                        "entry_hash": entry2_hash,
+                    },
+                ]
+            )
+        )
+        mock_verify_client.table.return_value.select.return_value = (
+            mock_verify_query_builder
+        )
+
+        service_for_verify = SkillAuditService(supabase_client=mock_verify_client)
+        is_valid = await service_for_verify.verify_chain("user-123")
+        assert is_valid is True
+
+
 class TestModuleExports:
     """Tests for skill_audit module exports."""
 
