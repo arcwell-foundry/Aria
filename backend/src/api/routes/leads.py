@@ -28,6 +28,7 @@ from src.memory.lead_memory import (
     LifecycleStage,
 )
 from src.models.lead_memory import (
+    ContributorCreate,
     InsightResponse,
     InsightType,
     LeadEventCreate,
@@ -804,6 +805,62 @@ async def transition_stage(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to transition stage")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.post(
+    "/{lead_id}/contributors",
+    response_model=dict[str, str],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_contributor(
+    lead_id: str,
+    contributor_data: ContributorCreate,
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """Add a contributor to a lead.
+
+    Args:
+        lead_id: The lead ID to add contributor to.
+        contributor_data: The contributor data.
+        current_user: Current authenticated user.
+
+    Returns:
+        The contributor_id that was added.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if operation fails.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.lead_collaboration import LeadCollaborationService
+
+    try:
+        # Verify lead exists and user owns it
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Add contributor
+        client = SupabaseClient.get_client()
+        collab_service = LeadCollaborationService(db_client=client)
+
+        contributor_id = await collab_service.add_contributor(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+            contributor_id=contributor_data.contributor_id,
+        )
+
+        return {"contributor_id": contributor_id}
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to add contributor")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
