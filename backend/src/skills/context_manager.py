@@ -212,3 +212,43 @@ class SkillContextManager:
         ]
 
         return "\n".join(sections)
+
+    def prepare_subagent_context(
+        self,
+        task_briefing: str,
+        skill_content: str,
+        input_data: str,
+    ) -> str:
+        """Build isolated subagent context for skill execution.
+
+        Combines three sections into a unified subagent context:
+        1. Task (what the skill should do)
+        2. Skill Instructions (how to use the skill)
+        3. Input Data (the data to process)
+
+        The entire context is compacted to fit the subagent budget.
+
+        Args:
+            task_briefing: A brief description of what the skill should accomplish.
+            skill_content: The skill's instructions and documentation.
+            input_data: The input data for the skill to process.
+
+        Returns:
+            A unified context string with all three sections, compacted to fit budget.
+        """
+        # Build the unified context first
+        sections = [
+            "## Task",
+            task_briefing,
+            "",
+            "## Skill Instructions",
+            skill_content,
+            "",
+            "## Input Data",
+            input_data,
+        ]
+
+        full_context = "\n".join(sections)
+
+        # Compact the entire context to fit subagent budget
+        return self.compact_if_needed(full_context, self.subagent_budget)

@@ -325,3 +325,93 @@ def test_prepare_orchestrator_context_respects_section_order() -> None:
     memory_pos = result.find("## Working Memory")
 
     assert skills_pos < plan_pos < memory_pos
+
+
+def test_prepare_subagent_context_builds_three_sections() -> None:
+    """Test prepare_subagent_context builds context with three sections."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    task_briefing = "Extract key insights from the PDF"
+    skill_content = "## PDF Skill\nProcess PDF files to extract text and metadata"
+    input_data = '{"file_path": "/path/to/document.pdf"}'
+
+    result = manager.prepare_subagent_context(
+        task_briefing=task_briefing,
+        skill_content=skill_content,
+        input_data=input_data,
+    )
+
+    # Should contain all three sections
+    assert "## Task" in result
+    assert "## Skill Instructions" in result
+    assert "## Input Data" in result
+
+
+def test_prepare_subagent_context_compacts_over_budget_content() -> None:
+    """Test prepare_subagent_context compacts content when over budget."""
+    from src.skills.context_manager import SkillContextManager
+
+    # Use moderate subagent budget to force compaction but keep structure
+    manager = SkillContextManager(subagent_budget=200)
+
+    task_briefing = "Process this file"
+    skill_content = "## Skill Instructions\n" + "x" * 1000
+    input_data = '{"data": "' + "y" * 1000 + '"}'
+
+    result = manager.prepare_subagent_context(
+        task_briefing=task_briefing,
+        skill_content=skill_content,
+        input_data=input_data,
+    )
+
+    # Should have at least the first section
+    assert "## Task" in result
+    # Should be reasonably sized
+    estimated_tokens = manager.estimate_tokens(result)
+    assert estimated_tokens <= manager.subagent_budget + 50  # Small fudge factor
+    # Result should be shorter than input
+    assert len(result) < len(task_briefing) + len(skill_content) + len(input_data)
+
+
+def test_prepare_subagent_context_handles_empty_inputs() -> None:
+    """Test prepare_subagent_context handles empty inputs gracefully."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    result = manager.prepare_subagent_context(
+        task_briefing="",
+        skill_content="",
+        input_data="",
+    )
+
+    # Should still return structured context with empty sections
+    assert "## Task" in result
+    assert "## Skill Instructions" in result
+    assert "## Input Data" in result
+
+
+def test_prepare_subagent_context_respects_section_order() -> None:
+    """Test prepare_subagent_context maintains section order."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    task_briefing = "Do the task"
+    skill_content = "## Skill\nInstructions here"
+    input_data = '{"input": "value"}'
+
+    result = manager.prepare_subagent_context(
+        task_briefing=task_briefing,
+        skill_content=skill_content,
+        input_data=input_data,
+    )
+
+    # Check order: Task first, then Skill, then Input Data
+    task_pos = result.find("## Task")
+    skill_pos = result.find("## Skill Instructions")
+    input_pos = result.find("## Input Data")
+
+    assert task_pos < skill_pos < input_pos
