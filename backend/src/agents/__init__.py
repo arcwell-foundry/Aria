@@ -1,7 +1,8 @@
 """ARIA specialized agents module.
 
 This module provides the base agent class, all specialized agents,
-and the orchestrator for coordinating agent execution.
+the orchestrator for coordinating agent execution, and the
+skill-aware agent base for skills.sh integration.
 """
 
 from src.agents.analyst import AnalystAgent
@@ -16,9 +17,11 @@ from src.agents.orchestrator import (
 )
 from src.agents.scout import ScoutAgent
 from src.agents.scribe import ScribeAgent
+from src.agents.skill_aware_agent import AGENT_SKILLS, SkillAnalysis, SkillAwareAgent
 from src.agents.strategist import StrategistAgent
 
 __all__ = [
+    "AGENT_SKILLS",
     "AgentOrchestrator",
     "AgentResult",
     "AgentStatus",
@@ -31,5 +34,7 @@ __all__ = [
     "ProgressUpdate",
     "ScoutAgent",
     "ScribeAgent",
+    "SkillAnalysis",
+    "SkillAwareAgent",
     "StrategistAgent",
 ]
