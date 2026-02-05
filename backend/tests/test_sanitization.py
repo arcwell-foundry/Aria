@@ -57,3 +57,36 @@ class TestTokenMap:
         token = token_map.add_token("Credit_Card", "1234-5678")
 
         assert token == "[CREDIT_CARD_001]"
+
+    def test_get_original_returns_value(self) -> None:
+        """Test get_original returns the original value for a token."""
+        from src.security.sanitization import TokenMap
+
+        token_map = TokenMap()
+        token = token_map.add_token("financial", "$4.2M")
+
+        original = token_map.get_original(token)
+
+        assert original == "$4.2M"
+
+    def test_get_original_returns_none_for_unknown_token(self) -> None:
+        """Test get_original returns None for unknown token."""
+        from src.security.sanitization import TokenMap
+
+        token_map = TokenMap()
+
+        original = token_map.get_original("[UNKNOWN_001]")
+
+        assert original is None
+
+    def test_get_original_preserves_complex_types(self) -> None:
+        """Test get_original preserves complex data types."""
+        from src.security.sanitization import TokenMap
+
+        token_map = TokenMap()
+        complex_value = {"amount": 4200000, "currency": "USD"}
+        token = token_map.add_token("financial", complex_value)
+
+        original = token_map.get_original(token)
+
+        assert original == {"amount": 4200000, "currency": "USD"}

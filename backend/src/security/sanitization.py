@@ -38,3 +38,14 @@ class TokenMap:
         token = f"[{normalized_type}_{counter:03d}]"
         self.tokens[token] = value
         return token
+
+    def get_original(self, token: str) -> Any | None:
+        """Get the original value for a token.
+
+        Args:
+            token: The token string to look up.
+
+        Returns:
+            The original value, or None if token not found.
+        """
+        return self.tokens.get(token)
