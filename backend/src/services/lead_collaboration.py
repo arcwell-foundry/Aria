@@ -271,9 +271,24 @@ class LeadCollaborationService:
             DatabaseError: If submission fails.
         """
         from src.core.exceptions import DatabaseError
+        from src.models.notification import NotificationType
+        from src.services.notification_service import NotificationService
 
         try:
             client = self._get_supabase_client()
+
+            # Get lead owner to send notification
+            lead_response = (
+                client.table("lead_memories")
+                .select("user_id")
+                .eq("id", lead_memory_id)
+                .execute()
+            )
+
+            owner_id: str | None = None
+            if lead_response.data and len(lead_response.data) > 0:
+                lead_data = cast(dict[str, Any], lead_response.data[0])
+                owner_id = cast(str | None, lead_data.get("user_id"))
 
             now = datetime.now(UTC)
             data = {
@@ -299,6 +314,38 @@ class LeadCollaborationService:
             if not new_contribution_id:
                 raise DatabaseError("Failed to insert contribution")
 
+            # Send notification to lead owner if different from contributor
+            if owner_id and owner_id != user_id:
+                # Generate type description for the notification message
+                type_descriptions = {
+                    ContributionType.EVENT: "event",
+                    ContributionType.NOTE: "note",
+                    ContributionType.INSIGHT: "insight",
+                }
+                type_desc = type_descriptions.get(contribution_type, "contribution")
+
+                await NotificationService.create_notification(
+                    user_id=owner_id,
+                    type=NotificationType.TASK_DUE,
+                    title="New contribution pending review",
+                    message=f"A new {type_desc} contribution has been submitted for your review.",
+                    link=f"/leads/{lead_memory_id}",
+                    metadata={
+                        "contribution_id": new_contribution_id,
+                        "lead_memory_id": lead_memory_id,
+                        "contribution_type": contribution_type.value,
+                    },
+                )
+
+                logger.info(
+                    "Notification sent to lead owner",
+                    extra={
+                        "owner_id": owner_id,
+                        "contributor_id": user_id,
+                        "contribution_id": new_contribution_id,
+                    },
+                )
+
             logger.info(
                 "Contribution submitted",
                 extra={
@@ -306,6 +353,7 @@ class LeadCollaborationService:
                     "user_id": user_id,
                     "lead_memory_id": lead_memory_id,
                     "contribution_type": contribution_type.value,
+                    "owner_notified": owner_id and owner_id != user_id,
                 },
             )
 

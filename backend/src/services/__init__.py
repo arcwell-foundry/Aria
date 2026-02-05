@@ -21,6 +21,11 @@ from src.services.crm_sync_models import (
     SyncDirection,
     SyncStatus,
 )
+from src.services.lead_collaboration import (
+    Contribution,
+    Contributor,
+    LeadCollaborationService,
+)
 from src.services.notification_service import NotificationService
 from src.services.prediction_service import PredictionService
 
@@ -46,4 +51,8 @@ __all__ = [
     "SyncConflict",
     "CRMRecord",
     "CRMSyncModelError",
+    # Lead collaboration exports
+    "LeadCollaborationService",
+    "Contribution",
+    "Contributor",
 ]

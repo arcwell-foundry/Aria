@@ -442,9 +442,34 @@ class TestSubmitContribution:
     async def test_submit_note_contribution(self, mock_get_client):
         """Test submitting a note contribution."""
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.data = [{"id": "cntrb_123", "lead_memory_id": "lead_456"}]
-        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+
+        # Mock lead_memories query to get owner (returns empty, so no notification sent)
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = []
+        mock_lead_query = MagicMock()
+        mock_lead_query.execute.return_value = mock_lead_response
+        mock_lead_eq = MagicMock()
+        mock_lead_eq.eq.return_value = mock_lead_query
+        mock_lead_select = MagicMock()
+        mock_lead_select.select.return_value = mock_lead_eq
+
+        # Mock contributions insert
+        mock_contrib_response = MagicMock()
+        mock_contrib_response.data = [{"id": "cntrb_123", "lead_memory_id": "lead_456"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_contrib_response
+
+        # Configure table to return different mocks
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memories" and table_call_count[0] == 1:
+                return mock_lead_select
+            elif table_name == "lead_memory_contributions":
+                return mock_client.table.return_value
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
         mock_get_client.return_value = mock_client
 
         service = LeadCollaborationService(db_client=MagicMock())
@@ -458,7 +483,8 @@ class TestSubmitContribution:
         )
 
         assert result == "cntrb_123"
-        mock_client.table.assert_called_once_with("lead_memory_contributions")
+        # Verify both tables were called
+        assert mock_client.table.call_count >= 2
         insert_call = mock_client.table.return_value.insert
         assert insert_call.called
         inserted_data = insert_call.call_args[0][0]
@@ -557,6 +583,196 @@ class TestSubmitContribution:
             )
 
         assert "Failed to insert contribution" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    @patch("src.services.notification_service.NotificationService.create_notification")
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_sends_notification_to_owner(self, mock_get_client, mock_create_notification):
+        """Test that submit_contribution sends notification to lead owner when contributor is different."""
+        mock_client = MagicMock()
+
+        # Mock lead_memories query to get owner
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = [{"user_id": "user_owner"}]
+        mock_lead_query = MagicMock()
+        mock_lead_query.execute.return_value = mock_lead_response
+        mock_lead_eq = MagicMock()
+        mock_lead_eq.eq.return_value = mock_lead_query
+        mock_lead_select = MagicMock()
+        mock_lead_select.select.return_value = mock_lead_eq
+
+        # Mock contributions insert
+        mock_contrib_response = MagicMock()
+        mock_contrib_response.data = [{"id": "cntrb_123", "lead_memory_id": "lead_456"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_contrib_response
+
+        # Configure table to return different mocks
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memories" and table_call_count[0] == 1:
+                return mock_lead_select
+            elif table_name == "lead_memory_contributions":
+                return mock_client.table.return_value
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        # Mock create_notification to return a notification response
+        from src.models.notification import NotificationType, NotificationResponse
+        from datetime import datetime, timezone
+
+        mock_create_notification.return_value = NotificationResponse(
+            id="notif_123",
+            user_id="user_owner",
+            type=NotificationType.TASK_DUE,
+            title="New contribution pending review",
+            message="A new note contribution has been submitted for your review.",
+            link="/leads/lead_456",
+            metadata={"contribution_id": "cntrb_123", "lead_memory_id": "lead_456"},
+            read_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.submit_contribution(
+            user_id="user_contributor",  # Different from owner
+            lead_memory_id="lead_456",
+            contribution_type=ContributionType.NOTE,
+            content="This is a note contribution",
+        )
+
+        assert result == "cntrb_123"
+        # Verify notification was created for the owner
+        mock_create_notification.assert_called_once()
+        call_kwargs = mock_create_notification.call_args.kwargs
+        assert call_kwargs["user_id"] == "user_owner"
+        assert call_kwargs["type"] == NotificationType.TASK_DUE
+        assert call_kwargs["title"] == "New contribution pending review"
+        assert "note contribution" in call_kwargs["message"]
+        assert call_kwargs["link"] == "/leads/lead_456"
+        assert call_kwargs["metadata"]["contribution_id"] == "cntrb_123"
+        assert call_kwargs["metadata"]["lead_memory_id"] == "lead_456"
+
+    @pytest.mark.asyncio
+    @patch("src.services.notification_service.NotificationService.create_notification")
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_no_notification_when_owner_is_contributor(self, mock_get_client, mock_create_notification):
+        """Test that submit_contribution does not send notification when owner is the contributor."""
+        mock_client = MagicMock()
+
+        # Mock lead_memories query to get owner (same as contributor)
+        mock_lead_response = MagicMock()
+        mock_lead_response.data = [{"user_id": "user_owner"}]
+        mock_lead_query = MagicMock()
+        mock_lead_query.execute.return_value = mock_lead_response
+        mock_lead_eq = MagicMock()
+        mock_lead_eq.eq.return_value = mock_lead_query
+        mock_lead_select = MagicMock()
+        mock_lead_select.select.return_value = mock_lead_eq
+
+        # Mock contributions insert
+        mock_contrib_response = MagicMock()
+        mock_contrib_response.data = [{"id": "cntrb_456", "lead_memory_id": "lead_789"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_contrib_response
+
+        # Configure table to return different mocks
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memories" and table_call_count[0] == 1:
+                return mock_lead_select
+            elif table_name == "lead_memory_contributions":
+                return mock_client.table.return_value
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.submit_contribution(
+            user_id="user_owner",  # Same as owner
+            lead_memory_id="lead_789",
+            contribution_type=ContributionType.EVENT,
+            contribution_id="event_abc",
+        )
+
+        assert result == "cntrb_456"
+        # Verify notification was NOT created since owner is the contributor
+        mock_create_notification.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("src.services.notification_service.NotificationService.create_notification")
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_submit_contribution_handles_each_contribution_type(self, mock_get_client, mock_create_notification):
+        """Test that submit_contribution generates correct message for each contribution type."""
+        from src.models.notification import NotificationType, NotificationResponse
+        from datetime import datetime, timezone
+
+        mock_create_notification.return_value = NotificationResponse(
+            id="notif_123",
+            user_id="user_owner",
+            type=NotificationType.TASK_DUE,
+            title="New contribution pending review",
+            message="",
+            link="/leads/lead_456",
+            metadata={},
+            read_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        for contribution_type, expected_type_desc in [
+            (ContributionType.EVENT, "event"),
+            (ContributionType.NOTE, "note"),
+            (ContributionType.INSIGHT, "insight"),
+        ]:
+            mock_client = MagicMock()
+
+            # Mock lead_memories query to get owner
+            mock_lead_response = MagicMock()
+            mock_lead_response.data = [{"user_id": "user_owner"}]
+            mock_lead_query = MagicMock()
+            mock_lead_query.execute.return_value = mock_lead_response
+            mock_lead_eq = MagicMock()
+            mock_lead_eq.eq.return_value = mock_lead_query
+            mock_lead_select = MagicMock()
+            mock_lead_select.select.return_value = mock_lead_eq
+
+            # Mock contributions insert
+            mock_contrib_response = MagicMock()
+            mock_contrib_response.data = [{"id": f"cntrb_{contribution_type.value}", "lead_memory_id": "lead_456"}]
+            mock_client.table.return_value.insert.return_value.execute.return_value = mock_contrib_response
+
+            # Configure table to return different mocks
+            table_call_count = [0]
+
+            def table_side_effect(table_name):
+                table_call_count[0] += 1
+                if table_name == "lead_memories" and table_call_count[0] == 1:
+                    return mock_lead_select
+                elif table_name == "lead_memory_contributions":
+                    return mock_client.table.return_value
+                return MagicMock()
+
+            mock_client.table.side_effect = table_side_effect
+            mock_get_client.return_value = mock_client
+
+            service = LeadCollaborationService(db_client=MagicMock())
+
+            await service.submit_contribution(
+                user_id="user_contributor",
+                lead_memory_id="lead_456",
+                contribution_type=contribution_type,
+            )
+
+            # Verify the correct type description was used in the message
+            call_kwargs = mock_create_notification.call_args.kwargs
+            assert expected_type_desc in call_kwargs["message"]
 
 
 class TestGetPendingContributions:
