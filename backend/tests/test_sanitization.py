@@ -647,3 +647,68 @@ class TestIntegrationScenarios:
         # Verify no leakage
         report = sanitizer.validate_output(sanitized, token_map)
         assert report.leaked is False
+
+    @pytest.mark.asyncio
+    async def test_deal_memo_scenario(self) -> None:
+        """Test sanitizing a deal memo with pricing and terms."""
+        from src.security import DataSanitizer, DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        deal_memo = """
+        DEAL MEMO - CONFIDENTIAL
+
+        Customer: Acme Healthcare
+        Contact: Sarah Johnson (sarah.johnson@acmehc.com)
+        Phone: 555-234-5678
+
+        Deal Summary:
+        - Contract value: $2.5M over 3 years
+        - Our pricing: $850K/year with 10% discount
+        - Competitor pricing: BioTech offers at $750K/year
+        - Expected revenue impact: +15% margin improvement
+
+        Key Terms:
+        - Net 60 payment terms
+        - Annual price escalator of 3%
+        - Exclusivity clause for 2 years
+
+        Notes: Customer SSN for verification: 123-45-6789
+        """
+
+        # COMMUNITY skill - only PUBLIC access
+        sanitized, token_map = await sanitizer.sanitize(
+            deal_memo,
+            SkillTrustLevel.COMMUNITY,
+        )
+
+        # All sensitive data should be redacted
+        assert "sarah.johnson@acmehc.com" not in sanitized
+        assert "555-234-5678" not in sanitized
+        assert "$2.5M" not in sanitized
+        assert "$850K" not in sanitized
+        assert "123-45-6789" not in sanitized
+
+        # SSN should be redacted (not tokenized)
+        assert "[REDACTED:" in sanitized
+
+        # CORE skill - full access except REGULATED
+        sanitized_core, token_map_core = await sanitizer.sanitize(
+            deal_memo,
+            SkillTrustLevel.CORE,
+        )
+
+        # Financial data should be tokenized
+        assert "[FINANCIAL_" in sanitized_core
+        assert "[CONTACT_" in sanitized_core
+
+        # SSN (REGULATED) should still be redacted for CORE
+        assert "123-45-6789" not in sanitized_core
+        assert "[REDACTED:" in sanitized_core  # SSN redaction
+
+        # Verify detokenization restores financial and contact but not SSN
+        restored = sanitizer.detokenize(sanitized_core, token_map_core)
+        assert "$2.5M" in restored or "2.5M" in restored  # Financial restored
+        assert "123-45-6789" not in restored  # SSN stays redacted
