@@ -322,3 +322,45 @@ class TestDataSanitizer:
 
         assert isinstance(sanitized["financials"], dict)
         assert "[REDACTED:" in str(sanitized["financials"]["revenue"])
+
+    @pytest.mark.asyncio
+    async def test_sanitize_list_processes_all_items(self) -> None:
+        """Test sanitize processes all items in a list."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        data = ["john@example.com", "jane@example.com", "public info"]
+
+        sanitized, token_map = await sanitizer.sanitize(data, SkillTrustLevel.CORE)
+
+        assert isinstance(sanitized, list)
+        assert len(sanitized) == 3
+        assert "[CONTACT_" in sanitized[0]
+        assert "[CONTACT_" in sanitized[1]
+        assert sanitized[2] == "public info"
+
+    @pytest.mark.asyncio
+    async def test_sanitize_list_of_dicts(self) -> None:
+        """Test sanitize handles list of dictionaries."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        data = [
+            {"name": "John", "email": "john@example.com"},
+            {"name": "Jane", "email": "jane@example.com"},
+        ]
+
+        sanitized, token_map = await sanitizer.sanitize(data, SkillTrustLevel.CORE)
+
+        assert isinstance(sanitized, list)
+        assert len(sanitized) == 2
+        assert sanitized[0]["name"] == "John"
+        assert "[CONTACT_" in sanitized[0]["email"]
