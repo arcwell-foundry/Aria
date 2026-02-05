@@ -20,3 +20,21 @@ class TokenMap:
     """
 
     tokens: dict[str, Any] = field(default_factory=dict)
+    _counters: dict[str, int] = field(default_factory=dict)
+
+    def add_token(self, data_type: str, value: Any) -> str:
+        """Add a value to the token map and return its token string.
+
+        Args:
+            data_type: Category of data (e.g., "financial", "contact").
+            value: The original value to tokenize.
+
+        Returns:
+            Token string in format [DATA_TYPE_NNN].
+        """
+        normalized_type = data_type.upper()
+        self._counters[normalized_type] = self._counters.get(normalized_type, 0) + 1
+        counter = self._counters[normalized_type]
+        token = f"[{normalized_type}_{counter:03d}]"
+        self.tokens[token] = value
+        return token
