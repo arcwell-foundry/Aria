@@ -88,6 +88,7 @@ class SkillAuditService:
         """Compute SHA256 hash of entry data including previous hash.
 
         This creates the cryptographic link between entries in the chain.
+        Uses sorted keys for deterministic JSON serialization.
 
         Args:
             entry_data: Dictionary of entry data to hash.
@@ -98,7 +99,7 @@ class SkillAuditService:
         """
         # Create deterministic string representation
         # Sort keys for consistent ordering
-        canonical = json.dumps(entry_data, sort_keys=True, default=str)
+        canonical = json.dumps(entry_data, sort_keys=True)
         # Include previous hash to chain entries together
         combined = f"{canonical}:{previous_hash}"
         # Return SHA256 as hex string
