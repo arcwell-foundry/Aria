@@ -232,3 +232,92 @@ class SkillInstaller:
         except Exception as e:
             logger.error(f"Error uninstalling skill {skill_id} for user {user_id}: {e}")
             return False
+
+    async def get_installed(self, user_id: str, skill_id: str) -> InstalledSkill | None:
+        """Get an installed skill by user ID and skill ID.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+
+        Returns:
+            The InstalledSkill if found, None otherwise.
+        """
+        return await self._get_by_user_and_skill_id(user_id, skill_id)
+
+    async def is_installed(self, user_id: str, skill_id: str) -> bool:
+        """Check if a skill is installed for a user.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+
+        Returns:
+            True if the skill is installed, False otherwise.
+        """
+        try:
+            installed_skill = await self._get_by_user_and_skill_id(user_id, skill_id)
+            return installed_skill is not None
+        except Exception as e:
+            logger.debug(f"Error checking if skill {skill_id} is installed for user {user_id}: {e}")
+            return False
+
+    async def record_usage(
+        self, user_id: str, skill_id: str, *, success: bool = True
+    ) -> InstalledSkill | None:
+        """Record usage of an installed skill.
+
+        Increments execution_count and optionally success_count,
+        and updates last_used_at timestamp.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+            success: Whether the execution was successful (default: True).
+
+        Returns:
+            The updated InstalledSkill if found, None otherwise.
+        """
+        try:
+            # Get the current installation
+            installed_skill = await self._get_by_user_and_skill_id(user_id, skill_id)
+            if not installed_skill:
+                logger.warning(
+                    f"Cannot record usage: skill {skill_id} not installed for user {user_id}"
+                )
+                return None
+
+            # Prepare update data
+            now = datetime.now()
+            update_data = {
+                "execution_count": installed_skill.execution_count + 1,
+                "last_used_at": now.isoformat(),
+            }
+
+            # Only increment success_count if success is True
+            if success:
+                update_data["success_count"] = installed_skill.success_count + 1
+            else:
+                update_data["success_count"] = installed_skill.success_count
+
+            # Perform the update
+            response = (
+                self._client.table("user_skills")
+                .update(update_data)
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+
+            if response.data:
+                updated_skill = self._db_row_to_installed_skill(response.data[0])
+                logger.debug(
+                    f"Recorded usage for skill {skill_id} by user {user_id} "
+                    f"(success={success}, execution_count={updated_skill.execution_count})"
+                )
+                return updated_skill
+
+            return None
+        except Exception as e:
+            logger.error(f"Error recording usage for skill {skill_id} by user {user_id}: {e}")
+            return None

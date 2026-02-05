@@ -549,3 +549,440 @@ class TestSkillInstallerUninstall:
         result = await installer.uninstall("user-abc", "skill-id-123")
 
         assert result is False
+
+
+class TestSkillInstallerGetInstalled:
+    """Tests for SkillInstaller.get_installed method."""
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_get_installed_returns_installed_skill(self, mock_get_client: MagicMock) -> None:
+        """Test get_installed returns an installed skill."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await installer.get_installed("user-abc", "skill-456")
+
+        assert result is not None
+        assert result.id == "123"
+        assert result.user_id == "user-abc"
+        assert result.skill_id == "skill-456"
+        assert result.skill_path == "anthropics/skills/pdf"
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_get_installed_returns_none_for_nonexistent_skill(self, mock_get_client: MagicMock) -> None:
+        """Test get_installed returns None when skill not installed."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock empty response
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await installer.get_installed("user-abc", "nonexistent-skill")
+
+        assert result is None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_get_installed_uses_helper_method(self, mock_get_client: MagicMock) -> None:
+        """Test get_installed uses _get_by_user_and_skill_id helper."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": None,
+            "skill_id": "skill-789",
+            "skill_path": "test/skill",
+            "trust_level": "community",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await installer.get_installed("user-abc", "skill-789")
+
+        assert result is not None
+        assert result.skill_id == "skill-789"
+        assert result.trust_level == SkillTrustLevel.COMMUNITY
+
+
+class TestSkillInstallerIsInstalled:
+    """Tests for SkillInstaller.is_installed method."""
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_is_installed_returns_true_for_installed_skill(self, mock_get_client: MagicMock) -> None:
+        """Test is_installed returns True when skill is installed."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await installer.is_installed("user-abc", "skill-456")
+
+        assert result is True
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_is_installed_returns_false_for_nonexistent_skill(self, mock_get_client: MagicMock) -> None:
+        """Test is_installed returns False when skill not installed."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock empty response
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await installer.is_installed("user-abc", "nonexistent-skill")
+
+        assert result is False
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_is_installed_handles_database_error(self, mock_get_client: MagicMock) -> None:
+        """Test is_installed returns False on database error."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock database error
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = (
+            Exception("Database connection error")
+        )
+
+        result = await installer.is_installed("user-abc", "skill-456")
+
+        assert result is False
+
+
+class TestSkillInstallerRecordUsage:
+    """Tests for SkillInstaller.record_usage method."""
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_increments_execution_count(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage increments execution_count."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 10,
+            "success_count": 9,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Mock select to return existing skill
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        # Mock update response
+        updated_row = existing_row.copy()
+        updated_row["execution_count"] = 11
+        updated_row["success_count"] = 10
+        updated_row["last_used_at"] = now.isoformat()
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            [updated_row]
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456", success=True)
+
+        assert result is not None
+        assert result.execution_count == 11
+        assert result.success_count == 10
+        assert result.last_used_at is not None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_increments_success_count_on_success(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage increments success_count when success=True."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 5,
+            "success_count": 4,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["execution_count"] = 6
+        updated_row["success_count"] = 5
+        updated_row["last_used_at"] = now.isoformat()
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            [updated_row]
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456", success=True)
+
+        assert result is not None
+        assert result.success_count == 5
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_does_not_increment_success_count_on_failure(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """Test record_usage does not increment success_count when success=False."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 5,
+            "success_count": 4,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["execution_count"] = 6
+        updated_row["success_count"] = 4  # Unchanged
+        updated_row["last_used_at"] = now.isoformat()
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            [updated_row]
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456", success=False)
+
+        assert result is not None
+        assert result.execution_count == 6
+        assert result.success_count == 4
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_updates_last_used_at(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage updates last_used_at timestamp."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["execution_count"] = 1
+        updated_row["success_count"] = 1
+        updated_row["last_used_at"] = now.isoformat()
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            [updated_row]
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456", success=True)
+
+        assert result is not None
+        assert result.last_used_at is not None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_returns_none_for_nonexistent_skill(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage returns None when skill not installed."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        # Mock empty response
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await installer.record_usage("user-abc", "nonexistent-skill", success=True)
+
+        assert result is None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_handles_database_error(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage returns None on database error."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        # Mock update error
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.side_effect = (
+            Exception("Database connection error")
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456", success=True)
+
+        assert result is None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_defaults_success_to_true(self, mock_get_client: MagicMock) -> None:
+        """Test record_usage defaults success parameter to True."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        now = datetime.now(timezone.utc)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "tenant_id": "tenant-xyz",
+            "skill_id": "skill-456",
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["execution_count"] = 1
+        updated_row["success_count"] = 1  # Should increment since default is True
+        updated_row["last_used_at"] = now.isoformat()
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            [updated_row]
+        )
+
+        result = await installer.record_usage("user-abc", "skill-456")
+
+        assert result is not None
+        assert result.execution_count == 1
+        assert result.success_count == 1
