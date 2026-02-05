@@ -423,3 +423,167 @@ class TestLogExecution:
         assert insert_args["security_flags"] == ["large_output"]
         assert insert_args["previous_hash"] == "0" * 64
         assert insert_args["entry_hash"] == "hash123"
+
+
+class TestVerifyChain:
+    """Tests for hash chain verification."""
+
+    @pytest.mark.asyncio
+    async def test_verify_chain_passes_with_valid_chain(self) -> None:
+        """Test verification passes when chain is intact."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        # Build a valid chain: entry1 -> entry2 -> entry3
+        service = SkillAuditService()
+        zero_hash = "0" * 64
+
+        # Entry 1 (genesis) - compute hash WITHOUT filtered fields (id, timestamp, entry_hash, previous_hash)
+        entry1_data = {"skill_id": "skill1", "user_id": "user123"}
+        entry1_hash = service._compute_hash(entry1_data, zero_hash)
+
+        # Entry 2
+        entry2_data = {"skill_id": "skill2", "user_id": "user123"}
+        entry2_hash = service._compute_hash(entry2_data, entry1_hash)
+
+        # Entry 3
+        entry3_data = {"skill_id": "skill3", "user_id": "user123"}
+        entry3_hash = service._compute_hash(entry3_data, entry2_hash)
+
+        mock_entries = [
+            {
+                "id": "1",
+                "skill_id": "skill1",
+                "user_id": "user123",
+                "previous_hash": zero_hash,
+                "entry_hash": entry1_hash,
+            },
+            {
+                "id": "2",
+                "skill_id": "skill2",
+                "user_id": "user123",
+                "previous_hash": entry1_hash,
+                "entry_hash": entry2_hash,
+            },
+            {
+                "id": "3",
+                "skill_id": "skill3",
+                "user_id": "user123",
+                "previous_hash": entry2_hash,
+                "entry_hash": entry3_hash,
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=mock_entries))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service2 = SkillAuditService(supabase_client=mock_client)
+        result = await service2.verify_chain("user123")
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_verify_chain_fails_with_tampered_entry(self) -> None:
+        """Test verification fails when an entry is tampered."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        zero_hash = "0" * 64
+
+        # Valid chain - compute hashes WITHOUT filtered fields
+        entry1_data = {"skill_id": "skill1", "user_id": "user123"}
+        entry1_hash = service._compute_hash(entry1_data, zero_hash)
+        entry2_data = {"skill_id": "skill2", "user_id": "user123"}
+        entry2_hash = service._compute_hash(entry2_data, entry1_hash)
+
+        # Tampered entry: previous_hash doesn't match actual previous entry_hash
+        mock_entries = [
+            {
+                "id": "1",
+                "skill_id": "skill1",
+                "user_id": "user123",
+                "previous_hash": zero_hash,
+                "entry_hash": entry1_hash,
+            },
+            {
+                "id": "2",
+                "skill_id": "skill2",
+                "user_id": "user123",
+                "previous_hash": "tampered" * 8,  # Wrong!
+                "entry_hash": entry2_hash,
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=mock_entries))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service2 = SkillAuditService(supabase_client=mock_client)
+        result = await service2.verify_chain("user123")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_verify_chain_fails_with_broken_hash(self) -> None:
+        """Test verification fails when entry_hash doesn't match computed."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        service = SkillAuditService()
+        zero_hash = "0" * 64
+
+        # Create an entry with a wrong entry_hash (doesn't match computed)
+        entry1_data = {"skill_id": "skill1", "user_id": "user123"}
+        correct_hash = service._compute_hash(entry1_data, zero_hash)
+
+        mock_entries = [
+            {
+                "id": "1",
+                "skill_id": "skill1",
+                "user_id": "user123",
+                "previous_hash": zero_hash,
+                "entry_hash": "wrong" * 16,  # Doesn't match computed hash!
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=mock_entries))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.verify_chain("user123")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_verify_chain_returns_true_for_empty_chain(self) -> None:
+        """Test verification passes when user has no entries."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.security.skill_audit import SkillAuditService
+
+        mock_client = MagicMock()
+        mock_query_builder = MagicMock()
+        mock_query_builder.eq.return_value = mock_query_builder
+        mock_query_builder.order.return_value = mock_query_builder
+        mock_query_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+        mock_client.table.return_value.select.return_value = mock_query_builder
+
+        service = SkillAuditService(supabase_client=mock_client)
+        result = await service.verify_chain("user123")
+
+        assert result is True

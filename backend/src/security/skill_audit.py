@@ -190,3 +190,76 @@ class SkillAuditService:
                 extra={"user_id": entry.user_id, "skill_id": entry.skill_id},
             )
             raise DatabaseError(f"Failed to log skill execution: {e}") from e
+
+    async def verify_chain(self, user_id: str) -> bool:
+        """Verify the integrity of a user's audit log hash chain.
+
+        Checks that each entry's previous_hash matches the entry_hash of the
+        immediately preceding entry. Any mismatch indicates tampering.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            True if chain is valid, False if tampering detected.
+        """
+        try:
+            response = await (
+                self._client.table("skill_audit_log")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("timestamp", desc=False)  # Oldest first
+                .execute()
+            )
+
+            entries = response.data
+
+            # Empty chain is valid
+            if not entries:
+                return True
+
+            # Verify each link in the chain
+            previous_hash = "0" * 64  # Genesis block has zero previous hash
+
+            for entry in entries:
+                # Check previous_hash matches
+                if entry.get("previous_hash") != previous_hash:
+                    logger.warning(
+                        "Hash chain broken: previous_hash mismatch",
+                        extra={
+                            "user_id": user_id,
+                            "entry_id": entry.get("id"),
+                            "expected": previous_hash,
+                            "actual": entry.get("previous_hash"),
+                        },
+                    )
+                    return False
+
+                # Recompute hash to verify entry wasn't modified
+                entry_data = {
+                    k: v
+                    for k, v in entry.items()
+                    if k not in ["id", "timestamp", "entry_hash", "previous_hash"]
+                }
+                computed_hash = self._compute_hash(entry_data, previous_hash)
+
+                if entry.get("entry_hash") != computed_hash:
+                    logger.warning(
+                        "Hash chain broken: entry_hash mismatch",
+                        extra={
+                            "user_id": user_id,
+                            "entry_id": entry.get("id"),
+                            "expected": computed_hash,
+                            "actual": entry.get("entry_hash"),
+                        },
+                    )
+                    return False
+
+                # Chain continues
+                previous_hash = entry.get("entry_hash", "")
+
+            return True
+
+        except Exception as e:
+            logger.exception("Failed to verify hash chain", extra={"user_id": user_id})
+            return False
