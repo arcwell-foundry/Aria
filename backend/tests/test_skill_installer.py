@@ -1,6 +1,6 @@
 """Tests for skill installer service and InstalledSkill dataclass."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -986,3 +986,532 @@ class TestSkillInstallerRecordUsage:
         assert result is not None
         assert result.execution_count == 1
         assert result.success_count == 1
+
+
+class TestSkillInstallerIntegration:
+    """Integration tests for full skill installer workflow."""
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_full_workflow_install_is_installed_record_usage_uninstall(self, mock_get_client: MagicMock) -> None:
+        """Test complete workflow: install -> is_installed -> record_usage -> uninstall."""
+        from src.skills.installer import SkillInstaller
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.security.trust_levels import SkillTrustLevel
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+        now = datetime.now(timezone.utc)
+
+        # Step 1: Install - skill not yet installed, skill index lookup succeeds
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        # Mock SkillIndex.get_skill with AsyncMock
+        with patch.object(SkillIndex, "get_skill", new=AsyncMock()) as mock_get_skill:
+            mock_skill_entry = SkillIndexEntry(
+                id=skill_id,
+                skill_path="anthropics/skills/pdf",
+                skill_name="PDF Reader",
+                description="Read PDF files",
+                full_content="Skill content here",
+                content_hash="abc123",
+                author="Anthropic",
+                version="1.0.0",
+                tags=["pdf", "reader"],
+                trust_level=SkillTrustLevel.VERIFIED,
+                life_sciences_relevant=False,
+                declared_permissions=[],
+                summary_verbosity="standard",
+                last_synced=now,
+                created_at=now,
+                updated_at=now,
+            )
+            mock_get_skill.return_value = mock_skill_entry
+
+            # Mock insert response
+            installed_row = {
+                "id": "install-123",
+                "user_id": user_id,
+                "tenant_id": None,
+                "skill_id": skill_id,
+                "skill_path": "anthropics/skills/pdf",
+                "trust_level": "verified",
+                "permissions_granted": [],
+                "installed_at": now.isoformat(),
+                "auto_installed": False,
+                "last_used_at": None,
+                "execution_count": 0,
+                "success_count": 0,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            mock_insert_response = MagicMock()
+            mock_insert_response.data = [installed_row]
+            mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+            # Execute install
+            installed_skill = await installer.install(user_id, skill_id)
+
+            # Verify install
+            assert installed_skill is not None
+            assert installed_skill.user_id == user_id
+            assert installed_skill.skill_id == skill_id
+            assert installed_skill.execution_count == 0
+            assert installed_skill.success_count == 0
+            mock_get_skill.assert_called_once_with(skill_id)
+
+        # Step 2: is_installed - skill is now installed
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            installed_row
+        )
+
+        is_installed = await installer.is_installed(user_id, skill_id)
+        assert is_installed is True
+
+        # Step 3: record_usage - increment counters
+        mock_client.reset_mock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            installed_row
+        )
+
+        updated_row = installed_row.copy()
+        updated_row["execution_count"] = 1
+        updated_row["success_count"] = 1
+        updated_row["last_used_at"] = now.isoformat()
+
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await installer.record_usage(user_id, skill_id, success=True)
+        assert result is not None
+        assert result.execution_count == 1
+        assert result.success_count == 1
+        assert result.last_used_at is not None
+
+        # Step 4: uninstall - remove the skill
+        mock_client.reset_mock()
+        mock_delete_response = MagicMock()
+        mock_delete_response.count = 1
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_delete_response
+        )
+
+        uninstalled = await installer.uninstall(user_id, skill_id)
+        assert uninstalled is True
+
+        # Verify uninstall was called correctly
+        mock_client.table.assert_called_with("user_skills")
+        mock_client.table.return_value.delete.assert_called_once()
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_install_idempotent_reinstall_returns_existing(self, mock_get_client: MagicMock) -> None:
+        """Test installing an already-installed skill returns existing installation."""
+        from src.skills.installer import SkillInstaller
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.security.trust_levels import SkillTrustLevel
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+        now = datetime.now(timezone.utc)
+
+        # Existing installation
+        existing_row = {
+            "id": "install-123",
+            "user_id": user_id,
+            "tenant_id": None,
+            "skill_id": skill_id,
+            "skill_path": "anthropics/skills/pdf",
+            "trust_level": "verified",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 5,
+            "success_count": 5,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Mock: skill already installed
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        # Mock skill index entry
+        mock_skill_entry = SkillIndexEntry(
+            id=skill_id,
+            skill_path="anthropics/skills/pdf",
+            skill_name="PDF Reader",
+            description="Read PDF files",
+            full_content="Skill content",
+            content_hash="abc123",
+            author="Anthropic",
+            version="1.0.0",
+            tags=["pdf"],
+            trust_level=SkillTrustLevel.VERIFIED,
+            life_sciences_relevant=False,
+            declared_permissions=[],
+            summary_verbosity="standard",
+            last_synced=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with patch.object(SkillIndex, "get_skill", new=AsyncMock(return_value=mock_skill_entry)):
+            # Attempt to reinstall
+            result = await installer.install(user_id, skill_id)
+
+            # Should return existing installation without creating new one
+            assert result is not None
+            assert result.id == "install-123"
+            assert result.execution_count == 5
+            assert result.success_count == 5
+
+            # Verify no insert was performed
+            mock_client.table.return_value.insert.assert_not_called()
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_record_usage_multiple_executions_builds_history(self, mock_get_client: MagicMock) -> None:
+        """Test recording multiple usages builds accurate execution history."""
+        from src.skills.installer import SkillInstaller
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+        now = datetime.now(timezone.utc)
+
+        # Initial state
+        base_row = {
+            "id": "install-123",
+            "user_id": user_id,
+            "tenant_id": None,
+            "skill_id": skill_id,
+            "skill_path": "test/skill",
+            "trust_level": "community",
+            "permissions_granted": [],
+            "installed_at": now.isoformat(),
+            "auto_installed": False,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        # Simulate 10 executions with 2 failures
+        execution_count = 0
+        success_count = 0
+
+        for i in range(10):
+            mock_client.reset_mock()
+
+            # Current state
+            current_row = base_row.copy()
+            current_row["execution_count"] = execution_count
+            current_row["success_count"] = success_count
+
+            mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+                current_row
+            )
+
+            # Determine success (fail on iterations 3 and 7)
+            success = i not in [3, 7]
+            execution_count += 1
+            if success:
+                success_count += 1
+
+            # Updated state
+            updated_row = current_row.copy()
+            updated_row["execution_count"] = execution_count
+            updated_row["success_count"] = success_count
+            updated_row["last_used_at"] = now.isoformat()
+
+            mock_update_response = MagicMock()
+            mock_update_response.data = [updated_row]
+            mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                mock_update_response
+            )
+
+            # Record usage
+            result = await installer.record_usage(user_id, skill_id, success=success)
+
+            assert result is not None
+            assert result.execution_count == execution_count
+            assert result.success_count == success_count
+
+        # Final state: 10 executions, 8 successes
+        assert execution_count == 10
+        assert success_count == 8
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_install_with_tenant_and_permissions(self, mock_get_client: MagicMock) -> None:
+        """Test installing a skill with tenant ID and custom permissions."""
+        from src.skills.installer import SkillInstaller
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.security.trust_levels import SkillTrustLevel
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+        tenant_id = "tenant-abc"
+        custom_permissions = ["network_read", "file_write"]
+        now = datetime.now(timezone.utc)
+
+        # Mock: skill not yet installed
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = [
+            MagicMock(data=None),  # Not installed
+        ]
+
+        # Mock skill index entry
+        mock_skill_entry = SkillIndexEntry(
+            id=skill_id,
+            skill_path="aria:clinical-analyzer",
+            skill_name="Clinical Analyzer",
+            description="Analyze clinical data",
+            full_content="Skill content",
+            content_hash="xyz789",
+            author="ARIA",
+            version="2.0.0",
+            tags=["clinical", "healthcare"],
+            trust_level=SkillTrustLevel.CORE,
+            life_sciences_relevant=True,
+            declared_permissions=["network_read"],
+            summary_verbosity="detailed",
+            last_synced=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with patch.object(SkillIndex, "get_skill", new=AsyncMock(return_value=mock_skill_entry)):
+            # Mock insert response
+            installed_row = {
+                "id": "install-456",
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "skill_id": skill_id,
+                "skill_path": "aria:clinical-analyzer",
+                "trust_level": "core",
+                "permissions_granted": custom_permissions,
+                "installed_at": now.isoformat(),
+                "auto_installed": True,
+                "last_used_at": None,
+                "execution_count": 0,
+                "success_count": 0,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            mock_insert_response = MagicMock()
+            mock_insert_response.data = [installed_row]
+            mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+            # Install with tenant and custom permissions
+            result = await installer.install(
+                user_id,
+                skill_id,
+                tenant_id=tenant_id,
+                auto_installed=True,
+                permissions_granted=custom_permissions,
+            )
+
+            # Verify
+            assert result is not None
+            assert result.tenant_id == tenant_id
+            assert result.permissions_granted == custom_permissions
+            assert result.auto_installed is True
+            assert result.trust_level == SkillTrustLevel.CORE
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_install_nonexistent_skill_raises_error(self, mock_get_client: MagicMock) -> None:
+        """Test installing a non-existent skill raises SkillNotFoundError."""
+        from src.skills.installer import SkillInstaller, SkillNotFoundError
+        from src.skills.index import SkillIndex
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "nonexistent-skill"
+
+        # Mock: skill not installed, and not in index
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        with patch.object(SkillIndex, "get_skill", new=AsyncMock(return_value=None)):
+            # Attempt to install non-existent skill
+            with pytest.raises(SkillNotFoundError) as exc_info:
+                await installer.install(user_id, skill_id)
+
+            assert "not found in skills index" in str(exc_info.value)
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_get_installed_returns_none_for_uninstalled_skill(self, mock_get_client: MagicMock) -> None:
+        """Test get_installed returns None for a skill that was never installed."""
+        from src.skills.installer import SkillInstaller
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+
+        # Mock: skill not found
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await installer.get_installed(user_id, skill_id)
+        assert result is None
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_uninstall_idempotent(self, mock_get_client: MagicMock) -> None:
+        """Test uninstalling an already-uninstalled skill returns False."""
+        from src.skills.installer import SkillInstaller
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+
+        # Mock: no rows deleted
+        mock_delete_response = MagicMock()
+        mock_delete_response.count = 0
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_delete_response
+        )
+
+        # First uninstall
+        result1 = await installer.uninstall(user_id, skill_id)
+        assert result1 is False
+
+        # Second uninstall (should also return False)
+        result2 = await installer.uninstall(user_id, skill_id)
+        assert result2 is False
+
+    @patch("src.skills.installer.SupabaseClient.get_client")
+    async def test_workflow_get_installed_before_install(self, mock_get_client: MagicMock) -> None:
+        """Test calling get_installed before install returns None, then returns value after install."""
+        from src.skills.installer import SkillInstaller
+        from src.skills.index import SkillIndex, SkillIndexEntry
+        from src.security.trust_levels import SkillTrustLevel
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        installer = SkillInstaller()
+
+        user_id = "user-123"
+        skill_id = "skill-456"
+        now = datetime.now(timezone.utc)
+
+        # Before install: get_installed returns None
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result_before = await installer.get_installed(user_id, skill_id)
+        assert result_before is None
+
+        # Install the skill
+        mock_client.reset_mock()
+
+        # Mock: not yet installed
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = [
+            MagicMock(data=None),  # Not installed check
+        ]
+
+        # Mock skill index
+        mock_skill_entry = SkillIndexEntry(
+            id=skill_id,
+            skill_path="test/skill",
+            skill_name="Test Skill",
+            description="A test skill",
+            full_content="Content",
+            content_hash="hash",
+            author="Test",
+            version="1.0",
+            tags=["test"],
+            trust_level=SkillTrustLevel.COMMUNITY,
+            life_sciences_relevant=False,
+            declared_permissions=[],
+            summary_verbosity="standard",
+            last_synced=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with patch.object(SkillIndex, "get_skill", new=AsyncMock(return_value=mock_skill_entry)):
+            installed_row = {
+                "id": "install-123",
+                "user_id": user_id,
+                "tenant_id": None,
+                "skill_id": skill_id,
+                "skill_path": "test/skill",
+                "trust_level": "community",
+                "permissions_granted": [],
+                "installed_at": now.isoformat(),
+                "auto_installed": False,
+                "last_used_at": None,
+                "execution_count": 0,
+                "success_count": 0,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            mock_insert_response = MagicMock()
+            mock_insert_response.data = [installed_row]
+            mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+            await installer.install(user_id, skill_id)
+
+        # After install: get_installed returns the skill
+        # Don't reset - just reconfigure for the new call
+        def setup_get_installed_mock(row):
+            mock_select = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_single = MagicMock()
+            mock_exec = MagicMock()
+            mock_exec.data = row
+
+            mock_single.execute.return_value = mock_exec
+            mock_eq2.single.return_value = mock_single
+            mock_eq1.eq.return_value = mock_eq2
+            mock_select.eq.return_value = mock_eq1
+            mock_client.table.return_value.select.return_value = mock_select
+
+        setup_get_installed_mock(installed_row)
+
+        result_after = await installer.get_installed(user_id, skill_id)
+        assert result_after is not None
+        assert result_after.skill_id == skill_id
+        assert result_after.user_id == user_id
