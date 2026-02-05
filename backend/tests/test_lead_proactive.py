@@ -105,3 +105,127 @@ class TestCheckSilentLeads:
                 user_id="user-abc",
                 inactive_days=7,
             )
+
+
+class TestCheckHealthDrops:
+    """Tests for check_health_drops method."""
+
+    @pytest.mark.asyncio
+    async def test_check_health_drops_sends_notification(self):
+        """Test that health drops trigger notifications."""
+        from src.behaviors.lead_proactive import LeadProactiveBehaviors
+        from src.memory.health_score import HealthScoreHistory
+        from src.models.notification import NotificationType
+
+        mock_db = MagicMock()
+        service = LeadProactiveBehaviors(db_client=mock_db)
+
+        now = datetime.now(UTC)
+
+        # Mock database response for active leads with health drops
+        mock_leads_response = MagicMock()
+        mock_leads_response.data = [
+            {
+                "id": "lead-123",
+                "company_name": "Acme Corp",
+                "health_score": 50,
+            },
+            {
+                "id": "lead-456",
+                "company_name": "Beta Inc",
+                "health_score": 40,
+            },
+        ]
+
+        # Mock health score history showing drops
+        mock_history_response = MagicMock()
+        mock_history_response.data = [
+            # lead-123: dropped from 75 to 50 (25 points)
+            {"lead_memory_id": "lead-123", "score": 75, "calculated_at": (now - timedelta(days=1)).isoformat()},
+            # lead-456: dropped from 55 to 40 (15 points - below threshold)
+            {"lead_memory_id": "lead-456", "score": 55, "calculated_at": (now - timedelta(days=1)).isoformat()},
+        ]
+
+        # Setup mock chain
+        mock_table = MagicMock()
+        mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_leads_response
+        mock_table.select.return_value.in_.return_value.order.return_value.execute.return_value = mock_history_response
+        mock_db.table.return_value = mock_table
+
+        with patch(
+            "src.behaviors.lead_proactive.NotificationService"
+        ) as mock_notification_service:
+            mock_notification_service.create_notification = AsyncMock()
+
+            result = await service.check_health_drops(user_id="user-abc")
+
+            # Only 1 notification (lead-123 dropped 25 points, lead-456 only 15)
+            assert result == 1
+            assert mock_notification_service.create_notification.call_count == 1
+
+            call = mock_notification_service.create_notification.call_args
+            assert call.kwargs["type"] == NotificationType.LEAD_HEALTH_DROP
+            assert "Acme Corp" in call.kwargs["title"]
+            assert "25" in call.kwargs["message"]  # Drop amount
+
+    @pytest.mark.asyncio
+    async def test_check_health_drops_no_drops(self):
+        """Test check_health_drops with no significant drops."""
+        from src.behaviors.lead_proactive import LeadProactiveBehaviors
+
+        mock_db = MagicMock()
+        service = LeadProactiveBehaviors(db_client=mock_db)
+
+        # No active leads
+        mock_leads_response = MagicMock()
+        mock_leads_response.data = []
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_leads_response
+
+        with patch(
+            "src.behaviors.lead_proactive.NotificationService"
+        ) as mock_notification_service:
+            mock_notification_service.create_notification = AsyncMock()
+
+            result = await service.check_health_drops(user_id="user-abc")
+
+            assert result == 0
+            mock_notification_service.create_notification.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_health_drops_custom_threshold(self):
+        """Test check_health_drops with custom threshold."""
+        from src.behaviors.lead_proactive import LeadProactiveBehaviors
+        from src.memory.health_score import HealthScoreCalculator
+
+        mock_db = MagicMock()
+        service = LeadProactiveBehaviors(db_client=mock_db)
+
+        now = datetime.now(UTC)
+
+        mock_leads_response = MagicMock()
+        mock_leads_response.data = [
+            {"id": "lead-123", "company_name": "Acme Corp", "health_score": 50},
+        ]
+
+        mock_history_response = MagicMock()
+        mock_history_response.data = [
+            {"lead_memory_id": "lead-123", "score": 60, "calculated_at": (now - timedelta(days=1)).isoformat()},
+        ]
+
+        mock_table = MagicMock()
+        mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_leads_response
+        mock_table.select.return_value.in_.return_value.order.return_value.execute.return_value = mock_history_response
+        mock_db.table.return_value = mock_table
+
+        with patch(
+            "src.behaviors.lead_proactive.NotificationService"
+        ) as mock_notification_service:
+            mock_notification_service.create_notification = AsyncMock()
+
+            # With threshold of 10, a drop of 10 points should trigger notification
+            result = await service.check_health_drops(
+                user_id="user-abc",
+                threshold=10,
+            )
+
+            assert result == 1
