@@ -122,3 +122,17 @@ class TestLeakageReport:
         assert report.leaked is False
         assert report.leaked_values == []
         assert report.severity == "none"
+
+
+class TestDataSanitizer:
+    """Tests for DataSanitizer class."""
+
+    def test_data_sanitizer_initializes(self) -> None:
+        """Test DataSanitizer initializes with classifier."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        assert sanitizer.classifier is classifier

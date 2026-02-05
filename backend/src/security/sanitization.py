@@ -7,6 +7,9 @@ before any data reaches external skills.
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.security.data_classification import ClassifiedData, DataClass, DataClassifier
+from src.security.trust_levels import SkillTrustLevel, can_access_data
+
 
 @dataclass
 class TokenMap:
@@ -64,3 +67,11 @@ class LeakageReport:
     leaked: bool
     leaked_values: list[Any]
     severity: str
+
+
+class DataSanitizer:
+    """Sanitizes data for skill execution based on trust levels."""
+
+    def __init__(self, classifier: DataClassifier) -> None:
+        """Initialize DataSanitizer with a classifier."""
+        self.classifier = classifier
