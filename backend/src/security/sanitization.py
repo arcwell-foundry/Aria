@@ -79,3 +79,7 @@ class DataSanitizer:
     def tokenize_value(self, value: Any, data_type: str, token_map: TokenMap) -> str:
         """Replace a sensitive value with a token."""
         return token_map.add_token(data_type, value)
+
+    def redact_value(self, classified_data: ClassifiedData) -> str:
+        """Redact a classified value completely."""
+        return f"[REDACTED: {classified_data.data_type}]"

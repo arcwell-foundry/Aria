@@ -165,3 +165,39 @@ class TestDataSanitizer:
 
         assert token1 == "[CONTACT_001]"
         assert token2 == "[CONTACT_002]"
+
+    def test_redact_value_returns_redaction_marker(self) -> None:
+        """Test redact_value returns [REDACTED: type] marker."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import ClassifiedData, DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        classified = ClassifiedData(
+            data="123-45-6789",
+            classification=DataClass.REGULATED,
+            data_type="ssn",
+            source="user_input",
+        )
+
+        result = sanitizer.redact_value(classified)
+
+        assert result == "[REDACTED: ssn]"
+
+    def test_redact_value_uses_data_type(self) -> None:
+        """Test redact_value uses data_type in marker."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import ClassifiedData, DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        classified = ClassifiedData(
+            data="john@example.com",
+            classification=DataClass.CONFIDENTIAL,
+            data_type="contact",
+            source="crm",
+        )
+
+        result = sanitizer.redact_value(classified)
+
+        assert result == "[REDACTED: contact]"
