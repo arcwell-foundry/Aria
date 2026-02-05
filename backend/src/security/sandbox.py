@@ -6,6 +6,9 @@ access system resources or data beyond their permissions.
 """
 
 from dataclasses import dataclass, field
+from typing import Final
+
+from src.security.trust_levels import SkillTrustLevel
 
 
 @dataclass
@@ -34,3 +37,48 @@ class SandboxConfig:
     can_read_files: bool = False
     can_write_files: bool = False
     can_execute_code: bool = False
+
+
+# Sandbox configs by trust level - more trusted = more permissions
+SANDBOX_BY_TRUST: Final[dict[SkillTrustLevel, SandboxConfig]] = {
+    SkillTrustLevel.CORE: SandboxConfig(
+        timeout_seconds=120,
+        memory_limit_mb=1024,
+        cpu_limit_percent=80,
+        network_enabled=True,
+        allowed_domains=[],  # Empty means all domains allowed for CORE
+        can_read_files=True,
+        can_write_files=True,
+        can_execute_code=True,
+    ),
+    SkillTrustLevel.VERIFIED: SandboxConfig(
+        timeout_seconds=60,
+        memory_limit_mb=512,
+        cpu_limit_percent=50,
+        network_enabled=False,
+        allowed_domains=[],
+        can_read_files=True,
+        can_write_files=True,
+        can_execute_code=False,
+    ),
+    SkillTrustLevel.COMMUNITY: SandboxConfig(
+        timeout_seconds=30,
+        memory_limit_mb=256,
+        cpu_limit_percent=25,
+        network_enabled=False,
+        allowed_domains=[],
+        can_read_files=False,
+        can_write_files=False,
+        can_execute_code=False,
+    ),
+    SkillTrustLevel.USER: SandboxConfig(
+        timeout_seconds=60,
+        memory_limit_mb=512,
+        cpu_limit_percent=50,
+        network_enabled=False,
+        allowed_domains=[],
+        can_read_files=True,
+        can_write_files=True,
+        can_execute_code=False,
+    ),
+}
