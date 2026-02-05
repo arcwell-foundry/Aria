@@ -25,3 +25,28 @@ ORCHESTRATOR_BUDGET = 2000  # Total budget for orchestrator context
 SKILL_INDEX_BUDGET = 600     # Budget for skill index summaries
 WORKING_MEMORY_BUDGET = 800  # Budget for working memory entries
 SUBAGENT_BUDGET = 6000       # Budget for individual skill subagent contexts
+
+
+class SummaryVerbosity(Enum):
+    """Verbosity level for context summaries.
+
+    Each level has a target token count for generating summaries.
+    The build_working_memory_entry method uses these targets.
+
+    Attributes:
+        token_target: Target token count for this verbosity level.
+    """
+
+    MINIMAL = "minimal"      # ~300 tokens - bare facts
+    STANDARD = "standard"     # ~800 tokens - key details
+    DETAILED = "detailed"     # ~1500 tokens - full context
+
+    @property
+    def token_target(self) -> int:
+        """Get the target token count for this verbosity level."""
+        targets = {
+            SummaryVerbosity.MINIMAL: 300,
+            SummaryVerbosity.STANDARD: 800,
+            SummaryVerbosity.DETAILED: 1500,
+        }
+        return targets[self]
