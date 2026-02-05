@@ -385,3 +385,131 @@ class TestSkillAutonomyServiceShouldRequestApproval:
         result = await service.should_request_approval("user-abc", "skill-financial", SkillRiskLevel.CRITICAL)
 
         assert result is True
+
+
+class TestSkillAutonomyServiceRecordExecutionOutcome:
+    """Tests for SkillAutonomyService.record_execution_outcome method."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_record_success_creates_new_history(self, mock_get_client: MagicMock) -> None:
+        """Test recording success creates new trust history if none exists."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        # No existing history
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        # Mock insert response
+        now = datetime.now(UTC)
+        inserted_row = {
+            "id": "new-123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 1,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        mock_insert_response = MagicMock()
+        mock_insert_response.data = [inserted_row]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+        result = await service.record_execution_outcome("user-abc", "skill-pdf", success=True)
+
+        assert result is not None
+        assert result.successful_executions == 1
+        assert result.failed_executions == 0
+        assert result.last_success is not None
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_record_success_increments_success_count(self, mock_get_client: MagicMock) -> None:
+        """Test recording success increments successful_executions."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 2,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        # Mock update response
+        updated_row = existing_row.copy()
+        updated_row["successful_executions"] = 3
+        updated_row["last_success"] = now.isoformat()
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.record_execution_outcome("user-abc", "skill-pdf", success=True)
+
+        assert result is not None
+        assert result.successful_executions == 3
+        assert result.failed_executions == 0
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_record_failure_increments_failure_count(self, mock_get_client: MagicMock) -> None:
+        """Test recording failure increments failed_executions."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 5,
+            "failed_executions": 1,
+            "last_success": now.isoformat(),
+            "last_failure": now.isoformat(),
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["failed_executions"] = 2
+        updated_row["last_failure"] = now.isoformat()
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.record_execution_outcome("user-abc", "skill-pdf", success=False)
+
+        assert result is not None
+        assert result.successful_executions == 5  # Unchanged
+        assert result.failed_executions == 2

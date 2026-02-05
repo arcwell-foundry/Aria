@@ -215,3 +215,80 @@ class SkillAutonomyService:
 
         # Check if we've met the success threshold
         return history.successful_executions < auto_approve_after
+
+    async def record_execution_outcome(
+        self, user_id: str, skill_id: str, *, success: bool
+    ) -> TrustHistory | None:
+        """Record the outcome of a skill execution.
+
+        Creates or updates trust history for the user-skill pair.
+        Tracks successes and failures separately for trust calculation.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier.
+            success: True if execution succeeded, False if it failed.
+
+        Returns:
+            The updated TrustHistory, or None on error.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+
+            # Check if history exists
+            existing = await self.get_trust_history(user_id, skill_id)
+
+            if existing is None:
+                # Create new trust history record
+                record = {
+                    "user_id": user_id,
+                    "skill_id": skill_id,
+                    "successful_executions": 1 if success else 0,
+                    "failed_executions": 0 if success else 1,
+                    "last_success": now.isoformat() if success else None,
+                    "last_failure": now.isoformat() if not success else None,
+                    "session_trust_granted": False,
+                    "globally_approved": False,
+                    "globally_approved_at": None,
+                }
+
+                response = self._client.table("skill_trust_history").insert(record).execute()
+                if response.data:
+                    logger.info(
+                        f"Created trust history for user {user_id}, skill {skill_id} "
+                        f"(success={success})"
+                    )
+                    return self._db_row_to_trust_history(response.data[0])
+                return None
+
+            # Update existing record
+            update_data = {
+                "successful_executions": existing.successful_executions + (1 if success else 0),
+                "failed_executions": existing.failed_executions + (0 if success else 1),
+            }
+
+            if success:
+                update_data["last_success"] = now.isoformat()
+            else:
+                update_data["last_failure"] = now.isoformat()
+
+            response = (
+                self._client.table("skill_trust_history")
+                .update(update_data)
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+
+            if response.data:
+                logger.debug(
+                    f"Updated trust history for user {user_id}, skill {skill_id} "
+                    f"(success={success}, total_successes={update_data['successful_executions']})"
+                )
+                return self._db_row_to_trust_history(response.data[0])
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error recording execution outcome for user {user_id}, skill {skill_id}: {e}")
+            return None
