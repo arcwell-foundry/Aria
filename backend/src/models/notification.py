@@ -18,6 +18,8 @@ class NotificationType(str, Enum):
     TASK_DUE = "task_due"
     MEETING_BRIEF_READY = "meeting_brief_ready"
     DRAFT_READY = "draft_ready"
+    LEAD_SILENT = "lead_silent"
+    LEAD_HEALTH_DROP = "lead_health_drop"
 
 
 class NotificationCreate(BaseModel):
