@@ -231,3 +231,97 @@ def test_compact_if_needed_handles_empty_string() -> None:
     result = manager.compact_if_needed("", max_tokens=100)
 
     assert result == ""
+
+
+def test_prepare_orchestrator_context_builds_three_sections() -> None:
+    """Test prepare_orchestrator_context builds context with three sections."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    skill_index = "## Available Skills\n- pdf: Process PDF files\n- docx: Process Word documents"
+    plan = "## Execution Plan\n1. Extract text from PDF\n2. Summarize content"
+    working_memory = "## Working Memory\n- Previous step completed"
+
+    result = manager.prepare_orchestrator_context(
+        skill_index=skill_index,
+        plan=plan,
+        working_memory=working_memory,
+    )
+
+    # Should contain all three sections
+    assert "## Available Skills" in result
+    assert "## Execution Plan" in result
+    assert "## Working Memory" in result
+
+
+def test_prepare_orchestrator_context_compacts_over_budget_sections() -> None:
+    """Test prepare_orchestrator_context compacts sections when over budget."""
+    from src.skills.context_manager import SkillContextManager
+
+    # Use very small budgets to force compaction
+    manager = SkillContextManager(
+        skill_index_budget=10,  # Very small
+        working_memory_budget=10,  # Very small
+    )
+
+    # Create content that exceeds budgets
+    skill_index = "## Available Skills\n" + "x" * 1000
+    plan = "## Execution Plan\n1. Step one"
+    working_memory = "## Working Memory\n" + "y" * 1000
+
+    result = manager.prepare_orchestrator_context(
+        skill_index=skill_index,
+        plan=plan,
+        working_memory=working_memory,
+    )
+
+    # Should still have sections but truncated
+    assert "## Available Skills" in result
+    assert "## Execution Plan" in result
+    assert "## Working Memory" in result
+    # Result should be reasonably sized (under orchestrator budget)
+    estimated_tokens = manager.estimate_tokens(result)
+    assert estimated_tokens <= manager.orchestrator_budget + 100  # Small fudge factor
+
+
+def test_prepare_orchestrator_context_handles_empty_inputs() -> None:
+    """Test prepare_orchestrator_context handles empty inputs gracefully."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    result = manager.prepare_orchestrator_context(
+        skill_index="",
+        plan="",
+        working_memory="",
+    )
+
+    # Should still return structured context with empty sections
+    assert "## Available Skills" in result
+    assert "## Execution Plan" in result
+    assert "## Working Memory" in result
+
+
+def test_prepare_orchestrator_context_respects_section_order() -> None:
+    """Test prepare_orchestrator_context maintains section order."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    skill_index = "## Available Skills\n- pdf"
+    plan = "## Execution Plan\n1. Step"
+    working_memory = "## Working Memory\n- Done"
+
+    result = manager.prepare_orchestrator_context(
+        skill_index=skill_index,
+        plan=plan,
+        working_memory=working_memory,
+    )
+
+    # Check order: Skills first, then Plan, then Working Memory
+    skills_pos = result.find("## Available Skills")
+    plan_pos = result.find("## Execution Plan")
+    memory_pos = result.find("## Working Memory")
+
+    assert skills_pos < plan_pos < memory_pos

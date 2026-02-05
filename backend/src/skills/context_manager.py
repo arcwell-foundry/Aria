@@ -161,3 +161,54 @@ class SkillContextManager:
             target_chars = 0
 
         return context[:target_chars] + "..."
+
+    def prepare_orchestrator_context(
+        self,
+        skill_index: str,
+        plan: str,
+        working_memory: str,
+    ) -> str:
+        """Build compact orchestrator context from skill index, plan, and working memory.
+
+        Combines three sections into a unified orchestrator context:
+        1. Available Skills (from skill index)
+        2. Execution Plan (current plan)
+        3. Working Memory (step summaries)
+
+        Each section is compacted to fit its allocated budget before being combined.
+
+        Args:
+            skill_index: The skill index summaries to include.
+            plan: The execution plan to include.
+            working_memory: The working memory entries to include.
+
+        Returns:
+            A unified context string with all three sections, compacted to fit budgets.
+        """
+        # Compact each section to its allocated budget
+        compacted_skill_index = self.compact_if_needed(
+            skill_index,
+            self.skill_index_budget,
+        )
+        compacted_plan = self.compact_if_needed(
+            plan,
+            self.orchestrator_budget - self.skill_index_budget - self.working_memory_budget,
+        )
+        compacted_working_memory = self.compact_if_needed(
+            working_memory,
+            self.working_memory_budget,
+        )
+
+        # Build the unified context with proper section headers
+        sections = [
+            "## Available Skills",
+            compacted_skill_index,
+            "",
+            "## Execution Plan",
+            compacted_plan,
+            "",
+            "## Working Memory",
+            compacted_working_memory,
+        ]
+
+        return "\n".join(sections)
