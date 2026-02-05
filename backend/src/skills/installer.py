@@ -18,6 +18,12 @@ from src.security.trust_levels import SkillTrustLevel
 logger = logging.getLogger(__name__)
 
 
+class SkillNotFoundError(Exception):
+    """Raised when a skill is not found in the skills index."""
+
+    pass
+
+
 @dataclass(frozen=True)
 class InstalledSkill:
     """A skill installed by a user.
@@ -101,3 +107,103 @@ class SkillInstaller:
             created_at=parse_dt(row["created_at"]) or datetime.now(),
             updated_at=parse_dt(row["updated_at"]) or datetime.now(),
         )
+
+    async def _get_by_user_and_skill_id(self, user_id: str, skill_id: str) -> InstalledSkill | None:
+        """Get an installed skill by user ID and skill ID.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+
+        Returns:
+            The InstalledSkill if found, None otherwise.
+        """
+        try:
+            response = (
+                self._client.table("user_skills")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .single()
+                .execute()
+            )
+            if response.data:
+                return self._db_row_to_installed_skill(response.data)
+            return None
+        except Exception as e:
+            logger.debug(f"Installed skill not found for user {user_id}, skill {skill_id}: {e}")
+            return None
+
+    async def install(
+        self,
+        user_id: str,
+        skill_id: str,
+        *,
+        tenant_id: str | None = None,
+        auto_installed: bool = False,
+        permissions_granted: list[str] | None = None,
+    ) -> InstalledSkill:
+        """Install a skill for a user.
+
+        Validates that the skill exists in the skills index, then creates
+        a user_skills record. If already installed, returns the existing record.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's UUID from skills_index.
+            tenant_id: Optional tenant/company ID for multi-tenant scenarios.
+            auto_installed: True if ARIA auto-installed this, False if user-initiated.
+            permissions_granted: Optional list of specific permissions granted.
+
+        Returns:
+            The InstalledSkill record.
+
+        Raises:
+            SkillNotFoundError: If the skill_id doesn't exist in skills_index.
+        """
+        # Import here to avoid circular dependency
+        from src.skills.index import SkillIndex
+
+        # First, verify the skill exists in the skills index
+        skill_index = SkillIndex()
+        skill_entry = await skill_index.get_skill(skill_id)
+
+        if skill_entry is None:
+            logger.error(f"Skill not found in index: {skill_id}")
+            raise SkillNotFoundError(f"Skill with id {skill_id} not found in skills index")
+
+        # Check if already installed
+        existing = await self._get_by_user_and_skill_id(user_id, skill_id)
+        if existing:
+            logger.info(f"Skill {skill_id} already installed for user {user_id}")
+            return existing
+
+        # Create the installation record
+        now = datetime.now()
+        record = {
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "skill_id": skill_id,
+            "skill_path": skill_entry.skill_path,
+            "trust_level": skill_entry.trust_level.value,
+            "permissions_granted": permissions_granted or skill_entry.declared_permissions,
+            "installed_at": now.isoformat(),
+            "auto_installed": auto_installed,
+            "last_used_at": None,
+            "execution_count": 0,
+            "success_count": 0,
+        }
+
+        try:
+            response = self._client.table("user_skills").insert(record).execute()
+            if response.data:
+                installed_skill = self._db_row_to_installed_skill(response.data[0])
+                logger.info(
+                    f"Installed skill {skill_entry.skill_path} for user {user_id} "
+                    f"(trust_level={skill_entry.trust_level.value}, auto_installed={auto_installed})"
+                )
+                return installed_skill
+            raise Exception("No data returned from insert")
+        except Exception as e:
+            logger.error(f"Failed to install skill {skill_id} for user {user_id}: {e}")
+            raise

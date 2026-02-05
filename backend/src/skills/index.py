@@ -151,6 +151,26 @@ class SkillIndex:
             logger.debug(f"Skill not found: {skill_id}, error: {e}")
             return None
 
+    async def get_by_path(self, skill_path: str) -> SkillIndexEntry | None:
+        """Get a skill by its path.
+
+        Args:
+            skill_path: The unique path identifier of the skill (e.g., "anthropics/skills/pdf").
+
+        Returns:
+            The SkillIndexEntry if found, None otherwise.
+        """
+        try:
+            response = (
+                self._client.table("skills_index").select("*").eq("skill_path", skill_path).single().execute()
+            )
+            if response.data:
+                return self._db_row_to_entry(response.data)
+            return None
+        except Exception as e:
+            logger.debug(f"Skill not found by path: {skill_path}, error: {e}")
+            return None
+
     async def search(
         self,
         query: str,
