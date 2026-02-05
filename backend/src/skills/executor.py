@@ -9,7 +9,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from src.security.data_classification import DataClassifier
+from src.security.sanitization import DataSanitizer
+from src.security.sandbox import SkillSandbox
+from src.security.skill_audit import SkillAuditService
 from src.security.trust_levels import SkillTrustLevel
+from src.skills.index import SkillIndex
+from src.skills.installer import SkillInstaller
 
 
 def _hash_data(data: Any) -> str:
@@ -92,3 +98,39 @@ class SkillExecutionError(Exception):
         self.skill_id = skill_id
         self.stage = stage
         super().__init__(message)
+
+
+class SkillExecutor:
+    """Executes skills through the complete security pipeline.
+
+    Orchestrates: classify -> sanitize -> sandbox execute -> validate -> detokenize -> audit.
+
+    All skill executions go through this service to ensure proper
+    data protection and audit logging.
+    """
+
+    def __init__(
+        self,
+        classifier: DataClassifier,
+        sanitizer: DataSanitizer,
+        sandbox: SkillSandbox,
+        index: SkillIndex,
+        installer: SkillInstaller,
+        audit_service: SkillAuditService,
+    ) -> None:
+        """Initialize SkillExecutor with all required dependencies.
+
+        Args:
+            classifier: DataClassifier for input data classification.
+            sanitizer: DataSanitizer for tokenization/redaction.
+            sandbox: SkillSandbox for isolated execution.
+            index: SkillIndex for skill lookup.
+            installer: SkillInstaller for checking installation status.
+            audit_service: SkillAuditService for audit logging.
+        """
+        self._classifier = classifier
+        self._sanitizer = sanitizer
+        self._sandbox = sandbox
+        self._index = index
+        self._installer = installer
+        self._audit = audit_service

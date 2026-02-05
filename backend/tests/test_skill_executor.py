@@ -1,7 +1,9 @@
 """Tests for skill executor service."""
 
+from unittest.mock import MagicMock
+
 from src.security.trust_levels import SkillTrustLevel
-from src.skills.executor import SkillExecution, SkillExecutionError, _hash_data
+from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor, _hash_data
 
 
 class TestHashDataHelper:
@@ -155,3 +157,66 @@ class TestSkillExecutionDataclass:
                 error=None if result_value else "No result",
             )
             assert execution.result == result_value
+
+
+class TestSkillExecutorInit:
+    """Tests for SkillExecutor initialization."""
+
+    def test_executor_initializes_with_dependencies(self) -> None:
+        """Test SkillExecutor accepts all required dependencies."""
+        from src.security.data_classification import DataClassifier
+        from src.security.sanitization import DataSanitizer
+        from src.security.sandbox import SkillSandbox
+        from src.security.skill_audit import SkillAuditService
+        from src.skills.index import SkillIndex
+        from src.skills.installer import SkillInstaller
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        sandbox = SkillSandbox()
+        index = MagicMock(spec=SkillIndex)
+        installer = MagicMock(spec=SkillInstaller)
+        audit = MagicMock(spec=SkillAuditService)
+
+        executor = SkillExecutor(
+            classifier=classifier,
+            sanitizer=sanitizer,
+            sandbox=sandbox,
+            index=index,
+            installer=installer,
+            audit_service=audit,
+        )
+
+        assert executor._classifier is classifier
+        assert executor._sanitizer is sanitizer
+        assert executor._sandbox is sandbox
+        assert executor._index is index
+        assert executor._installer is installer
+        assert executor._audit is audit
+
+    def test_executor_stores_all_components(self) -> None:
+        """Test all components are accessible after init."""
+        from src.security.data_classification import DataClassifier
+        from src.security.sanitization import DataSanitizer
+        from src.security.sandbox import SkillSandbox
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        sandbox = SkillSandbox()
+
+        executor = SkillExecutor(
+            classifier=classifier,
+            sanitizer=sanitizer,
+            sandbox=sandbox,
+            index=MagicMock(),
+            installer=MagicMock(),
+            audit_service=MagicMock(),
+        )
+
+        # Should have all private attributes
+        assert hasattr(executor, "_classifier")
+        assert hasattr(executor, "_sanitizer")
+        assert hasattr(executor, "_sandbox")
+        assert hasattr(executor, "_index")
+        assert hasattr(executor, "_installer")
+        assert hasattr(executor, "_audit")
