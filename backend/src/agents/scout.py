@@ -7,15 +7,18 @@ import logging
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult
+from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.skills.index import SkillIndex
+    from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
-class ScoutAgent(BaseAgent):
+class ScoutAgent(SkillAwareAgent):
     """Gathers intelligence from web, news, and social sources.
 
     The Scout agent monitors entities, searches for signals,
@@ -24,15 +27,29 @@ class ScoutAgent(BaseAgent):
 
     name = "Scout"
     description = "Intelligence gathering and filtering"
+    agent_id = "scout"
 
-    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        user_id: str,
+        skill_orchestrator: "SkillOrchestrator | None" = None,
+        skill_index: "SkillIndex | None" = None,
+    ) -> None:
         """Initialize the Scout agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            skill_orchestrator: Optional orchestrator for multi-skill execution.
+            skill_index: Optional index for skill discovery.
         """
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            skill_orchestrator=skill_orchestrator,
+            skill_index=skill_index,
+        )
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate Scout agent task input.

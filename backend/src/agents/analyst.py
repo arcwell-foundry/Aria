@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import httpx
 
-from src.agents.base import BaseAgent
+from src.agents.skill_aware_agent import SkillAwareAgent
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ FDA_DEVICE_API_URL = "https://api.fda.gov/device/510k.json"
 CHEMBL_API_URL = "https://www.ebi.ac.uk/chembl/api/data"
 
 
-class AnalystAgent(BaseAgent):
+class AnalystAgent(SkillAwareAgent):
     """Scientific research agent for life sciences queries.
 
     The Analyst agent searches scientific databases to provide
@@ -41,21 +41,35 @@ class AnalystAgent(BaseAgent):
 
     name = "Analyst"
     description = "Scientific research agent for life sciences queries"
+    agent_id = "analyst"
 
     # Rate limiting: PubMed allows 3 requests/second without API key
     _pubmed_rate_limit = 3
     _pubmem_last_call_time: float = 0.0
 
-    def __init__(self, llm_client: Any, user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: Any,
+        user_id: str,
+        skill_orchestrator: Any = None,
+        skill_index: Any = None,
+    ) -> None:
         """Initialize the Analyst agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            skill_orchestrator: Optional orchestrator for multi-skill execution.
+            skill_index: Optional index for skill discovery.
         """
         self._research_cache: dict[str, Any] = {}
         self._http_client: httpx.AsyncClient | None = None
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            skill_orchestrator=skill_orchestrator,
+            skill_index=skill_index,
+        )
 
     def _register_tools(self) -> dict[str, Any]:
         """Register Analyst agent's research tools.

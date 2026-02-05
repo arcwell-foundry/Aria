@@ -7,15 +7,18 @@ CRM read/write operations, and third-party integration management.
 import logging
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult
+from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.skills.index import SkillIndex
+    from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
-class OperatorAgent(BaseAgent):
+class OperatorAgent(SkillAwareAgent):
     """System operations for calendar, CRM, and integrations.
 
     The Operator agent manages external system interactions including
@@ -25,17 +28,31 @@ class OperatorAgent(BaseAgent):
 
     name = "Operator"
     description = "System operations for calendar, CRM, and integrations"
+    agent_id = "operator"
     VALID_OPERATION_TYPES = {"calendar_read", "calendar_write", "crm_read", "crm_write"}
 
-    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        user_id: str,
+        skill_orchestrator: "SkillOrchestrator | None" = None,
+        skill_index: "SkillIndex | None" = None,
+    ) -> None:
         """Initialize the Operator agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            skill_orchestrator: Optional orchestrator for multi-skill execution.
+            skill_index: Optional index for skill discovery.
         """
         self._integration_cache: dict[str, Any] = {}
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            skill_orchestrator=skill_orchestrator,
+            skill_index=skill_index,
+        )
 
     def _register_tools(self) -> dict[str, Any]:
         """Register Operator agent's system operation tools.

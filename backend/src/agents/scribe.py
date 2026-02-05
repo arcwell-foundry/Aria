@@ -6,15 +6,18 @@ Drafts emails and documents with style matching using Digital Twin.
 import logging
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult
+from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.skills.index import SkillIndex
+    from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
-class ScribeAgent(BaseAgent):
+class ScribeAgent(SkillAwareAgent):
     """Drafts emails and documents with style matching.
 
     The Scribe agent creates communications tailored to the user's
@@ -24,20 +27,34 @@ class ScribeAgent(BaseAgent):
 
     name = "Scribe"
     description = "Drafts emails and documents with style matching"
+    agent_id = "scribe"
 
     # Valid communication types and tones
     VALID_COMMUNICATION_TYPES = {"email", "document", "message"}
     VALID_TONES = {"formal", "friendly", "urgent"}
 
-    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        user_id: str,
+        skill_orchestrator: "SkillOrchestrator | None" = None,
+        skill_index: "SkillIndex | None" = None,
+    ) -> None:
         """Initialize the Scribe agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            skill_orchestrator: Optional orchestrator for multi-skill execution.
+            skill_index: Optional index for skill discovery.
         """
         self._templates: dict[str, str] = self._get_builtin_templates()
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            skill_orchestrator=skill_orchestrator,
+            skill_index=skill_index,
+        )
 
     def _get_builtin_templates(self) -> dict[str, str]:
         """Get built-in communication templates.

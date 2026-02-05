@@ -9,15 +9,18 @@ import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult
+from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.skills.index import SkillIndex
+    from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
-class StrategistAgent(BaseAgent):
+class StrategistAgent(SkillAwareAgent):
     """Strategic planning agent for pursuit orchestration.
 
     The Strategist agent analyzes account context, generates pursuit
@@ -26,18 +29,32 @@ class StrategistAgent(BaseAgent):
 
     name = "Strategist"
     description = "Strategic planning and pursuit orchestration"
+    agent_id = "strategist"
 
     # Valid goal types for strategy tasks
     VALID_GOAL_TYPES = {"lead_gen", "research", "outreach", "close", "retention"}
 
-    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        user_id: str,
+        skill_orchestrator: "SkillOrchestrator | None" = None,
+        skill_index: "SkillIndex | None" = None,
+    ) -> None:
         """Initialize the Strategist agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            skill_orchestrator: Optional orchestrator for multi-skill execution.
+            skill_index: Optional index for skill discovery.
         """
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            skill_orchestrator=skill_orchestrator,
+            skill_index=skill_index,
+        )
 
     def _register_tools(self) -> dict[str, Any]:
         """Register Strategist agent's planning tools.

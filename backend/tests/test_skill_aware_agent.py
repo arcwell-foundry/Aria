@@ -416,3 +416,147 @@ async def test_execute_with_skills_handles_orchestrator_error() -> None:
 
     assert result.success is False
     assert "Skill execution failed" in (result.error or "")
+
+
+# --- Agent Integration Tests ---
+
+
+def test_hunter_extends_skill_aware_agent() -> None:
+    """Test HunterAgent extends SkillAwareAgent."""
+    from src.agents.hunter import HunterAgent
+
+    assert issubclass(HunterAgent, SkillAwareAgent)
+
+
+def test_hunter_has_correct_agent_id() -> None:
+    """Test HunterAgent has agent_id='hunter'."""
+    from src.agents.hunter import HunterAgent
+
+    assert HunterAgent.agent_id == "hunter"
+
+
+def test_hunter_init_accepts_skill_params() -> None:
+    """Test HunterAgent accepts skill_orchestrator and skill_index."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    mock_orchestrator = MagicMock()
+    mock_index = MagicMock()
+
+    agent = HunterAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        skill_orchestrator=mock_orchestrator,
+        skill_index=mock_index,
+    )
+
+    assert agent.skill_orchestrator is mock_orchestrator
+    assert agent.skill_index is mock_index
+    assert agent._company_cache == {}
+
+
+def test_hunter_init_works_without_skill_params() -> None:
+    """Test HunterAgent still works without skill parameters."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
+    assert agent._company_cache == {}
+
+
+def test_analyst_extends_skill_aware_agent() -> None:
+    """Test AnalystAgent extends SkillAwareAgent."""
+    from src.agents.analyst import AnalystAgent
+
+    assert issubclass(AnalystAgent, SkillAwareAgent)
+    assert AnalystAgent.agent_id == "analyst"
+
+
+def test_analyst_init_accepts_skill_params() -> None:
+    """Test AnalystAgent accepts and stores skill parameters."""
+    from src.agents.analyst import AnalystAgent
+
+    mock_llm = MagicMock()
+    agent = AnalystAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
+
+
+def test_strategist_extends_skill_aware_agent() -> None:
+    """Test StrategistAgent extends SkillAwareAgent."""
+    from src.agents.strategist import StrategistAgent
+
+    assert issubclass(StrategistAgent, SkillAwareAgent)
+    assert StrategistAgent.agent_id == "strategist"
+
+
+def test_strategist_init_accepts_skill_params() -> None:
+    """Test StrategistAgent accepts and stores skill parameters."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
+
+
+def test_scribe_extends_skill_aware_agent() -> None:
+    """Test ScribeAgent extends SkillAwareAgent."""
+    from src.agents.scribe import ScribeAgent
+
+    assert issubclass(ScribeAgent, SkillAwareAgent)
+    assert ScribeAgent.agent_id == "scribe"
+
+
+def test_scribe_init_accepts_skill_params() -> None:
+    """Test ScribeAgent accepts and stores skill parameters."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
+
+
+def test_operator_extends_skill_aware_agent() -> None:
+    """Test OperatorAgent extends SkillAwareAgent."""
+    from src.agents.operator import OperatorAgent
+
+    assert issubclass(OperatorAgent, SkillAwareAgent)
+    assert OperatorAgent.agent_id == "operator"
+
+
+def test_operator_init_accepts_skill_params() -> None:
+    """Test OperatorAgent accepts and stores skill parameters."""
+    from src.agents.operator import OperatorAgent
+
+    mock_llm = MagicMock()
+    agent = OperatorAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
+
+
+def test_scout_extends_skill_aware_agent() -> None:
+    """Test ScoutAgent extends SkillAwareAgent."""
+    from src.agents.scout import ScoutAgent
+
+    assert issubclass(ScoutAgent, SkillAwareAgent)
+    assert ScoutAgent.agent_id == "scout"
+
+
+def test_scout_init_accepts_skill_params() -> None:
+    """Test ScoutAgent accepts and stores skill parameters."""
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-123")
+
+    assert agent.skill_orchestrator is None
+    assert agent.skill_index is None
