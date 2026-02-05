@@ -1,7 +1,7 @@
 """Security module for ARIA.
 
-Provides data classification, trust levels, sanitization, sandboxing, and audit
-capabilities for the skills integration system.
+Provides data classification, trust levels, sanitization, sandboxing, audit
+capabilities, and skill audit trail for the skills integration system.
 """
 
 from src.security.data_classification import (
@@ -20,6 +20,10 @@ from src.security.sanitization import (
     DataSanitizer,
     LeakageReport,
     TokenMap,
+)
+from src.security.skill_audit import (
+    SkillAuditEntry,
+    SkillAuditService,
 )
 from src.security.trust_levels import (
     TRUST_DATA_ACCESS,
@@ -50,4 +54,7 @@ __all__ = [
     "SandboxResult",
     "SkillSandbox",
     "SANDBOX_BY_TRUST",
+    # Skill audit
+    "SkillAuditEntry",
+    "SkillAuditService",
 ]

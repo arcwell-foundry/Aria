@@ -684,3 +684,19 @@ class TestQueryMethods:
         mock_query_builder.eq.assert_any_call("skill_id", "pdf")
         assert len(result) == 1
         assert result[0]["skill_id"] == "pdf"
+
+
+class TestModuleExports:
+    """Tests for skill_audit module exports."""
+
+    def test_skill_audit_entry_exported(self) -> None:
+        """Test SkillAuditEntry is exported from security module."""
+        from src.security import SkillAuditEntry
+
+        assert SkillAuditEntry is not None
+
+    def test_skill_audit_service_exported(self) -> None:
+        """Test SkillAuditService is exported from security module."""
+        from src.security import SkillAuditService
+
+        assert SkillAuditService is not None
