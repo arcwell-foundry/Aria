@@ -276,3 +276,49 @@ class TestDataSanitizer:
 
         assert "[REDACTED:" in sanitized
         assert "123-45-6789" not in sanitized
+
+    @pytest.mark.asyncio
+    async def test_sanitize_dict_processes_all_values(self) -> None:
+        """Test sanitize processes all values in a dict."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        data = {
+            "name": "Acme Corp",
+            "revenue": "$4.2M",
+            "contact": "john@example.com",
+        }
+
+        sanitized, token_map = await sanitizer.sanitize(data, SkillTrustLevel.CORE)
+
+        assert isinstance(sanitized, dict)
+        assert "name" in sanitized
+        assert "[FINANCIAL_" in str(sanitized.get("revenue"))
+        assert "[CONTACT_" in str(sanitized.get("contact"))
+
+    @pytest.mark.asyncio
+    async def test_sanitize_dict_handles_nested_dicts(self) -> None:
+        """Test sanitize handles nested dictionaries."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        data = {
+            "company": "Acme",
+            "financials": {
+                "revenue": "$4.2M",
+                "profit": "$1.5M",
+            },
+        }
+
+        sanitized, token_map = await sanitizer.sanitize(data, SkillTrustLevel.COMMUNITY)
+
+        assert isinstance(sanitized["financials"], dict)
+        assert "[REDACTED:" in str(sanitized["financials"]["revenue"])
