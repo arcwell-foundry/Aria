@@ -89,3 +89,95 @@ class DataClassifier:
             r"\bextension\s*[:\-]?\s*\d+\b",  # Phone extensions
         ],
     }
+
+    async def classify(self, data: Any, context: dict[str, Any]) -> ClassifiedData:
+        """Classify data based on content patterns and context.
+
+        Scans data for sensitive patterns and returns appropriate classification.
+        Checks from most sensitive (REGULATED) to least sensitive (CONFIDENTIAL).
+        Defaults to INTERNAL if no sensitive patterns found.
+
+        Args:
+            data: The data to classify (any type, will be converted to string for scanning).
+            context: Context about the data source and type.
+                - source: Where this data came from (e.g., "crm", "user_input").
+
+        Returns:
+            ClassifiedData with appropriate classification and metadata.
+        """
+        # Convert data to string for pattern matching
+        text = str(data) if data is not None else ""
+
+        # Check patterns from most to least sensitive
+        for classification in [
+            DataClass.REGULATED,
+            DataClass.RESTRICTED,
+            DataClass.CONFIDENTIAL,
+        ]:
+            patterns = self.PATTERNS.get(classification, [])
+            for pattern in patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    return ClassifiedData(
+                        data=data,
+                        classification=classification,
+                        data_type=self._infer_data_type(text, pattern),
+                        source=context.get("source", "unknown"),
+                    )
+
+        # Default to INTERNAL if no sensitive patterns found
+        return ClassifiedData(
+            data=data,
+            classification=DataClass.INTERNAL,
+            data_type="general",
+            source=context.get("source", "unknown"),
+        )
+
+    def _infer_data_type(self, text: str, matched_pattern: str) -> str:
+        """Infer the data type based on which pattern matched.
+
+        Args:
+            text: The text that was classified.
+            matched_pattern: The regex pattern that matched.
+
+        Returns:
+            A string describing the data type.
+        """
+        # SSN patterns
+        if "\\d{3}-\\d{2}-\\d{4}" in matched_pattern or matched_pattern == r"\b\d{9}\b":
+            return "ssn"
+
+        # Credit card patterns
+        if "\\d{4}" in matched_pattern and ("\\d{16}" in matched_pattern or "{3}" in matched_pattern):
+            return "credit_card"
+
+        # DOB pattern
+        if "DOB" in matched_pattern.upper():
+            return "date_of_birth"
+
+        # PHI patterns
+        if any(
+            kw in matched_pattern.lower()
+            for kw in ["diagnosis", "prognosis", "medication", "patient", "medical"]
+        ):
+            return "health"
+
+        # Financial patterns
+        if any(
+            kw in matched_pattern.lower()
+            for kw in ["revenue", "profit", "margin", "deal", "contract"]
+        ):
+            return "financial"
+
+        if "\\$" in matched_pattern:
+            return "financial"
+
+        if any(kw in matched_pattern.lower() for kw in ["confidential", "proprietary", "nda"]):
+            return "competitive"
+
+        # Contact patterns
+        if "@" in matched_pattern:
+            return "contact"
+        if "\\d{3}" in matched_pattern and "\\d{4}" in matched_pattern:
+            return "contact"
+
+        return "sensitive"

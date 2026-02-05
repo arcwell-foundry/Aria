@@ -431,3 +431,194 @@ class TestContactPatternDetection:
 
         text = "International: +1-555-123-4567"
         assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+class TestDataClassifierClassify:
+    """Tests for DataClassifier.classify() method."""
+
+    @pytest.mark.asyncio
+    async def test_classify_returns_classified_data(self) -> None:
+        """Test classify returns ClassifiedData instance."""
+        from src.security.data_classification import (
+            ClassifiedData,
+            DataClassifier,
+        )
+
+        classifier = DataClassifier()
+        result = await classifier.classify("test data", {"source": "test"})
+
+        assert isinstance(result, ClassifiedData)
+        assert result.data == "test data"
+        assert result.source == "test"
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_ssn_as_regulated(self) -> None:
+        """Test SSN is classified as REGULATED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Customer SSN: 123-45-6789",
+            {"source": "user_input"},
+        )
+
+        assert result.classification == DataClass.REGULATED
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_credit_card_as_regulated(self) -> None:
+        """Test credit card is classified as REGULATED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Payment: 1234-5678-9012-3456",
+            {"source": "user_input"},
+        )
+
+        assert result.classification == DataClass.REGULATED
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_phi_as_regulated(self) -> None:
+        """Test PHI keywords are classified as REGULATED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Patient diagnosis shows improvement",
+            {"source": "medical_record"},
+        )
+
+        assert result.classification == DataClass.REGULATED
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_revenue_as_restricted(self) -> None:
+        """Test revenue mention is classified as RESTRICTED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Q4 revenue exceeded targets",
+            {"source": "financial_report"},
+        )
+
+        assert result.classification == DataClass.RESTRICTED
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_dollar_amount_as_restricted(self) -> None:
+        """Test dollar amounts are classified as RESTRICTED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Deal worth $4.2M",
+            {"source": "crm"},
+        )
+
+        assert result.classification == DataClass.RESTRICTED
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_email_as_confidential(self) -> None:
+        """Test email addresses are classified as CONFIDENTIAL."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Contact: john.doe@company.com",
+            {"source": "contact_list"},
+        )
+
+        assert result.classification == DataClass.CONFIDENTIAL
+
+    @pytest.mark.asyncio
+    async def test_classify_detects_phone_as_confidential(self) -> None:
+        """Test phone numbers are classified as CONFIDENTIAL."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Call 555-123-4567 for details",
+            {"source": "notes"},
+        )
+
+        assert result.classification == DataClass.CONFIDENTIAL
+
+    @pytest.mark.asyncio
+    async def test_classify_defaults_to_internal(self) -> None:
+        """Test non-sensitive data defaults to INTERNAL."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Meeting scheduled for next Tuesday",
+            {"source": "calendar"},
+        )
+
+        assert result.classification == DataClass.INTERNAL
+
+    @pytest.mark.asyncio
+    async def test_classify_uses_most_sensitive_match(self) -> None:
+        """Test that most sensitive pattern wins when multiple match."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        # Contains both email (CONFIDENTIAL) and SSN (REGULATED)
+        result = await classifier.classify(
+            "SSN 123-45-6789 email: test@example.com",
+            {"source": "user_input"},
+        )
+
+        # Should be REGULATED (most sensitive)
+        assert result.classification == DataClass.REGULATED
+
+    @pytest.mark.asyncio
+    async def test_classify_handles_dict_data(self) -> None:
+        """Test classify handles dict data by converting to string."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            {"ssn": "123-45-6789", "name": "John"},
+            {"source": "user_input"},
+        )
+
+        assert result.classification == DataClass.REGULATED
+        assert result.data == {"ssn": "123-45-6789", "name": "John"}
+
+    @pytest.mark.asyncio
+    async def test_classify_handles_list_data(self) -> None:
+        """Test classify handles list data by converting to string."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            ["john@example.com", "jane@example.com"],
+            {"source": "user_input"},
+        )
+
+        assert result.classification == DataClass.CONFIDENTIAL
+
+    @pytest.mark.asyncio
+    async def test_classify_handles_none_data(self) -> None:
+        """Test classify handles None data."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(None, {"source": "test"})
+
+        assert result.classification == DataClass.INTERNAL
+        assert result.data is None
+
+    @pytest.mark.asyncio
+    async def test_classify_is_case_insensitive(self) -> None:
+        """Test pattern matching is case insensitive."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+
+        result1 = await classifier.classify("REVENUE targets", {"source": "test"})
+        result2 = await classifier.classify("revenue targets", {"source": "test"})
+        result3 = await classifier.classify("Revenue Targets", {"source": "test"})
+
+        assert result1.classification == DataClass.RESTRICTED
+        assert result2.classification == DataClass.RESTRICTED
+        assert result3.classification == DataClass.RESTRICTED
