@@ -9,6 +9,7 @@ Coordinates execution of multiple skills with:
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from src.core.llm import LLMClient
 from src.skills.autonomy import SkillAutonomyService
 from src.skills.executor import SkillExecutor
 from src.skills.index import SkillIndex
@@ -131,6 +133,103 @@ class SkillOrchestrator:
         self._executor = executor
         self._index = index
         self._autonomy = autonomy
+        self._llm = LLMClient()
+
+    async def create_execution_plan(
+        self,
+        task: str,
+        available_skills: list[Any],
+    ) -> ExecutionPlan:
+        """Use LLM to analyze a task and build an execution plan.
+
+        Fetches skill summaries, sends them with the task to the LLM,
+        and parses the response into an ExecutionPlan with a dependency DAG.
+
+        Args:
+            task: Natural language description of the task to accomplish.
+            available_skills: List of skill objects (must have .id attribute).
+
+        Returns:
+            An ExecutionPlan with steps, dependencies, and parallel groups.
+
+        Raises:
+            ValueError: If the LLM response cannot be parsed into a valid plan.
+        """
+        # Get compact summaries for context
+        skill_ids = [s.id for s in available_skills]
+        summaries = await self._index.get_summaries(skill_ids)
+
+        # Build summaries text for LLM
+        summaries_text = "\n".join(
+            f"- {sid}: {summary}" for sid, summary in summaries.items()
+        )
+
+        system_prompt = (
+            "You are a skill orchestration planner. Given a task and available skills, "
+            "create an execution plan as a JSON object.\n\n"
+            "Output ONLY valid JSON with this structure:\n"
+            "{\n"
+            '  "steps": [{"step_number": int, "skill_id": str, "skill_path": str, '
+            '"depends_on": [int], "input_data": {}}],\n'
+            '  "parallel_groups": [[int]] (groups of step numbers that can run concurrently),\n'
+            '  "estimated_duration_ms": int,\n'
+            '  "risk_level": "low"|"medium"|"high"|"critical",\n'
+            '  "approval_required": bool\n'
+            "}\n\n"
+            "Rules:\n"
+            "- Steps that depend on output from other steps must list those in depends_on\n"
+            "- Independent steps should be grouped together in parallel_groups\n"
+            "- parallel_groups must be ordered: dependencies must come in earlier groups\n"
+            "- Every step must appear in exactly one parallel group\n"
+            "- risk_level is the highest risk among all steps\n"
+            "- approval_required is true if any step has medium or higher risk"
+        )
+
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"Task: {task}\n\n"
+                    f"Available skills:\n{summaries_text}\n\n"
+                    "Create the execution plan."
+                ),
+            }
+        ]
+
+        response = await self._llm.generate_response(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_tokens=2048,
+        )
+
+        # Parse LLM response
+        try:
+            plan_data = json.loads(response)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse LLM response as JSON: {e}") from e
+
+        # Build ExecutionPlan from parsed data
+        steps = [
+            ExecutionStep(
+                step_number=s["step_number"],
+                skill_id=s["skill_id"],
+                skill_path=s.get("skill_path", ""),
+                depends_on=s.get("depends_on", []),
+                status="pending",
+                input_data=s.get("input_data", {}),
+            )
+            for s in plan_data.get("steps", [])
+        ]
+
+        return ExecutionPlan(
+            task_description=task,
+            steps=steps,
+            parallel_groups=plan_data.get("parallel_groups", []),
+            estimated_duration_ms=plan_data.get("estimated_duration_ms", 0),
+            risk_level=plan_data.get("risk_level", "low"),
+            approval_required=plan_data.get("approval_required", False),
+        )
 
     def _can_execute(
         self, step: ExecutionStep, completed_steps: dict[int, bool]

@@ -1,6 +1,7 @@
 """Tests for skill orchestrator service."""
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -713,3 +714,155 @@ class TestExecutePlan:
         statuses = {r.step_number: r.status for r in results}
         assert statuses[1] == "failed"
         assert statuses[2] == "completed"
+
+
+@pytest.mark.asyncio
+class TestCreateExecutionPlan:
+    """Tests for SkillOrchestrator.create_execution_plan method."""
+
+    def _make_orchestrator(
+        self,
+        index: MagicMock | None = None,
+        llm_response: str | None = None,
+    ) -> SkillOrchestrator:
+        """Create orchestrator with mocked dependencies and LLM."""
+        mock_index = index or MagicMock()
+        if index is None:
+            mock_index.get_summaries = AsyncMock(return_value={
+                "skill-pdf": "PDF Parser: Extracts text from PDFs [CORE]",
+                "skill-csv": "CSV Analyzer: Parses and analyzes CSV data [Verified]",
+            })
+
+        orch = SkillOrchestrator(
+            executor=MagicMock(),
+            index=mock_index,
+            autonomy=MagicMock(),
+        )
+
+        # Mock the LLM client
+        mock_llm = MagicMock()
+        default_response = llm_response or json.dumps({
+            "steps": [
+                {
+                    "step_number": 1,
+                    "skill_id": "skill-pdf",
+                    "skill_path": "anthropics/skills/pdf",
+                    "depends_on": [],
+                    "input_data": {"file": "report.pdf"},
+                },
+                {
+                    "step_number": 2,
+                    "skill_id": "skill-csv",
+                    "skill_path": "vercel-labs/agent-skills/csv",
+                    "depends_on": [1],
+                    "input_data": {"source": "extracted_tables"},
+                },
+            ],
+            "parallel_groups": [[1], [2]],
+            "estimated_duration_ms": 8000,
+            "risk_level": "low",
+            "approval_required": False,
+        })
+        mock_llm.generate_response = AsyncMock(return_value=default_response)
+        orch._llm = mock_llm
+
+        return orch
+
+    async def test_create_plan_returns_execution_plan(self) -> None:
+        """create_execution_plan returns a valid ExecutionPlan."""
+        orch = self._make_orchestrator()
+
+        available_skills = [
+            MagicMock(id="skill-pdf", skill_path="anthropics/skills/pdf"),
+            MagicMock(id="skill-csv", skill_path="vercel-labs/agent-skills/csv"),
+        ]
+
+        plan = await orch.create_execution_plan(
+            task="Parse the PDF and analyze the extracted tables",
+            available_skills=available_skills,
+        )
+
+        assert isinstance(plan, ExecutionPlan)
+        assert len(plan.steps) == 2
+        assert plan.steps[0].skill_id == "skill-pdf"
+        assert plan.steps[1].skill_id == "skill-csv"
+        assert plan.steps[1].depends_on == [1]
+        assert plan.parallel_groups == [[1], [2]]
+        assert plan.risk_level == "low"
+
+    async def test_create_plan_calls_llm_with_context(self) -> None:
+        """LLM is called with task description and skill summaries."""
+        orch = self._make_orchestrator()
+
+        available_skills = [
+            MagicMock(id="skill-pdf", skill_path="anthropics/skills/pdf"),
+        ]
+
+        await orch.create_execution_plan(
+            task="Parse report",
+            available_skills=available_skills,
+        )
+
+        orch._llm.generate_response.assert_awaited_once()
+        call_args = orch._llm.generate_response.call_args
+        messages = call_args.kwargs.get("messages") or call_args[0][0]
+        message_text = str(messages)
+        assert "Parse report" in message_text
+
+    async def test_create_plan_fetches_skill_summaries(self) -> None:
+        """Skill summaries are fetched from the index for LLM context."""
+        mock_index = MagicMock()
+        mock_index.get_summaries = AsyncMock(return_value={"skill-pdf": "PDF parser [CORE]"})
+
+        orch = self._make_orchestrator(index=mock_index)
+
+        available_skills = [
+            MagicMock(id="skill-pdf", skill_path="anthropics/skills/pdf"),
+        ]
+
+        await orch.create_execution_plan(
+            task="Parse a PDF",
+            available_skills=available_skills,
+        )
+
+        mock_index.get_summaries.assert_awaited_once_with(["skill-pdf"])
+
+    async def test_create_plan_with_parallel_skills(self) -> None:
+        """LLM can plan parallel execution when skills are independent."""
+        parallel_response = json.dumps({
+            "steps": [
+                {"step_number": 1, "skill_id": "s1", "skill_path": "a/b/c", "depends_on": [], "input_data": {}},
+                {"step_number": 2, "skill_id": "s2", "skill_path": "d/e/f", "depends_on": [], "input_data": {}},
+                {"step_number": 3, "skill_id": "s3", "skill_path": "g/h/i", "depends_on": [1, 2], "input_data": {}},
+            ],
+            "parallel_groups": [[1, 2], [3]],
+            "estimated_duration_ms": 5000,
+            "risk_level": "low",
+            "approval_required": False,
+        })
+
+        orch = self._make_orchestrator(llm_response=parallel_response)
+
+        available_skills = [
+            MagicMock(id="s1"), MagicMock(id="s2"), MagicMock(id="s3"),
+        ]
+
+        plan = await orch.create_execution_plan(
+            task="Multi-step parallel task",
+            available_skills=available_skills,
+        )
+
+        assert plan.parallel_groups == [[1, 2], [3]]
+        assert len(plan.steps) == 3
+
+    async def test_create_plan_handles_malformed_llm_response(self) -> None:
+        """Graceful handling of malformed LLM JSON response."""
+        orch = self._make_orchestrator(llm_response="not valid json at all")
+
+        available_skills = [MagicMock(id="s1")]
+
+        with pytest.raises(ValueError, match="parse"):
+            await orch.create_execution_plan(
+                task="Some task",
+                available_skills=available_skills,
+            )
