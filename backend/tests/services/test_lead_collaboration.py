@@ -915,6 +915,198 @@ class TestGetContributors:
 
     @pytest.mark.asyncio
     @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_uses_earliest_added_at(self, mock_get_client):
+        """Test that get_contributors uses the earliest created_at as added_at."""
+        mock_client = MagicMock()
+
+        # Mock contributions response - user_123 has contributions at different times
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = [
+            {"contributor_id": "user_123", "created_at": "2025-02-04T11:00:00+00:00"},
+            {"contributor_id": "user_123", "created_at": "2025-02-04T10:00:00+00:00"},  # Earliest
+            {"contributor_id": "user_123", "created_at": "2025-02-04T12:00:00+00:00"},
+        ]
+
+        # Mock user profiles response
+        mock_users_response = MagicMock()
+        mock_users_response.data = [
+            {"id": "user_123", "full_name": "Alice Johnson", "email": "alice@example.com"},
+        ]
+
+        # Set up the mock chain for contributions query
+        mock_contributions_query = MagicMock()
+        mock_contributions_query.execute.return_value = mock_contributions_response
+        mock_contributions_eq = MagicMock()
+        mock_contributions_eq.eq.return_value = mock_contributions_query
+        mock_contributions_select = MagicMock()
+        mock_contributions_select.select.return_value = mock_contributions_eq
+
+        # Set up the mock chain for users query
+        mock_users_query = MagicMock()
+        mock_users_query.execute.return_value = mock_users_response
+        mock_users_in = MagicMock()
+        mock_users_in.in_.return_value = mock_users_query
+        mock_users_select = MagicMock()
+        mock_users_select.select.return_value = mock_users_in
+
+        # Configure table to return different mocks based on call
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memory_contributions" and table_call_count[0] == 1:
+                return mock_contributions_select
+            elif table_name == "user_profiles":
+                return mock_users_select
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        assert len(result) == 1
+        alice = result[0]
+
+        # Verify the earliest timestamp is used (10:00, not 11:00 or 12:00)
+        assert alice.added_at == datetime(2025, 2, 4, 10, 0, tzinfo=UTC)
+        assert alice.contribution_count == 3
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_sorts_by_added_at(self, mock_get_client):
+        """Test that get_contributors sorts results by added_at ascending."""
+        mock_client = MagicMock()
+
+        # Mock contributions response - contributors in different order than added_at
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = [
+            {"contributor_id": "user_789", "created_at": "2025-02-04T15:00:00+00:00"},  # Latest
+            {"contributor_id": "user_123", "created_at": "2025-02-04T10:00:00+00:00"},  # Earliest
+            {"contributor_id": "user_456", "created_at": "2025-02-04T12:00:00+00:00"},  # Middle
+        ]
+
+        # Mock user profiles response
+        mock_users_response = MagicMock()
+        mock_users_response.data = [
+            {"id": "user_123", "full_name": "Alice Johnson", "email": "alice@example.com"},
+            {"id": "user_456", "full_name": "Bob Smith", "email": "bob@example.com"},
+            {"id": "user_789", "full_name": "Carol Davis", "email": "carol@example.com"},
+        ]
+
+        # Set up the mock chain for contributions query
+        mock_contributions_query = MagicMock()
+        mock_contributions_query.execute.return_value = mock_contributions_response
+        mock_contributions_eq = MagicMock()
+        mock_contributions_eq.eq.return_value = mock_contributions_query
+        mock_contributions_select = MagicMock()
+        mock_contributions_select.select.return_value = mock_contributions_eq
+
+        # Set up the mock chain for users query
+        mock_users_query = MagicMock()
+        mock_users_query.execute.return_value = mock_users_response
+        mock_users_in = MagicMock()
+        mock_users_in.in_.return_value = mock_users_query
+        mock_users_select = MagicMock()
+        mock_users_select.select.return_value = mock_users_in
+
+        # Configure table to return different mocks based on call
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memory_contributions" and table_call_count[0] == 1:
+                return mock_contributions_select
+            elif table_name == "user_profiles":
+                return mock_users_select
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        assert len(result) == 3
+
+        # Verify sorted by added_at ascending (oldest first)
+        assert result[0].id == "user_123"  # 10:00
+        assert result[1].id == "user_456"  # 12:00
+        assert result[2].id == "user_789"  # 15:00
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
+    async def test_get_contributors_skips_null_created_at(self, mock_get_client):
+        """Test that get_contributors skips contributions with NULL created_at."""
+        mock_client = MagicMock()
+
+        # Mock contributions response with NULL created_at values
+        mock_contributions_response = MagicMock()
+        mock_contributions_response.data = [
+            {"contributor_id": "user_123", "created_at": "2025-02-04T10:00:00+00:00"},
+            {"contributor_id": "user_123", "created_at": None},  # Should be skipped
+            {"contributor_id": "user_456", "created_at": None},  # Entire user should be excluded
+        ]
+
+        # Mock user profiles response
+        mock_users_response = MagicMock()
+        mock_users_response.data = [
+            {"id": "user_123", "full_name": "Alice Johnson", "email": "alice@example.com"},
+        ]
+
+        # Set up the mock chain for contributions query
+        mock_contributions_query = MagicMock()
+        mock_contributions_query.execute.return_value = mock_contributions_response
+        mock_contributions_eq = MagicMock()
+        mock_contributions_eq.eq.return_value = mock_contributions_query
+        mock_contributions_select = MagicMock()
+        mock_contributions_select.select.return_value = mock_contributions_eq
+
+        # Set up the mock chain for users query
+        mock_users_query = MagicMock()
+        mock_users_query.execute.return_value = mock_users_response
+        mock_users_in = MagicMock()
+        mock_users_in.in_.return_value = mock_users_query
+        mock_users_select = MagicMock()
+        mock_users_select.select.return_value = mock_users_in
+
+        # Configure table to return different mocks based on call
+        table_call_count = [0]
+
+        def table_side_effect(table_name):
+            table_call_count[0] += 1
+            if table_name == "lead_memory_contributions" and table_call_count[0] == 1:
+                return mock_contributions_select
+            elif table_name == "user_profiles":
+                return mock_users_select
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
+
+        service = LeadCollaborationService(db_client=MagicMock())
+
+        result = await service.get_contributors(
+            user_id="user_owner",
+            lead_memory_id="lead_456",
+        )
+
+        # Only user_123 should be included (user_456 had only NULL created_at)
+        assert len(result) == 1
+        assert result[0].id == "user_123"
+        assert result[0].contribution_count == 1
+
+    @pytest.mark.asyncio
+    @patch("src.services.lead_collaboration.LeadCollaborationService._get_supabase_client")
     async def test_get_contributors_empty(self, mock_get_client):
         """Test that get_contributors returns an empty list when no contributors."""
         mock_client = MagicMock()

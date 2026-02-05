@@ -469,17 +469,30 @@ class LeadCollaborationService:
                 .execute()
             )
 
-            # Aggregate unique contributors with counts
+            # Aggregate unique contributors with counts and earliest added_at
             contributor_data: dict[str, dict[str, Any]] = {}
             for item in response.data:
                 contrib = cast(dict[str, Any], item)
                 contributor_id = cast(str, contrib["contributor_id"])
+                created_at = contrib.get("created_at")
+
+                # Skip contributions without created_at
+                if not created_at:
+                    continue
 
                 if contributor_id not in contributor_data:
                     contributor_data[contributor_id] = {
                         "count": 0,
-                        "added_at": contrib.get("created_at"),
+                        "added_at": created_at,
                     }
+                else:
+                    # Track the earliest (first) contribution timestamp
+                    current = created_at
+                    existing = contributor_data[contributor_id]["added_at"]
+                    if isinstance(current, str) and isinstance(existing, str):
+                        if current < existing:
+                            contributor_data[contributor_id]["added_at"] = current
+
                 contributor_data[contributor_id]["count"] += 1
 
             # Get user profiles for names/emails
@@ -504,11 +517,13 @@ class LeadCollaborationService:
                 for contributor_id, data in contributor_data.items():
                     user_info = user_map.get(contributor_id, {"name": "", "email": ""})
                     added_at_raw = data["added_at"]
+
+                    # Parse datetime (already validated to be non-None above)
                     added_at = (
                         datetime.fromisoformat(added_at_raw)
                         if isinstance(added_at_raw, str)
                         else added_at_raw
-                    ) if added_at_raw else datetime.now(UTC)
+                    )
 
                     contributors.append(
                         Contributor(
@@ -520,6 +535,9 @@ class LeadCollaborationService:
                             contribution_count=data["count"],
                         )
                     )
+
+            # Sort contributors by added_at ascending (oldest first)
+            contributors.sort(key=lambda c: c.added_at)
 
             logger.info(
                 "Retrieved contributors",
