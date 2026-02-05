@@ -552,3 +552,81 @@ def test_build_working_memory_entry_respects_token_targets() -> None:
 
     # Should be reasonably close to target (within 50% fudge factor)
     assert minimal_tokens <= SummaryVerbosity.MINIMAL.token_target + 150
+
+
+def test_skills_module_exports_budget_constants() -> None:
+    """Test that skills module exports budget constants."""
+    from src.skills import (
+        ORCHESTRATOR_BUDGET,
+        SKILL_INDEX_BUDGET,
+        SUBAGENT_BUDGET,
+        WORKING_MEMORY_BUDGET,
+    )
+
+    assert ORCHESTRATOR_BUDGET == 2000
+    assert SKILL_INDEX_BUDGET == 600
+    assert WORKING_MEMORY_BUDGET == 800
+    assert SUBAGENT_BUDGET == 6000
+
+
+def test_skills_module_exports_context_manager_types() -> None:
+    """Test that skills module exports context manager types."""
+    from src.skills import ContextAllocation, SkillContextManager, SummaryVerbosity
+
+    # Should be able to instantiate SkillContextManager
+    manager = SkillContextManager()
+    assert manager is not None
+
+    # Should be able to use SummaryVerbosity
+    assert SummaryVerbosity.MINIMAL.value == "minimal"
+
+    # Should be able to create ContextAllocation
+    allocation = ContextAllocation(
+        component="test",
+        allocated_tokens=100,
+        used_tokens=50,
+        content="test content",
+    )
+    assert allocation.remaining_tokens == 50
+
+
+def test_skills_module_exports_all_context_manager_items() -> None:
+    """Test that all context manager items are in __all__."""
+    from src.skills import __all__ as skills_exports
+
+    # Check that all context manager exports are present
+    expected_context_exports = [
+        "ORCHESTRATOR_BUDGET",
+        "SKILL_INDEX_BUDGET",
+        "WORKING_MEMORY_BUDGET",
+        "SUBAGENT_BUDGET",
+        "SkillContextManager",
+        "ContextAllocation",
+        "SummaryVerbosity",
+    ]
+
+    for export in expected_context_exports:
+        assert export in skills_exports, f"{export} not in skills.__all__"
+
+
+def test_skills_module_context_manager_imports_work() -> None:
+    """Test that context manager imports are accessible from skills module."""
+    # This should work without errors
+    from src.skills import (
+        ContextAllocation,
+        ORCHESTRATOR_BUDGET,
+        SKILL_INDEX_BUDGET,
+        SUBAGENT_BUDGET,
+        SummaryVerbosity,
+        SkillContextManager,
+        WORKING_MEMORY_BUDGET,
+    )
+
+    # Verify they're the right types
+    assert isinstance(ORCHESTRATOR_BUDGET, int)
+    assert isinstance(SKILL_INDEX_BUDGET, int)
+    assert isinstance(WORKING_MEMORY_BUDGET, int)
+    assert isinstance(SUBAGENT_BUDGET, int)
+    assert SkillContextManager is not None
+    assert ContextAllocation is not None
+    assert SummaryVerbosity is not None
