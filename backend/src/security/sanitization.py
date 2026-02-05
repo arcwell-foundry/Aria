@@ -254,15 +254,11 @@ class DataSanitizer:
 
         if isinstance(data, dict):
             return {
-                key: self._detokenize_recursive(value, token_map)
-                for key, value in data.items()
+                key: self._detokenize_recursive(value, token_map) for key, value in data.items()
             }
 
         if isinstance(data, list):
-            return [
-                self._detokenize_recursive(item, token_map)
-                for item in data
-            ]
+            return [self._detokenize_recursive(item, token_map) for item in data]
 
         return data
 
@@ -283,7 +279,7 @@ class DataSanitizer:
 
         output_str = self._to_string_for_scan(output)
 
-        for token, original in token_map.tokens.items():
+        for _token, original in token_map.tokens.items():
             original_str = str(original)
             if original_str in output_str:
                 leaked_values.append(original)
