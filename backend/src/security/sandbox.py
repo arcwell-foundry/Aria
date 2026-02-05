@@ -211,3 +211,31 @@ class SkillSandbox:
         """
         # Placeholder implementation - actual execution would call LLM
         return {"status": "executed", "input_received": bool(input_data)}
+
+    def check_network_access(self, config: SandboxConfig, domain: str) -> None:
+        """Check if network access to a domain is permitted.
+
+        Args:
+            config: The sandbox configuration.
+            domain: The domain being accessed.
+
+        Raises:
+            SandboxViolation: If network access is not permitted.
+        """
+        if not config.network_enabled:
+            raise SandboxViolation(
+                violation_type="network_access",
+                message="Network access is not permitted for this skill",
+                details={"requested_domain": domain},
+            )
+
+        # Empty whitelist means all domains allowed (for CORE skills)
+        if config.allowed_domains and domain not in config.allowed_domains:
+            raise SandboxViolation(
+                violation_type="network_access",
+                message=f"Domain '{domain}' is not in the allowed domains whitelist",
+                details={
+                    "requested_domain": domain,
+                    "allowed_domains": config.allowed_domains,
+                },
+            )

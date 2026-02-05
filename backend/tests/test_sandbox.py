@@ -306,3 +306,55 @@ class TestSkillSandbox:
         )
 
         assert result.output == expected_output
+
+    @pytest.mark.asyncio
+    async def test_check_network_access_allowed(self) -> None:
+        """check_network_access should pass when network is enabled."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(network_enabled=True, allowed_domains=["api.example.com"])
+
+        # Should not raise
+        sandbox.check_network_access(config, "api.example.com")
+
+    @pytest.mark.asyncio
+    async def test_check_network_access_denied_when_disabled(self) -> None:
+        """check_network_access should raise when network is disabled."""
+        from src.security.sandbox import SandboxConfig, SandboxViolation, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(network_enabled=False)
+
+        with pytest.raises(SandboxViolation) as exc_info:
+            sandbox.check_network_access(config, "api.example.com")
+
+        assert exc_info.value.violation_type == "network_access"
+
+    @pytest.mark.asyncio
+    async def test_check_network_access_denied_for_unlisted_domain(self) -> None:
+        """check_network_access should raise for domains not in whitelist."""
+        from src.security.sandbox import SandboxConfig, SandboxViolation, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(
+            network_enabled=True,
+            allowed_domains=["api.example.com", "data.example.com"],
+        )
+
+        with pytest.raises(SandboxViolation) as exc_info:
+            sandbox.check_network_access(config, "evil.attacker.com")
+
+        assert exc_info.value.violation_type == "network_access"
+        assert "evil.attacker.com" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_check_network_access_empty_whitelist_allows_all(self) -> None:
+        """Empty allowed_domains with network_enabled should allow all domains."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(network_enabled=True, allowed_domains=[])
+
+        # Should not raise - empty whitelist means all allowed
+        sandbox.check_network_access(config, "any-domain.com")
