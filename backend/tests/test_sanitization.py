@@ -712,3 +712,67 @@ class TestIntegrationScenarios:
         restored = sanitizer.detokenize(sanitized_core, token_map_core)
         assert "$2.5M" in restored or "2.5M" in restored  # Financial restored
         assert "123-45-6789" not in restored  # SSN stays redacted
+
+    @pytest.mark.asyncio
+    async def test_mixed_classification_levels(self) -> None:
+        """Test data with multiple classification levels."""
+        from src.security import DataSanitizer, DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        mixed_data = {
+            "public": {
+                "company_name": "BioPharm Inc",
+                "industry": "Life Sciences",
+                "website": "https://biopharm.com",
+            },
+            "internal": {
+                "strategy": "Focus on oncology market",
+                "goals": "Increase market share by 20%",
+            },
+            "confidential": {
+                "key_contact": "Dr. Smith (dr.smith@biopharm.com)",
+                "phone": "555-111-2222",
+            },
+            "restricted": {
+                "revenue": "$45M annually",
+                "deal_pipeline": "$12M in active deals",
+                "proprietary": "Novel drug delivery mechanism",
+            },
+            "regulated": {
+                "patient_data": "Patient ID: 12345, diagnosis: stage 2",
+                "ssn": "987-65-4321",
+            },
+        }
+
+        # Test each trust level
+        trust_levels = [
+            (SkillTrustLevel.COMMUNITY, {"public"}),
+            (SkillTrustLevel.USER, {"public", "internal"}),
+            (SkillTrustLevel.VERIFIED, {"public", "internal"}),
+            (SkillTrustLevel.CORE, {"public", "internal", "confidential", "restricted"}),
+        ]
+
+        for trust_level, accessible_categories in trust_levels:
+            sanitized, token_map = await sanitizer.sanitize(mixed_data, trust_level)
+
+            # Public data always accessible
+            assert sanitized["public"]["company_name"] == "BioPharm Inc"
+
+            # Check confidential
+            if "confidential" in accessible_categories:
+                assert "[CONTACT_" in sanitized["confidential"]["key_contact"]
+            else:
+                assert "[REDACTED:" in sanitized["confidential"]["key_contact"]
+
+            # Check restricted
+            if "restricted" in accessible_categories:
+                assert "[FINANCIAL_" in str(sanitized["restricted"]["revenue"])
+            else:
+                assert "[REDACTED:" in str(sanitized["restricted"]["revenue"])
+
+            # Regulated never accessible to any trust level
+            assert "[REDACTED:" in sanitized["regulated"]["ssn"]
+            assert "987-65-4321" not in str(sanitized)
