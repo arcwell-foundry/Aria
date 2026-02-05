@@ -9,6 +9,13 @@ from src.security.data_classification import (
     DataClass,
     DataClassifier,
 )
+from src.security.sandbox import (
+    SANDBOX_BY_TRUST,
+    SandboxConfig,
+    SandboxResult,
+    SandboxViolation,
+    SkillSandbox,
+)
 from src.security.sanitization import (
     DataSanitizer,
     LeakageReport,
@@ -23,6 +30,7 @@ from src.security.trust_levels import (
 )
 
 __all__ = [
+    # Data classification
     "ClassifiedData",
     "DataClass",
     "DataClassifier",
@@ -36,4 +44,10 @@ __all__ = [
     "TokenMap",
     "LeakageReport",
     "DataSanitizer",
+    # Sandbox
+    "SandboxConfig",
+    "SandboxViolation",
+    "SandboxResult",
+    "SkillSandbox",
+    "SANDBOX_BY_TRUST",
 ]

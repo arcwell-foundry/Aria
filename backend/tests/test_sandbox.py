@@ -403,3 +403,23 @@ class TestSkillSandbox:
 
         assert exc_info.value.violation_type == "file_access"
         assert "write" in exc_info.value.message.lower()
+
+
+class TestModuleExports:
+    """Tests for security module exports."""
+
+    def test_sandbox_exports_from_security_module(self) -> None:
+        """All sandbox types should be importable from src.security."""
+        from src.security import (
+            SANDBOX_BY_TRUST,
+            SandboxConfig,
+            SandboxResult,
+            SandboxViolation,
+            SkillSandbox,
+        )
+
+        assert SandboxConfig is not None
+        assert SandboxViolation is not None
+        assert SandboxResult is not None
+        assert SkillSandbox is not None
+        assert SANDBOX_BY_TRUST is not None
