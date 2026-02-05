@@ -169,3 +169,49 @@ class SkillAutonomyService:
         except Exception as e:
             logger.debug(f"Trust history not found for user {user_id}, skill {skill_id}: {e}")
             return None
+
+    async def should_request_approval(
+        self, user_id: str, skill_id: str, risk_level: SkillRiskLevel
+    ) -> bool:
+        """Determine if skill execution requires user approval.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier.
+            risk_level: The risk level of this skill operation.
+
+        Returns:
+            True if approval is required, False if execution can proceed.
+
+        Approval logic:
+        1. Globally approved skills: never require approval
+        2. Session trusted skills: never require approval
+        3. No history: require approval (first time)
+        4. LOW/MEDIUM risk: auto-approve after threshold successes
+        5. HIGH/CRITICAL risk: always require approval
+        """
+        # Get current trust history
+        history = await self.get_trust_history(user_id, skill_id)
+
+        # No history exists - require approval
+        if history is None:
+            return True
+
+        # Global approval trumps everything
+        if history.globally_approved:
+            return False
+
+        # Session trust also bypasses checks
+        if history.session_trust_granted:
+            return False
+
+        # Get auto-approval threshold for this risk level
+        threshold_config = SKILL_RISK_THRESHOLDS.get(risk_level, {})
+        auto_approve_after = threshold_config.get("auto_approve_after")
+
+        # HIGH and CRITICAL risk never auto-approve
+        if auto_approve_after is None:
+            return True
+
+        # Check if we've met the success threshold
+        return history.successful_executions < auto_approve_after

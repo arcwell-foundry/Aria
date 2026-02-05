@@ -149,3 +149,239 @@ class TestSkillAutonomyServiceGetTrustHistory:
         result = await service.get_trust_history("user-abc", "skill-pdf")
 
         assert result is None
+
+
+class TestSkillAutonomyServiceShouldRequestApproval:
+    """Tests for SkillAutonomyService.should_request_approval method."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_globally_approved_needs_no_approval(self, mock_get_client: MagicMock) -> None:
+        """Test globally approved skills never require approval."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "last_success": None,
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": True,  # Globally approved
+            "globally_approved_at": now.isoformat(),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+
+        assert result is False
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_session_trusted_needs_no_approval(self, mock_get_client: MagicMock) -> None:
+        """Test session trusted skills don't require approval."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "last_success": None,
+            "last_failure": None,
+            "session_trust_granted": True,  # Session trust
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.MEDIUM)
+
+        assert result is False
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_no_history_needs_approval(self, mock_get_client: MagicMock) -> None:
+        """Test skills with no history require approval."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+
+        assert result is True
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_low_risk_auto_approves_after_3_successes(self, mock_get_client: MagicMock) -> None:
+        """Test LOW risk skills auto-approve after 3 successes."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 3,  # Met threshold
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+
+        assert result is False
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_low_risk_needs_approval_before_3_successes(self, mock_get_client: MagicMock) -> None:
+        """Test LOW risk skills need approval before 3 successes."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 2,  # Below threshold
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+
+        assert result is True
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_medium_risk_auto_approves_after_10_successes(self, mock_get_client: MagicMock) -> None:
+        """Test MEDIUM risk skills auto-approve after 10 successes."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-email",
+            "successful_executions": 10,  # Met threshold
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-email", SkillRiskLevel.MEDIUM)
+
+        assert result is False
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_high_risk_always_needs_approval(self, mock_get_client: MagicMock) -> None:
+        """Test HIGH risk skills always need approval (no auto-approve)."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-delete",
+            "successful_executions": 100,  # Even with many successes
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-delete", SkillRiskLevel.HIGH)
+
+        assert result is True
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_critical_risk_always_needs_approval(self, mock_get_client: MagicMock) -> None:
+        """Test CRITICAL risk skills always need approval."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-financial",
+            "successful_executions": 100,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-financial", SkillRiskLevel.CRITICAL)
+
+        assert result is True
