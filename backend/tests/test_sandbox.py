@@ -358,3 +358,48 @@ class TestSkillSandbox:
 
         # Should not raise - empty whitelist means all allowed
         sandbox.check_network_access(config, "any-domain.com")
+
+    def test_check_file_access_read_allowed(self) -> None:
+        """check_file_access should pass for read when can_read_files is True."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(can_read_files=True)
+
+        # Should not raise
+        sandbox.check_file_access(config, "/path/to/file.txt", "read")
+
+    def test_check_file_access_read_denied(self) -> None:
+        """check_file_access should raise for read when can_read_files is False."""
+        from src.security.sandbox import SandboxConfig, SandboxViolation, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(can_read_files=False)
+
+        with pytest.raises(SandboxViolation) as exc_info:
+            sandbox.check_file_access(config, "/path/to/file.txt", "read")
+
+        assert exc_info.value.violation_type == "file_access"
+
+    def test_check_file_access_write_allowed(self) -> None:
+        """check_file_access should pass for write when can_write_files is True."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(can_write_files=True)
+
+        # Should not raise
+        sandbox.check_file_access(config, "/path/to/output.txt", "write")
+
+    def test_check_file_access_write_denied(self) -> None:
+        """check_file_access should raise for write when can_write_files is False."""
+        from src.security.sandbox import SandboxConfig, SandboxViolation, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(can_write_files=False)
+
+        with pytest.raises(SandboxViolation) as exc_info:
+            sandbox.check_file_access(config, "/path/to/output.txt", "write")
+
+        assert exc_info.value.violation_type == "file_access"
+        assert "write" in exc_info.value.message.lower()

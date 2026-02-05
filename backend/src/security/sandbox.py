@@ -239,3 +239,33 @@ class SkillSandbox:
                     "allowed_domains": config.allowed_domains,
                 },
             )
+
+    def check_file_access(
+        self,
+        config: SandboxConfig,
+        file_path: str,
+        operation: str,
+    ) -> None:
+        """Check if file access is permitted.
+
+        Args:
+            config: The sandbox configuration.
+            file_path: Path to the file being accessed.
+            operation: Type of operation - "read" or "write".
+
+        Raises:
+            SandboxViolation: If file access is not permitted.
+        """
+        if operation == "read" and not config.can_read_files:
+            raise SandboxViolation(
+                violation_type="file_access",
+                message="File read access is not permitted for this skill",
+                details={"file_path": file_path, "operation": operation},
+            )
+
+        if operation == "write" and not config.can_write_files:
+            raise SandboxViolation(
+                violation_type="file_access",
+                message="File write access is not permitted for this skill",
+                details={"file_path": file_path, "operation": operation},
+            )
