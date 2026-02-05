@@ -307,3 +307,186 @@ class TestSkillExecutorExecuteSkillLookup:
         assert "not installed" in str(exc_info.value).lower()
         assert exc_info.value.skill_id == "skill-123"
         assert exc_info.value.stage == "lookup"
+
+
+class TestSkillExecutorExecuteFullPipeline:
+    """Tests for SkillExecutor.execute full pipeline."""
+
+    @pytest.fixture
+    def executor_with_full_mocks(self) -> tuple:
+        """Create executor with fully mocked pipeline."""
+        from src.security.data_classification import DataClassifier
+        from src.security.sanitization import DataSanitizer
+        from src.security.sandbox import SkillSandbox, SandboxResult
+        from src.security.trust_levels import SkillTrustLevel
+        from src.skills.executor import SkillExecutor
+        from src.skills.index import SkillIndexEntry
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        sandbox = MagicMock(spec=SkillSandbox)
+        index = MagicMock()
+        installer = MagicMock()
+        audit = MagicMock()
+
+        # Setup default successful responses
+        mock_entry = MagicMock(spec=SkillIndexEntry)
+        mock_entry.id = "skill-123"
+        mock_entry.skill_path = "anthropics/skills/pdf"
+        mock_entry.skill_name = "PDF Parser"
+        mock_entry.trust_level = SkillTrustLevel.VERIFIED
+        mock_entry.full_content = "# PDF Parser\nExtract text from PDFs"
+        index.get_skill = AsyncMock(return_value=mock_entry)
+
+        installer.is_installed = AsyncMock(return_value=True)
+        installer.record_usage = AsyncMock(return_value=None)
+
+        # Mock sandbox to return success
+        sandbox.execute = AsyncMock(
+            return_value=SandboxResult(
+                output={"parsed": "document content"},
+                execution_time_ms=150,
+                memory_used_mb=50.0,
+                violations=[],
+                success=True,
+            )
+        )
+
+        # Mock audit service
+        audit.get_latest_hash = AsyncMock(return_value="0" * 64)
+        audit.log_execution = AsyncMock(return_value=None)
+        audit._compute_hash = MagicMock(return_value="a" * 64)
+
+        executor = SkillExecutor(
+            classifier=classifier,
+            sanitizer=sanitizer,
+            sandbox=sandbox,
+            index=index,
+            installer=installer,
+            audit_service=audit,
+        )
+
+        return executor, index, installer, sandbox, audit, mock_entry
+
+    @pytest.mark.asyncio
+    async def test_execute_successful_returns_skill_execution(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test successful execution returns SkillExecution."""
+        from src.skills.executor import SkillExecution
+
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        result = await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "document.pdf"},
+        )
+
+        assert isinstance(result, SkillExecution)
+        assert result.skill_id == "skill-123"
+        assert result.skill_path == "anthropics/skills/pdf"
+        assert result.success is True
+        assert result.result == {"parsed": "document content"}
+        assert result.error is None
+
+    @pytest.mark.asyncio
+    async def test_execute_calls_sandbox_with_correct_config(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute uses correct sandbox config for trust level."""
+        from src.security.sandbox import SANDBOX_BY_TRUST
+        from src.security.trust_levels import SkillTrustLevel
+
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "test.pdf"},
+        )
+
+        sandbox.execute.assert_called_once()
+        call_args = sandbox.execute.call_args
+        # Should use VERIFIED config
+        assert call_args[1]["config"] == SANDBOX_BY_TRUST[SkillTrustLevel.VERIFIED]
+
+    @pytest.mark.asyncio
+    async def test_execute_logs_audit_entry(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute logs to audit trail."""
+        from src.security.skill_audit import SkillAuditEntry
+
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "test.pdf"},
+            task_id="task-456",
+            agent_id="hunter",
+            trigger_reason="document_analysis",
+        )
+
+        audit.log_execution.assert_called_once()
+        call_args = audit.log_execution.call_args
+        audit_entry = call_args[0][0]
+        assert isinstance(audit_entry, SkillAuditEntry)
+        assert audit_entry.user_id == "user-123"
+        assert audit_entry.skill_id == "skill-123"
+        assert audit_entry.task_id == "task-456"
+        assert audit_entry.agent_id == "hunter"
+        assert audit_entry.trigger_reason == "document_analysis"
+        assert audit_entry.success is True
+
+    @pytest.mark.asyncio
+    async def test_execute_records_usage_on_success(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute records usage in installer on success."""
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "test.pdf"},
+        )
+
+        installer.record_usage.assert_called_once_with(
+            "user-123", "skill-123", success=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_computes_input_and_output_hashes(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute computes hashes for audit."""
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        result = await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "test.pdf"},
+        )
+
+        # Should have valid hashes
+        assert len(result.input_hash) == 64
+        assert len(result.output_hash) == 64
+        assert all(c in "0123456789abcdef" for c in result.input_hash)
+        assert all(c in "0123456789abcdef" for c in result.output_hash)
+
+    @pytest.mark.asyncio
+    async def test_execute_captures_execution_time(
+        self, executor_with_full_mocks: tuple
+    ) -> None:
+        """Test execute captures execution time from sandbox."""
+        executor, index, installer, sandbox, audit, entry = executor_with_full_mocks
+
+        result = await executor.execute(
+            user_id="user-123",
+            skill_id="skill-123",
+            input_data={"file": "test.pdf"},
+        )
+
+        assert result.execution_time_ms == 150  # From mock

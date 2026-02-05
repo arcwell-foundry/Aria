@@ -6,16 +6,19 @@ classify -> sanitize -> sandbox execute -> validate -> detokenize -> audit.
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from src.security.data_classification import DataClassifier
+from src.security.sandbox import SANDBOX_BY_TRUST, SandboxViolation, SkillSandbox
 from src.security.sanitization import DataSanitizer
-from src.security.sandbox import SkillSandbox
-from src.security.skill_audit import SkillAuditService
+from src.security.skill_audit import SkillAuditEntry, SkillAuditService
 from src.security.trust_levels import SkillTrustLevel
 from src.skills.index import SkillIndex
 from src.skills.installer import SkillInstaller
+
+logger = logging.getLogger(__name__)
 
 
 def _hash_data(data: Any) -> str:
@@ -30,10 +33,7 @@ def _hash_data(data: Any) -> str:
         64-character hex SHA256 hash string.
     """
     # Convert to deterministic string representation
-    if data is None:
-        canonical = "null"
-    else:
-        canonical = json.dumps(data, sort_keys=True, default=str)
+    canonical = "null" if data is None else json.dumps(data, sort_keys=True, default=str)
 
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -186,5 +186,141 @@ class SkillExecutor:
                 stage="lookup",
             )
 
-        # TODO: Implement remaining pipeline phases
-        raise NotImplementedError("Execution pipeline not yet complete")
+        trust_level = skill_entry.trust_level
+        input_hash = _hash_data(input_data)
+
+        # Initialize variables for audit
+        output_hash: str | None = None
+        sanitized = False
+        tokens_used: list[str] = []
+        execution_time_ms = 0
+        success = False
+        result: Any = None
+        error_msg: str | None = None
+        security_flags: list[str] = []
+
+        try:
+            # Phase 2: Sanitize input
+            sanitized_data, token_map = await self._sanitizer.sanitize(
+                input_data, trust_level, context
+            )
+            sanitized = len(token_map.tokens) > 0
+            tokens_used = list(token_map.tokens.keys())
+
+            # Phase 3: Execute in sandbox
+            sandbox_config = SANDBOX_BY_TRUST[trust_level]
+            sandbox_result = await self._sandbox.execute(
+                skill_content=skill_entry.full_content or "",
+                input_data=sanitized_data,
+                config=sandbox_config,
+            )
+
+            execution_time_ms = sandbox_result.execution_time_ms
+            raw_output = sandbox_result.output
+            success = sandbox_result.success
+
+            # Phase 4: Validate output for leakage (log but don't fail)
+            leakage_report = self._sanitizer.validate_output(raw_output, token_map)
+            if leakage_report.leaked:
+                logger.warning(
+                    "Data leakage detected in skill output",
+                    extra={
+                        "skill_id": skill_id,
+                        "user_id": user_id,
+                        "leaked_count": len(leakage_report.leaked_values),
+                        "severity": leakage_report.severity,
+                    },
+                )
+                security_flags.append(f"leakage:{leakage_report.severity}")
+
+            # Phase 5: Detokenize output
+            result = self._sanitizer.detokenize(raw_output, token_map)
+            output_hash = _hash_data(result)
+
+        except SandboxViolation as e:
+            error_msg = str(e)
+            success = False
+            security_flags.append(f"violation:{e.violation_type}")
+            logger.warning(
+                "Sandbox violation during skill execution",
+                extra={
+                    "skill_id": skill_id,
+                    "user_id": user_id,
+                    "violation_type": e.violation_type,
+                },
+            )
+
+        except Exception as e:
+            error_msg = str(e)
+            success = False
+            logger.exception(
+                "Error during skill execution",
+                extra={"skill_id": skill_id, "user_id": user_id},
+            )
+
+        # Phase 6: Log audit entry (always, even on failure)
+        previous_hash = await self._audit.get_latest_hash(user_id)
+        audit_entry_data = {
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "skill_path": skill_entry.skill_path,
+            "skill_trust_level": trust_level.value,
+            "trigger_reason": trigger_reason,
+            "data_classes_requested": [],  # Could be enhanced to track actual classes
+            "data_classes_granted": [],
+            "input_hash": input_hash,
+            "output_hash": output_hash,
+            "execution_time_ms": execution_time_ms,
+            "success": success,
+            "error": error_msg,
+            "data_redacted": sanitized,
+            "tokens_used": tokens_used,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "security_flags": security_flags,
+        }
+        entry_hash = self._audit._compute_hash(audit_entry_data, previous_hash)
+
+        audit_entry = SkillAuditEntry(
+            user_id=user_id,
+            skill_id=skill_id,
+            skill_path=skill_entry.skill_path,
+            skill_trust_level=trust_level.value,
+            trigger_reason=trigger_reason,
+            data_classes_requested=[],
+            data_classes_granted=[],
+            input_hash=input_hash,
+            output_hash=output_hash,
+            execution_time_ms=execution_time_ms,
+            success=success,
+            error=error_msg,
+            data_redacted=sanitized,
+            tokens_used=tokens_used,
+            task_id=task_id,
+            agent_id=agent_id,
+            security_flags=security_flags,
+            previous_hash=previous_hash,
+            entry_hash=entry_hash,
+        )
+
+        await self._audit.log_execution(audit_entry)
+
+        # Record usage on success
+        if success:
+            await self._installer.record_usage(user_id, skill_id, success=True)
+        else:
+            await self._installer.record_usage(user_id, skill_id, success=False)
+
+        return SkillExecution(
+            skill_id=skill_id,
+            skill_path=skill_entry.skill_path,
+            trust_level=trust_level,
+            input_hash=input_hash,
+            output_hash=output_hash,
+            sanitized=sanitized,
+            tokens_used=tokens_used,
+            execution_time_ms=execution_time_ms,
+            success=success,
+            result=result,
+            error=error_msg,
+        )
