@@ -4,6 +4,7 @@ Tokenizes, redacts, and validates data based on skill trust levels
 before any data reaches external skills.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -83,3 +84,142 @@ class DataSanitizer:
     def redact_value(self, classified_data: ClassifiedData) -> str:
         """Redact a classified value completely."""
         return f"[REDACTED: {classified_data.data_type}]"
+
+    async def sanitize(
+        self,
+        data: Any,
+        skill_trust_level: SkillTrustLevel,
+        context: dict[str, Any] | None = None,
+    ) -> tuple[Any, TokenMap]:
+        """Sanitize data for skill execution.
+
+        Args:
+            data: The data to sanitize (string, dict, list, or other).
+            skill_trust_level: The trust level of the skill that will receive this data.
+            context: Optional context about the data source.
+
+        Returns:
+            Tuple of (sanitized_data, token_map) where token_map allows detokenization.
+        """
+        if context is None:
+            context = {}
+
+        token_map = TokenMap()
+        sanitized = await self._sanitize_recursive(data, skill_trust_level, context, token_map)
+        return sanitized, token_map
+
+    async def _sanitize_recursive(
+        self,
+        data: Any,
+        skill_trust_level: SkillTrustLevel,
+        context: dict[str, Any],
+        token_map: TokenMap,
+    ) -> Any:
+        """Recursively sanitize data structures.
+
+        Args:
+            data: The data to sanitize.
+            skill_trust_level: The trust level of the skill.
+            context: Context about the data source.
+            token_map: The token map to store mappings in.
+
+        Returns:
+            The sanitized data.
+        """
+        if isinstance(data, str):
+            result, _ = await self._sanitize_string(data, skill_trust_level, context, token_map)
+            return result
+
+        if isinstance(data, dict):
+            return {
+                key: await self._sanitize_recursive(value, skill_trust_level, context, token_map)
+                for key, value in data.items()
+            }
+
+        if isinstance(data, list):
+            return [
+                await self._sanitize_recursive(item, skill_trust_level, context, token_map)
+                for item in data
+            ]
+
+        if data is None:
+            return None
+
+        classified = await self.classifier.classify(data, context)
+        result, _ = self._handle_classified_data(classified, skill_trust_level, token_map)
+        return result
+
+    async def _sanitize_string(
+        self,
+        text: str,
+        skill_trust_level: SkillTrustLevel,
+        context: dict[str, Any],
+        token_map: TokenMap,
+    ) -> tuple[str, TokenMap]:
+        """Sanitize a string by finding and replacing sensitive patterns.
+
+        Args:
+            text: The string to sanitize.
+            skill_trust_level: The trust level of the skill.
+            context: Context about the data source.
+            token_map: The token map to store mappings in.
+
+        Returns:
+            Tuple of (sanitized_string, token_map).
+        """
+        result = text
+
+        # Check all patterns from most to least sensitive
+        for classification in [DataClass.REGULATED, DataClass.RESTRICTED, DataClass.CONFIDENTIAL]:
+            patterns = self.classifier.PATTERNS.get(classification, [])
+            for pattern in patterns:
+                matches = list(re.finditer(pattern, result, re.IGNORECASE))
+                for match in reversed(matches):  # Reverse to preserve positions
+                    matched_text = match.group()
+                    data_type = self.classifier._infer_data_type(pattern)
+                    can_tokenize = self.classifier._can_be_tokenized(pattern)
+
+                    classified = ClassifiedData(
+                        data=matched_text,
+                        classification=classification,
+                        data_type=data_type,
+                        source=context.get("source", "unknown"),
+                        can_be_tokenized=can_tokenize,
+                    )
+
+                    has_access = can_access_data(skill_trust_level, classification)
+
+                    if has_access and can_tokenize:
+                        replacement = self.tokenize_value(matched_text, data_type, token_map)
+                    else:
+                        replacement = self.redact_value(classified)
+
+                    result = result[: match.start()] + replacement + result[match.end() :]
+
+        return result, token_map
+
+    def _handle_classified_data(
+        self,
+        classified: ClassifiedData,
+        skill_trust_level: SkillTrustLevel,
+        token_map: TokenMap,
+    ) -> tuple[Any, TokenMap]:
+        """Handle pre-classified data based on trust level.
+
+        Args:
+            classified: The pre-classified data.
+            skill_trust_level: The trust level of the skill.
+            token_map: The token map to store mappings in.
+
+        Returns:
+            Tuple of (processed_data, token_map).
+        """
+        has_access = can_access_data(skill_trust_level, classified.classification)
+
+        if has_access and classified.can_be_tokenized:
+            token = self.tokenize_value(classified.data, classified.data_type, token_map)
+            return token, token_map
+        elif not has_access or not classified.can_be_tokenized:
+            return self.redact_value(classified), token_map
+
+        return classified.data, token_map

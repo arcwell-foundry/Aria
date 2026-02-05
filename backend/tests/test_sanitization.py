@@ -201,3 +201,78 @@ class TestDataSanitizer:
         result = sanitizer.redact_value(classified)
 
         assert result == "[REDACTED: contact]"
+
+    @pytest.mark.asyncio
+    async def test_sanitize_string_returns_tuple(self) -> None:
+        """Test sanitize returns (sanitized_data, TokenMap) tuple."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        result = await sanitizer.sanitize("Hello world", SkillTrustLevel.COMMUNITY)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        sanitized, token_map = result
+        assert isinstance(token_map, TokenMap)
+
+    @pytest.mark.asyncio
+    async def test_sanitize_string_tokenizes_for_allowed_access(self) -> None:
+        """Test sanitize tokenizes data when skill has access."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        # CORE can access RESTRICTED (financial) data
+        sanitized, token_map = await sanitizer.sanitize(
+            "Revenue: $4.2M",
+            SkillTrustLevel.CORE,
+        )
+
+        # Should tokenize the financial value
+        assert "[FINANCIAL_001]" in sanitized
+        assert token_map.get_original("[FINANCIAL_001]") is not None
+
+    @pytest.mark.asyncio
+    async def test_sanitize_string_redacts_for_no_access(self) -> None:
+        """Test sanitize redacts data when skill lacks access."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        # COMMUNITY cannot access RESTRICTED (financial) data
+        sanitized, token_map = await sanitizer.sanitize(
+            "Revenue: $4.2M",
+            SkillTrustLevel.COMMUNITY,
+        )
+
+        assert "[REDACTED:" in sanitized
+        assert len(token_map.tokens) == 0
+
+    @pytest.mark.asyncio
+    async def test_sanitize_string_redacts_non_tokenizable(self) -> None:
+        """Test sanitize redacts data that cannot be tokenized."""
+        from src.security.sanitization import DataSanitizer
+        from src.security.data_classification import DataClassifier
+        from src.security.trust_levels import SkillTrustLevel
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+
+        # SSN cannot be tokenized even for CORE
+        sanitized, token_map = await sanitizer.sanitize(
+            "SSN: 123-45-6789",
+            SkillTrustLevel.CORE,
+        )
+
+        assert "[REDACTED:" in sanitized
+        assert "123-45-6789" not in sanitized
