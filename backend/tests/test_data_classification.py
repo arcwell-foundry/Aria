@@ -151,3 +151,283 @@ def test_data_classifier_patterns_are_valid_regex() -> None:
                 re.compile(pattern)
             except re.error as e:
                 pytest.fail(f"Invalid regex pattern '{pattern}' for {data_class}: {e}")
+
+
+class TestSSNPatternDetection:
+    """Tests for SSN pattern detection."""
+
+    def test_detects_ssn_with_dashes(self) -> None:
+        """Test detection of SSN in format XXX-XX-XXXX."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Customer SSN is 123-45-6789"
+        assert any(re.search(p, text) for p in patterns)
+
+    def test_detects_ssn_without_dashes(self) -> None:
+        """Test detection of SSN without dashes (9 digits)."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "SSN: 123456789"
+        assert any(re.search(p, text) for p in patterns)
+
+    def test_does_not_false_positive_on_regular_numbers(self) -> None:
+        """Test that regular numbers don't trigger SSN detection."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        # Only check SSN-specific patterns
+        ssn_patterns = [
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            r"\b\d{9}\b",
+        ]
+
+        text = "The year is 2024 and we have 150 customers"
+        assert not any(re.search(p, text) for p in ssn_patterns)
+
+
+class TestCreditCardPatternDetection:
+    """Tests for credit card pattern detection."""
+
+    def test_detects_credit_card_with_dashes(self) -> None:
+        """Test detection of credit card with dashes."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Card: 1234-5678-9012-3456"
+        assert any(re.search(p, text) for p in patterns)
+
+    def test_detects_credit_card_with_spaces(self) -> None:
+        """Test detection of credit card with spaces."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Card: 1234 5678 9012 3456"
+        assert any(re.search(p, text) for p in patterns)
+
+    def test_detects_credit_card_without_separators(self) -> None:
+        """Test detection of credit card without separators."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Card number: 1234567890123456"
+        assert any(re.search(p, text) for p in patterns)
+
+
+class TestDOBPatternDetection:
+    """Tests for date of birth pattern detection."""
+
+    def test_detects_dob_with_slashes(self) -> None:
+        """Test detection of DOB with slashes."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "DOB: 01/15/1990"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_dob_with_dashes(self) -> None:
+        """Test detection of DOB with dashes."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "DOB-12-25-1985"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+class TestPHIPatternDetection:
+    """Tests for Protected Health Information pattern detection."""
+
+    def test_detects_diagnosis(self) -> None:
+        """Test detection of diagnosis keyword."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Patient diagnosis indicates stage 2"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_medication(self) -> None:
+        """Test detection of medication keyword."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Current medication includes lisinopril"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_patient_id(self) -> None:
+        """Test detection of patient ID reference."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "Patient ID: 12345"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_medical_record(self) -> None:
+        """Test detection of medical record reference."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.REGULATED]
+
+        text = "See medical record for history"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+class TestFinancialPatternDetection:
+    """Tests for financial/RESTRICTED pattern detection."""
+
+    def test_detects_dollar_amount(self) -> None:
+        """Test detection of dollar amounts."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.RESTRICTED]
+
+        text = "Deal worth $4.2M"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_revenue_mention(self) -> None:
+        """Test detection of revenue keyword."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.RESTRICTED]
+
+        text = "Q4 revenue targets"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_profit_mention(self) -> None:
+        """Test detection of profit keyword."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.RESTRICTED]
+
+        text = "Projected profits for next quarter"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_deal_size(self) -> None:
+        """Test detection of deal size reference."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.RESTRICTED]
+
+        text = "The deal size is estimated at"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_confidential_marker(self) -> None:
+        """Test detection of explicit confidential marker."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.RESTRICTED]
+
+        text = "CONFIDENTIAL: Internal projections"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+class TestContactPatternDetection:
+    """Tests for contact information (CONFIDENTIAL) pattern detection."""
+
+    def test_detects_email_address(self) -> None:
+        """Test detection of email addresses."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.CONFIDENTIAL]
+
+        text = "Contact: john.doe@company.com"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_phone_number_with_dashes(self) -> None:
+        """Test detection of phone numbers with dashes."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.CONFIDENTIAL]
+
+        text = "Call me at 555-123-4567"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_phone_number_with_dots(self) -> None:
+        """Test detection of phone numbers with dots."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.CONFIDENTIAL]
+
+        text = "Phone: 555.123.4567"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def test_detects_international_phone(self) -> None:
+        """Test detection of international phone numbers."""
+        import re
+
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        patterns = classifier.PATTERNS[DataClass.CONFIDENTIAL]
+
+        text = "International: +1-555-123-4567"
+        assert any(re.search(p, text, re.IGNORECASE) for p in patterns)
