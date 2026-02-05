@@ -115,3 +115,39 @@ def test_classified_data_accepts_any_data_type() -> None:
         source="test",
     )
     assert none_data.data is None
+
+
+def test_data_classifier_has_patterns_dict() -> None:
+    """Test DataClassifier has PATTERNS dict with regex patterns."""
+    from src.security.data_classification import DataClass, DataClassifier
+
+    classifier = DataClassifier()
+
+    assert hasattr(classifier, "PATTERNS")
+    assert isinstance(classifier.PATTERNS, dict)
+
+    # Should have patterns for REGULATED, RESTRICTED, CONFIDENTIAL
+    assert DataClass.REGULATED in classifier.PATTERNS
+    assert DataClass.RESTRICTED in classifier.PATTERNS
+    assert DataClass.CONFIDENTIAL in classifier.PATTERNS
+
+    # Each entry should be a list of patterns
+    assert isinstance(classifier.PATTERNS[DataClass.REGULATED], list)
+    assert len(classifier.PATTERNS[DataClass.REGULATED]) > 0
+
+
+def test_data_classifier_patterns_are_valid_regex() -> None:
+    """Test all patterns in PATTERNS are valid regex."""
+    import re
+
+    from src.security.data_classification import DataClassifier
+
+    classifier = DataClassifier()
+
+    for data_class, patterns in classifier.PATTERNS.items():
+        for pattern in patterns:
+            # Should not raise
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                pytest.fail(f"Invalid regex pattern '{pattern}' for {data_class}: {e}")
