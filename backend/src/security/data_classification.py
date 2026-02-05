@@ -124,12 +124,31 @@ class DataClassifier:
                         source=context.get("source", "unknown"),
                     )
 
-        # Default to INTERNAL if no sensitive patterns found
+        # Context-based classification fallback
+        source = context.get("source", "unknown")
+
+        if source == "crm_deal":
+            return ClassifiedData(
+                data=data,
+                classification=DataClass.CONFIDENTIAL,
+                data_type="deal_info",
+                source=source,
+            )
+
+        if source == "financial_report":
+            return ClassifiedData(
+                data=data,
+                classification=DataClass.RESTRICTED,
+                data_type="financial",
+                source=source,
+            )
+
+        # Default to INTERNAL if no sensitive patterns or context found
         return ClassifiedData(
             data=data,
             classification=DataClass.INTERNAL,
             data_type="general",
-            source=context.get("source", "unknown"),
+            source=source,
         )
 
     def _infer_data_type(self, text: str, matched_pattern: str) -> str:

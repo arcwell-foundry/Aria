@@ -622,3 +622,76 @@ class TestDataClassifierClassify:
         assert result1.classification == DataClass.RESTRICTED
         assert result2.classification == DataClass.RESTRICTED
         assert result3.classification == DataClass.RESTRICTED
+
+
+class TestContextBasedClassification:
+    """Tests for context-based classification fallback."""
+
+    @pytest.mark.asyncio
+    async def test_crm_deal_source_classifies_as_confidential(self) -> None:
+        """Test CRM deal data defaults to CONFIDENTIAL."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Meeting notes from customer call",
+            {"source": "crm_deal"},
+        )
+
+        # Should be CONFIDENTIAL due to source context
+        assert result.classification == DataClass.CONFIDENTIAL
+        assert result.data_type == "deal_info"
+
+    @pytest.mark.asyncio
+    async def test_financial_report_source_classifies_as_restricted(self) -> None:
+        """Test financial report data defaults to RESTRICTED."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "Q4 summary report",
+            {"source": "financial_report"},
+        )
+
+        # Should be RESTRICTED due to source context
+        assert result.classification == DataClass.RESTRICTED
+        assert result.data_type == "financial"
+
+    @pytest.mark.asyncio
+    async def test_pattern_match_overrides_context(self) -> None:
+        """Test pattern match takes precedence over context."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        # Contains SSN, even though source is just "notes"
+        result = await classifier.classify(
+            "Customer SSN: 123-45-6789",
+            {"source": "notes"},
+        )
+
+        # Should be REGULATED due to SSN pattern, not INTERNAL
+        assert result.classification == DataClass.REGULATED
+
+    @pytest.mark.asyncio
+    async def test_unknown_source_defaults_to_internal(self) -> None:
+        """Test unknown source defaults to INTERNAL."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify(
+            "General meeting notes",
+            {"source": "unknown_system"},
+        )
+
+        assert result.classification == DataClass.INTERNAL
+
+    @pytest.mark.asyncio
+    async def test_missing_source_uses_unknown(self) -> None:
+        """Test missing source key uses 'unknown'."""
+        from src.security.data_classification import DataClass, DataClassifier
+
+        classifier = DataClassifier()
+        result = await classifier.classify("Some data", {})
+
+        assert result.source == "unknown"
+        assert result.classification == DataClass.INTERNAL
