@@ -513,3 +513,170 @@ class TestSkillAutonomyServiceRecordExecutionOutcome:
         assert result is not None
         assert result.successful_executions == 5  # Unchanged
         assert result.failed_executions == 2
+
+
+class TestSkillAutonomyServiceTrustManagement:
+    """Tests for SkillAutonomyService trust management methods."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_grant_session_trust_sets_flag(self, mock_get_client: MagicMock) -> None:
+        """Test grant_session_trust sets session_trust_granted to True."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 2,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["session_trust_granted"] = True
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.grant_session_trust("user-abc", "skill-pdf")
+
+        assert result is not None
+        assert result.session_trust_granted is True
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_grant_global_approval_sets_flags(self, mock_get_client: MagicMock) -> None:
+        """Test grant_global_approval sets globally_approved and timestamp."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 10,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["globally_approved"] = True
+        updated_row["globally_approved_at"] = now.isoformat()
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.grant_global_approval("user-abc", "skill-pdf")
+
+        assert result is not None
+        assert result.globally_approved is True
+        assert result.globally_approved_at is not None
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_revoke_trust_clears_all_flags(self, mock_get_client: MagicMock) -> None:
+        """Test revoke_trust clears both session and global trust flags."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        existing_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 10,
+            "failed_executions": 0,
+            "last_success": now.isoformat(),
+            "last_failure": None,
+            "session_trust_granted": True,
+            "globally_approved": True,
+            "globally_approved_at": now.isoformat(),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            existing_row
+        )
+
+        updated_row = existing_row.copy()
+        updated_row["session_trust_granted"] = False
+        updated_row["globally_approved"] = False
+        updated_row["globally_approved_at"] = None
+        mock_update_response = MagicMock()
+        mock_update_response.data = [updated_row]
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_update_response
+        )
+
+        result = await service.revoke_trust("user-abc", "skill-pdf")
+
+        assert result is not None
+        assert result.session_trust_granted is False
+        assert result.globally_approved is False
+        assert result.globally_approved_at is None
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_revoke_trust_creates_history_if_none_exists(self, mock_get_client: MagicMock) -> None:
+        """Test revoke_trust creates history record if none exists (for future use)."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        # No existing history
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        now = datetime.now(UTC)
+        inserted_row = {
+            "id": "new-123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "last_success": None,
+            "last_failure": None,
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        mock_insert_response = MagicMock()
+        mock_insert_response.data = [inserted_row]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_insert_response
+
+        result = await service.revoke_trust("user-abc", "skill-pdf")
+
+        assert result is not None
+        assert result.session_trust_granted is False
+        assert result.globally_approved is False

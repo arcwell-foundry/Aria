@@ -292,3 +292,175 @@ class SkillAutonomyService:
         except Exception as e:
             logger.error(f"Error recording execution outcome for user {user_id}, skill {skill_id}: {e}")
             return None
+
+    async def grant_session_trust(self, user_id: str, skill_id: str) -> TrustHistory | None:
+        """Grant session-level trust for a skill.
+
+        Session trust allows auto-approval for the current session only.
+        Resets when user logs out or new session starts.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier.
+
+        Returns:
+            The updated TrustHistory, or None on error.
+        """
+        try:
+            existing = await self.get_trust_history(user_id, skill_id)
+
+            if existing is None:
+                # Create new record with session trust
+                now = datetime.now(timezone.utc)
+                record = {
+                    "user_id": user_id,
+                    "skill_id": skill_id,
+                    "successful_executions": 0,
+                    "failed_executions": 0,
+                    "last_success": None,
+                    "last_failure": None,
+                    "session_trust_granted": True,
+                    "globally_approved": False,
+                    "globally_approved_at": None,
+                }
+
+                response = self._client.table("skill_trust_history").insert(record).execute()
+                if response.data:
+                    logger.info(f"Granted session trust for user {user_id}, skill {skill_id}")
+                    return self._db_row_to_trust_history(response.data[0])
+                return None
+
+            # Update existing record
+            response = (
+                self._client.table("skill_trust_history")
+                .update({"session_trust_granted": True})
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+
+            if response.data:
+                logger.info(f"Granted session trust for user {user_id}, skill {skill_id}")
+                return self._db_row_to_trust_history(response.data[0])
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error granting session trust for user {user_id}, skill {skill_id}: {e}")
+            return None
+
+    async def grant_global_approval(self, user_id: str, skill_id: str) -> TrustHistory | None:
+        """Grant permanent global approval for a skill.
+
+        Global approval means the skill will never require approval for this user
+        unless explicitly revoked.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier.
+
+        Returns:
+            The updated TrustHistory, or None on error.
+        """
+        try:
+            existing = await self.get_trust_history(user_id, skill_id)
+            now = datetime.now(timezone.utc)
+
+            if existing is None:
+                # Create new record with global approval
+                record = {
+                    "user_id": user_id,
+                    "skill_id": skill_id,
+                    "successful_executions": 0,
+                    "failed_executions": 0,
+                    "last_success": None,
+                    "last_failure": None,
+                    "session_trust_granted": False,
+                    "globally_approved": True,
+                    "globally_approved_at": now.isoformat(),
+                }
+
+                response = self._client.table("skill_trust_history").insert(record).execute()
+                if response.data:
+                    logger.info(f"Granted global approval for user {user_id}, skill {skill_id}")
+                    return self._db_row_to_trust_history(response.data[0])
+                return None
+
+            # Update existing record
+            response = (
+                self._client.table("skill_trust_history")
+                .update({"globally_approved": True, "globally_approved_at": now.isoformat()})
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+
+            if response.data:
+                logger.info(f"Granted global approval for user {user_id}, skill {skill_id}")
+                return self._db_row_to_trust_history(response.data[0])
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error granting global approval for user {user_id}, skill {skill_id}: {e}")
+            return None
+
+    async def revoke_trust(self, user_id: str, skill_id: str) -> TrustHistory | None:
+        """Revoke all trust (session and global) for a skill.
+
+        Clears both session_trust_granted and globally_approved flags.
+        Keeps execution statistics intact.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier.
+
+        Returns:
+            The updated TrustHistory, or None on error.
+        """
+        try:
+            existing = await self.get_trust_history(user_id, skill_id)
+
+            if existing is None:
+                # Create new revoked record (for future use)
+                now = datetime.now(timezone.utc)
+                record = {
+                    "user_id": user_id,
+                    "skill_id": skill_id,
+                    "successful_executions": 0,
+                    "failed_executions": 0,
+                    "last_success": None,
+                    "last_failure": None,
+                    "session_trust_granted": False,
+                    "globally_approved": False,
+                    "globally_approved_at": None,
+                }
+
+                response = self._client.table("skill_trust_history").insert(record).execute()
+                if response.data:
+                    logger.info(f"Revoked trust for user {user_id}, skill {skill_id} (new record)")
+                    return self._db_row_to_trust_history(response.data[0])
+                return None
+
+            # Update existing record - clear all trust flags
+            response = (
+                self._client.table("skill_trust_history")
+                .update({
+                    "session_trust_granted": False,
+                    "globally_approved": False,
+                    "globally_approved_at": None,
+                })
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+
+            if response.data:
+                logger.info(f"Revoked trust for user {user_id}, skill {skill_id}")
+                return self._db_row_to_trust_history(response.data[0])
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error revoking trust for user {user_id}, skill {skill_id}: {e}")
+            return None
