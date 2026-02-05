@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
-from src.skills.autonomy import SkillAutonomyService
+from src.skills.autonomy import SkillAutonomyService, SkillRiskLevel
 from src.skills.executor import SkillExecutor
 from src.skills.index import SkillIndex
 
@@ -207,18 +207,29 @@ class SkillOrchestrator:
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse LLM response as JSON: {e}") from e
 
-        # Build ExecutionPlan from parsed data
-        steps = [
-            ExecutionStep(
-                step_number=s["step_number"],
-                skill_id=s["skill_id"],
-                skill_path=s.get("skill_path", ""),
-                depends_on=s.get("depends_on", []),
-                status="pending",
-                input_data=s.get("input_data", {}),
+        # Validate required structure
+        if not isinstance(plan_data, dict) or "steps" not in plan_data:
+            raise ValueError(
+                "Failed to parse LLM plan: response missing required 'steps' field"
             )
-            for s in plan_data.get("steps", [])
-        ]
+
+        # Build ExecutionPlan from parsed data
+        try:
+            steps = [
+                ExecutionStep(
+                    step_number=s["step_number"],
+                    skill_id=s["skill_id"],
+                    skill_path=s.get("skill_path", ""),
+                    depends_on=s.get("depends_on", []),
+                    status="pending",
+                    input_data=s.get("input_data", {}),
+                )
+                for s in plan_data["steps"]
+            ]
+        except (KeyError, TypeError) as e:
+            raise ValueError(
+                f"Failed to parse LLM plan: invalid step structure: {e}"
+            ) from e
 
         return ExecutionPlan(
             task_description=task,
@@ -295,8 +306,6 @@ class SkillOrchestrator:
         Returns:
             A WorkingMemoryEntry summarizing the step outcome.
         """
-        from src.skills.autonomy import SkillRiskLevel
-
         # Map risk level string to enum
         risk_enum_map: dict[str, SkillRiskLevel] = {
             "low": SkillRiskLevel.LOW,
@@ -312,6 +321,11 @@ class SkillOrchestrator:
         )
 
         if needs_approval:
+            logger.info(
+                "Step %d skipped: approval required",
+                step.step_number,
+                extra={"skill_id": step.skill_id, "user_id": user_id},
+            )
             if progress_callback:
                 await progress_callback(step.step_number, "skipped", "Approval required")
             return WorkingMemoryEntry(
@@ -325,6 +339,12 @@ class SkillOrchestrator:
             )
 
         # Notify running
+        logger.debug(
+            "Executing step %d (%s)",
+            step.step_number,
+            step.skill_path,
+            extra={"skill_id": step.skill_id, "user_id": user_id},
+        )
         if progress_callback:
             await progress_callback(step.step_number, "running", f"Executing {step.skill_path}")
 
@@ -337,18 +357,39 @@ class SkillOrchestrator:
         if memory_summary:
             context["working_memory"] = memory_summary
 
-        # Execute via SkillExecutor
-        execution = await self._executor.execute(
-            user_id=user_id,
-            skill_id=step.skill_id,
-            input_data=step.input_data,
-            context=context,
-        )
+        try:
+            # Execute via SkillExecutor
+            execution = await self._executor.execute(
+                user_id=user_id,
+                skill_id=step.skill_id,
+                input_data=step.input_data,
+                context=context,
+            )
 
-        # Record outcome in autonomy system
-        await self._autonomy.record_execution_outcome(
-            user_id, step.skill_id, success=execution.success
-        )
+            # Record outcome in autonomy system
+            await self._autonomy.record_execution_outcome(
+                user_id, step.skill_id, success=execution.success
+            )
+        except Exception as e:
+            logger.exception(
+                "Unexpected error executing step %d",
+                step.step_number,
+                extra={"skill_id": step.skill_id, "user_id": user_id},
+            )
+            step.status = "failed"
+            step.completed_at = datetime.now(UTC)
+            entry = WorkingMemoryEntry(
+                step_number=step.step_number,
+                skill_id=step.skill_id,
+                status="failed",
+                summary=f"Step failed: {e}",
+                artifacts=[],
+                extracted_facts={},
+                next_step_hints=[],
+            )
+            if progress_callback:
+                await progress_callback(step.step_number, "failed", entry.summary)
+            return entry
 
         step.completed_at = datetime.now(UTC)
 
@@ -372,6 +413,12 @@ class SkillOrchestrator:
                 next_step_hints=[],
             )
 
+            logger.debug(
+                "Step %d completed in %dms",
+                step.step_number,
+                execution.execution_time_ms,
+                extra={"skill_id": step.skill_id, "user_id": user_id},
+            )
             if progress_callback:
                 await progress_callback(step.step_number, "completed", entry.summary)
 
@@ -390,6 +437,12 @@ class SkillOrchestrator:
             next_step_hints=[],
         )
 
+        logger.warning(
+            "Step %d failed: %s",
+            step.step_number,
+            error_msg,
+            extra={"skill_id": step.skill_id, "user_id": user_id},
+        )
         if progress_callback:
             await progress_callback(step.step_number, "failed", entry.summary)
 
@@ -418,6 +471,14 @@ class SkillOrchestrator:
         """
         if not plan.steps:
             return []
+
+        logger.info(
+            "Executing plan %s: %d steps, %d groups",
+            plan.plan_id,
+            len(plan.steps),
+            len(plan.parallel_groups),
+            extra={"plan_id": plan.plan_id, "task": plan.task_description},
+        )
 
         # Build step lookup
         step_map: dict[int, ExecutionStep] = {s.step_number: s for s in plan.steps}

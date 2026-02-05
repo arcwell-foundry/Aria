@@ -511,6 +511,34 @@ class TestExecuteStep:
         assert "running" in statuses
         assert "completed" in statuses
 
+    async def test_execute_step_handles_executor_exception(self) -> None:
+        """Step returns failed entry when executor raises an exception."""
+        mock_executor = MagicMock()
+        mock_executor.execute = AsyncMock(side_effect=RuntimeError("connection lost"))
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+
+        orch = self._make_orchestrator(executor=mock_executor, autonomy=mock_autonomy)
+
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="skill-abc",
+            skill_path="a/b/c",
+            depends_on=[],
+            status="pending",
+            input_data={},
+        )
+
+        entry = await orch._execute_step(
+            user_id="user-123",
+            step=step,
+            working_memory=[],
+        )
+
+        assert entry.status == "failed"
+        assert "connection lost" in entry.summary
+
 
 @pytest.mark.asyncio
 class TestExecutePlan:
@@ -862,6 +890,36 @@ class TestCreateExecutionPlan:
         available_skills = [MagicMock(id="s1")]
 
         with pytest.raises(ValueError, match="parse"):
+            await orch.create_execution_plan(
+                task="Some task",
+                available_skills=available_skills,
+            )
+
+    async def test_create_plan_raises_on_missing_steps_key(self) -> None:
+        """ValueError raised when LLM returns valid JSON without 'steps' key."""
+        orch = self._make_orchestrator(llm_response=json.dumps({"no_steps": []}))
+
+        available_skills = [MagicMock(id="s1")]
+
+        with pytest.raises(ValueError, match="missing required 'steps' field"):
+            await orch.create_execution_plan(
+                task="Some task",
+                available_skills=available_skills,
+            )
+
+    async def test_create_plan_raises_on_malformed_step_structure(self) -> None:
+        """ValueError raised when steps have missing required fields."""
+        malformed_response = json.dumps({
+            "steps": [
+                {"skill_id": "s1"}  # missing step_number (required)
+            ],
+            "parallel_groups": [[1]],
+        })
+        orch = self._make_orchestrator(llm_response=malformed_response)
+
+        available_skills = [MagicMock(id="s1")]
+
+        with pytest.raises(ValueError, match="invalid step structure"):
             await orch.create_execution_plan(
                 task="Some task",
                 available_skills=available_skills,
