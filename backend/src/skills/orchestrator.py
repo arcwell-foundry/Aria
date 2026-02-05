@@ -277,6 +277,7 @@ class SkillOrchestrator:
         step: ExecutionStep,
         working_memory: list[WorkingMemoryEntry],
         *,
+        risk_level: str = "low",
         progress_callback: ProgressCallback | None = None,
     ) -> WorkingMemoryEntry:
         """Execute a single step and produce a WorkingMemoryEntry.
@@ -288,6 +289,7 @@ class SkillOrchestrator:
             user_id: ID of the user requesting execution.
             step: The step to execute.
             working_memory: Prior step summaries for context.
+            risk_level: Risk level for autonomy approval check.
             progress_callback: Optional callback for status updates.
 
         Returns:
@@ -295,9 +297,18 @@ class SkillOrchestrator:
         """
         from src.skills.autonomy import SkillRiskLevel
 
+        # Map risk level string to enum
+        risk_enum_map: dict[str, SkillRiskLevel] = {
+            "low": SkillRiskLevel.LOW,
+            "medium": SkillRiskLevel.MEDIUM,
+            "high": SkillRiskLevel.HIGH,
+            "critical": SkillRiskLevel.CRITICAL,
+        }
+        skill_risk = risk_enum_map.get(risk_level, SkillRiskLevel.LOW)
+
         # Check if approval is required
         needs_approval = await self._autonomy.should_request_approval(
-            user_id, step.skill_id, SkillRiskLevel.LOW
+            user_id, step.skill_id, skill_risk
         )
 
         if needs_approval:
@@ -414,8 +425,12 @@ class SkillOrchestrator:
         completed_steps: dict[int, bool] = {}
 
         for group in plan.parallel_groups:
-            # Filter to steps that are actually executable in this group
-            group_steps = [step_map[num] for num in group if num in step_map]
+            # Filter to steps whose dependencies are satisfied
+            group_steps = [
+                step_map[num]
+                for num in group
+                if num in step_map and self._can_execute(step_map[num], completed_steps)
+            ]
 
             if len(group_steps) == 1:
                 # Single step - execute directly
@@ -424,6 +439,7 @@ class SkillOrchestrator:
                     user_id=user_id,
                     step=step,
                     working_memory=working_memory,
+                    risk_level=plan.risk_level,
                     progress_callback=progress_callback,
                 )
                 working_memory.append(entry)
@@ -435,6 +451,7 @@ class SkillOrchestrator:
                         user_id=user_id,
                         step=step,
                         working_memory=working_memory,
+                        risk_level=plan.risk_level,
                         progress_callback=progress_callback,
                     )
                     for step in group_steps
