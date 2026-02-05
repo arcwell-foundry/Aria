@@ -134,3 +134,57 @@ class SkillExecutor:
         self._index = index
         self._installer = installer
         self._audit = audit_service
+
+    async def execute(
+        self,
+        user_id: str,
+        skill_id: str,
+        input_data: dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        trigger_reason: str = "user_request",
+    ) -> SkillExecution:
+        """Execute a skill through the security pipeline.
+
+        Pipeline: lookup → classify → sanitize → sandbox execute → validate → detokenize → audit
+
+        Args:
+            user_id: ID of the user requesting execution.
+            skill_id: ID of the skill to execute.
+            input_data: Input data to pass to the skill.
+            context: Optional context for data classification.
+            task_id: Optional task ID for audit trail.
+            agent_id: Optional agent ID for audit trail.
+            trigger_reason: Reason for execution (for audit).
+
+        Returns:
+            SkillExecution with results and metadata.
+
+        Raises:
+            SkillExecutionError: If skill not found, not installed, or execution fails.
+        """
+        if context is None:
+            context = {}
+
+        # Phase 1: Skill lookup
+        skill_entry = await self._index.get_skill(skill_id)
+        if skill_entry is None:
+            raise SkillExecutionError(
+                f"Skill '{skill_id}' not found in index",
+                skill_id=skill_id,
+                stage="lookup",
+            )
+
+        # Check if installed for user
+        is_installed = await self._installer.is_installed(user_id, skill_id)
+        if not is_installed:
+            raise SkillExecutionError(
+                f"Skill '{skill_id}' is not installed for user '{user_id}'",
+                skill_id=skill_id,
+                stage="lookup",
+            )
+
+        # TODO: Implement remaining pipeline phases
+        raise NotImplementedError("Execution pipeline not yet complete")

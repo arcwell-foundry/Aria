@@ -1,6 +1,8 @@
 """Tests for skill executor service."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.security.trust_levels import SkillTrustLevel
 from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor, _hash_data
@@ -220,3 +222,88 @@ class TestSkillExecutorInit:
         assert hasattr(executor, "_index")
         assert hasattr(executor, "_installer")
         assert hasattr(executor, "_audit")
+
+
+class TestSkillExecutorExecuteSkillLookup:
+    """Tests for SkillExecutor.execute skill lookup phase."""
+
+    @pytest.fixture
+    def executor_with_mocks(self) -> tuple:
+        """Create executor with mocked dependencies."""
+        from src.security.data_classification import DataClassifier
+        from src.security.sanitization import DataSanitizer
+        from src.security.sandbox import SkillSandbox
+        from src.skills.executor import SkillExecutor
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        sandbox = SkillSandbox()
+        index = MagicMock()
+        installer = MagicMock()
+        audit = MagicMock()
+
+        executor = SkillExecutor(
+            classifier=classifier,
+            sanitizer=sanitizer,
+            sandbox=sandbox,
+            index=index,
+            installer=installer,
+            audit_service=audit,
+        )
+
+        return executor, index, installer, audit
+
+    @pytest.mark.asyncio
+    async def test_execute_raises_error_if_skill_not_found(
+        self, executor_with_mocks: tuple
+    ) -> None:
+        """Test execute raises SkillExecutionError if skill not in index."""
+        from src.skills.executor import SkillExecutionError
+
+        executor, index, installer, audit = executor_with_mocks
+        index.get_skill = AsyncMock(return_value=None)
+
+        with pytest.raises(SkillExecutionError) as exc_info:
+            await executor.execute(
+                user_id="user-123",
+                skill_id="nonexistent-skill",
+                input_data={"text": "test"},
+            )
+
+        assert "not found" in str(exc_info.value).lower()
+        assert exc_info.value.skill_id == "nonexistent-skill"
+        assert exc_info.value.stage == "lookup"
+
+    @pytest.mark.asyncio
+    async def test_execute_raises_error_if_skill_not_installed(
+        self, executor_with_mocks: tuple
+    ) -> None:
+        """Test execute raises error if skill not installed for user."""
+        from src.security.trust_levels import SkillTrustLevel
+        from src.skills.executor import SkillExecutionError
+        from src.skills.index import SkillIndexEntry
+
+        executor, index, installer, audit = executor_with_mocks
+
+        # Skill exists in index
+        mock_entry = MagicMock(spec=SkillIndexEntry)
+        mock_entry.id = "skill-123"
+        mock_entry.skill_path = "test/skill"
+        mock_entry.skill_name = "Test Skill"
+        mock_entry.trust_level = SkillTrustLevel.COMMUNITY
+        mock_entry.full_content = "# Test skill content"
+        index.get_skill = AsyncMock(return_value=mock_entry)
+
+        # But not installed
+        installer.is_installed = AsyncMock(return_value=False)
+
+        with pytest.raises(SkillExecutionError) as exc_info:
+            await executor.execute(
+                user_id="user-123",
+                skill_id="skill-123",
+                input_data={"text": "test"},
+            )
+
+        assert "not installed" in str(exc_info.value).lower()
+        assert exc_info.value.skill_id == "skill-123"
+        assert exc_info.value.stage == "lookup"
