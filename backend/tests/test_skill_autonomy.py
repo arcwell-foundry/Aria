@@ -1,10 +1,16 @@
 """Tests for skill autonomy and trust system."""
 
+from datetime import UTC, datetime, timedelta
 from enum import Enum
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.skills.autonomy import SKILL_RISK_THRESHOLDS, SkillRiskLevel
+from src.skills.autonomy import (
+    SKILL_RISK_THRESHOLDS,
+    SkillAutonomyService,
+    SkillRiskLevel,
+)
 
 
 class TestSkillRiskLevel:
@@ -59,3 +65,87 @@ class TestSkillRiskThresholds:
         for threshold in SKILL_RISK_THRESHOLDS.values():
             value = threshold["auto_approve_after"]
             assert value is None or (isinstance(value, int) and value > 0)
+
+
+class TestSkillAutonomyServiceInit:
+    """Tests for SkillAutonomyService initialization."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    def test_init_creates_supabase_client(self, mock_get_client: MagicMock) -> None:
+        """Test SkillAutonomyService initializes with Supabase client."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        service = SkillAutonomyService()
+
+        assert service._client is not None
+        mock_get_client.assert_called_once()
+
+
+class TestSkillAutonomyServiceGetTrustHistory:
+    """Tests for SkillAutonomyService.get_trust_history method."""
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_get_trust_history_returns_existing_record(self, mock_get_client: MagicMock) -> None:
+        """Test get_trust_history returns existing trust history record."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        now = datetime.now(UTC)
+        db_row = {
+            "id": "123",
+            "user_id": "user-abc",
+            "skill_id": "skill-pdf",
+            "successful_executions": 5,
+            "failed_executions": 1,
+            "last_success": now.isoformat(),
+            "last_failure": (now - timedelta(hours=1)).isoformat(),
+            "session_trust_granted": False,
+            "globally_approved": False,
+            "globally_approved_at": None,
+            "created_at": (now - timedelta(days=7)).isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            db_row
+        )
+
+        result = await service.get_trust_history("user-abc", "skill-pdf")
+
+        assert result is not None
+        assert result.user_id == "user-abc"
+        assert result.skill_id == "skill-pdf"
+        assert result.successful_executions == 5
+        assert result.failed_executions == 1
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_get_trust_history_returns_none_for_nonexistent(self, mock_get_client: MagicMock) -> None:
+        """Test get_trust_history returns None when no record exists."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await service.get_trust_history("user-abc", "skill-pdf")
+
+        assert result is None
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_get_trust_history_handles_database_error(self, mock_get_client: MagicMock) -> None:
+        """Test get_trust_history returns None on database error."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.side_effect = (
+            Exception("Database connection error")
+        )
+
+        result = await service.get_trust_history("user-abc", "skill-pdf")
+
+        assert result is None

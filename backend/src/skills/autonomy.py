@@ -89,3 +89,83 @@ class TrustHistory:
     globally_approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class SkillAutonomyService:
+    """Service for managing skill autonomy and trust.
+
+    Tracks per-user-per-skill execution history and makes approval decisions
+    based on risk level and historical success rate.
+
+    Trust builds through successful executions:
+    - LOW risk: auto-approve after 3 successes
+    - MEDIUM risk: auto-approve after 10 successes
+    - HIGH risk: session trust only (never auto-approve)
+    - CRITICAL risk: always ask (never auto-approve)
+
+    Global approval can be explicitly granted for any skill.
+    Session trust is temporary and resets on logout/new session.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the autonomy service."""
+        self._client = SupabaseClient.get_client()
+
+    def _db_row_to_trust_history(self, row: dict[str, Any]) -> TrustHistory:
+        """Convert a database row to a TrustHistory.
+
+        Args:
+            row: Dictionary from Supabase representing a skill_trust_history row.
+
+        Returns:
+            A TrustHistory with all fields properly typed.
+        """
+        def parse_dt(value: Any) -> datetime | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return None
+
+        return TrustHistory(
+            id=str(row["id"]),
+            user_id=str(row["user_id"]),
+            skill_id=str(row["skill_id"]),
+            successful_executions=int(row.get("successful_executions", 0)),
+            failed_executions=int(row.get("failed_executions", 0)),
+            last_success=parse_dt(row.get("last_success")),
+            last_failure=parse_dt(row.get("last_failure")),
+            session_trust_granted=bool(row.get("session_trust_granted", False)),
+            globally_approved=bool(row.get("globally_approved", False)),
+            globally_approved_at=parse_dt(row.get("globally_approved_at")),
+            created_at=parse_dt(row["created_at"]) or datetime.now(timezone.utc),
+            updated_at=parse_dt(row["updated_at"]) or datetime.now(timezone.utc),
+        )
+
+    async def get_trust_history(self, user_id: str, skill_id: str) -> TrustHistory | None:
+        """Get trust history for a user-skill pair.
+
+        Args:
+            user_id: The user's UUID.
+            skill_id: The skill's identifier (from skills_index.id or path).
+
+        Returns:
+            The TrustHistory if found, None otherwise.
+        """
+        try:
+            response = (
+                self._client.table("skill_trust_history")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("skill_id", skill_id)
+                .single()
+                .execute()
+            )
+            if response.data:
+                return self._db_row_to_trust_history(response.data)
+            return None
+        except Exception as e:
+            logger.debug(f"Trust history not found for user {user_id}, skill {skill_id}: {e}")
+            return None
