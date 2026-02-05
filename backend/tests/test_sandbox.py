@@ -146,3 +146,65 @@ class TestSandboxViolation:
         )
         assert violation.violation_type == "network_access"
         assert violation.details is None
+
+
+class TestSandboxResult:
+    """Tests for SandboxResult dataclass."""
+
+    def test_sandbox_result_success(self) -> None:
+        """SandboxResult should store successful execution details."""
+        from src.security.sandbox import SandboxResult
+
+        result = SandboxResult(
+            output={"analysis": "complete"},
+            execution_time_ms=150,
+            memory_used_mb=45.5,
+            violations=[],
+            success=True,
+        )
+        assert result.output == {"analysis": "complete"}
+        assert result.execution_time_ms == 150
+        assert result.memory_used_mb == 45.5
+        assert result.violations == []
+        assert result.success is True
+
+    def test_sandbox_result_with_violations(self) -> None:
+        """SandboxResult should store violations when execution fails."""
+        from src.security.sandbox import SandboxResult, SandboxViolation
+
+        violation = SandboxViolation("network_access", "Attempted to access blocked domain")
+        result = SandboxResult(
+            output=None,
+            execution_time_ms=50,
+            memory_used_mb=12.3,
+            violations=[violation],
+            success=False,
+        )
+        assert result.output is None
+        assert len(result.violations) == 1
+        assert result.violations[0].violation_type == "network_access"
+        assert result.success is False
+
+    def test_sandbox_result_any_output_type(self) -> None:
+        """SandboxResult output should accept any type."""
+        from src.security.sandbox import SandboxResult
+
+        # String output
+        result_str = SandboxResult(
+            output="text output",
+            execution_time_ms=10,
+            memory_used_mb=1.0,
+            violations=[],
+            success=True,
+        )
+        assert result_str.output == "text output"
+
+        # List output
+        result_list = SandboxResult(
+            output=["item1", "item2"],
+            execution_time_ms=20,
+            memory_used_mb=2.0,
+            violations=[],
+            success=True,
+        )
+        assert result_list.output == ["item1", "item2"]

@@ -113,3 +113,25 @@ SANDBOX_BY_TRUST: Final[dict[SkillTrustLevel, SandboxConfig]] = {
         can_execute_code=False,
     ),
 }
+
+
+@dataclass
+class SandboxResult:
+    """Result of sandboxed skill execution.
+
+    Contains the execution output along with resource usage metrics
+    and any violations that occurred during execution.
+
+    Attributes:
+        output: The skill's output (any type).
+        execution_time_ms: Time taken to execute in milliseconds.
+        memory_used_mb: Peak memory usage during execution in megabytes.
+        violations: List of SandboxViolation instances if any occurred.
+        success: Whether execution completed without critical violations.
+    """
+
+    output: Any
+    execution_time_ms: int
+    memory_used_mb: float
+    violations: list[SandboxViolation]
+    success: bool
