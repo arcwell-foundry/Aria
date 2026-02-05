@@ -99,3 +99,32 @@ def test_context_allocation_is_over_budget_property() -> None:
 
     assert under.is_over_budget is False
     assert over.is_over_budget is True
+
+
+def test_skill_context_manager_initializes() -> None:
+    """Test SkillContextManager initializes with default budgets."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager()
+
+    assert manager.orchestrator_budget == 2000
+    assert manager.skill_index_budget == 600
+    assert manager.working_memory_budget == 800
+    assert manager.subagent_budget == 6000
+
+
+def test_skill_context_manager_accepts_custom_budgets() -> None:
+    """Test SkillContextManager accepts custom budget values."""
+    from src.skills.context_manager import SkillContextManager
+
+    manager = SkillContextManager(
+        orchestrator_budget=5000,
+        skill_index_budget=1000,
+        working_memory_budget=2000,
+        subagent_budget=10000,
+    )
+
+    assert manager.orchestrator_budget == 5000
+    assert manager.skill_index_budget == 1000
+    assert manager.working_memory_budget == 2000
+    assert manager.subagent_budget == 10000

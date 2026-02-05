@@ -84,3 +84,38 @@ class ContextAllocation:
     def is_over_budget(self) -> bool:
         """Check if this component has exceeded its budget."""
         return self.used_tokens > self.allocated_tokens
+
+
+class SkillContextManager:
+    """Manages context building and token budgets for skill orchestration.
+
+    The context manager provides two key capabilities:
+    1. Build compact orchestrator context (~2000 tokens) for planning
+    2. Build isolated subagent context (~6000 tokens) per skill execution
+
+    It also provides utilities for:
+    - Estimating token counts from text
+    - Compacting content to fit budgets
+    - Building working memory entries with controlled verbosity
+    """
+
+    def __init__(
+        self,
+        *,
+        orchestrator_budget: int = ORCHESTRATOR_BUDGET,
+        skill_index_budget: int = SKILL_INDEX_BUDGET,
+        working_memory_budget: int = WORKING_MEMORY_BUDGET,
+        subagent_budget: int = SUBAGENT_BUDGET,
+    ) -> None:
+        """Initialize the context manager with budget limits.
+
+        Args:
+            orchestrator_budget: Total tokens for orchestrator planning context.
+            skill_index_budget: Tokens for skill index summaries within orchestrator.
+            working_memory_budget: Tokens for working memory entries within orchestrator.
+            subagent_budget: Tokens for individual skill subagent contexts.
+        """
+        self.orchestrator_budget = orchestrator_budget
+        self.skill_index_budget = skill_index_budget
+        self.working_memory_budget = working_memory_budget
+        self.subagent_budget = subagent_budget
