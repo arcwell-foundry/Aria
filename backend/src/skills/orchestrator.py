@@ -10,9 +10,14 @@ Coordinates execution of multiple skills with:
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+from src.skills.autonomy import SkillAutonomyService
+from src.skills.executor import SkillExecutor
+from src.skills.index import SkillIndex
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +96,79 @@ class WorkingMemoryEntry:
     artifacts: list[str]
     extracted_facts: dict[str, Any]
     next_step_hints: list[str]
+
+
+# Type alias for progress callbacks
+ProgressCallback = Callable[[int, str, str], Awaitable[None]]
+# Arguments: (step_number, status, message)
+
+
+class SkillOrchestrator:
+    """Orchestrates multi-skill task execution.
+
+    Plans and executes multi-step skill workflows with:
+    - LLM-powered task analysis and dependency DAG construction
+    - Parallel execution of independent steps
+    - Working memory for inter-step context
+    - Autonomy integration for approval checks
+    - Progress callbacks for real-time updates
+    """
+
+    def __init__(
+        self,
+        executor: SkillExecutor,
+        index: SkillIndex,
+        autonomy: SkillAutonomyService,
+    ) -> None:
+        """Initialize the orchestrator.
+
+        Args:
+            executor: SkillExecutor for running individual skills.
+            index: SkillIndex for skill metadata and summaries.
+            autonomy: SkillAutonomyService for approval checks.
+        """
+        self._executor = executor
+        self._index = index
+        self._autonomy = autonomy
+
+    def _can_execute(
+        self, step: ExecutionStep, completed_steps: dict[int, bool]
+    ) -> bool:
+        """Check if a step's dependencies are satisfied.
+
+        Args:
+            step: The step to check.
+            completed_steps: Map of step_number -> completion status.
+
+        Returns:
+            True if all dependencies are in completed_steps, False otherwise.
+        """
+        return all(dep in completed_steps for dep in step.depends_on)
+
+    def _build_working_memory_summary(self, entries: list[WorkingMemoryEntry]) -> str:
+        """Build a compact text summary from working memory entries.
+
+        Produces a structured summary suitable for inclusion in LLM context
+        or for passing to subsequent skill steps.
+
+        Args:
+            entries: List of WorkingMemoryEntry from completed steps.
+
+        Returns:
+            Formatted string summary. Empty string if no entries.
+        """
+        if not entries:
+            return ""
+
+        parts: list[str] = []
+        for entry in entries:
+            section = f"Step {entry.step_number} ({entry.skill_id}) [{entry.status}]: {entry.summary}"
+            if entry.extracted_facts:
+                facts_str = ", ".join(f"{k}={v}" for k, v in entry.extracted_facts.items())
+                section += f"\n  Facts: {facts_str}"
+            if entry.next_step_hints:
+                hints_str = "; ".join(entry.next_step_hints)
+                section += f"\n  Hints: {hints_str}"
+            parts.append(section)
+
+        return "\n".join(parts)
