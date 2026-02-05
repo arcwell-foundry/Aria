@@ -5,7 +5,9 @@ what skills can access it. Skills are treated as untrusted code
 until proven otherwise.
 """
 
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Optional
 
 
 class DataClass(Enum):
@@ -21,12 +23,25 @@ class DataClass(Enum):
     REGULATED = "regulated"  # PHI, PII - legal requirements (HIPAA, GDPR)
 
 
-# Placeholder classes for the __init__.py imports
-# These will be implemented in subsequent tasks
+@dataclass
 class ClassifiedData:
-    """Placeholder for classified data container - to be implemented."""
+    """Data with its classification and handling rules.
 
-    pass
+    Attributes:
+        data: The actual data content (any type).
+        classification: The sensitivity level of this data.
+        data_type: Category of data (financial, contact, health, competitive, etc.).
+        source: Where this data came from (crm, user_input, memory, etc.).
+        can_be_tokenized: Whether we can replace with placeholder tokens.
+        retention_days: Auto-delete after N days (None means permanent).
+    """
+
+    data: Any
+    classification: DataClass
+    data_type: str
+    source: str
+    can_be_tokenized: bool = True
+    retention_days: Optional[int] = None
 
 
 class DataClassifier:
