@@ -5,6 +5,8 @@ resource limits based on trust levels. Ensures untrusted skills cannot
 access system resources or data beyond their permissions.
 """
 
+import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -135,3 +137,77 @@ class SandboxResult:
     memory_used_mb: float
     violations: list[SandboxViolation]
     success: bool
+
+
+class SkillSandbox:
+    """Executes skills in isolated sandbox with resource limits.
+
+    Provides timeout enforcement, resource tracking, and access control
+    for skill execution based on SandboxConfig settings.
+    """
+
+    async def execute(
+        self,
+        skill_content: str,
+        input_data: dict[str, Any],
+        config: SandboxConfig,
+    ) -> SandboxResult:
+        """Execute skill instructions in sandbox.
+
+        Enforces timeout and tracks resource usage. Returns SandboxResult
+        with output and metrics, or raises SandboxViolation on timeout.
+
+        Args:
+            skill_content: The skill's markdown/instruction content.
+            input_data: Sanitized input data for the skill.
+            config: SandboxConfig defining resource limits.
+
+        Returns:
+            SandboxResult with output, timing, and resource metrics.
+
+        Raises:
+            SandboxViolation: If execution exceeds timeout.
+        """
+        start_time = time.perf_counter()
+
+        try:
+            output = await asyncio.wait_for(
+                self._execute_skill(skill_content, input_data),
+                timeout=config.timeout_seconds,
+            )
+        except TimeoutError:
+            raise SandboxViolation(
+                violation_type="timeout",
+                message=f"Skill execution timed out after {config.timeout_seconds} seconds",
+                details={"timeout_seconds": config.timeout_seconds},
+            ) from None
+
+        execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+
+        return SandboxResult(
+            output=output,
+            execution_time_ms=execution_time_ms,
+            memory_used_mb=0.0,  # TODO: Implement memory tracking
+            violations=[],
+            success=True,
+        )
+
+    async def _execute_skill(
+        self,
+        skill_content: str,  # noqa: ARG002
+        input_data: dict[str, Any],
+    ) -> Any:
+        """Execute the skill (placeholder for actual LLM-based execution).
+
+        For LLM-based skills, this builds a prompt with skill instructions
+        and sanitized input, then calls the LLM.
+
+        Args:
+            skill_content: The skill's instruction content.
+            input_data: The sanitized input data.
+
+        Returns:
+            The skill's output.
+        """
+        # Placeholder implementation - actual execution would call LLM
+        return {"status": "executed", "input_received": bool(input_data)}

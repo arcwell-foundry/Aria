@@ -1,5 +1,7 @@
 """Unit tests for skill execution sandbox."""
 
+import asyncio
+
 import pytest
 
 
@@ -208,3 +210,99 @@ class TestSandboxResult:
             success=True,
         )
         assert result_list.output == ["item1", "item2"]
+
+
+class TestSkillSandbox:
+    """Tests for SkillSandbox class."""
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_sandbox_result(self) -> None:
+        """execute() should return a SandboxResult."""
+        from src.security.sandbox import SandboxConfig, SandboxResult, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(timeout_seconds=5)
+
+        result = await sandbox.execute(
+            skill_content="Test skill content",
+            input_data={"query": "test"},
+            config=config,
+        )
+
+        assert isinstance(result, SandboxResult)
+        assert result.success is True
+        assert result.execution_time_ms >= 0
+        assert result.memory_used_mb >= 0
+
+    @pytest.mark.asyncio
+    async def test_execute_enforces_timeout(self) -> None:
+        """execute() should raise SandboxViolation on timeout."""
+        from src.security.sandbox import SandboxConfig, SandboxViolation, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(timeout_seconds=1)
+
+        # Create a skill execution that takes too long
+        async def slow_execution(skill_content: str, input_data: dict) -> dict:
+            await asyncio.sleep(5)  # Sleep longer than timeout
+            return {"result": "done"}
+
+        sandbox._execute_skill = slow_execution  # type: ignore
+
+        with pytest.raises(SandboxViolation) as exc_info:
+            await sandbox.execute(
+                skill_content="Slow skill",
+                input_data={},
+                config=config,
+            )
+
+        assert exc_info.value.violation_type == "timeout"
+        assert "1" in exc_info.value.message  # Should mention the timeout duration
+
+    @pytest.mark.asyncio
+    async def test_execute_tracks_execution_time(self) -> None:
+        """execute() should track execution time in milliseconds."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(timeout_seconds=5)
+
+        # Create a skill execution with known duration
+        async def timed_execution(skill_content: str, input_data: dict) -> dict:
+            await asyncio.sleep(0.1)  # 100ms
+            return {"result": "done"}
+
+        sandbox._execute_skill = timed_execution  # type: ignore
+
+        result = await sandbox.execute(
+            skill_content="Timed skill",
+            input_data={},
+            config=config,
+        )
+
+        # Should be at least 100ms, with some tolerance
+        assert result.execution_time_ms >= 90
+        assert result.execution_time_ms < 500  # Shouldn't be too long
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_output(self) -> None:
+        """execute() should return skill output in result."""
+        from src.security.sandbox import SandboxConfig, SkillSandbox
+
+        sandbox = SkillSandbox()
+        config = SandboxConfig(timeout_seconds=5)
+
+        expected_output = {"analysis": "complete", "score": 95}
+
+        async def output_execution(skill_content: str, input_data: dict) -> dict:
+            return expected_output
+
+        sandbox._execute_skill = output_execution  # type: ignore
+
+        result = await sandbox.execute(
+            skill_content="Output skill",
+            input_data={},
+            config=config,
+        )
+
+        assert result.output == expected_output
