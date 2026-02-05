@@ -75,3 +75,7 @@ class DataSanitizer:
     def __init__(self, classifier: DataClassifier) -> None:
         """Initialize DataSanitizer with a classifier."""
         self.classifier = classifier
+
+    def tokenize_value(self, value: Any, data_type: str, token_map: TokenMap) -> str:
+        """Replace a sensitive value with a token."""
+        return token_map.add_token(data_type, value)

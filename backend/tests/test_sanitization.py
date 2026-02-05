@@ -136,3 +136,32 @@ class TestDataSanitizer:
         sanitizer = DataSanitizer(classifier)
 
         assert sanitizer.classifier is classifier
+
+    def test_tokenize_value_returns_token_and_updates_map(self) -> None:
+        """Test tokenize_value returns token and updates token map."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        token_map = TokenMap()
+
+        token = sanitizer.tokenize_value("$4.2M", "financial", token_map)
+
+        assert token == "[FINANCIAL_001]"
+        assert token_map.get_original("[FINANCIAL_001]") == "$4.2M"
+
+    def test_tokenize_value_handles_multiple_values(self) -> None:
+        """Test tokenize_value handles multiple values of same type."""
+        from src.security.sanitization import DataSanitizer, TokenMap
+        from src.security.data_classification import DataClassifier
+
+        classifier = DataClassifier()
+        sanitizer = DataSanitizer(classifier)
+        token_map = TokenMap()
+
+        token1 = sanitizer.tokenize_value("john@example.com", "contact", token_map)
+        token2 = sanitizer.tokenize_value("jane@example.com", "contact", token_map)
+
+        assert token1 == "[CONTACT_001]"
+        assert token2 == "[CONTACT_002]"
