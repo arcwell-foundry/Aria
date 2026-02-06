@@ -983,3 +983,150 @@ async def get_injected_questions(
     ooda = OnboardingOODAController()
     questions = await ooda.get_injected_questions(current_user.id, step)
     return [q.model_dump() for q in questions]
+
+
+# Cross-user acceleration endpoints (US-917)
+
+
+class CrossUserAccelerationResponse(BaseModel):
+    """Response model for cross-user acceleration check."""
+
+    exists: bool
+    company_id: str | None
+    company_name: str | None
+    richness_score: int
+    recommendation: str  # "skip", "partial", "full"
+    facts: list[dict[str, Any]]  # Corporate memory facts
+
+
+class ConfirmCompanyDataRequest(BaseModel):
+    """Request body for confirming company data."""
+
+    company_id: str
+    corrections: dict[str, str] = {}
+
+
+class ConfirmCompanyDataResponse(BaseModel):
+    """Response model for confirming company data."""
+
+    user_linked: bool
+    steps_skipped: list[str]
+    readiness_inherited: int
+    corrections_applied: int
+
+
+def _get_cross_user_service() -> "CrossUserAccelerationService":
+    """Get cross-user acceleration service instance."""
+    from src.onboarding.cross_user import CrossUserAccelerationService
+
+    db = SupabaseClient.get_client()
+    return CrossUserAccelerationService(db=db)
+
+
+@router.get(
+    "/cross-user",
+    response_model=CrossUserAccelerationResponse,
+)
+async def get_cross_user_acceleration(
+    domain: str,
+    current_user: CurrentUser,
+) -> CrossUserAccelerationResponse:
+    """Check if company domain exists in Corporate Memory.
+
+    When user #2+ at a company starts onboarding, this endpoint detects
+    existing Corporate Memory and recommends step skipping based on data richness.
+
+    Privacy: Only returns corporate facts (excludes personal data from other users).
+
+    Args:
+        domain: Company domain to check (e.g., "acme-corp.com").
+        current_user: Authenticated user.
+
+    Returns:
+        CrossUserAccelerationResponse with existence status, company info,
+        richness score, recommendation, and corporate facts.
+
+    Raises:
+        HTTPException: 500 if service error occurs.
+    """
+    try:
+        service = _get_cross_user_service()
+
+        # Check if company exists
+        check_result = service.check_company_exists(domain)
+
+        # Get company facts if company exists
+        facts: list[dict[str, Any]] = []
+        if check_result.exists and check_result.company_id:
+            memory_delta = service.get_company_memory_delta(
+                check_result.company_id,
+                current_user.id,
+            )
+            facts = memory_delta.get("facts", [])
+
+        return CrossUserAccelerationResponse(
+            exists=check_result.exists,
+            company_id=check_result.company_id,
+            company_name=check_result.company_name,
+            richness_score=check_result.richness_score,
+            recommendation=check_result.recommendation,
+            facts=facts,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error checking cross-user acceleration for domain {domain}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to check company domain",
+        ) from e
+
+
+@router.post(
+    "/cross-user/confirm",
+    response_model=ConfirmCompanyDataResponse,
+)
+async def confirm_company_data(
+    body: ConfirmCompanyDataRequest,
+    current_user: CurrentUser,
+) -> ConfirmCompanyDataResponse:
+    """Confirm existing company data and link user to company.
+
+    When user #2+ confirms their company data, this endpoint:
+    1. Links user to company via user_profiles
+    2. Applies any corrections provided by user
+    3. Marks company_discovery and document_upload as skipped
+    4. Inherits corporate_memory readiness score from company richness
+
+    Args:
+        body: Request with company_id and optional corrections.
+        current_user: Authenticated user.
+
+    Returns:
+        ConfirmCompanyDataResponse with link status, skipped steps,
+        inherited readiness score, and corrections applied count.
+
+    Raises:
+        HTTPException: 500 if service error occurs.
+    """
+    try:
+        service = _get_cross_user_service()
+
+        result = service.confirm_company_data(
+            company_id=body.company_id,
+            user_id=current_user.id,
+            corrections=body.corrections,
+        )
+
+        return ConfirmCompanyDataResponse(
+            user_linked=result["user_linked"],
+            steps_skipped=result["steps_skipped"],
+            readiness_inherited=result["readiness_inherited"],
+            corrections_applied=result["corrections_applied"],
+        )
+
+    except Exception as e:
+        logger.exception(f"Error confirming company data for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to confirm company data",
+        ) from e

@@ -6,8 +6,6 @@ ARIA (Autonomous Reasoning & Intelligence Agent) is an AI-powered Department Dir
 
 **Key Value:** Solve the "72% admin trap" - sales reps spend most time on admin, not selling.
 
-**AGI Vision:** ARIA should feel like a colleague, not a tool. She remembers everything, volunteers relevant information, adapts to user stress, and has opinions.
-
 ## Tech Stack
 
 - **Backend:** Python 3.11+ / FastAPI / Uvicorn
@@ -17,7 +15,8 @@ ARIA (Autonomous Reasoning & Intelligence Agent) is an AI-powered Department Dir
 - **LLM:** Anthropic Claude API (claude-sonnet-4-20250514)
 - **Video:** Tavus + Daily.co
 - **Integrations:** Composio for OAuth
-- **Skills:** skills.sh ecosystem integration
+- **Email Service:** Resend/SendGrid (transactional emails)
+- **Payments:** Stripe (billing & subscriptions)
 
 ## Commands
 
@@ -39,11 +38,6 @@ npm run build
 npm run typecheck
 npm run lint
 npm run test
-
-# Database migrations
-supabase migration new <name>
-supabase db push
-supabase migration repair --status applied <version>
 ```
 
 ## Project Structure
@@ -51,45 +45,36 @@ supabase migration repair --status applied <version>
 ```
 aria/
 ├── backend/src/
-│   ├── api/routes/        # FastAPI route handlers
-│   ├── agents/            # ARIA's specialized agents
-│   │   ├── base.py
-│   │   ├── skill_aware_agent.py  # Base for skill-enabled agents
-│   │   ├── hunter.py
-│   │   ├── analyst.py
-│   │   ├── strategist.py
-│   │   ├── scribe.py
-│   │   ├── operator.py
-│   │   └── scout.py
-│   ├── memory/            # Six-type memory system
-│   │   ├── working.py
-│   │   ├── episodic.py
-│   │   ├── semantic.py
-│   │   ├── procedural.py
-│   │   ├── prospective.py
-│   │   └── lead_memory.py
-│   ├── skills/            # Skills.sh integration
-│   │   ├── index.py           # Skill discovery & search
-│   │   ├── installer.py       # Skill installation
-│   │   ├── executor.py        # Sandboxed execution
-│   │   ├── orchestrator.py    # Multi-skill coordination
-│   │   ├── context_manager.py # Context budget management
-│   │   └── autonomy.py        # Trust & approval system
-│   ├── security/          # Data protection
-│   │   ├── data_classification.py
-│   │   ├── sanitization.py
-│   │   ├── sandbox.py
-│   │   ├── trust_levels.py
-│   │   └── audit.py
-│   ├── core/              # Config, OODA loop, LLM client
-│   ├── intelligence/      # AGI capabilities
-│   └── db/                # Supabase and Graphiti clients
+│   ├── api/routes/          # FastAPI route handlers
+│   ├── agents/              # ARIA's specialized agents (Hunter, Analyst, Strategist, Scribe, Operator, Scout)
+│   ├── memory/              # Six-type memory system + Memory Delta Presenter
+│   │   ├── delta_presenter.py   # Reusable Memory Delta pattern (US-920)
+│   │   ├── profile_merge.py     # Profile update → memory merge pipeline (US-922)
+│   │   └── retroactive_enrichment.py  # Post-ingestion back-enrichment (US-923)
+│   ├── onboarding/          # Intelligence Initialization (Phase 9A)
+│   │   ├── orchestrator.py      # State machine & step coordination (US-901)
+│   │   ├── adaptive_controller.py  # OODA-driven step adaptation (US-916)
+│   │   ├── enrichment.py        # Company Enrichment Engine (US-903)
+│   │   ├── email_bootstrap.py   # Priority email ingestion (US-908)
+│   │   ├── gap_detector.py      # Knowledge gap → Prospective Memory (US-912)
+│   │   ├── readiness.py         # Readiness score per memory domain (US-913)
+│   │   ├── first_conversation.py  # Intelligence demonstration (US-914)
+│   │   ├── activation.py        # Agent activation on completion (US-915)
+│   │   ├── skill_recommender.py # Skills pre-configuration (US-918)
+│   │   ├── personality_calibrator.py  # Tone calibration from Digital Twin (US-919)
+│   │   └── outcome_tracker.py   # Self-improving onboarding (US-924)
+│   ├── core/                # Config, OODA loop, LLM client
+│   ├── skills/              # Phase 5B skills system
+│   └── db/                  # Supabase and Graphiti clients
 ├── frontend/src/
-│   ├── components/        # React components
-│   ├── pages/             # Route pages
-│   ├── hooks/             # Custom React hooks
-│   └── api/               # API client functions
-└── docs/                  # PRD and phase documents
+│   ├── components/
+│   │   ├── onboarding/      # Step components (CompanyDiscoveryStep, DocumentUploadStep, etc.)
+│   │   ├── memory/          # MemoryDelta component (reusable across app)
+│   │   └── ...              # Other component groups
+│   ├── pages/               # Route pages
+│   ├── hooks/               # Custom React hooks
+│   └── api/                 # API client functions
+└── docs/                    # PRD and phase documents
 ```
 
 ## Code Style
@@ -108,229 +93,89 @@ aria/
 - React functional components with hooks
 - Tailwind for styling (no custom CSS files)
 
----
-
 ## Key Patterns
 
 ### Memory System
-
-ARIA has six memory types. Always consider which applies:
-
-| Type | Purpose | Storage | Retention |
-|------|---------|---------|-----------|
-| Working | Current conversation | In-memory | Session |
-| Episodic | Past events | Graphiti | Permanent |
-| Semantic | Facts with confidence | Graphiti + pgvector | Permanent |
-| Procedural | Learned workflows | Supabase | Permanent |
-| Prospective | Future tasks | Supabase | Until done |
-| Lead | Sales pursuit tracking | Graphiti + Supabase | Permanent |
+ARIA has six memory types. Always consider which memory type applies:
+1. **Working** - Current conversation (in-memory)
+2. **Episodic** - Past events (Graphiti)
+3. **Semantic** - Facts with confidence (Graphiti + pgvector)
+4. **Procedural** - Workflows (Supabase)
+5. **Prospective** - Future tasks (Supabase)
+6. **Lead** - Sales pursuit tracking (Graphiti + Supabase)
 
 ### OODA Loop
-
-ARIA's cognitive process: **Observe → Orient → Decide → Act**
-
-Always implement this loop for complex tasks. Skills participate in the ACT phase.
+ARIA's cognitive process: Observe → Orient → Decide → Act
+Always implement this loop for complex tasks. The onboarding flow itself runs through OODA — it adapts based on what ARIA learns at each step.
 
 ### Agents
+Six core agents: Hunter, Analyst, Strategist, Scribe, Operator, Scout
+Extend `BaseAgent` class for any new agents.
 
-Six core agents, all extending `SkillAwareAgent`:
+### Integration Checklist (Phase 9+)
+Every feature that collects or processes data MUST include an Integration Checklist in its implementation. Ask: "Where else does this data need to flow?"
 
-| Agent | Role | Skills Access |
-|-------|------|---------------|
-| Hunter | Lead discovery | competitor-analysis, lead-research |
-| Analyst | Scientific research | clinical-trial-analysis, pubmed-research |
-| Strategist | Planning | market-analysis, competitive-positioning |
-| Scribe | Communication | pdf, docx, pptx, email-sequence |
-| Operator | System ops | calendar-management, crm-operations |
-| Scout | Intelligence | regulatory-monitor, news-aggregation |
-
----
-
-## Skills System
-
-### Overview
-
-ARIA integrates with skills.sh (200+ community skills) while maintaining enterprise security. Skills extend agent capabilities without compromising data protection.
-
-### Skill Trust Levels
-
-| Level | Source | Data Access | Network |
-|-------|--------|-------------|---------|
-| CORE | Built by ARIA team | All (with permission) | Whitelisted |
-| VERIFIED | Anthropic, Vercel, Supabase | PUBLIC, INTERNAL | None |
-| COMMUNITY | skills.sh community | PUBLIC only | None |
-| USER | User-created | PUBLIC, INTERNAL | None |
-
-### Data Classification
-
-ALL data is classified before skill access:
-
-```python
-class DataClass(Enum):
-    PUBLIC = "public"           # Company names, public info
-    INTERNAL = "internal"       # Goals, strategies, notes
-    CONFIDENTIAL = "confidential"  # Deal details, contacts
-    RESTRICTED = "restricted"   # Revenue, pricing, contracts
-    REGULATED = "regulated"     # PHI, PII (HIPAA, GDPR)
-```
-
-### Security Pipeline
-
-Every skill execution follows this pipeline:
+A data point should flow into at least 3 downstream systems. If it only stores in one place, it's a form — not intelligence.
 
 ```
-Input Data
-    ↓
-1. CLASSIFY - Scan for sensitive patterns
-    ↓
-2. PERMISSION CHECK - Trust level vs data class
-    ↓
-3. TOKENIZE - Replace sensitive values
-    ↓
-4. SANDBOX EXECUTE - Resource-limited execution
-    ↓
-5. VALIDATE OUTPUT - Check for leakage
-    ↓
-6. AUDIT LOG - Immutable record
-    ↓
-Clean Output
+Integration Checklist:
+- [ ] Data stored in correct memory type(s)
+- [ ] Causal graph seeds generated (if applicable)
+- [ ] Knowledge gaps identified → Prospective Memory entries created
+- [ ] Readiness sub-score updated
+- [ ] Downstream features notified (list which)
+- [ ] Audit log entry created
+- [ ] Episodic memory records the event
 ```
 
-### Skill Orchestration
+### Memory Delta Pattern
+The Memory Delta is a reusable UX pattern for trust-building. Whenever ARIA learns something significant, she shows the user what she learned with confidence indicators and correction affordances.
 
-For multi-skill tasks:
+Use `MemoryDeltaPresenter` (backend) and `<MemoryDelta>` component (frontend) everywhere ARIA learns:
+- Post-onboarding enrichment
+- Post-email processing
+- Post-meeting debrief
+- Profile updates
+- Any significant memory event
 
-```python
-# Orchestrator prepares minimal context (~2000 tokens)
-orchestrator_context = {
-    "skill_index": compact_summaries,  # ~600 tokens
-    "execution_plan": current_plan,     # ~500 tokens
-    "working_memory": step_summaries,   # ~800 tokens
-}
+Confidence → language mapping:
+- 95%+ → stated as fact
+- 80-94% → "Based on your communications..."
+- 60-79% → "It appears that..."
+- 40-59% → "I'm not certain, but..."
+- <40% → "Can you confirm...?"
 
-# Each skill gets isolated context (~6000 tokens)
-subagent_context = {
-    "task_briefing": what_to_do,        # ~300 tokens
-    "skill_instructions": full_skill_md, # ~2000 tokens
-    "input_data": sanitized_data,        # variable
-}
-```
+### Readiness Scoring
+Every user has readiness sub-scores (0-100) across five domains:
+- `corporate_memory` (25% weight)
+- `digital_twin` (25% weight)
+- `relationship_graph` (20% weight)
+- `integrations` (15% weight)
+- `goal_clarity` (15% weight)
 
-### Autonomy System
+Readiness scores inform feature confidence. Low readiness in a domain = lower confidence disclaimers on features that depend on that domain.
 
-Trust builds over time:
+### Continuous Onboarding
+Onboarding never truly ends. After formal onboarding, ARIA proactively fills knowledge gaps through natural conversation — not pop-ups. Use `KnowledgeGapDetector` to identify gaps and `ProspectiveMemory` to schedule gap-filling prompts.
 
-| Risk Level | Auto-execute After | Examples |
-|------------|-------------------|----------|
-| LOW | 3 successes | pdf, docx, research |
-| MEDIUM | 10 successes | email-sequence, calendar |
-| HIGH | Session trust only | external-api-calls |
-| CRITICAL | Never (always ask) | data-deletion, financial |
+### Retroactive Enrichment
+When ARIA learns something new, she checks if it enriches earlier memories. Example: Email archive reveals deep relationship with a contact that was only superficially captured during CRM import → retroactively enrich Lead Memory, update stakeholder map, recalculate health score.
 
-### Skill Development Patterns
+Use `RetroactiveEnrichmentService` after major data ingestion events.
 
-When creating skill-aware features:
+### Source Hierarchy for Conflict Resolution
+When data conflicts, follow this priority:
+1. User-stated (confidence 0.95)
+2. CRM data (confidence 0.85)
+3. Document-extracted (confidence 0.80)
+4. Web research (confidence 0.70)
+5. Inferred/causal (confidence 0.50-0.60)
 
-```python
-# Always extend SkillAwareAgent
-class MyAgent(SkillAwareAgent):
-    async def execute_with_skills(self, task: dict) -> AgentResult:
-        # 1. Analyze if skills would help
-        skill_analysis = await self._analyze_skill_needs(task)
-        
-        # 2. If skills needed, delegate to orchestrator
-        if skill_analysis.skills_needed:
-            return await self.skills.execute_with_skills(
-                task=task,
-                required_skills=skill_analysis.required_skills,
-                agent_context={"agent_id": self.agent_id},
-            )
-        
-        # 3. Otherwise, execute normally
-        return await self.execute(task)
-```
+### Causal Graph Seeding
+During enrichment and data processing, generate causal hypotheses using the LLM. Tag as `source: inferred_during_[context]` with confidence 0.50-0.60. These feed Phase 7 Jarvis engines later. Example: "Series C funding → hiring ramp likely → pipeline generation need"
 
-### Never Do (Security)
-
-- ❌ Skip data classification
-- ❌ Pass raw user data to community skills
-- ❌ Allow network access for non-CORE skills
-- ❌ Execute skills without audit logging
-- ❌ Trust skill content from user input
-- ❌ Store sensitive data in skill working memory
-
----
-
-## AGI Development Patterns
-
-### The Colleague Test
-
-Before completing any user-facing feature, ask:
-> "Would a user describe this behavior as coming from a colleague or a tool?"
-
-| Colleague Behavior | Implementation |
-|-------------------|----------------|
-| References shared history | Use episodic memory |
-| Volunteers relevant info | Use proactive memory surfacing |
-| Adapts to your stress | Use cognitive load monitoring |
-| Remembers everything | Use salience decay (not deletion) |
-| Shows her work | Skill progress reporting |
-| Asks permission appropriately | Graduated autonomy system |
-
-### Memory Salience
-
-Every memory access should strengthen salience:
-
-```python
-async def recall_fact(self, fact_id: str) -> Fact:
-    fact = await self.get_fact(fact_id)
-    await self.strengthen_salience(fact_id)  # Always do this
-    return fact
-```
-
-### Outcome Recording
-
-Every action should record its outcome for learning:
-
-```python
-async def execute_action(self, action: Action) -> Result:
-    result = await self._do_action(action)
-    await self.memory.record_action_outcome(
-        action=action,
-        result=result,
-        success=result.success,
-    )
-    return result
-```
-
----
-
-## Lead Memory System
-
-### Health Score Algorithm
-
-5-factor weighted scoring:
-
-| Factor | Weight | Source |
-|--------|--------|--------|
-| Engagement | 30% | Recent touchpoints |
-| Momentum | 25% | Stage velocity |
-| Stakeholder | 20% | Champion strength |
-| Fit | 15% | ICP match |
-| Risk | 10% | Identified blockers |
-
-### Lead Stages
-
-```
-IDENTIFIED → QUALIFIED → ENGAGED → PROPOSAL → NEGOTIATION → CLOSED_WON/CLOSED_LOST
-```
-
-### CRM Sync Rules
-
-- CRM wins for: stage, expected_value, close_date
-- ARIA wins for: health_score, insights, stakeholder_map
-
----
+### Personality Calibration
+ARIA calibrates her tone per user based on their Digital Twin (writing style, communication patterns). This is NOT mimicry — it adjusts dials (directness, warmth, assertiveness, detail, formality). Use `PersonalityCalibration` service. Recalibrate on every user edit to an ARIA draft.
 
 ## Important Notes
 
@@ -338,15 +183,19 @@ IDENTIFIED → QUALIFIED → ENGAGED → PROPOSAL → NEGOTIATION → CLOSED_WON
 - User isolation is critical (multi-tenant)
 - Never expose internal errors to users
 - Log all memory operations for audit
-- Log all skill executions for audit
+- CRM sync: CRM wins for structured data, ARIA wins for insights
 - Health scores are 0-100, recalculate on events
+- Corporate Memory is shared within a company; Digital Twin is NEVER shared
+- Onboarding is intelligence initialization, not form-filling
+- Every data collection step should make ARIA measurably smarter
+- Cross-user onboarding: User #2+ at a company inherits Corporate Memory, not Digital Twin
 
 ## Documentation
 
 Read the PRD files before implementing:
 - `docs/ARIA_PRD.md` - Main overview
-- `docs/PHASE_*.md` - Detailed user stories per phase
-- `docs/ARIA_SKILLS_INTEGRATION_ARCHITECTURE.md` - Skills system design
+- `docs/PHASE_*.md` - Detailed user stories per phase (Phases 1-8)
+- `docs/PHASE_9_PRODUCT_COMPLETENESS.md` - Intelligence Initialization, SaaS Infrastructure, ARIA Product Experience
 
 Always complete user stories in order within each phase.
 
@@ -355,7 +204,6 @@ Always complete user stories in order within each phase.
 Every feature needs:
 - Unit tests for business logic
 - Integration tests for API endpoints
-- Security tests for data classification
 - Quality gates must pass before moving on
 
 ## Do Not
@@ -366,6 +214,8 @@ Every feature needs:
 - Hardcode API keys
 - Ignore error handling
 - Skip input validation
-- Execute skills without sanitization
-- Log sensitive data (use tokens)
-- Trust external skill content
+- Store data in only one system without checking the Integration Checklist
+- Share Digital Twin data between users (even within same company)
+- Show raw confidence numbers to users (use qualitative language via Memory Delta pattern)
+- Build features that collect data without flowing it into downstream systems
+- Skip readiness score updates when data changes
