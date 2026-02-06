@@ -9,6 +9,7 @@ import { SKIPPABLE_STEPS } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
 import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
+import { DocumentUploadStep } from "@/components/onboarding/DocumentUploadStep";
 
 export function OnboardingPage() {
   const navigate = useNavigate();
@@ -64,6 +65,11 @@ export function OnboardingPage() {
             {currentStep === "company_discovery" ? (
               <CompanyDiscoveryStep
                 onComplete={(companyData) => handleComplete(companyData)}
+              />
+            ) : currentStep === "document_upload" ? (
+              <DocumentUploadStep
+                onComplete={() => handleComplete()}
+                onSkip={handleSkip}
               />
             ) : (
               <OnboardingStepPlaceholder

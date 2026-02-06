@@ -26,6 +26,12 @@ pytest-cov>=4.1.0,<5.0.0
 mypy>=1.8.0,<2.0.0
 ruff>=0.1.0,<1.0.0
 
+# Document parsing (US-904)
+PyMuPDF>=1.24.0,<2.0.0
+python-docx>=1.1.0,<2.0.0
+python-pptx>=0.6.23,<1.0.0
+openpyxl>=3.1.0,<4.0.0
+
 # Integrations
 composio>=0.10.7,<1.0.0
 
