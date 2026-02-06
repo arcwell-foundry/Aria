@@ -134,3 +134,263 @@ class TestSkillsRequireAuth:
             assert response.status_code == status.HTTP_401_UNAUTHORIZED, (
                 f"{method} {path} should require auth"
             )
+
+
+class TestInstallSkill:
+    def test_install_skill_succeeds(self, test_client: TestClient) -> None:
+        """Test POST /skills/install installs a skill."""
+        with patch("src.api.routes.skills.SkillInstaller") as mock_installer_class:
+            mock_installer = MagicMock()
+            mock_installer.install = AsyncMock(
+                return_value=MagicMock(
+                    id="install-1",
+                    user_id="test-user-123",
+                    skill_id="skill-uuid-1",
+                    skill_path="anthropics/skills/pdf",
+                    trust_level=MagicMock(value="verified"),
+                    permissions_granted=["read"],
+                    installed_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
+                    auto_installed=False,
+                    execution_count=0,
+                    success_count=0,
+                    last_used_at=None,
+                )
+            )
+            mock_installer_class.return_value = mock_installer
+
+            response = test_client.post(
+                "/api/v1/skills/install",
+                json={"skill_id": "skill-uuid-1"},
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["skill_path"] == "anthropics/skills/pdf"
+
+    def test_install_skill_not_found(self, test_client: TestClient) -> None:
+        """Test POST /skills/install returns 404 for unknown skill."""
+        with patch("src.api.routes.skills.SkillInstaller") as mock_installer_class:
+            from src.skills.installer import SkillNotFoundError
+
+            mock_installer = MagicMock()
+            mock_installer.install = AsyncMock(
+                side_effect=SkillNotFoundError("Skill not found")
+            )
+            mock_installer_class.return_value = mock_installer
+
+            response = test_client.post(
+                "/api/v1/skills/install",
+                json={"skill_id": "nonexistent"},
+            )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestUninstallSkill:
+    def test_uninstall_skill_succeeds(self, test_client: TestClient) -> None:
+        """Test DELETE /skills/{skill_id} uninstalls a skill."""
+        with patch("src.api.routes.skills.SkillInstaller") as mock_installer_class:
+            mock_installer = MagicMock()
+            mock_installer.uninstall = AsyncMock(return_value=True)
+            mock_installer_class.return_value = mock_installer
+
+            response = test_client.delete("/api/v1/skills/skill-uuid-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["status"] == "uninstalled"
+
+    def test_uninstall_skill_not_installed(self, test_client: TestClient) -> None:
+        """Test DELETE /skills/{skill_id} returns 404 if not installed."""
+        with patch("src.api.routes.skills.SkillInstaller") as mock_installer_class:
+            mock_installer = MagicMock()
+            mock_installer.uninstall = AsyncMock(return_value=False)
+            mock_installer_class.return_value = mock_installer
+
+            response = test_client.delete("/api/v1/skills/nonexistent")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestExecuteSkill:
+    def test_execute_skill_succeeds(self, test_client: TestClient) -> None:
+        """Test POST /skills/execute runs a skill through security pipeline."""
+        with patch("src.api.routes.skills._get_executor") as mock_get_executor:
+            mock_executor = MagicMock()
+            mock_executor.execute = AsyncMock(
+                return_value=MagicMock(
+                    skill_id="skill-uuid-1",
+                    skill_path="anthropics/skills/pdf",
+                    trust_level=MagicMock(value="verified"),
+                    success=True,
+                    result={"document_url": "https://example.com/doc.pdf"},
+                    error=None,
+                    execution_time_ms=150,
+                    sanitized=True,
+                )
+            )
+            mock_get_executor.return_value = mock_executor
+
+            response = test_client.post(
+                "/api/v1/skills/execute",
+                json={
+                    "skill_id": "skill-uuid-1",
+                    "input_data": {"title": "Q1 Report"},
+                },
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["success"] is True
+        assert data["result"]["document_url"] == "https://example.com/doc.pdf"
+
+    def test_execute_skill_failure(self, test_client: TestClient) -> None:
+        """Test POST /skills/execute returns error on execution failure."""
+        with patch("src.api.routes.skills._get_executor") as mock_get_executor:
+            from src.skills.executor import SkillExecutionError
+
+            mock_executor = MagicMock()
+            mock_executor.execute = AsyncMock(
+                side_effect=SkillExecutionError(
+                    "Skill not installed", skill_id="skill-uuid-1", stage="lookup"
+                )
+            )
+            mock_get_executor.return_value = mock_executor
+
+            response = test_client.post(
+                "/api/v1/skills/execute",
+                json={
+                    "skill_id": "skill-uuid-1",
+                    "input_data": {"title": "Test"},
+                },
+            )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+class TestAuditLog:
+    def test_get_audit_log(self, test_client: TestClient) -> None:
+        """Test GET /skills/audit returns paginated audit entries."""
+        with patch("src.api.routes.skills.SkillAuditService") as mock_audit_class:
+            mock_audit = MagicMock()
+            mock_audit.get_audit_log = AsyncMock(
+                return_value=[
+                    {
+                        "id": "audit-1",
+                        "user_id": "test-user-123",
+                        "skill_id": "skill-uuid-1",
+                        "skill_path": "anthropics/skills/pdf",
+                        "skill_trust_level": "verified",
+                        "trigger_reason": "user_request",
+                        "success": True,
+                        "execution_time_ms": 150,
+                        "timestamp": "2026-02-01T10:00:00Z",
+                    }
+                ]
+            )
+            mock_audit_class.return_value = mock_audit
+
+            response = test_client.get("/api/v1/skills/audit?limit=10&offset=0")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["skill_path"] == "anthropics/skills/pdf"
+
+    def test_get_audit_log_with_skill_filter(self, test_client: TestClient) -> None:
+        """Test GET /skills/audit?skill_id= filters by skill."""
+        with patch("src.api.routes.skills.SkillAuditService") as mock_audit_class:
+            mock_audit = MagicMock()
+            mock_audit.get_audit_for_skill = AsyncMock(return_value=[])
+            mock_audit_class.return_value = mock_audit
+
+            response = test_client.get(
+                "/api/v1/skills/audit?skill_id=skill-uuid-1"
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_audit.get_audit_for_skill.assert_called_once()
+
+
+class TestAutonomy:
+    def test_get_trust_level(self, test_client: TestClient) -> None:
+        """Test GET /skills/autonomy/{skill_id} returns trust info."""
+        with patch("src.api.routes.skills.SkillAutonomyService") as mock_autonomy_class:
+            mock_autonomy = MagicMock()
+            mock_autonomy.get_trust_history = AsyncMock(
+                return_value=MagicMock(
+                    id="trust-1",
+                    user_id="test-user-123",
+                    skill_id="skill-uuid-1",
+                    successful_executions=5,
+                    failed_executions=0,
+                    session_trust_granted=False,
+                    globally_approved=False,
+                    globally_approved_at=None,
+                    created_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
+                    updated_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T12:00:00+00:00")),
+                )
+            )
+            mock_autonomy_class.return_value = mock_autonomy
+
+            response = test_client.get("/api/v1/skills/autonomy/skill-uuid-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["successful_executions"] == 5
+        assert data["globally_approved"] is False
+
+    def test_get_trust_level_no_history(self, test_client: TestClient) -> None:
+        """Test GET /skills/autonomy/{skill_id} returns defaults when no history."""
+        with patch("src.api.routes.skills.SkillAutonomyService") as mock_autonomy_class:
+            mock_autonomy = MagicMock()
+            mock_autonomy.get_trust_history = AsyncMock(return_value=None)
+            mock_autonomy_class.return_value = mock_autonomy
+
+            response = test_client.get("/api/v1/skills/autonomy/skill-uuid-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["successful_executions"] == 0
+        assert data["globally_approved"] is False
+
+    def test_grant_global_approval(self, test_client: TestClient) -> None:
+        """Test POST /skills/autonomy/{skill_id}/approve grants global approval."""
+        with patch("src.api.routes.skills.SkillAutonomyService") as mock_autonomy_class:
+            mock_autonomy = MagicMock()
+            mock_autonomy.grant_global_approval = AsyncMock(
+                return_value=MagicMock(
+                    id="trust-1",
+                    user_id="test-user-123",
+                    skill_id="skill-uuid-1",
+                    successful_executions=5,
+                    failed_executions=0,
+                    session_trust_granted=False,
+                    globally_approved=True,
+                    globally_approved_at=MagicMock(isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")),
+                    created_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
+                    updated_at=MagicMock(isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")),
+                )
+            )
+            mock_autonomy_class.return_value = mock_autonomy
+
+            response = test_client.post(
+                "/api/v1/skills/autonomy/skill-uuid-1/approve"
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["globally_approved"] is True
+
+    def test_grant_approval_fails(self, test_client: TestClient) -> None:
+        """Test POST /skills/autonomy/{skill_id}/approve handles failure."""
+        with patch("src.api.routes.skills.SkillAutonomyService") as mock_autonomy_class:
+            mock_autonomy = MagicMock()
+            mock_autonomy.grant_global_approval = AsyncMock(return_value=None)
+            mock_autonomy_class.return_value = mock_autonomy
+
+            response = test_client.post(
+                "/api/v1/skills/autonomy/nonexistent/approve"
+            )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
