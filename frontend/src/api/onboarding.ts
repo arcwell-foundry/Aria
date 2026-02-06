@@ -416,3 +416,50 @@ export async function confirmCompanyData(
   return response.data.state;
 }
 
+// Skills Pre-Configuration endpoints (US-918)
+
+export interface SkillRecommendation {
+  skill_id: string;
+  trust_level: string;
+}
+
+export interface SkillRecommendationsRequest {
+  company_type: string;
+  role?: string;
+}
+
+export interface SkillRecommendationsResponse {
+  recommendations: SkillRecommendation[];
+  message: string | null;
+}
+
+export interface SkillInstallRequest {
+  skill_ids: string[];
+}
+
+export interface SkillInstallResponse {
+  installed_count: number;
+  total_count: number;
+  failed_skills: string[];
+}
+
+export async function getSkillRecommendations(
+  request: SkillRecommendationsRequest
+): Promise<SkillRecommendationsResponse> {
+  const response = await apiClient.post<SkillRecommendationsResponse>(
+    "/onboarding/skills/recommendations",
+    request
+  );
+  return response.data;
+}
+
+export async function installRecommendedSkills(
+  request: SkillInstallRequest
+): Promise<SkillInstallResponse> {
+  const response = await apiClient.post<SkillInstallResponse>(
+    "/onboarding/skills/install",
+    request
+  );
+  return response.data;
+}
+

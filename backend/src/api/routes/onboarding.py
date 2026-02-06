@@ -2,13 +2,16 @@
 
 import asyncio
 import logging
-from typing import Any
+import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr
 
 from src.api.deps import CurrentUser
 from src.db.supabase import SupabaseClient
+from src.memory.episodic import Episode
 from src.onboarding.company_discovery import CompanyDiscoveryService
 from src.onboarding.document_ingestion import DocumentIngestionService
 from src.onboarding.email_integration import (
@@ -18,6 +21,10 @@ from src.onboarding.email_integration import (
 from src.onboarding.first_goal import (
     FirstGoalService,
 )
+
+if TYPE_CHECKING:
+    from src.onboarding.cross_user import CrossUserAccelerationService
+    from src.onboarding.skill_recommender import SkillRecommendationEngine
 from src.onboarding.integration_wizard import (
     IntegrationPreferences,
     IntegrationWizardService,
@@ -1129,4 +1136,170 @@ async def confirm_company_data(
         raise HTTPException(
             status_code=500,
             detail="Failed to confirm company data",
+        ) from e
+
+
+# Skills Pre-Configuration endpoints (US-918)
+
+
+class SkillRecommendationsRequest(BaseModel):
+    """Request body for getting skill recommendations."""
+
+    company_type: str
+    role: str = ""
+
+
+class SkillRecommendationsResponse(BaseModel):
+    """Response model for skill recommendations."""
+
+    recommendations: list[dict[str, Any]]
+    message: str | None = None
+
+
+class SkillInstallRequest(BaseModel):
+    """Request body for installing recommended skills."""
+
+    skill_ids: list[str]
+
+
+class SkillInstallResponse(BaseModel):
+    """Response model for skill installation."""
+
+    installed_count: int
+    total_count: int
+    failed_skills: list[str]
+
+
+def _get_skill_recommender() -> "SkillRecommendationEngine":
+    """Get skill recommendation engine instance."""
+    from src.onboarding.skill_recommender import SkillRecommendationEngine
+
+    return SkillRecommendationEngine()
+
+
+@router.post(
+    "/skills/recommendations",
+    response_model=SkillRecommendationsResponse,
+)
+async def get_skill_recommendations(
+    body: SkillRecommendationsRequest,
+    current_user: CurrentUser,  # noqa: ARG001 - Required for auth but not used in recommendations
+) -> SkillRecommendationsResponse:
+    """Get skill recommendations based on company type and role.
+
+    Analyzes the user's company classification from enrichment (US-903)
+    and returns relevant skills recommended for pre-installation at
+    COMMUNITY trust level.
+
+    Args:
+        body: Request with company_type and optional role.
+        current_user: Authenticated user.
+
+    Returns:
+        SkillRecommendationsResponse with recommended skills list and message.
+
+    Raises:
+        HTTPException: 500 if service error occurs.
+    """
+    try:
+        engine = _get_skill_recommender()
+        recommendations = await engine.recommend(body.company_type, body.role)
+
+        # Generate a personalized message
+        message = (
+            f"Based on your role in {body.company_type}, I've equipped myself with "
+            f"these capabilities. You can add or remove any before confirming."
+        )
+
+        return SkillRecommendationsResponse(
+            recommendations=recommendations,
+            message=message,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error generating skill recommendations: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate skill recommendations",
+        ) from e
+
+
+@router.post(
+    "/skills/install",
+    response_model=SkillInstallResponse,
+)
+async def install_recommended_skills(
+    body: SkillInstallRequest,
+    current_user: CurrentUser,
+) -> SkillInstallResponse:
+    """Install selected recommended skills at COMMUNITY trust level.
+
+    Pre-installs skills selected by the user from the recommendations.
+    Skills are marked as auto_installed=True and start at COMMUNITY
+    trust level, earning higher trust through usage (US-530).
+
+    Updates the integrations readiness score and records the event
+    in episodic memory.
+
+    Args:
+        body: Request with list of skill_ids to install.
+        current_user: Authenticated user.
+
+    Returns:
+        SkillInstallResponse with installed count and failed skills.
+
+    Raises:
+        HTTPException: 500 if service error occurs.
+    """
+    try:
+        engine = _get_skill_recommender()
+
+        # Convert skill_ids to recommendation format
+        skills = [{"skill_id": sid, "trust_level": "community"} for sid in body.skill_ids]
+
+        installed_count = await engine.pre_install(current_user.id, skills)
+
+        # Track failed skills
+        failed_count = len(body.skill_ids) - installed_count
+        failed_skills = []
+        if failed_count > 0:
+            # Skills that failed would be logged, but we don't track them individually here
+            failed_skills = ["Some skills failed to install - see logs for details"]
+
+        # Update readiness score for integrations
+        from src.memory.episodic import EpisodicMemory
+        from src.onboarding.readiness import OnboardingReadinessService
+
+        readiness_service = OnboardingReadinessService()
+        await readiness_service.recalculate(current_user.id)
+
+        # Record episodic memory
+        episodic = EpisodicMemory()
+        now = datetime.now(UTC)
+        episode = Episode(
+            id=str(uuid.uuid4()),
+            user_id=current_user.id,
+            event_type="onboarding_skills_preconfigured",
+            content=f"Pre-configured {installed_count} skills based on company type",
+            participants=[current_user.id],
+            occurred_at=now,
+            recorded_at=now,
+            context={
+                "skills_count": installed_count,
+                "total_requested": len(body.skill_ids),
+            },
+        )
+        await episodic.store_episode(episode)
+
+        return SkillInstallResponse(
+            installed_count=installed_count,
+            total_count=len(body.skill_ids),
+            failed_skills=failed_skills,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error installing skills for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to install skills",
         ) from e
