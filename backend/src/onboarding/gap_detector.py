@@ -413,7 +413,7 @@ class KnowledgeGapDetector:
     async def _create_prospective_entries(self, user_id: str, gaps: list[KnowledgeGap]) -> None:
         """Create Prospective Memory entries for each gap.
 
-        Each gap becomes a pending task in memory_prospective with
+        Each gap becomes a pending task in prospective_memories with
         metadata about the domain, priority, fill strategy, and
         any suggested agent or prompt.
 
@@ -437,7 +437,7 @@ class KnowledgeGapDetector:
                         "suggested_prompt": gap.suggested_prompt,
                     },
                 }
-                self.db.table("memory_prospective").insert(entry).execute()  # type: ignore[arg-type]
+                self.db.table("prospective_memories").insert(entry).execute()  # type: ignore[arg-type]
             except Exception as e:
                 logger.warning(f"Failed to create prospective entry: {e}")
 

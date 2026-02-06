@@ -626,14 +626,14 @@ class TestStorageIntegration:
     async def test_stores_commitments_in_prospective_memory(
         self, service: PriorityEmailIngestion, mock_db: MagicMock
     ) -> None:
-        """Detected commitments are stored in memory_prospective table."""
+        """Detected commitments are stored in prospective_memories table."""
         commitments = [
             {"commitment": "Send proposal", "to": "client@pharma.com", "deadline": "2026-02-07"},
         ]
 
         await service._store_commitments("user-123", commitments)
 
-        mock_db.table.assert_any_call("memory_prospective")
+        mock_db.table.assert_any_call("prospective_memories")
 
     @pytest.mark.asyncio
     async def test_refines_writing_style(self, service: PriorityEmailIngestion) -> None:

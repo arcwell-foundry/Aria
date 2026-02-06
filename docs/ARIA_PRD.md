@@ -128,7 +128,7 @@ agent_executions (id, agent_id, input, output, tokens_used, created_at)
 memory_episodes (id, user_id, content, embedding, metadata, created_at)
 memory_semantic (id, user_id, fact, confidence, source, valid_from, valid_to)
 memory_procedural (id, user_id, workflow_name, steps, success_rate)
-memory_prospective (id, user_id, task, due_date, status, created_at)
+prospective_memories (id, user_id, task, due_date, status, created_at)
 
 -- Lead Memory
 lead_memories (id, user_id, company_name, lifecycle_stage, health_score, crm_id)

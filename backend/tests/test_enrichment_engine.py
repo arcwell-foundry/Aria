@@ -1070,7 +1070,7 @@ async def test_store_results_stores_facts_in_semantic_memory() -> None:
 
 @pytest.mark.asyncio
 async def test_store_results_stores_gaps_in_prospective_memory() -> None:
-    """Test _store_results inserts gaps into memory_prospective table."""
+    """Test _store_results inserts gaps into prospective_memories table."""
     from src.onboarding.enrichment import (
         CompanyClassification,
         CompanyEnrichmentEngine,
@@ -1122,10 +1122,10 @@ async def test_store_results_stores_gaps_in_prospective_memory() -> None:
 
         await engine._store_results("company-123", "user-456", result)
 
-    # Verify memory_prospective was called
+    # Verify prospective_memories was called
     calls = mock_db.table.call_args_list
     table_names = [c.args[0] for c in calls]
-    assert "memory_prospective" in table_names
+    assert "prospective_memories" in table_names
 
 
 # --- Readiness Update Tests ---

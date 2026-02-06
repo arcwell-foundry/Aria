@@ -689,7 +689,7 @@ class PriorityEmailIngestion:
         """
         for c in commitments:
             try:
-                self._db.table("memory_prospective").insert(
+                self._db.table("prospective_memories").insert(
                     {
                         "user_id": user_id,
                         "task": f"Follow up: {c.get('commitment', '')}",

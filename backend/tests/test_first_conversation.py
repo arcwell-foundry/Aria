@@ -134,7 +134,7 @@ def _setup_db_for_generate(
                     }
                 }
             )
-        if table_name == "memory_prospective":
+        if table_name == "prospective_memories":
             return _build_chain(gaps if gaps is not None else SAMPLE_GAPS)
         if table_name == "goals":
             return _build_chain(

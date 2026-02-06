@@ -743,7 +743,7 @@ Respond ONLY with the JSON object."""
             # Create a check-in task for tomorrow
             tomorrow = datetime.now(UTC) + timedelta(days=1)
 
-            self._db.table("memory_prospective").insert(
+            self._db.table("prospective_memories").insert(
                 {
                     "user_id": user_id,
                     "task": f"Review progress on goal: {title}",

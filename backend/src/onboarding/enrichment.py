@@ -827,7 +827,7 @@ Respond ONLY with the JSON array, no additional text."""
         # Store knowledge gaps as Prospective Memory tasks
         for gap in result.gaps:
             try:
-                self._db.table("memory_prospective").insert(
+                self._db.table("prospective_memories").insert(
                     {
                         "user_id": user_id,
                         "task": gap.suggested_action,

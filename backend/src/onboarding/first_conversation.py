@@ -509,7 +509,7 @@ class FirstConversationGenerator:
             List of gap dicts with task and metadata.
         """
         result = (
-            self._db.table("memory_prospective")
+            self._db.table("prospective_memories")
             .select("task, metadata")
             .eq("user_id", user_id)
             .execute()
