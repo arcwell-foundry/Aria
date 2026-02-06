@@ -5,6 +5,7 @@ import {
   skipStep,
   getRoutingDecision,
   getReadiness,
+  getInjectedQuestions,
   type OnboardingStep,
 } from "@/api/onboarding";
 
@@ -13,6 +14,8 @@ export const onboardingKeys = {
   state: () => [...onboardingKeys.all, "state"] as const,
   routing: () => [...onboardingKeys.all, "routing"] as const,
   readiness: () => [...onboardingKeys.all, "readiness"] as const,
+  injectedQuestions: (step: string) =>
+    [...onboardingKeys.all, "injected-questions", step] as const,
 };
 
 export function useOnboardingState() {
@@ -68,6 +71,14 @@ export function useReadiness() {
     queryKey: onboardingKeys.readiness(),
     queryFn: getReadiness,
     refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+  });
+}
+
+export function useInjectedQuestions(step: string) {
+  return useQuery({
+    queryKey: onboardingKeys.injectedQuestions(step),
+    queryFn: () => getInjectedQuestions(step),
+    enabled: !!step,
   });
 }
 

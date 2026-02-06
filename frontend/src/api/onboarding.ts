@@ -319,6 +319,23 @@ export async function getReadiness(): Promise<ReadinessBreakdown> {
   return response.data;
 }
 
+// Adaptive OODA Injected Questions (US-916)
+
+export interface InjectedQuestion {
+  question: string;
+  context: string;
+  insert_after_step: string;
+}
+
+export async function getInjectedQuestions(
+  step: string
+): Promise<InjectedQuestion[]> {
+  const response = await apiClient.get<InjectedQuestion[]>(
+    `/onboarding/steps/${step}/injected-questions`
+  );
+  return response.data;
+}
+
 // Agent Activation Status (US-915)
 
 export interface AgentActivationEntry {

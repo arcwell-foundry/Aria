@@ -5,6 +5,7 @@ and triggers background processing on step completion. Each step seeds ARIA's
 memory systems, making her measurably smarter about the user and their company.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -132,6 +133,15 @@ class OnboardingOrchestrator:
 
         # Trigger background processing (non-blocking)
         await self._trigger_step_processing(user_id, step, step_data)
+
+        # Run OODA adaptive controller (non-blocking background task)
+        try:
+            from src.onboarding.adaptive_controller import OnboardingOODAController
+
+            ooda = OnboardingOODAController()
+            asyncio.create_task(ooda.assess_next_step(user_id, step))
+        except Exception as e:
+            logger.warning("OODA assessment failed to launch: %s", e)
 
         # Record episodic event
         await self._record_episodic_event(

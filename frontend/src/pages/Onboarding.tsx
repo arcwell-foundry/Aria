@@ -4,6 +4,7 @@ import {
   useOnboardingState,
   useCompleteStep,
   useSkipStep,
+  useInjectedQuestions,
 } from "@/hooks/useOnboarding";
 import { SKIPPABLE_STEPS } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
@@ -17,6 +18,8 @@ export function OnboardingPage() {
   const { data, isLoading } = useOnboardingState();
   const completeMutation = useCompleteStep();
   const skipMutation = useSkipStep();
+  const stepForQueries = data?.state?.current_step ?? "";
+  const { data: injectedQuestions } = useInjectedQuestions(stepForQueries);
 
   // Redirect to dashboard if onboarding is already complete
   useEffect(() => {
@@ -63,6 +66,23 @@ export function OnboardingPage() {
 
           {/* Right: Step content */}
           <main className="flex-1 min-w-0">
+            {/* OODA-injected contextual questions (US-916) */}
+            {injectedQuestions && injectedQuestions.length > 0 && (
+              <div className="mb-6 space-y-3">
+                {injectedQuestions.map((q, i) => (
+                  <div
+                    key={i}
+                    className="rounded-xl border border-[#E2E0DC] bg-[#F5F5F0] px-5 py-4"
+                  >
+                    <p className="text-[13px] font-medium text-[#6B7280] mb-1">
+                      {q.context}
+                    </p>
+                    <p className="text-[15px] text-[#1A1A1A]">{q.question}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {currentStep === "company_discovery" ? (
               <CompanyDiscoveryStep
                 onComplete={(companyData) => handleComplete(companyData)}

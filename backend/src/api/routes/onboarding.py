@@ -960,3 +960,26 @@ async def get_activation_status(
             overall = "pending"
 
     return {"status": overall, "activations": activations}
+
+
+# Adaptive OODA Controller endpoint (US-916)
+
+
+@router.get("/steps/{step}/injected-questions")
+async def get_injected_questions(
+    step: str,
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:
+    """Get OODA-injected contextual questions for a step.
+
+    Returns any questions ARIA's OODA controller has determined
+    should be asked at this step based on what was learned so far.
+
+    Returns:
+        List of injected question dicts with question, context, insert_after_step.
+    """
+    from src.onboarding.adaptive_controller import OnboardingOODAController
+
+    ooda = OnboardingOODAController()
+    questions = await ooda.get_injected_questions(current_user.id, step)
+    return [q.model_dump() for q in questions]
