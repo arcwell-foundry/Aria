@@ -112,3 +112,91 @@ export async function getEnrichmentStatus(): Promise<EnrichmentStatus> {
   );
   return response.data;
 }
+
+// Integration Wizard (US-909)
+
+export type IntegrationAppName =
+  | "SALESFORCE"
+  | "HUBSPOT"
+  | "GOOGLECALENDAR"
+  | "OUTLOOK365CALENDAR"
+  | "SLACK";
+
+export interface IntegrationStatus {
+  name: IntegrationAppName;
+  display_name: string;
+  category: "crm" | "calendar" | "messaging";
+  connected: boolean;
+  connected_at: string | null;
+  connection_id: string | null;
+}
+
+export interface IntegrationPreferences {
+  slack_channels: string[];
+  notification_enabled: boolean;
+  sync_frequency_hours: number;
+}
+
+export interface IntegrationsStatusResponse {
+  crm: IntegrationStatus[];
+  calendar: IntegrationStatus[];
+  messaging: IntegrationStatus[];
+  preferences: IntegrationPreferences;
+}
+
+export interface ConnectIntegrationRequest {
+  app_name: IntegrationAppName;
+}
+
+export interface ConnectIntegrationResponse {
+  auth_url: string;
+  connection_id: string;
+  status: string;
+}
+
+export interface DisconnectIntegrationRequest {
+  app_name: IntegrationAppName;
+}
+
+export interface SaveIntegrationPreferencesRequest {
+  slack_channels: string[];
+  notification_enabled: boolean;
+  sync_frequency_hours: number;
+}
+
+export async function getIntegrationWizardStatus(): Promise<IntegrationsStatusResponse> {
+  const response = await apiClient.get<IntegrationsStatusResponse>(
+    "/onboarding/integrations/status"
+  );
+  return response.data;
+}
+
+export async function connectIntegration(
+  appName: IntegrationAppName
+): Promise<ConnectIntegrationResponse> {
+  const response = await apiClient.post<ConnectIntegrationResponse>(
+    "/onboarding/integrations/connect",
+    { app_name: appName }
+  );
+  return response.data;
+}
+
+export async function disconnectIntegration(
+  appName: IntegrationAppName
+): Promise<{ status: string; message?: string }> {
+  const response = await apiClient.post<{ status: string; message?: string }>(
+    "/onboarding/integrations/disconnect",
+    { app_name: appName }
+  );
+  return response.data;
+}
+
+export async function saveIntegrationPreferences(
+  preferences: SaveIntegrationPreferencesRequest
+): Promise<{ status: string; connected_count: number }> {
+  const response = await apiClient.post<{ status: string; connected_count: number }>(
+    "/onboarding/integrations/preferences",
+    preferences
+  );
+  return response.data;
+}

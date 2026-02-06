@@ -14,6 +14,10 @@ from src.onboarding.email_integration import (
     EmailIntegrationConfig,
     EmailIntegrationService,
 )
+from src.onboarding.integration_wizard import (
+    IntegrationPreferences,
+    IntegrationWizardService,
+)
 from src.onboarding.models import (
     OnboardingStateResponse,
     OnboardingStep,
@@ -466,3 +470,103 @@ async def save_email_privacy(
 
     service = _get_email_service()
     return await service.save_privacy_config(current_user.id, body)
+
+
+# Integration Wizard endpoints (US-909)
+
+
+class IntegrationConnectRequest(BaseModel):
+    """Request body for initiating integration OAuth."""
+
+    app_name: str  # "SALESFORCE", "HUBSPOT", "GOOGLECALENDAR", "OUTLOOK365CALENDAR", "SLACK"
+
+
+class IntegrationDisconnectRequest(BaseModel):
+    """Request body for disconnecting an integration."""
+
+    app_name: str  # Same as above
+
+
+class IntegrationPreferencesRequest(BaseModel):
+    """Request body for saving integration preferences."""
+
+    slack_channels: list[str] = []
+    notification_enabled: bool = True
+    sync_frequency_hours: int = 1
+
+
+def _get_integration_wizard_service() -> IntegrationWizardService:
+    """Get integration wizard service instance."""
+    return IntegrationWizardService()
+
+
+@router.get("/integrations/status")
+async def get_integration_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get connection status for all integrations.
+
+    Returns status for CRM (Salesforce, HubSpot), Calendar (Google, Outlook),
+    and Slack integrations, including connection state, connected timestamp,
+    and user preferences.
+
+    Returns:
+        Dict with integration statuses grouped by category and preferences.
+    """
+    service = _get_integration_wizard_service()
+    return await service.get_integration_status(current_user.id)
+
+
+@router.post("/integrations/connect")
+async def connect_integration(
+    body: IntegrationConnectRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Initiate OAuth flow for an integration.
+
+    Generates an OAuth authorization URL for the user to redirect to.
+    Supports Salesforce, HubSpot, Google Calendar, Outlook Calendar, and Slack.
+
+    Returns:
+        Dict with auth_url, connection_id, and status.
+    """
+    service = _get_integration_wizard_service()
+    return await service.connect_integration(current_user.id, body.app_name)
+
+
+@router.post("/integrations/disconnect")
+async def disconnect_integration(
+    body: IntegrationDisconnectRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Disconnect an integration.
+
+    Revokes the OAuth connection and removes local records.
+
+    Returns:
+        Dict with status indicating success or error.
+    """
+    service = _get_integration_wizard_service()
+    return await service.disconnect_integration(current_user.id, body.app_name)
+
+
+@router.post("/integrations/preferences")
+async def save_integration_preferences(
+    body: IntegrationPreferencesRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Save integration preferences and update readiness scores.
+
+    Saves notification routing preferences, sync frequency, and
+    Slack channel configuration. Updates the integrations readiness score.
+
+    Returns:
+        Dict with save status and connected count.
+    """
+    service = _get_integration_wizard_service()
+    preferences = IntegrationPreferences(
+        slack_channels=body.slack_channels,
+        notification_enabled=body.notification_enabled,
+        sync_frequency_hours=body.sync_frequency_hours,
+    )
+    return await service.save_integration_preferences(current_user.id, preferences)
