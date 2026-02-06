@@ -10,6 +10,10 @@ from src.api.deps import CurrentUser
 from src.db.supabase import SupabaseClient
 from src.onboarding.company_discovery import CompanyDiscoveryService
 from src.onboarding.document_ingestion import DocumentIngestionService
+from src.onboarding.email_integration import (
+    EmailIntegrationConfig,
+    EmailIntegrationService,
+)
 from src.onboarding.models import (
     OnboardingStateResponse,
     OnboardingStep,
@@ -384,3 +388,81 @@ async def get_writing_fingerprint(
     if not fp:
         return {"status": "not_analyzed"}
     return fp.model_dump()
+
+
+# Email integration endpoints (US-907)
+
+
+class EmailConnectRequest(BaseModel):
+    """Request body for initiating email OAuth."""
+
+    provider: str  # "google" or "microsoft"
+
+
+def _get_email_service() -> EmailIntegrationService:
+    """Get email integration service instance."""
+    return EmailIntegrationService()
+
+
+@router.post("/email/connect")
+async def connect_email(
+    body: EmailConnectRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Initiate OAuth flow for email provider.
+
+    Generates an OAuth authorization URL for the user to redirect to.
+    Supports Google Workspace (Gmail) and Microsoft 365 (Outlook).
+
+    Returns:
+        Dict with auth_url, connection_id, and status.
+    """
+    if body.provider not in ("google", "microsoft"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider '{body.provider}'. Must be 'google' or 'microsoft'.",
+        )
+
+    service = _get_email_service()
+    return await service.initiate_oauth(current_user.id, body.provider)
+
+
+@router.get("/email/status")
+async def email_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Check email connection status for both providers.
+
+    Returns connection status for Gmail and Outlook, including
+    whether connected and when the connection was established.
+    """
+    service = _get_email_service()
+    google = await service.check_connection_status(current_user.id, "google")
+    microsoft = await service.check_connection_status(current_user.id, "microsoft")
+    return {"google": google, "microsoft": microsoft}
+
+
+@router.post("/email/privacy")
+async def save_email_privacy(
+    body: EmailIntegrationConfig,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Save email privacy exclusions and ingestion preferences.
+
+    Saves the user's privacy configuration before email ingestion begins,
+    including excluded senders/domains/categories, ingestion scope,
+    and attachment preferences.
+
+    Updates readiness scores and records the event in episodic memory.
+
+    Returns:
+        Dict with save status and exclusion count.
+    """
+    if body.provider not in ("google", "microsoft"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider '{body.provider}'. Must be 'google' or 'microsoft'.",
+        )
+
+    service = _get_email_service()
+    return await service.save_privacy_config(current_user.id, body)
