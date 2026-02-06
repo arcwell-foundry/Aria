@@ -12,6 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from src.api.routes import (
     account,
+    admin,
     auth,
     battle_cards,
     briefings,
@@ -94,6 +95,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(account.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
