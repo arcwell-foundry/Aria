@@ -27,6 +27,12 @@ from src.memory.corporate import (
     CorporateFactSource,
     CorporateMemory,
 )
+from src.memory.delta_presenter import (
+    CorrectionRequest,
+    MemoryDelta,
+    MemoryDeltaPresenter,
+    MemoryFact,
+)
 from src.memory.digital_twin import (
     DigitalTwin,
     TextStyleAnalyzer,
@@ -88,6 +94,11 @@ __all__ = [
     "log_memory_operation",
     # Confidence Scoring
     "ConfidenceScorer",
+    # Memory Delta Presenter
+    "CorrectionRequest",
+    "MemoryDelta",
+    "MemoryDeltaPresenter",
+    "MemoryFact",
     # Salience Service
     "SalienceService",
     # Working Memory

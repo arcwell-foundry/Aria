@@ -1611,3 +1611,106 @@ async def prime_conversation(
             status_code=503,
             detail="Failed to gather conversation context",
         ) from None
+
+
+# --- Memory Delta Presenter (US-920) ---
+
+
+class MemoryDeltaFactResponse(BaseModel):
+    """A single fact in a memory delta response."""
+
+    id: str
+    fact: str
+    confidence: float
+    source: str
+    category: str
+    language: str
+
+
+class MemoryDeltaResponse(BaseModel):
+    """A domain group in the memory delta."""
+
+    domain: str
+    facts: list[MemoryDeltaFactResponse]
+    summary: str
+    timestamp: str | None = None
+
+
+class CorrectionRequestBody(BaseModel):
+    """Request body for correcting a memory fact."""
+
+    fact_id: str
+    corrected_value: str
+    correction_type: str = "factual"
+
+
+class CorrectionResponse(BaseModel):
+    """Response from a memory correction."""
+
+    status: str
+    new_confidence: float | None = None
+
+
+@router.get("/delta", response_model=list[MemoryDeltaResponse])
+async def get_memory_delta(
+    current_user: CurrentUser,
+    since: str | None = Query(None, description="ISO timestamp to filter facts created after"),
+    domain: str | None = Query(None, description="Domain filter: corporate_memory, competitive, relationship, digital_twin"),
+) -> list[MemoryDeltaResponse]:
+    """Get memory deltas showing what ARIA has learned.
+
+    Returns confidence-calibrated facts grouped by domain.
+    Each fact includes human-readable language calibrated to its confidence level.
+    """
+    from src.memory.delta_presenter import MemoryDeltaPresenter
+
+    presenter = MemoryDeltaPresenter()
+    deltas = await presenter.generate_delta(current_user.id, since, domain)
+
+    return [
+        MemoryDeltaResponse(
+            domain=d.domain,
+            facts=[
+                MemoryDeltaFactResponse(
+                    id=f.id,
+                    fact=f.fact,
+                    confidence=f.confidence,
+                    source=f.source,
+                    category=f.category,
+                    language=f.language,
+                )
+                for f in d.facts
+            ],
+            summary=d.summary,
+            timestamp=d.timestamp,
+        )
+        for d in deltas
+    ]
+
+
+@router.post("/correct", response_model=CorrectionResponse)
+async def correct_memory(
+    body: CorrectionRequestBody,
+    current_user: CurrentUser,
+) -> CorrectionResponse:
+    """Correct a memory fact.
+
+    User corrections become source: user_stated with confidence 0.95.
+    The original fact is kept with reduced confidence for audit trail.
+    """
+    from src.memory.delta_presenter import CorrectionRequest, MemoryDeltaPresenter
+
+    presenter = MemoryDeltaPresenter()
+    result = await presenter.apply_correction(
+        user_id=current_user.id,
+        correction=CorrectionRequest(
+            fact_id=body.fact_id,
+            corrected_value=body.corrected_value,
+            correction_type=body.correction_type,
+        ),
+    )
+
+    return CorrectionResponse(
+        status=result["status"],
+        new_confidence=result.get("new_confidence"),
+    )
