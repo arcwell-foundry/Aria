@@ -134,6 +134,20 @@ class OnboardingOrchestrator:
         # Trigger background processing (non-blocking)
         await self._trigger_step_processing(user_id, step, step_data)
 
+        # Trigger agent activation if onboarding is complete (US-915)
+        if is_complete:
+            try:
+                from src.onboarding.activation import OnboardingCompletionOrchestrator
+
+                activator = OnboardingCompletionOrchestrator()
+                # Run activation in background without blocking response
+                asyncio.create_task(activator.activate(user_id, merged_data))
+            except Exception as e:
+                logger.warning(
+                    "Agent activation failed to launch",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
+
         # Run OODA adaptive controller (non-blocking background task)
         try:
             from src.onboarding.adaptive_controller import OnboardingOODAController
@@ -198,6 +212,21 @@ class OnboardingOrchestrator:
             update["completed_at"] = datetime.now(UTC).isoformat()
 
         result = self._db.table("onboarding_state").update(update).eq("user_id", user_id).execute()
+
+        # Trigger agent activation if onboarding is complete via skipping (US-915)
+        if next_step is None:
+            try:
+                from src.onboarding.activation import OnboardingCompletionOrchestrator
+
+                activator = OnboardingCompletionOrchestrator()
+                state_data = current.step_data if current else {}
+                # Run activation in background without blocking response
+                asyncio.create_task(activator.activate(user_id, state_data))
+            except Exception as e:
+                logger.warning(
+                    "Agent activation failed to launch",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
 
         await self._record_episodic_event(
             user_id,
