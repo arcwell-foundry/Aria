@@ -80,13 +80,18 @@ class OnboardingReadinessService:
             # No state yet — return all zeros
             return ReadinessBreakdown()
 
-        scores_data = response.data.get("readiness_scores", {})
+        # Type narrowing for JSON data
+        data_dict = response.data if isinstance(response.data, dict) else {}
+        scores_data = data_dict.get("readiness_scores", {})
+        if not isinstance(scores_data, dict):
+            scores_data = {}
+
         scores = ReadinessBreakdown(
-            corporate_memory=scores_data.get("corporate_memory", 0.0),
-            digital_twin=scores_data.get("digital_twin", 0.0),
-            relationship_graph=scores_data.get("relationship_graph", 0.0),
-            integrations=scores_data.get("integrations", 0.0),
-            goal_clarity=scores_data.get("goal_clarity", 0.0),
+            corporate_memory=float(scores_data.get("corporate_memory", 0.0)),
+            digital_twin=float(scores_data.get("digital_twin", 0.0)),
+            relationship_graph=float(scores_data.get("relationship_graph", 0.0)),
+            integrations=float(scores_data.get("integrations", 0.0)),
+            goal_clarity=float(scores_data.get("goal_clarity", 0.0)),
         )
 
         # Calculate weighted overall
