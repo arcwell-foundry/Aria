@@ -351,9 +351,9 @@ class CrossUserAccelerationService:
         high_confidence_facts = [f for f in all_facts if f.get("confidence", 0) >= 0.8]
 
         # Extract distinct domains covered
-        domains_covered = list(set(
+        domains_covered = list({
             f.get("domain") for f in all_facts if f.get("domain")
-        ))
+        })
 
         logger.info(
             f"Retrieved {len(all_facts)} corporate facts for company {company_id}, "
