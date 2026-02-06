@@ -11,8 +11,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from src.db.supabase import SupabaseClient
-
 if TYPE_CHECKING:
     from supabase import Client
 
@@ -63,6 +61,18 @@ class CrossUserAccelerationService:
         "email_analyzed", # Derived from user's personal email
     ])
 
+    # Richness score thresholds
+    _RICHNESS_THRESHOLD_SKIP = 80
+    _RICHNESS_THRESHOLD_PARTIAL = 30
+
+    # Richness score calculation weights and caps
+    _FACT_WEIGHT = 2
+    _FACT_MAX_SCORE = 50
+    _DOMAIN_WEIGHT = 10
+    _DOMAIN_MAX_SCORE = 30
+    _DOC_WEIGHT = 5
+    _DOC_MAX_SCORE = 20
+
     def __init__(self, db: "Client", llm_client: None = None) -> None:
         """Initialize cross-user acceleration service.
 
@@ -104,9 +114,9 @@ class CrossUserAccelerationService:
 
         # Determine recommendation based on richness
         recommendation: Literal["skip", "partial", "full"]
-        if richness_score > 80:
+        if richness_score > self._RICHNESS_THRESHOLD_SKIP:
             recommendation = "skip"
-        elif richness_score >= 30:
+        elif richness_score >= self._RICHNESS_THRESHOLD_PARTIAL:
             recommendation = "partial"
         else:
             recommendation = "full"
@@ -147,7 +157,7 @@ class CrossUserAccelerationService:
             return None
 
         except Exception as e:
-            logger.exception(f"Error querying company by domain: {domain}")
+            logger.exception(f"Error querying company by domain {domain}: {e}")
             return None
 
     def _calculate_richness_score(self, company_id: str) -> int:
@@ -169,9 +179,9 @@ class CrossUserAccelerationService:
         document_count = self._count_company_documents(company_id)
 
         # Apply weights with caps
-        fact_score = min(fact_count * 2, 50)
-        domain_score = min(domain_coverage * 10, 30)
-        doc_score = min(document_count * 5, 20)
+        fact_score = min(fact_count * self._FACT_WEIGHT, self._FACT_MAX_SCORE)
+        domain_score = min(domain_coverage * self._DOMAIN_WEIGHT, self._DOMAIN_MAX_SCORE)
+        doc_score = min(document_count * self._DOC_WEIGHT, self._DOC_MAX_SCORE)
 
         total_score = fact_score + domain_score + doc_score
 
@@ -209,7 +219,7 @@ class CrossUserAccelerationService:
             return 0
 
         except Exception as e:
-            logger.exception(f"Error counting facts for company: {company_id}")
+            logger.exception(f"Error counting facts for company {company_id}: {e}")
             return 0
 
     def _calculate_domain_coverage(self, company_id: str) -> int:
@@ -246,7 +256,7 @@ class CrossUserAccelerationService:
             return 0
 
         except Exception as e:
-            logger.exception(f"Error calculating domain coverage: {company_id}")
+            logger.exception(f"Error calculating domain coverage for company {company_id}: {e}")
             return 0
 
     def _count_company_documents(self, company_id: str) -> int:
@@ -271,5 +281,5 @@ class CrossUserAccelerationService:
             return 0
 
         except Exception as e:
-            logger.exception(f"Error counting documents for company: {company_id}")
+            logger.exception(f"Error counting documents for company {company_id}: {e}")
             return 0
