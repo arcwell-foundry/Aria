@@ -99,7 +99,7 @@ def test_check_company_exists_skip_recommendation():
         "name": test_company_name,
     })
 
-    # Mock the query chain for corporate_memory_facts table
+    # Mock the query chain for corporate_facts table
     facts_query = Mock()
     facts_query_select_call_count = [0]  # Use list to allow mutation in nested function
 
@@ -149,7 +149,7 @@ def test_check_company_exists_skip_recommendation():
     def table_factory(table_name: str):
         if table_name == "companies":
             return companies_query
-        elif table_name == "corporate_memory_facts":
+        elif table_name == "corporate_facts":
             return facts_query
         elif table_name == "company_documents":
             return docs_query
@@ -220,7 +220,7 @@ def test_check_company_partial_recommendation():
         "name": test_company_name,
     })
 
-    # Mock the query chain for corporate_memory_facts table
+    # Mock the query chain for corporate_facts table
     facts_query = Mock()
     facts_query_select_call_count = [0]
 
@@ -270,7 +270,7 @@ def test_check_company_partial_recommendation():
     def table_factory(table_name: str):
         if table_name == "companies":
             return companies_query
-        elif table_name == "corporate_memory_facts":
+        elif table_name == "corporate_facts":
             return facts_query
         elif table_name == "company_documents":
             return docs_query
@@ -339,7 +339,7 @@ def test_check_company_low_richness_full_recommendation():
         "name": test_company_name,
     })
 
-    # Mock the query chain for corporate_memory_facts table
+    # Mock the query chain for corporate_facts table
     facts_query = Mock()
     facts_query_select_call_count = [0]
 
@@ -389,7 +389,7 @@ def test_check_company_low_richness_full_recommendation():
     def table_factory(table_name: str):
         if table_name == "companies":
             return companies_query
-        elif table_name == "corporate_memory_facts":
+        elif table_name == "corporate_facts":
             return facts_query
         elif table_name == "company_documents":
             return docs_query
@@ -482,7 +482,7 @@ def test_get_company_memory_delta_filters_personal_data():
         },
     ]
 
-    # Mock the query chain for corporate_memory_facts table
+    # Mock the query chain for corporate_facts table
     facts_query = Mock()
 
     facts_query.select.return_value = facts_query
@@ -753,7 +753,7 @@ def test_confirm_company_data_applies_corrections():
     for insert_data in corporate_facts_inserts:
         assert insert_data["company_id"] == test_company_id
         assert insert_data["confidence"] == 0.95
-        assert insert_data["source"] == "user_stated"
+        assert insert_data["source"] == "admin_stated"
         assert insert_data["created_by"] == test_user_id
         assert insert_data["is_active"] is True
 

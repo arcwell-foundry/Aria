@@ -206,7 +206,7 @@ class CrossUserAccelerationService:
         """
         try:
             response = (
-                self._db.table("corporate_memory_facts")
+                self._db.table("corporate_facts")
                 .select("id", count="exact")  # type: ignore[arg-type]
                 .eq("company_id", company_id)
                 .eq("is_active", True)
@@ -238,7 +238,7 @@ class CrossUserAccelerationService:
         # Future enhancement: Group predicates into semantic domains
         try:
             response = (
-                self._db.table("corporate_memory_facts")
+                self._db.table("corporate_facts")
                 .select("predicate")
                 .eq("company_id", company_id)
                 .eq("is_active", True)
@@ -307,7 +307,7 @@ class CrossUserAccelerationService:
         # Query only corporate memory facts with allowed sources
         try:
             response = (
-                self._db.table("corporate_memory_facts")
+                self._db.table("corporate_facts")
                 .select("*")
                 .eq("company_id", company_id)
                 .eq("is_active", True)
@@ -528,8 +528,11 @@ class CrossUserAccelerationService:
         """Apply user corrections to corporate memory.
 
         For each correction, inserts a new fact into corporate_facts with
-        source="user_stated" and confidence=0.95 (highest priority per
+        source="admin_stated" and confidence=0.95 (highest priority per
         Source Hierarchy for Conflict Resolution).
+
+        User corrections are elevated to admin-level shared facts to ensure
+        they flow into corporate memory for all users at the company.
 
         Args:
             company_id: The company UUID.
@@ -553,6 +556,7 @@ class CrossUserAccelerationService:
                     continue
 
                 # Insert correction as high-confidence fact
+                # Use admin_stated (not user_stated) to ensure it's shared across users
                 (
                     self._db.table("corporate_facts")
                     .insert({
@@ -561,7 +565,7 @@ class CrossUserAccelerationService:
                         "predicate": predicate,
                         "object": str(value),
                         "confidence": 0.95,  # User-stated = highest priority
-                        "source": "user_stated",
+                        "source": "admin_stated",
                         "created_by": user_id,
                         "is_active": True,
                     })
@@ -650,7 +654,11 @@ class CrossUserAccelerationService:
                 logger.warning(f"No onboarding_state found for user {user_id}")
                 return
 
-            current_scores = response.data.get("readiness_scores", {})
+            # Type narrowing for response.data which is JSON type
+            data_dict = response.data if isinstance(response.data, dict) else {}
+            current_scores = data_dict.get("readiness_scores", {})
+            if not isinstance(current_scores, dict):
+                current_scores = {}
 
             # Update corporate_memory sub-score
             updated_scores = {
