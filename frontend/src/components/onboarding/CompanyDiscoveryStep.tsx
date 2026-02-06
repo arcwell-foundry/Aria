@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { Building2, Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   validateEmail,
   submitCompanyDiscovery,
 } from "@/api/companyDiscovery";
 import { EnrichmentProgress } from "@/components/onboarding/EnrichmentProgress";
+import { checkCrossUser } from "@/api/onboarding";
+import { CompanyMemoryDeltaConfirmation } from "./CompanyMemoryDeltaConfirmation";
 
 interface CompanyDiscoveryStepProps {
   onComplete: (companyData: { company_name: string; website: string; email: string }) => void;
@@ -21,6 +24,17 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+
+  // Extract domain from email for cross-user check
+  const emailDomain = formData.email.trim().split("@")[1];
+
+  // Check for cross-user data when domain is valid and email is not a personal domain
+  const { data: crossUserData } = useQuery({
+    queryKey: ["crossUser", emailDomain],
+    queryFn: () => checkCrossUser(emailDomain),
+    enabled: !!emailDomain && !errors.email && emailValidating === false,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
 
   const clearFieldError = (fieldName: string) => {
     setErrors((prev) => {
@@ -158,6 +172,14 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             </div>
           </div>
         </div>
+      )}
+
+      {/* Cross-User Memory Delta Confirmation */}
+      {crossUserData?.exists && crossUserData.recommendation !== "full" && (
+        <CompanyMemoryDeltaConfirmation
+          data={crossUserData}
+          showGaps={crossUserData.recommendation === "partial"}
+        />
       )}
 
       {/* Form — hidden after successful submission */}

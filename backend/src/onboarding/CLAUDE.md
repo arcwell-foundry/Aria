@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #851 | 5:06 PM | 🔵 | No existing CompanyFact types in backend onboarding module | ~194 |
 | #452 | 2:44 PM | 🟣 | Committed and Pushed US-916 Adaptive Onboarding Implementation | ~216 |
 | #296 | 2:06 PM | ✅ | Committed type safety improvements to readiness.py | ~173 |
 | #291 | " | ✅ | Git diff shows type safety improvements in readiness.py | ~188 |
