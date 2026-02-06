@@ -14,3 +14,4 @@ export { OnboardingPage } from "./Onboarding";
 export { PreferencesSettingsPage } from "./PreferencesSettings";
 export { SignupPage } from "./Signup";
 export { SkillsPage } from "./Skills";
+export { SettingsAccountPage } from "./SettingsAccountPage";

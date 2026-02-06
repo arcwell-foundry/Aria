@@ -19,6 +19,7 @@ import {
   DashboardPage,
   GoalsPage,
   SkillsPage,
+  SettingsAccountPage,
 } from "@/pages";
 import { PostAuthRouter } from "@/components/PostAuthRouter";
 
@@ -140,6 +141,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <PreferencesSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/account"
+              element={
+                <ProtectedRoute>
+                  <SettingsAccountPage />
                 </ProtectedRoute>
               }
             />
