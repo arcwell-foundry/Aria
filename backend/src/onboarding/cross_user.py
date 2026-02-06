@@ -9,7 +9,7 @@ Only shared, company-level facts (Corporate Memory) influence acceleration.
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.db.supabase import SupabaseClient
 
@@ -103,6 +103,7 @@ class CrossUserAccelerationService:
         richness_score = self._calculate_richness_score(company_id)
 
         # Determine recommendation based on richness
+        recommendation: Literal["skip", "partial", "full"]
         if richness_score > 80:
             recommendation = "skip"
         elif richness_score >= 30:
@@ -123,7 +124,7 @@ class CrossUserAccelerationService:
             recommendation=recommendation,
         )
 
-    def _get_company_by_domain(self, domain: str) -> dict | None:
+    def _get_company_by_domain(self, domain: str) -> dict[str, Any] | None:
         """Query companies table by domain.
 
         Args:
@@ -141,7 +142,9 @@ class CrossUserAccelerationService:
                 .execute()
             )
 
-            return response.data if response.data else None
+            if response and response.data:
+                return response.data
+            return None
 
         except Exception as e:
             logger.exception(f"Error querying company by domain: {domain}")
@@ -194,14 +197,16 @@ class CrossUserAccelerationService:
         try:
             response = (
                 self._db.table("corporate_memory_facts")
-                .select("id", count="exact")
+                .select("id", count="exact")  # type: ignore[arg-type]
                 .eq("company_id", company_id)
                 .eq("is_active", True)
                 .in_("source", list(self._CORPORATE_SOURCES))
                 .execute()
             )
 
-            return response.count if response.count else 0
+            if response and hasattr(response, "count") and response.count:
+                return response.count
+            return 0
 
         except Exception as e:
             logger.exception(f"Error counting facts for company: {company_id}")
@@ -231,8 +236,11 @@ class CrossUserAccelerationService:
                 .execute()
             )
 
-            if response.data:
-                predicates = {fact["predicate"] for fact in response.data}
+            if response and response.data:
+                predicates: set[str] = set()
+                for fact in response.data:
+                    if isinstance(fact, dict) and "predicate" in fact:
+                        predicates.add(fact["predicate"])
                 return len(predicates)
 
             return 0
@@ -253,12 +261,14 @@ class CrossUserAccelerationService:
         try:
             response = (
                 self._db.table("company_documents")
-                .select("id", count="exact")
+                .select("id", count="exact")  # type: ignore[arg-type]
                 .eq("company_id", company_id)
                 .execute()
             )
 
-            return response.count if response.count else 0
+            if response and hasattr(response, "count") and response.count:
+                return response.count
+            return 0
 
         except Exception as e:
             logger.exception(f"Error counting documents for company: {company_id}")
