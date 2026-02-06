@@ -5,7 +5,7 @@ when user #2+ at a company starts onboarding and recommends step skipping.
 """
 
 import logging
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from src.onboarding.cross_user import CompanyCheckResult, CrossUserAccelerationService
 
@@ -561,3 +561,201 @@ def test_get_company_memory_delta_filters_personal_data():
         assert fact["confidence"] >= 0.8, (
             f"High-confidence fact {fact['id']} has confidence {fact['confidence']}"
         )
+
+
+# --- confirm_company_data tests ---
+
+
+def test_confirm_company_data_links_user_and_skips_steps():
+    """Test that confirming company data links user to company and skips steps."""
+    mock_db = Mock()
+    test_company_id = "company-123"
+    test_user_id = "user-456"
+    test_richness_score = 85
+
+    # Mock user_profiles update (link user to company)
+    profiles_query = Mock()
+    profiles_query.update.return_value = profiles_query
+    profiles_query.eq.return_value = profiles_query
+    profiles_query.execute.return_value = Mock(data=[{"id": test_user_id, "company_id": test_company_id}])
+
+    # Mock onboarding_state - we need to track call order
+    # First: update (skip steps), Second: select (get readiness), Third: update (inherit readiness)
+    onboarding_call_count = [0]
+    onboarding_query = Mock()
+
+    def onboarding_table_router():
+        onboarding_call_count[0] += 1
+        if onboarding_call_count[0] == 1:
+            # First call: update for skip steps
+            onboarding_query.update.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data=[{
+                "id": "obs-1",
+                "user_id": test_user_id,
+            }])
+            return onboarding_query
+        elif onboarding_call_count[0] == 2:
+            # Second call: select to get current readiness
+            onboarding_query.select.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.maybe_single.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data={
+                "id": "obs-1",
+                "user_id": test_user_id,
+                "readiness_scores": {
+                    "corporate_memory": 0,
+                    "digital_twin": 0,
+                    "relationship_graph": 0,
+                    "integrations": 0,
+                    "goal_clarity": 0,
+                },
+            })
+            return onboarding_query
+        else:
+            # Third call: update for readiness inheritance
+            onboarding_query.update.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data=[{
+                "id": "obs-1",
+                "user_id": test_user_id,
+            }])
+            return onboarding_query
+
+    def table_factory(table_name: str):
+        if table_name == "user_profiles":
+            return profiles_query
+        elif table_name == "onboarding_state":
+            return onboarding_table_router()
+        return Mock()
+
+    mock_db.table = table_factory
+
+    # Create service and confirm company data
+    service = CrossUserAccelerationService(db=mock_db, llm_client=None)
+
+    # Mock _calculate_richness_score to return a fixed value
+    with patch.object(service, "_calculate_richness_score", return_value=test_richness_score):
+        result = service.confirm_company_data(test_company_id, test_user_id)
+
+    # Verify user_profiles was updated with company_id
+    assert profiles_query.update.called
+    update_data = profiles_query.update.call_args[0][0]
+    assert update_data["company_id"] == test_company_id
+
+    # Verify onboarding_state was called 3 times
+    assert onboarding_call_count[0] == 3
+
+    # Verify result
+    assert result["user_linked"] is True
+    assert result["steps_skipped"] == ["company_discovery", "document_upload"]
+    assert result["readiness_inherited"] == test_richness_score
+
+
+def test_confirm_company_data_applies_corrections():
+    """Test that corrections are stored with high confidence."""
+    mock_db = Mock()
+    test_company_id = "company-123"
+    test_user_id = "user-456"
+
+    # Track inserts into corporate_facts
+    corporate_facts_inserts = []
+
+    # Mock corporate_facts insert (for corrections)
+    facts_query = Mock()
+
+    def facts_insert(data):
+        corporate_facts_inserts.append(data)
+        return facts_query
+
+    facts_query.insert = facts_insert
+    facts_query.execute.return_value = Mock(data=[{"id": "fact-new"}])
+
+    # Mock user_profiles update
+    profiles_query = Mock()
+    profiles_query.update.return_value = profiles_query
+    profiles_query.eq.return_value = profiles_query
+    profiles_query.execute.return_value = Mock(data=[{"id": test_user_id}])
+
+    # Mock onboarding_state - need to track call order for updates
+    onboarding_call_count = [0]
+    onboarding_query = Mock()
+
+    def onboarding_table_router():
+        onboarding_call_count[0] += 1
+        if onboarding_call_count[0] == 1:
+            # First call: update for skip steps
+            onboarding_query.update.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data=[{
+                "id": "obs-1",
+                "user_id": test_user_id,
+            }])
+            return onboarding_query
+        elif onboarding_call_count[0] == 2:
+            # Second call: select to get current readiness
+            onboarding_query.select.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.maybe_single.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data={
+                "id": "obs-1",
+                "user_id": test_user_id,
+                "readiness_scores": {
+                    "corporate_memory": 0,
+                    "digital_twin": 0,
+                    "relationship_graph": 0,
+                    "integrations": 0,
+                    "goal_clarity": 0,
+                },
+            })
+            return onboarding_query
+        else:
+            # Third call: update for readiness inheritance
+            onboarding_query.update.return_value = onboarding_query
+            onboarding_query.eq.return_value = onboarding_query
+            onboarding_query.execute.return_value = Mock(data=[{
+                "id": "obs-1",
+                "user_id": test_user_id,
+            }])
+            return onboarding_query
+
+    def table_factory(table_name: str):
+        if table_name == "corporate_facts":
+            return facts_query
+        elif table_name == "user_profiles":
+            return profiles_query
+        elif table_name == "onboarding_state":
+            return onboarding_table_router()
+        return Mock()
+
+    mock_db.table = table_factory
+
+    # Create service with test richness score
+    service = CrossUserAccelerationService(db=mock_db, llm_client=None)
+
+    # Provide corrections
+    corrections = {
+        "headquarters": "Boston, MA",
+        "founded_year": "2010",
+    }
+
+    # Mock _calculate_richness_score to return a fixed value
+    with patch.object(service, "_calculate_richness_score", return_value=75):
+        result = service.confirm_company_data(
+            test_company_id,
+            test_user_id,
+            corrections=corrections,
+        )
+
+    # Verify corrections were inserted with high confidence
+    assert len(corporate_facts_inserts) == len(corrections)
+
+    for insert_data in corporate_facts_inserts:
+        assert insert_data["company_id"] == test_company_id
+        assert insert_data["confidence"] == 0.95
+        assert insert_data["source"] == "user_stated"
+        assert insert_data["created_by"] == test_user_id
+        assert insert_data["is_active"] is True
+
+    # Verify result includes corrections
+    assert result["corrections_applied"] == len(corrections)

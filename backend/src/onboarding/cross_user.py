@@ -424,3 +424,254 @@ class CrossUserAccelerationService:
 
         # Default to corporate domain
         return "corporate"
+
+    def confirm_company_data(
+        self,
+        company_id: str,
+        user_id: str,
+        corrections: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Confirm existing company data and link user to company.
+
+        When user #2+ confirms their company data, this method:
+        1. Links user to company via user_profiles
+        2. Applies any corrections provided by user
+        3. Marks company_discovery and document_upload as skipped
+        4. Inherits corporate_memory readiness score from company richness
+
+        Args:
+            company_id: The company UUID to link to.
+            user_id: The user UUID to link.
+            corrections: Optional dict of field names to corrected values.
+
+        Returns:
+            Dict with:
+                - user_linked: bool, whether user was successfully linked
+                - steps_skipped: list of step names that were skipped
+                - readiness_inherited: int, corporate_memory readiness score inherited
+                - corrections_applied: int, number of corrections applied
+        """
+        logger.info(
+            f"Confirming company data for user {user_id} "
+            f"at company {company_id}"
+        )
+
+        # Calculate richness score for inheritance
+        richness_score = self._calculate_richness_score(company_id)
+
+        # Link user to company
+        user_linked = self._link_user_to_company(company_id, user_id)
+
+        # Apply corrections if provided
+        corrections_applied = 0
+        if corrections:
+            corrections_applied = self._apply_corrections(
+                company_id,
+                user_id,
+                corrections,
+            )
+
+        # Skip onboarding steps
+        steps_skipped = self._skip_onboarding_steps(user_id)
+
+        # Inherit readiness score
+        self._inherit_readiness_score(user_id, richness_score)
+
+        logger.info(
+            f"Company data confirmed: user_linked={user_linked}, "
+            f"steps_skipped={steps_skipped}, readiness_inherited={richness_score}, "
+            f"corrections_applied={corrections_applied}"
+        )
+
+        return {
+            "user_linked": user_linked,
+            "steps_skipped": steps_skipped,
+            "readiness_inherited": richness_score,
+            "corrections_applied": corrections_applied,
+        }
+
+    def _link_user_to_company(self, company_id: str, user_id: str) -> bool:
+        """Link user to company via user_profiles table.
+
+        Args:
+            company_id: The company UUID to link to.
+            user_id: The user UUID to link.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            response = (
+                self._db.table("user_profiles")
+                .update({"company_id": company_id})
+                .eq("id", user_id)
+                .execute()
+            )
+
+            if response and response.data:
+                logger.info(f"Linked user {user_id} to company {company_id}")
+                return True
+            return False
+
+        except Exception as e:
+            logger.exception(
+                f"Error linking user {user_id} to company {company_id}: {e}"
+            )
+            return False
+
+    def _apply_corrections(
+        self,
+        company_id: str,
+        user_id: str,
+        corrections: dict[str, str],
+    ) -> int:
+        """Apply user corrections to corporate memory.
+
+        For each correction, inserts a new fact into corporate_facts with
+        source="user_stated" and confidence=0.95 (highest priority per
+        Source Hierarchy for Conflict Resolution).
+
+        Args:
+            company_id: The company UUID.
+            user_id: The user UUID making the corrections.
+            corrections: Dict of field names to corrected values.
+
+        Returns:
+            Number of corrections applied.
+        """
+        applied_count = 0
+
+        for field, value in corrections.items():
+            if not value:
+                continue
+
+            try:
+                # Map common field names to predicates
+                predicate = self._map_field_to_predicate(field)
+                if not predicate:
+                    logger.warning(f"Unknown correction field: {field}")
+                    continue
+
+                # Insert correction as high-confidence fact
+                (
+                    self._db.table("corporate_facts")
+                    .insert({
+                        "company_id": company_id,
+                        "subject": company_id,  # Company is the subject
+                        "predicate": predicate,
+                        "object": str(value),
+                        "confidence": 0.95,  # User-stated = highest priority
+                        "source": "user_stated",
+                        "created_by": user_id,
+                        "is_active": True,
+                    })
+                    .execute()
+                )
+
+                applied_count += 1
+                logger.info(
+                    f"Applied correction for {field}={value} "
+                    f"at company {company_id}"
+                )
+
+            except Exception as e:
+                logger.exception(
+                    f"Error applying correction {field}={value}: {e}"
+                )
+
+        return applied_count
+
+    def _map_field_to_predicate(self, field: str) -> str | None:
+        """Map a field name to a corporate_facts predicate.
+
+        Args:
+            field: The field name (e.g., "headquarters", "founded_year").
+
+        Returns:
+            Predicate string or None if unknown.
+        """
+        field_mapping = {
+            "headquarters": "has_headquarters",
+            "founded_year": "founded_in",
+            "company_name": "named",
+            "industry": "specializes_in",
+            "ceo": "ceo_is",
+            "revenue": "revenue",
+            "employee_count": "has_employee_count",
+            "description": "described_as",
+        }
+
+        return field_mapping.get(field)
+
+    def _skip_onboarding_steps(self, user_id: str) -> list[str]:
+        """Mark company_discovery and document_upload as skipped.
+
+        Args:
+            user_id: The user UUID.
+
+        Returns:
+            List of skipped step names.
+        """
+        skipped_steps = ["company_discovery", "document_upload"]
+
+        try:
+            (
+                self._db.table("onboarding_state")
+                .update({"skipped_steps": skipped_steps})
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            logger.info(f"Marked steps as skipped for user {user_id}: {skipped_steps}")
+
+        except Exception as e:
+            logger.exception(f"Error skipping steps for user {user_id}: {e}")
+
+        return skipped_steps
+
+    def _inherit_readiness_score(self, user_id: str, richness_score: int) -> None:
+        """Update corporate_memory readiness score from company richness.
+
+        Args:
+            user_id: The user UUID.
+            richness_score: The richness score to inherit (0-100).
+        """
+        try:
+            # Get current onboarding_state
+            response = (
+                self._db.table("onboarding_state")
+                .select("readiness_scores")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if not response or not response.data:
+                logger.warning(f"No onboarding_state found for user {user_id}")
+                return
+
+            current_scores = response.data.get("readiness_scores", {})
+
+            # Update corporate_memory sub-score
+            updated_scores = {
+                **current_scores,
+                "corporate_memory": richness_score,
+            }
+
+            # Write back
+            (
+                self._db.table("onboarding_state")
+                .update({"readiness_scores": updated_scores})
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            logger.info(
+                f"Updated readiness_scores for user {user_id}: "
+                f"corporate_memory={richness_score}"
+            )
+
+        except Exception as e:
+            logger.exception(
+                f"Error inheriting readiness score for user {user_id}: {e}"
+            )
