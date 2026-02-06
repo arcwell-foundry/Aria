@@ -33,9 +33,7 @@ def test_client(mock_current_user: MagicMock) -> TestClient:
 
 
 class TestListUserSkills:
-    def test_list_user_skills_returns_installed_skills(
-        self, test_client: TestClient
-    ) -> None:
+    def test_list_user_skills_returns_installed_skills(self, test_client: TestClient) -> None:
         """Test that list_user_skills returns all installed skills for user."""
         with patch("src.api.routes.skills.SkillInstaller") as mock_installer_class:
             mock_installer = MagicMock()
@@ -85,27 +83,21 @@ class TestAvailableSkills:
             )
             mock_index_class.return_value = mock_index
 
-            response = test_client.get(
-                "/api/v1/skills/available?query=pdf"
-            )
+            response = test_client.get("/api/v1/skills/available?query=pdf")
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert len(data) == 1
         assert data[0]["skill_name"] == "PDF Generator"
 
-    def test_search_available_skills_with_trust_filter(
-        self, test_client: TestClient
-    ) -> None:
+    def test_search_available_skills_with_trust_filter(self, test_client: TestClient) -> None:
         """Test GET /skills/available filters by trust level."""
         with patch("src.api.routes.skills.SkillIndex") as mock_index_class:
             mock_index = MagicMock()
             mock_index.search = AsyncMock(return_value=[])
             mock_index_class.return_value = mock_index
 
-            response = test_client.get(
-                "/api/v1/skills/available?query=test&trust_level=core"
-            )
+            response = test_client.get("/api/v1/skills/available?query=test&trust_level=core")
 
         assert response.status_code == status.HTTP_200_OK
         mock_index.search.assert_called_once()
@@ -149,7 +141,9 @@ class TestInstallSkill:
                     skill_path="anthropics/skills/pdf",
                     trust_level=MagicMock(value="verified"),
                     permissions_granted=["read"],
-                    installed_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
+                    installed_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")
+                    ),
                     auto_installed=False,
                     execution_count=0,
                     success_count=0,
@@ -173,9 +167,7 @@ class TestInstallSkill:
             from src.skills.installer import SkillNotFoundError
 
             mock_installer = MagicMock()
-            mock_installer.install = AsyncMock(
-                side_effect=SkillNotFoundError("Skill not found")
-            )
+            mock_installer.install = AsyncMock(side_effect=SkillNotFoundError("Skill not found"))
             mock_installer_class.return_value = mock_installer
 
             response = test_client.post(
@@ -304,9 +296,7 @@ class TestAuditLog:
             mock_audit.get_audit_for_skill = AsyncMock(return_value=[])
             mock_audit_class.return_value = mock_audit
 
-            response = test_client.get(
-                "/api/v1/skills/audit?skill_id=skill-uuid-1"
-            )
+            response = test_client.get("/api/v1/skills/audit?skill_id=skill-uuid-1")
 
         assert response.status_code == status.HTTP_200_OK
         mock_audit.get_audit_for_skill.assert_called_once()
@@ -327,8 +317,12 @@ class TestAutonomy:
                     session_trust_granted=False,
                     globally_approved=False,
                     globally_approved_at=None,
-                    created_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
-                    updated_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T12:00:00+00:00")),
+                    created_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")
+                    ),
+                    updated_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-01T12:00:00+00:00")
+                    ),
                 )
             )
             mock_autonomy_class.return_value = mock_autonomy
@@ -367,16 +361,20 @@ class TestAutonomy:
                     failed_executions=0,
                     session_trust_granted=False,
                     globally_approved=True,
-                    globally_approved_at=MagicMock(isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")),
-                    created_at=MagicMock(isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")),
-                    updated_at=MagicMock(isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")),
+                    globally_approved_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")
+                    ),
+                    created_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-01T10:00:00+00:00")
+                    ),
+                    updated_at=MagicMock(
+                        isoformat=MagicMock(return_value="2026-02-05T10:00:00+00:00")
+                    ),
                 )
             )
             mock_autonomy_class.return_value = mock_autonomy
 
-            response = test_client.post(
-                "/api/v1/skills/autonomy/skill-uuid-1/approve"
-            )
+            response = test_client.post("/api/v1/skills/autonomy/skill-uuid-1/approve")
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
@@ -389,8 +387,6 @@ class TestAutonomy:
             mock_autonomy.grant_global_approval = AsyncMock(return_value=None)
             mock_autonomy_class.return_value = mock_autonomy
 
-            response = test_client.post(
-                "/api/v1/skills/autonomy/nonexistent/approve"
-            )
+            response = test_client.post("/api/v1/skills/autonomy/nonexistent/approve")
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR

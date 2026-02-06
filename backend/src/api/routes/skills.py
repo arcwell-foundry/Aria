@@ -147,11 +147,11 @@ async def list_available_skills(
     if trust_level:
         try:
             trust_filter = SkillTrustLevel(trust_level)
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid trust_level: {trust_level}. Must be one of: core, verified, community, user",
-            )
+            ) from e
 
     results = await index.search(
         query,
@@ -321,9 +321,7 @@ async def get_audit_log(
             current_user.id, skill_id, limit=limit, offset=offset
         )
     else:
-        entries = await audit.get_audit_log(
-            current_user.id, limit=limit, offset=offset
-        )
+        entries = await audit.get_audit_log(current_user.id, limit=limit, offset=offset)
 
     logger.info(
         "Fetched audit log",
@@ -356,9 +354,7 @@ async def get_skill_trust(
         session_trust_granted=history.session_trust_granted,
         globally_approved=history.globally_approved,
         globally_approved_at=(
-            history.globally_approved_at.isoformat()
-            if history.globally_approved_at
-            else None
+            history.globally_approved_at.isoformat() if history.globally_approved_at else None
         ),
     )
 
@@ -390,8 +386,6 @@ async def approve_skill(
         session_trust_granted=history.session_trust_granted,
         globally_approved=history.globally_approved,
         globally_approved_at=(
-            history.globally_approved_at.isoformat()
-            if history.globally_approved_at
-            else None
+            history.globally_approved_at.isoformat() if history.globally_approved_at else None
         ),
     )
