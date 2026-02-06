@@ -10,6 +10,7 @@ import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
 import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
 import { DocumentUploadStep } from "@/components/onboarding/DocumentUploadStep";
+import { WritingSampleStep } from "@/components/onboarding/WritingSampleStep";
 
 export function OnboardingPage() {
   const navigate = useNavigate();
@@ -68,6 +69,11 @@ export function OnboardingPage() {
               />
             ) : currentStep === "document_upload" ? (
               <DocumentUploadStep
+                onComplete={() => handleComplete()}
+                onSkip={handleSkip}
+              />
+            ) : currentStep === "writing_samples" ? (
+              <WritingSampleStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
               />

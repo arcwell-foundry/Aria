@@ -18,6 +18,7 @@ from src.onboarding.models import (
 )
 from src.onboarding.orchestrator import OnboardingOrchestrator
 from src.onboarding.stakeholder_step import StakeholderStepService
+from src.onboarding.writing_analysis import WritingAnalysisService
 
 logger = logging.getLogger(__name__)
 
@@ -338,3 +339,48 @@ async def get_stakeholders(
     service = _get_stakeholder_service()
     stakeholders = await service.get_stakeholders(current_user.id)
     return [s.to_dict() for s in stakeholders]
+
+
+# Writing sample analysis endpoints (US-906)
+
+
+class WritingSamplesRequest(BaseModel):
+    """Request body for writing sample analysis."""
+
+    samples: list[str]  # Raw text samples
+
+
+def _get_writing_service() -> WritingAnalysisService:
+    """Get writing analysis service instance."""
+    return WritingAnalysisService()
+
+
+@router.post("/writing-analysis/analyze")
+async def analyze_writing(
+    body: WritingSamplesRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Analyze writing samples and generate style fingerprint.
+
+    Accepts raw text samples (emails, documents, reports) and returns
+    a comprehensive WritingStyleFingerprint stored in the Digital Twin.
+    """
+    service = _get_writing_service()
+    fingerprint = await service.analyze_samples(current_user.id, body.samples)
+    return fingerprint.model_dump()
+
+
+@router.get("/writing-analysis/fingerprint")
+async def get_writing_fingerprint(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get stored writing style fingerprint.
+
+    Returns the user's current WritingStyleFingerprint from the Digital Twin,
+    or a status indicator if not yet analyzed.
+    """
+    service = _get_writing_service()
+    fp = await service.get_fingerprint(current_user.id)
+    if not fp:
+        return {"status": "not_analyzed"}
+    return fp.model_dump()
