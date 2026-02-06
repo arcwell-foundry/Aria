@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-sans: "Satoshi", "General Sans", system-ui, sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 

@@ -10,6 +10,7 @@ export { IntegrationsSettingsPage } from "./IntegrationsSettings";
 export { LoginPage } from "./Login";
 export { MeetingBriefPage } from "./MeetingBrief";
 export { NotificationsPage } from "./NotificationsPage";
+export { OnboardingPage } from "./Onboarding";
 export { PreferencesSettingsPage } from "./PreferencesSettings";
 export { SignupPage } from "./Signup";
 export { SkillsPage } from "./Skills";

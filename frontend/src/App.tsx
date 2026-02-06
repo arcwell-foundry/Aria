@@ -13,12 +13,14 @@ import {
   LoginPage,
   MeetingBriefPage,
   NotificationsPage,
+  OnboardingPage,
   PreferencesSettingsPage,
   SignupPage,
   DashboardPage,
   GoalsPage,
   SkillsPage,
 } from "@/pages";
+import { PostAuthRouter } from "@/components/PostAuthRouter";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,6 +39,14 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route
+              path="/onboarding"
+              element={
+                <ProtectedRoute>
+                  <OnboardingPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/dashboard"
               element={
@@ -141,7 +151,14 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <PostAuthRouter />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </AuthProvider>
