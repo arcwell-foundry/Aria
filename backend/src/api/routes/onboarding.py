@@ -24,6 +24,7 @@ from src.onboarding.first_goal import (
 
 if TYPE_CHECKING:
     from src.onboarding.cross_user import CrossUserAccelerationService
+    from src.onboarding.personality_calibrator import PersonalityCalibrator
     from src.onboarding.skill_recommender import SkillRecommendationEngine
 from src.onboarding.integration_wizard import (
     IntegrationPreferences,
@@ -831,6 +832,12 @@ async def activate_aria(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # Run personality calibration before agents are spawned (US-919)
+    from src.onboarding.personality_calibrator import PersonalityCalibrator
+
+    calibrator = PersonalityCalibrator()
+    asyncio.create_task(calibrator.calibrate(current_user.id))
+
     # Fire memory construction as a background task
     from src.onboarding.memory_constructor import MemoryConstructionOrchestrator
 
@@ -1303,3 +1310,75 @@ async def install_recommended_skills(
             status_code=500,
             detail="Failed to install skills",
         ) from e
+
+
+# Personality Calibration endpoints (US-919)
+
+
+class PersonalityCalibrationResponse(BaseModel):
+    """Response model for personality calibration."""
+
+    directness: float
+    warmth: float
+    assertiveness: float
+    detail_orientation: float
+    formality: float
+    tone_guidance: str
+    example_adjustments: list[str]
+
+
+def _get_personality_calibrator() -> "PersonalityCalibrator":
+    """Get personality calibrator service instance."""
+    from src.onboarding.personality_calibrator import PersonalityCalibrator
+
+    return PersonalityCalibrator()
+
+
+@router.post(
+    "/personality/calibrate",
+    response_model=PersonalityCalibrationResponse,
+)
+async def calibrate_personality(
+    current_user: CurrentUser,
+) -> PersonalityCalibrationResponse:
+    """Calibrate ARIA's personality from user's Digital Twin.
+
+    Reads the writing style fingerprint and generates personality
+    trait adjustments. Stores calibration in Digital Twin for use
+    by all ARIA features (Scribe drafts, responses, etc.).
+
+    Returns:
+        PersonalityCalibrationResponse with trait adjustments and tone guidance.
+
+    Raises:
+        HTTPException: 500 if calibration fails.
+    """
+    try:
+        calibrator = _get_personality_calibrator()
+        result = await calibrator.calibrate(current_user.id)
+        return PersonalityCalibrationResponse(**result.model_dump())
+    except Exception as e:
+        logger.exception(f"Error calibrating personality for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to calibrate personality",
+        ) from e
+
+
+@router.get("/personality/calibration")
+async def get_personality_calibration(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get stored personality calibration.
+
+    Returns the current personality calibration for the user,
+    or a status indicator if not yet calibrated.
+
+    Returns:
+        PersonalityCalibration dict or {status: "not_calibrated"}.
+    """
+    calibrator = _get_personality_calibrator()
+    cal = await calibrator.get_calibration(current_user.id)
+    if cal:
+        return cal.model_dump()
+    return {"status": "not_calibrated"}

@@ -463,3 +463,35 @@ export async function installRecommendedSkills(
   return response.data;
 }
 
+// Personality Calibration endpoints (US-919)
+
+export interface PersonalityCalibrationResponse {
+  directness: number;
+  warmth: number;
+  assertiveness: number;
+  detail_orientation: number;
+  formality: number;
+  tone_guidance: string;
+  example_adjustments: string[];
+}
+
+export interface PersonalityCalibrationStatus {
+  status: "not_calibrated";
+}
+
+export async function calibratePersonality(): Promise<PersonalityCalibrationResponse> {
+  const response = await apiClient.post<PersonalityCalibrationResponse>(
+    "/onboarding/personality/calibrate"
+  );
+  return response.data;
+}
+
+export async function getPersonalityCalibration(): Promise<
+  PersonalityCalibrationResponse | PersonalityCalibrationStatus
+> {
+  const response = await apiClient.get<
+    PersonalityCalibrationResponse | PersonalityCalibrationStatus
+  >("/onboarding/personality/calibration");
+  return response.data;
+}
+
