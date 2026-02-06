@@ -28,6 +28,7 @@ from src.api.routes import (
     predictions,
     preferences,
     signals,
+    skills,
 )
 from src.core.exceptions import ARIAException
 
@@ -107,6 +108,7 @@ app.include_router(leads.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
 app.include_router(preferences.router, prefix="/api/v1")
+app.include_router(skills.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])

@@ -245,6 +245,28 @@ class SkillInstaller:
         """
         return await self._get_by_user_and_skill_id(user_id, skill_id)
 
+    async def list_user_skills(self, user_id: str) -> list[dict[str, Any]]:
+        """List all installed skills for a user.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            List of installed skill dictionaries.
+        """
+        try:
+            response = (
+                self._client.table("user_skills")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("installed_at", desc=True)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error listing installed skills for user {user_id}: {e}")
+            return []
+
     async def is_installed(self, user_id: str, skill_id: str) -> bool:
         """Check if a skill is installed for a user.
 
