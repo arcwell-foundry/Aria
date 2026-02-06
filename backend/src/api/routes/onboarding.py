@@ -834,3 +834,26 @@ async def activate_aria(
     asyncio.create_task(constructor.run_construction(current_user.id))
 
     return {"status": "activated", "redirect": "/dashboard"}
+
+
+# Knowledge Gap Detection endpoint (US-912)
+
+
+@router.get("/gaps")
+async def get_knowledge_gaps(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get current knowledge gaps by domain.
+
+    Runs full gap analysis across Corporate Memory, Digital Twin,
+    Competitive Intelligence, and Integration connectivity. Each gap
+    generates a Prospective Memory entry for future resolution.
+
+    Returns:
+        GapAnalysisResult with gaps, completeness scores, and counts.
+    """
+    from src.onboarding.gap_detector import KnowledgeGapDetector
+
+    detector = KnowledgeGapDetector()
+    result = await detector.detect_gaps(current_user.id)
+    return result.model_dump()
