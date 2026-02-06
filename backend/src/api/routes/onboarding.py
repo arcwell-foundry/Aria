@@ -899,3 +899,64 @@ async def get_first_conversation(
     generator = FirstConversationGenerator()
     message = await generator.generate(current_user.id)
     return message.model_dump()
+
+
+# Agent Activation Status endpoint (US-915)
+
+
+@router.get("/activation-status")
+async def get_activation_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get agent activation status after onboarding completion.
+
+    Returns active goals created by the activation process, each
+    with their assigned agent and current status.
+
+    Returns:
+        Dict with activations list and overall status.
+    """
+    db = SupabaseClient.get_client()
+
+    # Query goals created by onboarding activation
+    result = (
+        db.table("goals")
+        .select("id, title, description, status, progress, config, goal_agents(*)")
+        .eq("user_id", current_user.id)
+        .execute()
+    )
+
+    activations: list[dict[str, Any]] = []
+    for goal in result.data or []:
+        config = goal.get("config", {})
+        if config.get("source") != "onboarding_activation":
+            continue
+
+        agents = goal.get("goal_agents", [])
+        agent_type = config.get("agent", "")
+        agent_status = "pending"
+        if agents:
+            agent_status = agents[0].get("status", "pending")
+
+        activations.append(
+            {
+                "goal_id": goal["id"],
+                "agent": agent_type,
+                "goal_title": goal["title"],
+                "task": goal["description"],
+                "status": agent_status,
+                "progress": goal.get("progress", 0),
+            }
+        )
+
+    overall = "idle"
+    if activations:
+        statuses = {a["status"] for a in activations}
+        if "running" in statuses:
+            overall = "running"
+        elif statuses == {"complete"}:
+            overall = "complete"
+        elif "pending" in statuses:
+            overall = "pending"
+
+    return {"status": overall, "activations": activations}

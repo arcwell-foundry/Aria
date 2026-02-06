@@ -126,6 +126,24 @@ class MemoryConstructionOrchestrator:
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        # 9. Agent activation (US-915)
+        activation_result: dict[str, Any] = {}
+        try:
+            from src.onboarding.activation import (
+                OnboardingCompletionOrchestrator,
+            )
+
+            activator = OnboardingCompletionOrchestrator()
+            result = await activator.activate(user_id)
+            activation_result = result.model_dump()
+        except Exception as e:
+            logger.warning(
+                "Agent activation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        summary["activation"] = activation_result
+
         logger.info(
             "Memory construction complete",
             extra={"user_id": user_id, "summary": summary},

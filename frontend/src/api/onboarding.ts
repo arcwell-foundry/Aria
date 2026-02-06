@@ -319,3 +319,26 @@ export async function getReadiness(): Promise<ReadinessBreakdown> {
   return response.data;
 }
 
+// Agent Activation Status (US-915)
+
+export interface AgentActivationEntry {
+  goal_id: string;
+  agent: string;
+  goal_title: string;
+  task: string;
+  status: "pending" | "running" | "complete" | "failed";
+  progress: number;
+}
+
+export interface ActivationStatusResponse {
+  status: "idle" | "pending" | "running" | "complete";
+  activations: AgentActivationEntry[];
+}
+
+export async function getActivationStatus(): Promise<ActivationStatusResponse> {
+  const response = await apiClient.get<ActivationStatusResponse>(
+    "/onboarding/activation-status"
+  );
+  return response.data;
+}
+

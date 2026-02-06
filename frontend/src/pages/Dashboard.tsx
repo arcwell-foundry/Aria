@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { AgentActivationStatus } from "@/components/AgentActivationStatus";
 import {
   BriefingEmpty,
   BriefingHeader,
@@ -95,6 +96,11 @@ export function DashboardPage() {
               </button>
             </div>
           )}
+
+          {/* Agent Activation Status (US-915) */}
+          <div className="mt-6">
+            <AgentActivationStatus />
+          </div>
 
           {/* Content */}
           <div className="mt-6 space-y-6">
