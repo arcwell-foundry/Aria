@@ -472,6 +472,41 @@ async def save_email_privacy(
     return await service.save_privacy_config(current_user.id, body)
 
 
+# Email bootstrap status endpoint (US-908)
+
+
+@router.get("/email/bootstrap/status")
+async def email_bootstrap_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get email bootstrap processing status.
+
+    Returns the current state of the priority email bootstrap,
+    including counts of emails processed, contacts discovered,
+    active threads, and commitments detected.
+    """
+    db = SupabaseClient.get_client()
+
+    result = (
+        db.table("onboarding_state")
+        .select("metadata")
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+
+    if not result or not result.data:
+        return {"status": "not_started"}
+
+    metadata: dict[str, Any] = result.data.get("metadata", {})  # type: ignore[union-attr]
+    bootstrap_data = metadata.get("email_bootstrap")
+
+    if not bootstrap_data:
+        return {"status": "not_started"}
+
+    return bootstrap_data
+
+
 # Integration Wizard endpoints (US-909)
 
 

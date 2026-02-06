@@ -4,6 +4,7 @@ Manages email OAuth connection and privacy configuration for
 Gmail and Microsoft Outlook providers via Composio.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -225,6 +226,22 @@ class EmailIntegrationService:
         except Exception as e:
             logger.warning(
                 "Episodic record failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # Trigger priority email bootstrap (US-908) as background task
+        try:
+            from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+            bootstrap = PriorityEmailIngestion()
+            asyncio.create_task(bootstrap.run_bootstrap(user_id))
+            logger.info(
+                "Email bootstrap triggered",
+                extra={"user_id": user_id},
+            )
+        except Exception as e:
+            logger.warning(
+                "Email bootstrap trigger failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
 
