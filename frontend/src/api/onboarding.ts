@@ -285,3 +285,17 @@ export async function createFirstGoal(
   );
   return response.data;
 }
+
+// Activation endpoint (US-911)
+
+export interface ActivateAriaResponse {
+  status: "activated";
+  redirect: string;
+}
+
+export async function activateAria(): Promise<ActivateAriaResponse> {
+  const response = await apiClient.post<ActivateAriaResponse>(
+    "/onboarding/activate"
+  );
+  return response.data;
+}

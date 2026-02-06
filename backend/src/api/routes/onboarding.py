@@ -1,5 +1,6 @@
 """API routes for onboarding state machine."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -14,15 +15,15 @@ from src.onboarding.email_integration import (
     EmailIntegrationConfig,
     EmailIntegrationService,
 )
-from src.onboarding.integration_wizard import (
-    IntegrationPreferences,
-    IntegrationWizardService,
-)
 from src.onboarding.first_goal import (
     FirstGoalService,
     GoalCategory,
     GoalSuggestion,
     GoalTemplate,
+)
+from src.onboarding.integration_wizard import (
+    IntegrationPreferences,
+    IntegrationWizardService,
 )
 from src.onboarding.models import (
     OnboardingStateResponse,
@@ -798,3 +799,38 @@ async def _get_enrichment_context(user_id: str) -> dict[str, Any] | None:
     except Exception as e:
         logger.warning(f"Failed to get enrichment context: {e}")
         return None
+
+
+# Activation endpoint (US-911)
+
+
+@router.post("/activate")
+async def activate_aria(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Complete onboarding and activate ARIA.
+
+    Marks the activation step as complete, fires off background
+    memory construction (US-911), and redirects user to dashboard.
+
+    Returns:
+        Dict with activation status and dashboard redirect.
+    """
+    orchestrator = _get_orchestrator()
+
+    try:
+        await orchestrator.complete_step(
+            current_user.id,
+            OnboardingStep.ACTIVATION,
+            {},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Fire memory construction as a background task
+    from src.onboarding.memory_constructor import MemoryConstructionOrchestrator
+
+    constructor = MemoryConstructionOrchestrator()
+    asyncio.create_task(constructor.run_construction(current_user.id))
+
+    return {"status": "activated", "redirect": "/dashboard"}
