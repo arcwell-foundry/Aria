@@ -877,3 +877,25 @@ async def get_readiness(
     service = OnboardingReadinessService()
     result = await service.get_readiness(current_user.id)
     return result.model_dump()
+
+
+# First Conversation endpoint (US-914)
+
+
+@router.get("/first-conversation")
+async def get_first_conversation(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get or generate ARIA's first conversation message.
+
+    Returns the intelligence-demonstrating first message that proves
+    ARIA has done her homework. If not yet generated, triggers generation.
+
+    Returns:
+        FirstConversationMessage with content, memory delta, and metadata.
+    """
+    from src.onboarding.first_conversation import FirstConversationGenerator
+
+    generator = FirstConversationGenerator()
+    message = await generator.generate(current_user.id)
+    return message.model_dump()

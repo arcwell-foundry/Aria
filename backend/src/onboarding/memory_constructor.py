@@ -112,6 +112,20 @@ class MemoryConstructionOrchestrator:
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        # 8. Generate first conversation (US-914)
+        try:
+            from src.onboarding.first_conversation import (
+                FirstConversationGenerator,
+            )
+
+            generator = FirstConversationGenerator()
+            await generator.generate(user_id)
+        except Exception as e:
+            logger.warning(
+                "First conversation generation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
         logger.info(
             "Memory construction complete",
             extra={"user_id": user_id, "summary": summary},
