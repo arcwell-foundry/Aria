@@ -299,3 +299,23 @@ export async function activateAria(): Promise<ActivateAriaResponse> {
   );
   return response.data;
 }
+
+// Readiness Score endpoint (US-913)
+
+export interface ReadinessBreakdown {
+  corporate_memory: number;
+  digital_twin: number;
+  relationship_graph: number;
+  integrations: number;
+  goal_clarity: number;
+  overall: number;
+  confidence_modifier: "low" | "moderate" | "high" | "very_high";
+}
+
+export async function getReadiness(): Promise<ReadinessBreakdown> {
+  const response = await apiClient.get<ReadinessBreakdown>(
+    "/onboarding/readiness"
+  );
+  return response.data;
+}
+

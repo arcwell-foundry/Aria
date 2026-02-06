@@ -17,9 +17,6 @@ from src.onboarding.email_integration import (
 )
 from src.onboarding.first_goal import (
     FirstGoalService,
-    GoalCategory,
-    GoalSuggestion,
-    GoalTemplate,
 )
 from src.onboarding.integration_wizard import (
     IntegrationPreferences,
@@ -856,4 +853,27 @@ async def get_knowledge_gaps(
 
     detector = KnowledgeGapDetector()
     result = await detector.detect_gaps(current_user.id)
+    return result.model_dump()
+
+
+# Readiness Score endpoint (US-913)
+
+
+@router.get("/readiness")
+async def get_readiness(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get current readiness scores with overall calculation.
+
+    Returns readiness breakdown across five domains with weighted
+    overall score and confidence modifier. The readiness score indicates
+    how well-initialized ARIA is for this user.
+
+    Returns:
+        ReadinessBreakdown with all sub-scores, overall, and confidence modifier.
+    """
+    from src.onboarding.readiness import OnboardingReadinessService
+
+    service = OnboardingReadinessService()
+    result = await service.get_readiness(current_user.id)
     return result.model_dump()
