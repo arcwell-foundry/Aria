@@ -359,3 +359,60 @@ export async function getActivationStatus(): Promise<ActivationStatusResponse> {
   return response.data;
 }
 
+// Cross-user acceleration endpoints (US-917)
+
+export interface CompanyFact {
+  id: string;
+  fact: string;
+  domain: string;
+  confidence: number;
+  source: string;
+}
+
+export interface CompanyMemoryDelta {
+  facts: CompanyFact[];
+  high_confidence_facts: CompanyFact[];
+  domains_covered: string[];
+  total_fact_count: number;
+}
+
+export interface CrossUserAccelerationResponse {
+  exists: boolean;
+  company_id: string | null;
+  company_name: string | null;
+  richness_score: number;
+  recommendation: "skip" | "partial" | "full";
+  facts: CompanyFact[];
+}
+
+export interface ConfirmCompanyDataRequest {
+  company_id: string;
+  corrections: Record<string, string>;
+}
+
+export interface ConfirmCompanyDataResponse {
+  user_linked: boolean;
+  steps_skipped: string[];
+  readiness_inherited: number;
+  corrections_applied: number;
+}
+
+export async function checkCrossUser(
+  domain: string
+): Promise<CrossUserAccelerationResponse> {
+  const response = await apiClient.get<CrossUserAccelerationResponse>(
+    `/onboarding/cross-user?domain=${encodeURIComponent(domain)}`
+  );
+  return response.data;
+}
+
+export async function confirmCompanyData(
+  request: ConfirmCompanyDataRequest
+): Promise<OnboardingState> {
+  const response = await apiClient.post<{ state: OnboardingState }>(
+    "/onboarding/cross-user/confirm",
+    request
+  );
+  return response.data.state;
+}
+
