@@ -200,3 +200,88 @@ export async function saveIntegrationPreferences(
   );
   return response.data;
 }
+
+// First Goal endpoints (US-910)
+
+export interface GoalSuggestion {
+  title: string;
+  description: string;
+  category: string;
+  urgency: string;
+  reason: string;
+  goal_type: string;
+}
+
+export interface GoalTemplate {
+  title: string;
+  description: string;
+  category: string;
+  goal_type: string;
+  applicable_roles: string[];
+}
+
+export interface FirstGoalSuggestionsResponse {
+  suggestions: GoalSuggestion[];
+  templates: Record<string, GoalTemplate[]>;
+  enrichment_context: {
+    company: { name: string; classification: Record<string, unknown> } | null;
+    connected_integrations: string[];
+  } | null;
+}
+
+export interface SmartValidationRequest {
+  title: string;
+  description?: string;
+}
+
+export interface SmartValidationResponse {
+  is_smart: boolean;
+  score: number;
+  feedback: string[];
+  refined_version: string | null;
+}
+
+export interface FirstGoalCreateRequest {
+  title: string;
+  description?: string;
+  goal_type?: string;
+}
+
+export interface FirstGoalCreateResponse {
+  goal: {
+    id: string;
+    title: string;
+    description: string | null;
+    goal_type: string;
+    status: string;
+  };
+  status: string;
+  message: string;
+}
+
+export async function getFirstGoalSuggestions(): Promise<FirstGoalSuggestionsResponse> {
+  const response = await apiClient.get<FirstGoalSuggestionsResponse>(
+    "/onboarding/first-goal/suggestions"
+  );
+  return response.data;
+}
+
+export async function validateGoalSmart(
+  request: SmartValidationRequest
+): Promise<SmartValidationResponse> {
+  const response = await apiClient.post<SmartValidationResponse>(
+    "/onboarding/first-goal/validate-smart",
+    request
+  );
+  return response.data;
+}
+
+export async function createFirstGoal(
+  request: FirstGoalCreateRequest
+): Promise<FirstGoalCreateResponse> {
+  const response = await apiClient.post<FirstGoalCreateResponse>(
+    "/onboarding/first-goal/create",
+    request
+  );
+  return response.data;
+}

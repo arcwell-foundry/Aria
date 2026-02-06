@@ -18,6 +18,12 @@ from src.onboarding.integration_wizard import (
     IntegrationPreferences,
     IntegrationWizardService,
 )
+from src.onboarding.first_goal import (
+    FirstGoalService,
+    GoalCategory,
+    GoalSuggestion,
+    GoalTemplate,
+)
 from src.onboarding.models import (
     OnboardingStateResponse,
     OnboardingStep,
@@ -605,3 +611,190 @@ async def save_integration_preferences(
         sync_frequency_hours=body.sync_frequency_hours,
     )
     return await service.save_integration_preferences(current_user.id, preferences)
+
+
+# First Goal endpoints (US-910)
+
+
+class FirstGoalSuggestionsResponse(BaseModel):
+    """Response model for first goal suggestions."""
+
+    suggestions: list[dict[str, Any]]
+    templates: dict[str, list[dict[str, Any]]]
+    enrichment_context: dict[str, Any] | None = None
+
+
+class FirstGoalCreateRequest(BaseModel):
+    """Request body for creating first goal."""
+
+    title: str
+    description: str | None = None
+    goal_type: str | None = None  # "lead_gen", "research", "outreach", "analysis", "custom"
+
+
+class SmartValidationRequest(BaseModel):
+    """Request body for SMART validation."""
+
+    title: str
+    description: str | None = None
+
+
+def _get_first_goal_service() -> FirstGoalService:
+    """Get first goal service instance."""
+    return FirstGoalService()
+
+
+@router.get("/first-goal/suggestions", response_model=FirstGoalSuggestionsResponse)
+async def get_first_goal_suggestions(
+    current_user: CurrentUser,
+) -> FirstGoalSuggestionsResponse:
+    """Get personalized goal suggestions and templates.
+
+    Analyzes onboarding data (company classification, user role,
+    connected integrations) to suggest relevant goals. Also provides
+    role-based goal templates.
+
+    Returns:
+        Dict with suggestions list, templates by category, and enrichment context.
+    """
+    service = _get_first_goal_service()
+
+    # Get user profile to determine role for templates
+    db = SupabaseClient.get_client()
+    profile = (
+        db.table("user_profiles")
+        .select("role, department")
+        .eq("id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+
+    user_role = profile.data.get("role") if profile and profile.data else None
+
+    # Get suggestions
+    suggestions = await service.suggest_goals(current_user.id)
+
+    # Get templates filtered by role
+    templates = service.get_goal_templates(user_role)
+
+    # Get enrichment context for UI display
+    enrichment_context = await _get_enrichment_context(current_user.id)
+
+    return FirstGoalSuggestionsResponse(
+        suggestions=[s.model_dump() for s in suggestions],
+        templates={
+            category: [t.model_dump() for t in template_list]
+            for category, template_list in templates.items()
+        },
+        enrichment_context=enrichment_context,
+    )
+
+
+@router.post("/first-goal/validate-smart")
+async def validate_goal_smart(
+    body: SmartValidationRequest,
+    current_user: CurrentUser,  # noqa: ARG001
+) -> dict[str, Any]:
+    """Validate a goal against SMART criteria.
+
+    Uses LLM to assess if goal is Specific, Measurable, Achievable,
+    Relevant, and Time-bound. Provides feedback and refined version.
+
+    Returns:
+        Dict with SMART validation result, score, and refined version.
+    """
+    service = _get_first_goal_service()
+    validation = await service.validate_smart(body.title, body.description)
+    return validation.model_dump()
+
+
+@router.post("/first-goal/create")
+async def create_first_goal(
+    body: FirstGoalCreateRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Create the first goal and trigger agent activation.
+
+    Creates the goal using the existing Goal system, assigns appropriate
+    agents, updates readiness score, and creates prospective memory
+    entries for milestone tracking.
+
+    This is the final step of onboarding and triggers agent activation.
+
+    Returns:
+        Dict with created goal and agent assignments.
+    """
+    from src.models.goal import GoalType
+
+    service = _get_first_goal_service()
+
+    # Parse goal type from string
+    goal_type = GoalType.CUSTOM
+    if body.goal_type:
+        try:
+            goal_type = GoalType(body.goal_type)
+        except ValueError:
+            logger.warning(f"Invalid goal_type '{body.goal_type}', using CUSTOM")
+
+    result = await service.create_first_goal(
+        user_id=current_user.id,
+        title=body.title,
+        description=body.description,
+        goal_type=goal_type,
+    )
+
+    return result
+
+
+async def _get_enrichment_context(user_id: str) -> dict[str, Any] | None:
+    """Get enrichment context for goal suggestions UI.
+
+    Args:
+        user_id: The user's UUID.
+
+    Returns:
+        Enrichment context dict with company classification and connected integrations.
+    """
+    db = SupabaseClient.get_client()
+
+    try:
+        # Get company classification
+        profile = (
+            db.table("user_profiles")
+            .select("companies(*)")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+
+        company_data = None
+        if profile and profile.data:
+            company = profile.data.get("companies")
+            if company:
+                settings = company.get("settings", {})
+                company_data = {
+                    "name": company.get("name"),
+                    "classification": settings.get("classification"),
+                }
+
+        # Get connected integrations
+        integrations = (
+            db.table("user_integrations")
+            .select("provider, status")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .execute()
+        )
+
+        connected_providers = (
+            [i["provider"] for i in integrations.data] if integrations and integrations.data else []
+        )
+
+        return {
+            "company": company_data,
+            "connected_integrations": connected_providers,
+        }
+
+    except Exception as e:
+        logger.warning(f"Failed to get enrichment context: {e}")
+        return None
