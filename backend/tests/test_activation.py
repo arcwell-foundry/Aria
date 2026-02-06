@@ -48,6 +48,7 @@ class TestOnboardingCompletionOrchestrator:
             {"id": "goal-3"},  # Hunter
             {"id": "goal-4"},  # Operator
             {"id": "goal-5"},  # Scribe
+            {"id": "goal-6"},  # Strategist
         ]
 
         onboarding_data = {
@@ -72,16 +73,17 @@ class TestOnboardingCompletionOrchestrator:
         assert result["activations"]["hunter"] is not None
         assert result["activations"]["operator"] is not None
         assert result["activations"]["scribe"] is not None
+        assert result["activations"]["strategist"] is not None
 
         # Verify goals were created
-        assert mock_goal_service.create_goal.call_count == 5
+        assert mock_goal_service.create_goal.call_count == 6
 
     @pytest.mark.asyncio
     async def test_activate_without_crm_skips_analyst_operator(self, activator, mock_goal_service):
         """Test activation without CRM skips Analyst and Operator."""
         mock_goal_service.create_goal.side_effect = [
             {"id": "goal-1"},  # Scout
-            {"id": "goal-2"},  # Scribe (email not connected either)
+            {"id": "goal-2"},  # Strategist
         ]
 
         onboarding_data = {
@@ -106,9 +108,11 @@ class TestOnboardingCompletionOrchestrator:
         assert result["activations"]["scribe"] is None
         # Hunter not activated (no lead_gen goal)
         assert result["activations"]["hunter"] is None
+        # Strategist always activates
+        assert result["activations"]["strategist"] is not None
 
-        # Only Scout goal created
-        assert mock_goal_service.create_goal.call_count == 1
+        # Scout + Strategist goals created
+        assert mock_goal_service.create_goal.call_count == 2
 
     @pytest.mark.asyncio
     async def test_activate_scout_uses_competitors_from_enrichment(
@@ -128,8 +132,8 @@ class TestOnboardingCompletionOrchestrator:
         with patch.object(activator, "_record_activation_event", new_callable=AsyncMock):
             await activator.activate("user-123", onboarding_data)
 
-        # Verify Scout goal was created with competitors
-        call_args = mock_goal_service.create_goal.call_args
+        # Verify Scout goal was created with competitors (first call)
+        call_args = mock_goal_service.create_goal.call_args_list[0]
         goal_data = call_args[0][1]  # Second positional arg is GoalCreate
 
         assert goal_data.config["entities"] == [
@@ -156,8 +160,8 @@ class TestOnboardingCompletionOrchestrator:
         with patch.object(activator, "_record_activation_event", new_callable=AsyncMock):
             await activator.activate("user-123", onboarding_data)
 
-        # Verify Scout goal was created with company domain as fallback
-        call_args = mock_goal_service.create_goal.call_args
+        # Verify Scout goal was created with company domain as fallback (first call)
+        call_args = mock_goal_service.create_goal.call_args_list[0]
         goal_data = call_args[0][1]
 
         assert goal_data.config["entities"] == ["mycompany.com"]

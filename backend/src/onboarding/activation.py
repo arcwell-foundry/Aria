@@ -410,7 +410,6 @@ class OnboardingCompletionOrchestrator:
             )
             return None
 
-
     async def _activate_strategist(
         self,
         user_id: str,
