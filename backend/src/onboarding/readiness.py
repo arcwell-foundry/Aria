@@ -138,11 +138,11 @@ class OnboardingReadinessService:
             return ReadinessBreakdown()
 
         # Calculate each domain from actual data
-        corporate_memory = self._calculate_corporate_memory(user_id)
-        digital_twin = self._calculate_digital_twin(user_id)
-        relationship_graph = self._calculate_relationship_graph(user_id)
-        integrations = self._calculate_integrations(user_id)
-        goal_clarity = self._calculate_goal_clarity(user_id)
+        corporate_memory = await self._calculate_corporate_memory(user_id)
+        digital_twin = await self._calculate_digital_twin(user_id)
+        relationship_graph = await self._calculate_relationship_graph(user_id)
+        integrations = await self._calculate_integrations(user_id)
+        goal_clarity = await self._calculate_goal_clarity(user_id)
 
         # Clamp to 0-100
         corporate_memory = max(0.0, min(100.0, corporate_memory))
@@ -229,105 +229,184 @@ class OnboardingReadinessService:
             return "high"
         return "very_high"
 
-    def _calculate_corporate_memory(self, _user_id: str) -> float:
+    async def _calculate_corporate_memory(self, user_id: str) -> float:
         """Calculate corporate memory readiness from actual data.
 
-        Counts facts, checks enrichment quality, competitor coverage.
-        This is a placeholder implementation — full implementation would
-        query Graphiti and company_documents.
+        Score: facts (1pt each, cap 60) + documents (8pt each, cap 40).
 
         Args:
-            _user_id: The user's ID.
+            user_id: The user's ID.
 
         Returns:
             Corporate memory score (0-100).
         """
-        # TODO: Implement full calculation based on:
-        # - Number of corporate facts in Graphiti
-        # - Enrichment quality score from company profile
-        # - Number of competitors identified
-        # - Document count and quality scores
-        # For now, return a baseline score
-        return 50.0
+        try:
+            profile = (
+                self._db.table("user_profiles")
+                .select("company_id")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if not profile.data or not profile.data.get("company_id"):
+                return 0.0
 
-    def _calculate_digital_twin(self, _user_id: str) -> float:
+            company_id = profile.data["company_id"]
+
+            facts_result = (
+                self._db.table("corporate_facts")
+                .select("id")
+                .eq("company_id", company_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            fact_score = min(len(facts_result.data or []), 60)
+
+            docs_result = (
+                self._db.table("company_documents")
+                .select("id")
+                .eq("company_id", company_id)
+                .execute()
+            )
+            doc_score = min(len(docs_result.data or []) * 8, 40)
+
+            return min(float(fact_score + doc_score), 100.0)
+        except Exception as e:
+            logger.warning("Corporate memory calculation failed: %s", e)
+            return 0.0
+
+    async def _calculate_digital_twin(self, user_id: str) -> float:
         """Calculate digital twin readiness from actual data.
 
-        Checks writing fingerprint confidence, communication patterns.
-        This is a placeholder implementation — full implementation would
-        query digital_twin table and email patterns.
+        Score: writing style (50pt) + personality calibration (50pt).
 
         Args:
-            _user_id: The user's ID.
+            user_id: The user's ID.
 
         Returns:
             Digital twin score (0-100).
         """
-        # TODO: Implement full calculation based on:
-        # - Writing style fingerprint confidence
-        # - Number of email samples analyzed
-        # - Communication pattern coverage
-        # - Relationship graph density for this user
-        # For now, return a baseline score
-        return 50.0
+        try:
+            result = (
+                self._db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if not result.data:
+                return 0.0
 
-    def _calculate_relationship_graph(self, _user_id: str) -> float:
+            prefs = result.data.get("preferences") or {}
+            dt = prefs.get("digital_twin") or {}
+
+            score = 0.0
+            if dt.get("writing_style"):
+                score += 50.0
+            if dt.get("personality_calibration"):
+                score += 50.0
+
+            return min(score, 100.0)
+        except Exception as e:
+            logger.warning("Digital twin calculation failed: %s", e)
+            return 0.0
+
+    async def _calculate_relationship_graph(self, user_id: str) -> float:
         """Calculate relationship graph readiness from actual data.
 
-        Counts contacts, stakeholders, interaction depth.
-        This is a placeholder implementation — full implementation would
-        query contacts and stakeholder tables.
+        Score: leads (10pt each, cap 50) + stakeholders (5pt each, cap 50).
 
         Args:
-            _user_id: The user's ID.
+            user_id: The user's ID.
 
         Returns:
             Relationship graph score (0-100).
         """
-        # TODO: Implement full calculation based on:
-        # - Number of contacts in CRM
-        # - Number of stakeholders mapped
-        # - Interaction history depth
-        # - Stakeholder coverage
-        # For now, return a baseline score
-        return 50.0
+        try:
+            leads_result = (
+                self._db.table("lead_memories")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            lead_count = len(leads_result.data or [])
+            lead_score = min(lead_count * 10, 50)
 
-    def _calculate_integrations(self, _user_id: str) -> float:
+            stakeholder_score = 0
+            if lead_count > 0:
+                lead_ids = [lead["id"] for lead in leads_result.data]
+                stakeholders_result = (
+                    self._db.table("lead_memory_stakeholders")
+                    .select("id")
+                    .in_("lead_memory_id", lead_ids)
+                    .execute()
+                )
+                stakeholder_count = len(stakeholders_result.data or [])
+                stakeholder_score = min(stakeholder_count * 5, 50)
+
+            return min(float(lead_score + stakeholder_score), 100.0)
+        except Exception as e:
+            logger.warning("Relationship graph calculation failed: %s", e)
+            return 0.0
+
+    async def _calculate_integrations(self, user_id: str) -> float:
         """Calculate integrations readiness from actual data.
 
-        Counts connected tools, checks sync freshness.
-        This is a placeholder implementation — full implementation would
-        query user_integrations table.
+        Score: 25 points per active integration, capped at 100.
 
         Args:
-            _user_id: The user's ID.
+            user_id: The user's ID.
 
         Returns:
             Integrations score (0-100).
         """
-        # TODO: Implement full calculation based on:
-        # - Number of connected integrations
-        # - Sync freshness for each integration
-        # - Data quality from syncs
-        # For now, return a baseline score
-        return 50.0
+        try:
+            result = (
+                self._db.table("user_integrations")
+                .select("integration_type, status")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            active_count = len(result.data or [])
+            return min(active_count * 25.0, 100.0)
+        except Exception as e:
+            logger.warning("Integrations calculation failed: %s", e)
+            return 0.0
 
-    def _calculate_goal_clarity(self, _user_id: str) -> float:
+    async def _calculate_goal_clarity(self, user_id: str) -> float:
         """Calculate goal clarity readiness from actual data.
 
-        Checks if goals exist, are decomposed, have agents assigned.
-        This is a placeholder implementation — full implementation would
-        query goals table.
+        Score: goals (30pt each, cap 60) + agent assignments (10pt each, cap 40).
 
         Args:
-            _user_id: The user's ID.
+            user_id: The user's ID.
 
         Returns:
             Goal clarity score (0-100).
         """
-        # TODO: Implement full calculation based on:
-        # - Number of active goals
-        # - Goal decomposition quality
-        # - Agent assignment completeness
-        # For now, return a baseline score
-        return 50.0
+        try:
+            goals_result = (
+                self._db.table("goals")
+                .select("id")
+                .eq("user_id", user_id)
+                .in_("status", ["active", "draft"])
+                .execute()
+            )
+            goal_count = len(goals_result.data or [])
+            goal_score = min(goal_count * 30, 60)
+
+            agent_score = 0
+            if goal_count > 0:
+                goal_ids = [g["id"] for g in goals_result.data]
+                agents_result = (
+                    self._db.table("goal_agents").select("id").in_("goal_id", goal_ids).execute()
+                )
+                agent_count = len(agents_result.data or [])
+                agent_score = min(agent_count * 10, 40)
+
+            return min(float(goal_score + agent_score), 100.0)
+        except Exception as e:
+            logger.warning("Goal clarity calculation failed: %s", e)
+            return 0.0

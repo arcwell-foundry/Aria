@@ -55,6 +55,7 @@ def _build_chain(execute_return: Any) -> MagicMock:
     chain.insert.return_value = chain
     chain.update.return_value = chain
     chain.eq.return_value = chain
+    chain.in_.return_value = chain
     chain.maybe_single.return_value = chain
     chain.single.return_value = chain
     chain.execute.return_value = _mock_execute(execute_return)
@@ -377,13 +378,19 @@ async def test_recalculate_returns_updated_scores(
         _build_chain({"count": 50}),
         _build_chain([{"provider": "google"}]),
         _build_chain([{"id": "goal-1"}, {"id": "goal-2"}]),
-        _build_chain([_make_db_row(readiness_scores={
-            "corporate_memory": 85.0,
-            "digital_twin": 75.0,
-            "relationship_graph": 80.0,
-            "integrations": 60.0,
-            "goal_clarity": 70.0,
-        })]),
+        _build_chain(
+            [
+                _make_db_row(
+                    readiness_scores={
+                        "corporate_memory": 85.0,
+                        "digital_twin": 75.0,
+                        "relationship_graph": 80.0,
+                        "integrations": 60.0,
+                        "goal_clarity": 70.0,
+                    }
+                )
+            ]
+        ),
     ]
 
     with (
@@ -421,13 +428,19 @@ async def test_recalculate_clamps_scores_to_0_100(
         _build_chain({"count": 0}),
         _build_chain([]),
         _build_chain([]),
-        _build_chain([_make_db_row(readiness_scores={
-            "corporate_memory": 0.0,
-            "digital_twin": 0.0,
-            "relationship_graph": 0.0,
-            "integrations": 0.0,
-            "goal_clarity": 0.0,
-        })]),
+        _build_chain(
+            [
+                _make_db_row(
+                    readiness_scores={
+                        "corporate_memory": 0.0,
+                        "digital_twin": 0.0,
+                        "relationship_graph": 0.0,
+                        "integrations": 0.0,
+                        "goal_clarity": 0.0,
+                    }
+                )
+            ]
+        ),
     ]
 
     with (
@@ -479,3 +492,287 @@ def test_readiness_breakdown_default_values() -> None:
     assert breakdown.goal_clarity == 0.0
     assert breakdown.overall == 0.0
     assert breakdown.confidence_modifier == "low"
+
+
+# --- Real calculation tests ---
+
+
+class TestCorporateMemoryCalculation:
+    """Tests for real corporate memory score calculation."""
+
+    @pytest.mark.asyncio()
+    async def test_no_company_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """No company linked -> 0 score."""
+        chain = _build_chain(None)
+        mock_db.table.return_value = chain
+        score = await service._calculate_corporate_memory("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_no_facts_no_docs_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Company exists but no facts or docs -> 0 score."""
+        profile_chain = _build_chain({"company_id": "comp-1"})
+        facts_chain = _build_chain([])
+        docs_chain = _build_chain([])
+        mock_db.table.side_effect = [profile_chain, facts_chain, docs_chain]
+        score = await service._calculate_corporate_memory("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_facts_contribute_up_to_60(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Facts give 1 point each, capped at 60."""
+        profile_chain = _build_chain({"company_id": "comp-1"})
+        facts = [{"id": f"f{i}"} for i in range(80)]
+        facts_chain = _build_chain(facts)
+        docs_chain = _build_chain([])
+        mock_db.table.side_effect = [profile_chain, facts_chain, docs_chain]
+        score = await service._calculate_corporate_memory("user-123")
+        assert score == 60.0
+
+    @pytest.mark.asyncio()
+    async def test_docs_contribute_8_each_up_to_40(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Docs give 8 points each, capped at 40."""
+        profile_chain = _build_chain({"company_id": "comp-1"})
+        facts_chain = _build_chain([])
+        docs = [{"id": f"d{i}"} for i in range(10)]
+        docs_chain = _build_chain(docs)
+        mock_db.table.side_effect = [profile_chain, facts_chain, docs_chain]
+        score = await service._calculate_corporate_memory("user-123")
+        assert score == 40.0
+
+    @pytest.mark.asyncio()
+    async def test_combined_caps_at_100(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Facts + docs combined cap at 100."""
+        profile_chain = _build_chain({"company_id": "comp-1"})
+        facts = [{"id": f"f{i}"} for i in range(80)]
+        facts_chain = _build_chain(facts)
+        docs = [{"id": f"d{i}"} for i in range(10)]
+        docs_chain = _build_chain(docs)
+        mock_db.table.side_effect = [profile_chain, facts_chain, docs_chain]
+        score = await service._calculate_corporate_memory("user-123")
+        assert score == 100.0
+
+
+class TestDigitalTwinCalculation:
+    """Tests for real digital twin score calculation."""
+
+    @pytest.mark.asyncio()
+    async def test_no_settings_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """No user settings -> 0 score."""
+        chain = _build_chain(None)
+        mock_db.table.return_value = chain
+        score = await service._calculate_digital_twin("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_writing_style_adds_50(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Writing style present -> 50 points."""
+        settings = {"preferences": {"digital_twin": {"writing_style": {"avg_sentence_length": 15}}}}
+        chain = _build_chain(settings)
+        mock_db.table.return_value = chain
+        score = await service._calculate_digital_twin("user-123")
+        assert score == 50.0
+
+    @pytest.mark.asyncio()
+    async def test_personality_calibration_adds_50(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Personality calibration present -> 50 points."""
+        settings = {
+            "preferences": {"digital_twin": {"personality_calibration": {"directness": 0.7}}}
+        }
+        chain = _build_chain(settings)
+        mock_db.table.return_value = chain
+        score = await service._calculate_digital_twin("user-123")
+        assert score == 50.0
+
+    @pytest.mark.asyncio()
+    async def test_both_gives_100(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Both writing style + personality -> 100."""
+        settings = {
+            "preferences": {
+                "digital_twin": {
+                    "writing_style": {"x": 1},
+                    "personality_calibration": {"y": 1},
+                }
+            }
+        }
+        chain = _build_chain(settings)
+        mock_db.table.return_value = chain
+        score = await service._calculate_digital_twin("user-123")
+        assert score == 100.0
+
+    @pytest.mark.asyncio()
+    async def test_empty_digital_twin_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Empty digital_twin dict -> 0."""
+        settings = {"preferences": {"digital_twin": {}}}
+        chain = _build_chain(settings)
+        mock_db.table.return_value = chain
+        score = await service._calculate_digital_twin("user-123")
+        assert score == 0.0
+
+
+class TestRelationshipGraphCalculation:
+    """Tests for real relationship graph score calculation."""
+
+    @pytest.mark.asyncio()
+    async def test_no_leads_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """No lead memories -> 0 score."""
+        chain = _build_chain([])
+        mock_db.table.return_value = chain
+        score = await service._calculate_relationship_graph("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_leads_contribute_10_each_cap_50(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Leads give 10 points each, capped at 50."""
+        leads = [{"id": f"l{i}"} for i in range(8)]
+        leads_chain = _build_chain(leads)
+        stakeholders_chain = _build_chain([])
+        mock_db.table.side_effect = [leads_chain, stakeholders_chain]
+        score = await service._calculate_relationship_graph("user-123")
+        assert score == 50.0  # 8 leads * 10 = 80, capped at 50
+
+    @pytest.mark.asyncio()
+    async def test_stakeholders_contribute_5_each_cap_50(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Stakeholders give 5 points each, capped at 50."""
+        leads = [{"id": "l1"}]
+        leads_chain = _build_chain(leads)
+        stakeholders = [{"id": f"s{i}"} for i in range(12)]
+        stakeholders_chain = _build_chain(stakeholders)
+        mock_db.table.side_effect = [leads_chain, stakeholders_chain]
+        score = await service._calculate_relationship_graph("user-123")
+        assert score == 60.0  # 1*10 + min(12*5,50) = 10+50 = 60
+
+    @pytest.mark.asyncio()
+    async def test_combined_caps_at_100(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Leads + stakeholders combined cap at 100."""
+        leads = [{"id": f"l{i}"} for i in range(8)]
+        leads_chain = _build_chain(leads)
+        stakeholders = [{"id": f"s{i}"} for i in range(15)]
+        stakeholders_chain = _build_chain(stakeholders)
+        mock_db.table.side_effect = [leads_chain, stakeholders_chain]
+        score = await service._calculate_relationship_graph("user-123")
+        assert score == 100.0  # 50 (lead cap) + 50 (stakeholder cap) = 100
+
+
+class TestIntegrationsCalculation:
+    """Tests for real integrations score calculation."""
+
+    @pytest.mark.asyncio()
+    async def test_no_integrations_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """No connected integrations -> 0 score."""
+        chain = _build_chain([])
+        mock_db.table.return_value = chain
+        score = await service._calculate_integrations("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_each_active_adds_25(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Each active integration adds 25 points."""
+        integrations = [
+            {"integration_type": "gmail", "status": "active"},
+            {"integration_type": "google_calendar", "status": "active"},
+            {"integration_type": "salesforce", "status": "active"},
+        ]
+        chain = _build_chain(integrations)
+        mock_db.table.return_value = chain
+        score = await service._calculate_integrations("user-123")
+        assert score == 75.0
+
+    @pytest.mark.asyncio()
+    async def test_caps_at_100(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Score caps at 100 with 4+ integrations."""
+        integrations = [{"integration_type": f"int{i}", "status": "active"} for i in range(5)]
+        chain = _build_chain(integrations)
+        mock_db.table.return_value = chain
+        score = await service._calculate_integrations("user-123")
+        assert score == 100.0
+
+
+class TestGoalClarityCalculation:
+    """Tests for real goal clarity score calculation."""
+
+    @pytest.mark.asyncio()
+    async def test_no_goals_returns_zero(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """No goals -> 0 score."""
+        chain = _build_chain([])
+        mock_db.table.return_value = chain
+        score = await service._calculate_goal_clarity("user-123")
+        assert score == 0.0
+
+    @pytest.mark.asyncio()
+    async def test_goals_contribute_30_each_cap_60(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Goals give 30 points each, capped at 60."""
+        goals = [
+            {"id": "g1", "status": "active"},
+            {"id": "g2", "status": "active"},
+            {"id": "g3", "status": "active"},
+        ]
+        goals_chain = _build_chain(goals)
+        agents_chain = _build_chain([])
+        mock_db.table.side_effect = [goals_chain, agents_chain]
+        score = await service._calculate_goal_clarity("user-123")
+        assert score == 60.0  # 3 * 30 = 90, capped at 60
+
+    @pytest.mark.asyncio()
+    async def test_agent_assignments_add_10_each_cap_40(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Agent assignments give 10 points each, capped at 40."""
+        goals = [{"id": "g1"}]
+        goals_chain = _build_chain(goals)
+        agents = [{"id": f"a{i}"} for i in range(6)]
+        agents_chain = _build_chain(agents)
+        mock_db.table.side_effect = [goals_chain, agents_chain]
+        score = await service._calculate_goal_clarity("user-123")
+        assert score == 70.0  # 1*30 + min(6*10,40) = 30+40 = 70
+
+    @pytest.mark.asyncio()
+    async def test_combined_caps_at_100(
+        self, service: OnboardingReadinessService, mock_db: MagicMock
+    ) -> None:
+        """Goals + agents combined cap at 100."""
+        goals = [{"id": f"g{i}"} for i in range(3)]
+        goals_chain = _build_chain(goals)
+        agents = [{"id": f"a{i}"} for i in range(6)]
+        agents_chain = _build_chain(agents)
+        mock_db.table.side_effect = [goals_chain, agents_chain]
+        score = await service._calculate_goal_clarity("user-123")
+        assert score == 100.0  # 60 (goal cap) + 40 (agent cap) = 100
