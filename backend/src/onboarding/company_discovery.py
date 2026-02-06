@@ -5,6 +5,7 @@ and triggers enrichment. Implements the first step of ARIA's intelligence
 initialization flow.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -279,11 +280,25 @@ Respond in JSON format:
         # 3. Create company profile
         company = await self.create_company_profile(user_id, company_name, website, email)
 
-        # 4. Trigger enrichment (US-903 — non-blocking placeholder)
-        # This will be implemented in US-903. For now, log the intent.
+        # 4. Trigger enrichment (US-903 — fire and forget)
+        from src.onboarding.enrichment import CompanyEnrichmentEngine
+
+        enrichment_engine = CompanyEnrichmentEngine()
+        asyncio.create_task(
+            enrichment_engine.enrich_company(
+                company_id=company["id"],
+                company_name=company_name,
+                website=website,
+                user_id=user_id,
+            )
+        )
         logger.info(
-            f"Enrichment trigger queued for company '{company_name}' "
-            f"(company_id: {company['id']}, user: {user_id})"
+            "Enrichment triggered for company",
+            extra={
+                "company_name": company_name,
+                "company_id": company["id"],
+                "user_id": user_id,
+            },
         )
 
         # 5. Record to episodic memory

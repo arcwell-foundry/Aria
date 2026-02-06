@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from src.api.deps import CurrentUser
+from src.db.supabase import SupabaseClient
 from src.onboarding.company_discovery import CompanyDiscoveryService
 from src.onboarding.models import (
     OnboardingStateResponse,
@@ -104,6 +105,50 @@ async def validate_email(
     """
     service = _get_company_service()
     return await service.validate_email_domain(body.email)
+
+
+@router.get("/enrichment/status")
+async def get_enrichment_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get current enrichment status for user's company.
+
+    Returns enrichment completion status, quality score,
+    and classification if available.
+    """
+    db = SupabaseClient.get_client()
+
+    # Get user's company
+    profile = (
+        db.table("user_profiles")
+        .select("company_id")
+        .eq("id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not profile.data or not profile.data.get("company_id"):
+        return {"status": "no_company"}
+
+    company = (
+        db.table("companies")
+        .select("settings")
+        .eq("id", profile.data["company_id"])
+        .maybe_single()
+        .execute()
+    )
+    if not company.data:
+        return {"status": "not_found"}
+
+    company_settings = company.data.get("settings", {})
+    if "enrichment_quality_score" in company_settings:
+        return {
+            "status": "complete",
+            "quality_score": company_settings["enrichment_quality_score"],
+            "classification": company_settings.get("classification", {}),
+            "enriched_at": company_settings.get("enriched_at"),
+        }
+
+    return {"status": "in_progress"}
 
 
 @router.post("/company-discovery/submit")

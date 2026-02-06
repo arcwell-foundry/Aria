@@ -4,6 +4,7 @@ import {
   validateEmail,
   submitCompanyDiscovery,
 } from "@/api/companyDiscovery";
+import { EnrichmentProgress } from "@/components/onboarding/EnrichmentProgress";
 
 interface CompanyDiscoveryStepProps {
   onComplete: (companyData: { company_name: string; website: string; email: string }) => void;
@@ -19,6 +20,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
   const [emailValidating, setEmailValidating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
   const clearFieldError = (fieldName: string) => {
     setErrors((prev) => {
@@ -94,7 +96,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
       const result = await submitCompanyDiscovery(formData);
 
       if (result.success) {
-        onComplete(formData);
+        setIsSubmitted(true);
       } else {
         // Handle different error types
         if (result.type === "email_validation") {
@@ -158,181 +160,209 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
         </div>
       )}
 
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
-        {/* Company Name */}
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="company_name"
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
-          >
-            Company Name <span aria-hidden="true">*</span>
-            <span className="sr-only">(required)</span>
-          </label>
-          <input
-            type="text"
-            id="company_name"
-            name="company_name"
-            value={formData.company_name}
-            onChange={handleChange}
-            disabled={isSubmitting}
-            placeholder="e.g., Genentech"
-            autoComplete="organization"
-            className={`
-              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
-              focus:outline-none focus:ring-1 transition-colors duration-150
-              disabled:opacity-50 disabled:cursor-not-allowed
-              ${
-                errors.company_name
-                  ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
-                  : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
-              }
-            `}
-            aria-invalid={errors.company_name ? "true" : "false"}
-            aria-describedby={
-              errors.company_name ? "company_name-error" : undefined
-            }
-          />
-          {errors.company_name && (
-            <p
-              id="company_name-error"
-              className="font-sans text-[13px] text-[#945A5A]"
-              role="alert"
-              aria-live="polite"
+      {/* Form — hidden after successful submission */}
+      {!isSubmitted && (
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+          {/* Company Name */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="company_name"
+              className="font-sans text-[13px] font-medium text-[#6B7280]"
             >
-              {errors.company_name}
-            </p>
-          )}
-        </div>
-
-        {/* Website */}
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="website"
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
-          >
-            Company Website <span aria-hidden="true">*</span>
-            <span className="sr-only">(required)</span>
-          </label>
-          <input
-            type="url"
-            id="website"
-            name="website"
-            value={formData.website}
-            onChange={handleChange}
-            disabled={isSubmitting}
-            placeholder="https://yourcompany.com"
-            autoComplete="organization url"
-            className={`
-              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
-              focus:outline-none focus:ring-1 transition-colors duration-150
-              disabled:opacity-50 disabled:cursor-not-allowed
-              ${
-                errors.website
-                  ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
-                  : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
-              }
-            `}
-            aria-invalid={errors.website ? "true" : "false"}
-            aria-describedby={errors.website ? "website-error" : undefined}
-          />
-          {errors.website && (
-            <p
-              id="website-error"
-              className="font-sans text-[13px] text-[#945A5A]"
-              role="alert"
-              aria-live="polite"
-            >
-              {errors.website}
-            </p>
-          )}
-        </div>
-
-        {/* Corporate Email */}
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="email"
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
-          >
-            Corporate Email <span aria-hidden="true">*</span>
-            <span className="sr-only">(required)</span>
-          </label>
-          <div className="relative">
+              Company Name <span aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
+            </label>
             <input
-              type="email"
-              id="email"
-              name="email"
-              value={formData.email}
+              type="text"
+              id="company_name"
+              name="company_name"
+              value={formData.company_name}
               onChange={handleChange}
-              onBlur={handleEmailBlur}
-              disabled={isSubmitting || emailValidating}
-              placeholder="you@yourcompany.com"
-              autoComplete="email"
+              disabled={isSubmitting}
+              placeholder="e.g., Genentech"
+              autoComplete="organization"
               className={`
-                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans w-full pr-10
+                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
                 focus:outline-none focus:ring-1 transition-colors duration-150
                 disabled:opacity-50 disabled:cursor-not-allowed
                 ${
-                  errors.email
+                  errors.company_name
                     ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
                     : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
                 }
               `}
-              aria-invalid={errors.email ? "true" : "false"}
-              aria-describedby={errors.email ? "email-error" : undefined}
+              aria-invalid={errors.company_name ? "true" : "false"}
+              aria-describedby={
+                errors.company_name ? "company_name-error" : undefined
+              }
             />
-            {emailValidating && (
-              <Loader2
-                size={16}
-                strokeWidth={1.5}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B7280] animate-spin"
-                aria-hidden="true"
-              />
+            {errors.company_name && (
+              <p
+                id="company_name-error"
+                className="font-sans text-[13px] text-[#945A5A]"
+                role="alert"
+                aria-live="polite"
+              >
+                {errors.company_name}
+              </p>
             )}
           </div>
-          {errors.email && (
-            <p
-              id="email-error"
-              className="font-sans text-[13px] text-[#945A5A]"
-              role="alert"
-              aria-live="polite"
+
+          {/* Website */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="website"
+              className="font-sans text-[13px] font-medium text-[#6B7280]"
             >
-              {errors.email}
-            </p>
-          )}
+              Company Website <span aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
+            </label>
+            <input
+              type="url"
+              id="website"
+              name="website"
+              value={formData.website}
+              onChange={handleChange}
+              disabled={isSubmitting}
+              placeholder="https://yourcompany.com"
+              autoComplete="organization url"
+              className={`
+                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+                focus:outline-none focus:ring-1 transition-colors duration-150
+                disabled:opacity-50 disabled:cursor-not-allowed
+                ${
+                  errors.website
+                    ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
+                    : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                }
+              `}
+              aria-invalid={errors.website ? "true" : "false"}
+              aria-describedby={errors.website ? "website-error" : undefined}
+            />
+            {errors.website && (
+              <p
+                id="website-error"
+                className="font-sans text-[13px] text-[#945A5A]"
+                role="alert"
+                aria-live="polite"
+              >
+                {errors.website}
+              </p>
+            )}
+          </div>
+
+          {/* Corporate Email */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="email"
+              className="font-sans text-[13px] font-medium text-[#6B7280]"
+            >
+              Corporate Email <span aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
+            </label>
+            <div className="relative">
+              <input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                onBlur={handleEmailBlur}
+                disabled={isSubmitting || emailValidating}
+                placeholder="you@yourcompany.com"
+                autoComplete="email"
+                className={`
+                  bg-white border rounded-lg px-4 py-3 text-[15px] font-sans w-full pr-10
+                  focus:outline-none focus:ring-1 transition-colors duration-150
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  ${
+                    errors.email
+                      ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
+                      : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                  }
+                `}
+                aria-invalid={errors.email ? "true" : "false"}
+                aria-describedby={errors.email ? "email-error" : undefined}
+              />
+              {emailValidating && (
+                <Loader2
+                  size={16}
+                  strokeWidth={1.5}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B7280] animate-spin"
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            {errors.email && (
+              <p
+                id="email-error"
+                className="font-sans text-[13px] text-[#945A5A]"
+                role="alert"
+                aria-live="polite"
+              >
+                {errors.email}
+              </p>
+            )}
+          </div>
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className={`
+              bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+              font-sans font-medium text-[15px]
+              hover:bg-[#4A5D79] active:bg-[#3D5070]
+              transition-colors duration-150
+              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              disabled:opacity-50 disabled:cursor-not-allowed
+              cursor-pointer flex items-center justify-center gap-2
+              min-h-[44px]
+            `}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={16} strokeWidth={1.5} className="animate-spin" aria-hidden="true" />
+                <span>ARIA is analyzing...</span>
+              </>
+            ) : (
+              "Continue"
+            )}
+          </button>
+        </form>
+      )}
+
+      {/* Enrichment progress — shown after successful submission */}
+      {isSubmitted && (
+        <div className="flex flex-col gap-8">
+          <EnrichmentProgress companyName={formData.company_name} />
+
+          {/* Continue button */}
+          <button
+            type="button"
+            onClick={() => onComplete(formData)}
+            className={`
+              bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+              font-sans font-medium text-[15px]
+              hover:bg-[#4A5D79] active:bg-[#3D5070]
+              transition-colors duration-150
+              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              cursor-pointer flex items-center justify-center gap-2
+              min-h-[44px]
+            `}
+          >
+            Continue to next step
+          </button>
         </div>
+      )}
 
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className={`
-            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
-            font-sans font-medium text-[15px]
-            hover:bg-[#4A5D79] active:bg-[#3D5070]
-            transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
-            disabled:opacity-50 disabled:cursor-not-allowed
-            cursor-pointer flex items-center justify-center gap-2
-            min-h-[44px]
-          `}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 size={16} strokeWidth={1.5} className="animate-spin" aria-hidden="true" />
-              <span>ARIA is analyzing...</span>
-            </>
-          ) : (
-            "Continue"
-          )}
-        </button>
-      </form>
-
-      {/* ARIA presence text */}
-      <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
-        Once you continue, I'll start researching your company in the background —
-        you don't need to wait for me.
-      </p>
+      {/* ARIA presence text — only shown before submission */}
+      {!isSubmitted && (
+        <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+          Once you continue, I'll start researching your company in the background —
+          you don't need to wait for me.
+        </p>
+      )}
     </div>
   );
 }

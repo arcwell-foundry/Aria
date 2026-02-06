@@ -87,3 +87,28 @@ export async function getRoutingDecision(): Promise<RoutingDecision> {
   const response = await apiClient.get<RoutingDecision>("/onboarding/routing");
   return response.data;
 }
+
+// Enrichment status (US-903)
+
+export interface CompanyClassification {
+  company_type: string;
+  primary_modality: string;
+  company_posture: string;
+  therapeutic_areas: string[];
+  likely_pain_points: string[];
+  confidence: number;
+}
+
+export interface EnrichmentStatus {
+  status: "no_company" | "not_found" | "in_progress" | "complete";
+  quality_score?: number;
+  classification?: CompanyClassification;
+  enriched_at?: string;
+}
+
+export async function getEnrichmentStatus(): Promise<EnrichmentStatus> {
+  const response = await apiClient.get<EnrichmentStatus>(
+    "/onboarding/enrichment/status"
+  );
+  return response.data;
+}

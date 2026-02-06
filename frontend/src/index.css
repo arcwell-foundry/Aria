@@ -96,3 +96,84 @@ body {
 .animate-card-lift {
   animation: card-lift 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
+
+/* ARIA Ambient Presence Mark — "light moving through water" */
+
+@keyframes aria-breathe {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes aria-drift {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(2px, -1px) rotate(0.5deg);
+  }
+  50% {
+    transform: translate(-1px, 1px) rotate(-0.3deg);
+  }
+  75% {
+    transform: translate(1px, 2px) rotate(0.2deg);
+  }
+}
+
+@keyframes aria-glow {
+  0%, 100% {
+    opacity: 0.12;
+    filter: blur(40px);
+  }
+  33% {
+    opacity: 0.18;
+    filter: blur(44px);
+  }
+  66% {
+    opacity: 0.14;
+    filter: blur(38px);
+  }
+}
+
+@keyframes aria-settle {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.aria-breathe {
+  animation: aria-breathe 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.aria-drift {
+  animation: aria-drift 10s ease-in-out infinite;
+}
+
+.aria-glow {
+  animation: aria-glow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.aria-settle {
+  animation: aria-settle 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aria-breathe,
+  .aria-drift,
+  .aria-glow {
+    animation: none;
+  }
+  .aria-settle {
+    animation-duration: 0.01ms;
+  }
+}

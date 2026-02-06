@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     SKILLS_SYNC_INTERVAL_HOURS: int = 24
     SKILLS_MAX_CONTEXT_SUMMARIES: int = 50
 
+    # Exa API (web research for enrichment — optional)
+    EXA_API_KEY: str = ""
+
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
