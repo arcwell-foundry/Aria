@@ -409,3 +409,155 @@ def test_check_company_low_richness_full_recommendation():
     assert result.company_name == test_company_name
     assert result.richness_score < 30, f"Expected richness < 30, got {result.richness_score}"
     assert result.recommendation == "full"
+
+
+def test_get_company_memory_delta_filters_personal_data():
+    """Test that get_company_memory_delta only returns corporate facts, never personal data.
+
+    Even if a company has both corporate and personal facts, only corporate facts
+    (with sources in _CORPORATE_SOURCES) should be returned in the memory delta.
+
+    Personal sources like 'email_analysis' and 'writing_sample' must be excluded.
+    """
+    # Mock Supabase client
+    mock_db = Mock()
+
+    # Test company and user data
+    test_company_id = "test-company-456"
+    test_user_id = "user-2-id"
+
+    # Create mixed facts data (both corporate and personal sources)
+    facts_data = [
+        # Corporate facts (should be included)
+        {
+            "id": "fact-1",
+            "company_id": test_company_id,
+            "subject": "Company",
+            "predicate": "specializes_in",
+            "object": "biologics manufacturing",
+            "confidence": 0.95,
+            "source": "extracted",
+            "is_active": True,
+        },
+        {
+            "id": "fact-2",
+            "company_id": test_company_id,
+            "subject": "Company",
+            "predicate": "has_headquarters",
+            "object": "San Francisco, CA",
+            "confidence": 0.90,
+            "source": "aggregated",
+            "is_active": True,
+        },
+        {
+            "id": "fact-3",
+            "company_id": test_company_id,
+            "subject": "Company",
+            "predicate": "founded_in",
+            "object": "2015",
+            "confidence": 0.85,
+            "source": "admin_stated",
+            "is_active": True,
+        },
+        # Personal facts (should NOT appear in results)
+        {
+            "id": "fact-4",
+            "company_id": test_company_id,
+            "subject": "User",
+            "predicate": "prefers",
+            "object": "detailed reports",
+            "confidence": 0.90,
+            "source": "email_analysis",  # Personal source - should be filtered
+            "is_active": True,
+        },
+        {
+            "id": "fact-5",
+            "company_id": test_company_id,
+            "subject": "User",
+            "predicate": "writes_in_style",
+            "object": "concise",
+            "confidence": 0.95,
+            "source": "writing_sample",  # Personal source - should be filtered
+            "is_active": True,
+        },
+    ]
+
+    # Mock the query chain for corporate_memory_facts table
+    facts_query = Mock()
+
+    facts_query.select.return_value = facts_query
+    facts_query.eq.return_value = facts_query
+
+    # Track which sources were filtered and filter the data accordingly
+    filtered_sources = []
+
+    def mock_in_filter(self, sources):
+        nonlocal filtered_sources
+        filtered_sources = sources
+        return facts_query
+
+    facts_query.in_ = mock_in_filter
+
+    # Mock execute to return filtered data (simulate database filtering)
+    def mock_execute():
+        # Simulate the database filtering by source
+        filtered_facts = [
+            f for f in facts_data
+            if f.get("source") in CrossUserAccelerationService._CORPORATE_SOURCES
+        ]
+        return Mock(data=filtered_facts)
+
+    facts_query.execute = mock_execute
+
+    # Set up the table() method
+    mock_db.table.return_value = facts_query
+
+    # Create service with mocked client
+    service = CrossUserAccelerationService(db=mock_db, llm_client=None)
+
+    # Get company memory delta
+    result = service.get_company_memory_delta(test_company_id, test_user_id)
+
+    # Verify the query filtered by corporate sources
+    assert filtered_sources == list(service._CORPORATE_SOURCES), (
+        f"Query should filter by corporate sources, got {filtered_sources}"
+    )
+
+    # Verify the result structure
+    assert "facts" in result, "Result should include 'facts' key"
+    assert "high_confidence_facts" in result, "Result should include 'high_confidence_facts' key"
+    assert "domains_covered" in result, "Result should include 'domains_covered' key"
+    assert "total_fact_count" in result, "Result should include 'total_fact_count' key"
+
+    # Verify only corporate facts were returned (no personal sources)
+    corporate_facts = [f for f in facts_data if f["source"] in service._CORPORATE_SOURCES]
+    personal_facts = [f for f in facts_data if f["source"] in service._PERSONAL_SOURCES]
+
+    assert len(result["facts"]) == len(corporate_facts), (
+        f"Expected {len(corporate_facts)} facts, got {len(result['facts'])}"
+    )
+    assert result["total_fact_count"] == len(corporate_facts), (
+        f"Expected total_fact_count={len(corporate_facts)}, got {result['total_fact_count']}"
+    )
+
+    # Verify no personal sources in results
+    sources_in_result = [f["source"] for f in result["facts"]]
+    assert "email_analysis" not in sources_in_result, (
+        "Personal source 'email_analysis' should not be in results"
+    )
+    assert "writing_sample" not in sources_in_result, (
+        "Personal source 'writing_sample' should not be in results"
+    )
+
+    # Verify high_confidence_facts subset
+    high_confidence_corporate = [f for f in corporate_facts if f["confidence"] >= 0.8]
+    assert len(result["high_confidence_facts"]) == len(high_confidence_corporate), (
+        f"Expected {len(high_confidence_corporate)} high-confidence facts, "
+        f"got {len(result['high_confidence_facts'])}"
+    )
+
+    # Verify all high-confidence facts have confidence >= 0.8
+    for fact in result["high_confidence_facts"]:
+        assert fact["confidence"] >= 0.8, (
+            f"High-confidence fact {fact['id']} has confidence {fact['confidence']}"
+        )

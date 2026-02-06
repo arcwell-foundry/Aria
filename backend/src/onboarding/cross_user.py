@@ -153,7 +153,7 @@ class CrossUserAccelerationService:
             )
 
             if response and response.data:
-                return response.data
+                return response.data  # type: ignore[return-value]
             return None
 
         except Exception as e:
@@ -283,3 +283,144 @@ class CrossUserAccelerationService:
         except Exception as e:
             logger.exception(f"Error counting documents for company {company_id}: {e}")
             return 0
+
+    def get_company_memory_delta(self, company_id: str, user_id: str) -> dict[str, Any]:
+        """Get existing company facts for user confirmation.
+
+        Returns tiered Memory Delta with:
+        - High-confidence facts shown first
+        - ONLY corporate data (personal data filtered out)
+
+        Privacy: Enforced at query level with source filtering.
+
+        Args:
+            company_id: The company UUID to get facts for.
+            user_id: The user UUID (for logging/audit purposes).
+
+        Returns:
+            Dict with:
+                - facts: all corporate facts as list of dicts
+                - high_confidence_facts: subset with confidence >= 0.8
+                - domains_covered: list of distinct domains
+                - total_fact_count: total number of facts
+        """
+        # Query only corporate memory facts with allowed sources
+        try:
+            response = (
+                self._db.table("corporate_memory_facts")
+                .select("*")
+                .eq("company_id", company_id)
+                .eq("is_active", True)
+                .in_("source", list(self._CORPORATE_SOURCES))
+                .execute()
+            )
+
+            facts = response.data if response and response.data else []
+
+        except Exception as e:
+            logger.exception(f"Error querying facts for company {company_id}: {e}")
+            facts = []
+
+        # Build fact representations from database records
+        # Note: corporate_facts table has subject/predicate/object structure
+        # We derive a human-readable "fact" string and extract domain from predicate
+        all_facts = []
+        for f in facts:
+            if not isinstance(f, dict):
+                continue
+
+            # Derive domain from predicate (e.g., "specializes_in" -> "product")
+            # For MVP: use predicate as domain proxy
+            predicate = f.get("predicate", "")
+            domain = self._derive_domain_from_predicate(predicate)
+
+            # Build human-readable fact string
+            subject = f.get("subject", "Unknown")
+            obj = f.get("object", "")
+            fact_str = f"{subject} {predicate} {obj}" if obj else f"{subject} {predicate}"
+
+            all_facts.append({
+                "id": f.get("id"),
+                "fact": fact_str,
+                "domain": domain,
+                "confidence": f.get("confidence", 0.5),
+                "source": f.get("source"),
+            })
+
+        # Separate high-confidence facts (>=0.8) for tiered display
+        high_confidence_facts = [f for f in all_facts if f.get("confidence", 0) >= 0.8]
+
+        # Extract distinct domains covered
+        domains_covered = list(set(
+            f.get("domain") for f in all_facts if f.get("domain")
+        ))
+
+        logger.info(
+            f"Retrieved {len(all_facts)} corporate facts for company {company_id}, "
+            f"user {user_id} ({len(high_confidence_facts)} high-confidence)"
+        )
+
+        return {
+            "facts": all_facts,
+            "high_confidence_facts": high_confidence_facts,
+            "domains_covered": domains_covered,
+            "total_fact_count": len(all_facts),
+        }
+
+    def _derive_domain_from_predicate(self, predicate: str) -> str:
+        """Derive knowledge domain from a predicate.
+
+        Maps predicates to semantic domains for categorization.
+        For MVP, uses simple keyword matching.
+
+        Args:
+            predicate: The predicate string (e.g., "specializes_in", "has_headquarters").
+
+        Returns:
+            Domain string (e.g., "product", "geography", "leadership").
+        """
+        predicate_lower = predicate.lower()
+
+        # Domain mapping
+        domain_mapping = {
+            # Product domain
+            "specializes_in": "product",
+            "manufactures": "product",
+            "develops": "product",
+            "offers": "product",
+
+            # Geography domain
+            "has_headquarters": "geography",
+            "located_in": "geography",
+            "has_office": "geography",
+            "operates_in": "geography",
+
+            # Leadership domain
+            "founded_by": "leadership",
+            "led_by": "leadership",
+            "ceo_is": "leadership",
+            "executive": "leadership",
+
+            # Financial domain
+            "founded_in": "financial",
+            "funding_round": "financial",
+            "revenue": "financial",
+            "valuation": "financial",
+
+            # Partnership domain
+            "partners_with": "partnership",
+            "collaborates": "partnership",
+            "strategic_alliance": "partnership",
+        }
+
+        # Check for exact matches first
+        if predicate_lower in domain_mapping:
+            return domain_mapping[predicate_lower]
+
+        # Check for partial matches
+        for key, domain in domain_mapping.items():
+            if key in predicate_lower:
+                return domain
+
+        # Default to corporate domain
+        return "corporate"
