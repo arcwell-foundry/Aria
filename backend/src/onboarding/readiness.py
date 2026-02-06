@@ -11,6 +11,7 @@ The overall readiness score is a weighted average (0-100) that informs
 confidence levels across all ARIA features.
 """
 
+import asyncio
 import logging
 
 from pydantic import BaseModel
@@ -137,12 +138,20 @@ class OnboardingReadinessService:
             # No state — return zeros
             return ReadinessBreakdown()
 
-        # Calculate each domain from actual data
-        corporate_memory = await self._calculate_corporate_memory(user_id)
-        digital_twin = await self._calculate_digital_twin(user_id)
-        relationship_graph = await self._calculate_relationship_graph(user_id)
-        integrations = await self._calculate_integrations(user_id)
-        goal_clarity = await self._calculate_goal_clarity(user_id)
+        # Calculate each domain from actual data (independent queries, run concurrently)
+        (
+            corporate_memory,
+            digital_twin,
+            relationship_graph,
+            integrations,
+            goal_clarity,
+        ) = await asyncio.gather(
+            self._calculate_corporate_memory(user_id),
+            self._calculate_digital_twin(user_id),
+            self._calculate_relationship_graph(user_id),
+            self._calculate_integrations(user_id),
+            self._calculate_goal_clarity(user_id),
+        )
 
         # Clamp to 0-100
         corporate_memory = max(0.0, min(100.0, corporate_memory))
@@ -364,7 +373,7 @@ class OnboardingReadinessService:
         try:
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type, status")
+                .select("id")
                 .eq("user_id", user_id)
                 .eq("status", "active")
                 .execute()
