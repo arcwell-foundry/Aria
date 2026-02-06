@@ -1,0 +1,354 @@
+import { useState } from "react";
+import { Building2, Loader2 } from "lucide-react";
+import {
+  validateEmail,
+  submitCompanyDiscovery,
+} from "@/api/companyDiscovery";
+
+interface CompanyDiscoveryStepProps {
+  onComplete: (companyData: { company_name: string; website: string; email: string }) => void;
+}
+
+export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) {
+  const [formData, setFormData] = useState({
+    company_name: "",
+    website: "",
+    email: "",
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [emailValidating, setEmailValidating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [gateError, setGateError] = useState<string | null>(null);
+
+  const clearFieldError = (fieldName: string) => {
+    setErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors[fieldName];
+      return newErrors;
+    });
+  };
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    // Clear error for this field when user starts typing
+    if (errors[name]) {
+      clearFieldError(name);
+    }
+    // Clear gate error when user changes any field
+    if (gateError) {
+      setGateError(null);
+    }
+  };
+
+  const handleEmailBlur = async () => {
+    if (!formData.email) return;
+
+    setEmailValidating(true);
+    try {
+      const result = await validateEmail(formData.email);
+      if (!result.valid && result.reason) {
+        setErrors((prev) => ({ ...prev, email: result.reason as string }));
+      } else if (result.valid) {
+        clearFieldError("email");
+      }
+    } catch {
+      // Silently fail validation errors on blur
+    } finally {
+      setEmailValidating(false);
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.company_name.trim()) {
+      newErrors.company_name = "Company name is required";
+    }
+
+    if (!formData.website.trim()) {
+      newErrors.website = "Company website is required";
+    } else if (!isValidUrl(formData.website)) {
+      newErrors.website = "Please enter a valid URL (e.g., https://yourcompany.com)";
+    }
+
+    if (!formData.email.trim()) {
+      newErrors.email = "Email is required";
+    } else if (!isValidEmail(formData.email)) {
+      newErrors.email = "Please enter a valid email address";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateForm()) return;
+
+    setIsSubmitting(true);
+    try {
+      const result = await submitCompanyDiscovery(formData);
+
+      if (result.success) {
+        onComplete(formData);
+      } else {
+        // Handle different error types
+        if (result.type === "email_validation") {
+          setErrors({ email: result.error });
+        } else if (result.type === "vertical_mismatch") {
+          setGateError(result.message || result.error);
+        }
+      }
+    } catch {
+      setErrors({
+        _form: "Something went wrong. Please try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-8 max-w-md animate-in fade-in slide-in-from-bottom-4 duration-400">
+      {/* Header */}
+      <div className="flex flex-col gap-3">
+        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+          Tell ARIA about your company
+        </h1>
+        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+          This is ARIA's first step in becoming your team's intelligence layer.
+        </p>
+      </div>
+
+      {/* Gate Error Panel - shown when company fails life sciences check */}
+      {gateError && (
+        <div
+          className="rounded-xl bg-[#FAFAF9] border border-[#E2E0DC] px-5 py-4 w-full animate-in fade-in slide-in-from-top-2 duration-300"
+          role="alert"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3">
+            <Building2 size={20} strokeWidth={1.5} className="text-[#6B7280] shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-3">
+              <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27]">
+                {gateError}
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setGateError(null)}
+                  className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+                >
+                  Try a different email
+                </button>
+                <span className="text-[#E2E0DC]">•</span>
+                <a
+                  href="mailto:support@luminone.ai"
+                  className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+                >
+                  Think this is a mistake? Contact us
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form */}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+        {/* Company Name */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="company_name"
+            className="font-sans text-[13px] font-medium text-[#6B7280]"
+          >
+            Company Name <span aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <input
+            type="text"
+            id="company_name"
+            name="company_name"
+            value={formData.company_name}
+            onChange={handleChange}
+            disabled={isSubmitting}
+            placeholder="e.g., Genentech"
+            autoComplete="organization"
+            className={`
+              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+              focus:outline-none focus:ring-1 transition-colors duration-150
+              disabled:opacity-50 disabled:cursor-not-allowed
+              ${
+                errors.company_name
+                  ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
+                  : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+              }
+            `}
+            aria-invalid={errors.company_name ? "true" : "false"}
+            aria-describedby={
+              errors.company_name ? "company_name-error" : undefined
+            }
+          />
+          {errors.company_name && (
+            <p
+              id="company_name-error"
+              className="font-sans text-[13px] text-[#945A5A]"
+              role="alert"
+              aria-live="polite"
+            >
+              {errors.company_name}
+            </p>
+          )}
+        </div>
+
+        {/* Website */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="website"
+            className="font-sans text-[13px] font-medium text-[#6B7280]"
+          >
+            Company Website <span aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <input
+            type="url"
+            id="website"
+            name="website"
+            value={formData.website}
+            onChange={handleChange}
+            disabled={isSubmitting}
+            placeholder="https://yourcompany.com"
+            autoComplete="organization url"
+            className={`
+              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+              focus:outline-none focus:ring-1 transition-colors duration-150
+              disabled:opacity-50 disabled:cursor-not-allowed
+              ${
+                errors.website
+                  ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
+                  : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+              }
+            `}
+            aria-invalid={errors.website ? "true" : "false"}
+            aria-describedby={errors.website ? "website-error" : undefined}
+          />
+          {errors.website && (
+            <p
+              id="website-error"
+              className="font-sans text-[13px] text-[#945A5A]"
+              role="alert"
+              aria-live="polite"
+            >
+              {errors.website}
+            </p>
+          )}
+        </div>
+
+        {/* Corporate Email */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="email"
+            className="font-sans text-[13px] font-medium text-[#6B7280]"
+          >
+            Corporate Email <span aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <div className="relative">
+            <input
+              type="email"
+              id="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              onBlur={handleEmailBlur}
+              disabled={isSubmitting || emailValidating}
+              placeholder="you@yourcompany.com"
+              autoComplete="email"
+              className={`
+                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans w-full pr-10
+                focus:outline-none focus:ring-1 transition-colors duration-150
+                disabled:opacity-50 disabled:cursor-not-allowed
+                ${
+                  errors.email
+                    ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
+                    : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                }
+              `}
+              aria-invalid={errors.email ? "true" : "false"}
+              aria-describedby={errors.email ? "email-error" : undefined}
+            />
+            {emailValidating && (
+              <Loader2
+                size={16}
+                strokeWidth={1.5}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B7280] animate-spin"
+                aria-hidden="true"
+              />
+            )}
+          </div>
+          {errors.email && (
+            <p
+              id="email-error"
+              className="font-sans text-[13px] text-[#945A5A]"
+              role="alert"
+              aria-live="polite"
+            >
+              {errors.email}
+            </p>
+          )}
+        </div>
+
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className={`
+            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+            font-sans font-medium text-[15px]
+            hover:bg-[#4A5D79] active:bg-[#3D5070]
+            transition-colors duration-150
+            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            disabled:opacity-50 disabled:cursor-not-allowed
+            cursor-pointer flex items-center justify-center gap-2
+            min-h-[44px]
+          `}
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 size={16} strokeWidth={1.5} className="animate-spin" aria-hidden="true" />
+              <span>ARIA is analyzing...</span>
+            </>
+          ) : (
+            "Continue"
+          )}
+        </button>
+      </form>
+
+      {/* ARIA presence text */}
+      <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+        Once you continue, I'll start researching your company in the background —
+        you don't need to wait for me.
+      </p>
+    </div>
+  );
+}
+
+// Validation helpers
+
+function isValidUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isValidEmail(value: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(value);
+}

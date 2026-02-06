@@ -8,6 +8,7 @@ import {
 import { SKIPPABLE_STEPS } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
+import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
 
 export function OnboardingPage() {
   const navigate = useNavigate();
@@ -30,8 +31,8 @@ export function OnboardingPage() {
   const currentStep = state.current_step;
   const isSkippable = SKIPPABLE_STEPS.has(currentStep);
 
-  function handleComplete() {
-    completeMutation.mutate({ step: currentStep, stepData: {} });
+  function handleComplete(companyData?: { company_name: string; website: string; email: string }) {
+    completeMutation.mutate({ step: currentStep, stepData: companyData || {} });
   }
 
   function handleSkip() {
@@ -60,13 +61,19 @@ export function OnboardingPage() {
 
           {/* Right: Step content */}
           <main className="flex-1 min-w-0">
-            <OnboardingStepPlaceholder
-              step={currentStep}
-              onComplete={handleComplete}
-              onSkip={isSkippable ? handleSkip : undefined}
-              isCompleting={completeMutation.isPending}
-              isSkipping={skipMutation.isPending}
-            />
+            {currentStep === "company_discovery" ? (
+              <CompanyDiscoveryStep
+                onComplete={(companyData) => handleComplete(companyData)}
+              />
+            ) : (
+              <OnboardingStepPlaceholder
+                step={currentStep}
+                onComplete={handleComplete}
+                onSkip={isSkippable ? handleSkip : undefined}
+                isCompleting={completeMutation.isPending}
+                isSkipping={skipMutation.isPending}
+              />
+            )}
           </main>
         </div>
       </div>

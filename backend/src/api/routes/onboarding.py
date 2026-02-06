@@ -4,8 +4,10 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, EmailStr
 
 from src.api.deps import CurrentUser
+from src.onboarding.company_discovery import CompanyDiscoveryService
 from src.onboarding.models import (
     OnboardingStateResponse,
     OnboardingStep,
@@ -68,3 +70,67 @@ async def get_routing(
     orchestrator = _get_orchestrator()
     destination = await orchestrator.get_routing_decision(current_user.id)
     return {"route": destination}
+
+
+# Company discovery endpoints (US-902)
+
+
+class EmailValidationRequest(BaseModel):
+    """Request body for email validation."""
+
+    email: EmailStr
+
+
+class CompanyDiscoveryRequest(BaseModel):
+    """Request body for company discovery submission."""
+
+    company_name: str
+    website: str
+    email: EmailStr
+
+
+def _get_company_service() -> CompanyDiscoveryService:
+    """Get company discovery service instance."""
+    return CompanyDiscoveryService()
+
+
+@router.post("/company-discovery/validate-email")
+async def validate_email(
+    body: EmailValidationRequest,
+) -> dict[str, Any]:
+    """Check if email domain is corporate (not personal).
+
+    Returns validation result with reason if rejected.
+    """
+    service = _get_company_service()
+    return await service.validate_email_domain(body.email)
+
+
+@router.post("/company-discovery/submit")
+async def submit_company_discovery(
+    body: CompanyDiscoveryRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Submit company discovery and run life sciences gate check.
+
+    Validates email domain, checks if company is in life sciences vertical,
+    creates/links company profile, and triggers enrichment.
+
+    For non-life-sciences companies, adds to waitlist and returns
+    a graceful message (not an error).
+    """
+    service = _get_company_service()
+    result = await service.submit_company_discovery(
+        user_id=current_user.id,
+        company_name=body.company_name,
+        website=body.website,
+        email=body.email,
+    )
+
+    # Email validation errors are 400
+    if not result["success"] and result.get("type") == "email_validation":
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    # Other results (including vertical mismatch) return 200
+    # with the full result for frontend handling
+    return result
