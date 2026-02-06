@@ -1,6 +1,6 @@
 """US-915: Onboarding Completion → Agent Activation.
 
-Activates ARIA's five core agents immediately after onboarding completes
+Activates ARIA's six core agents immediately after onboarding completes
 so the user's first morning briefing is impressive, not empty.
 
 Each activation:
@@ -64,6 +64,7 @@ class OnboardingCompletionOrchestrator:
             "hunter": None,
             "operator": None,
             "scribe": None,
+            "strategist": None,
         }
 
         # Extract company intelligence from onboarding
@@ -89,6 +90,9 @@ class OnboardingCompletionOrchestrator:
 
         # Scribe: Pre-draft follow-ups for stale conversations
         activations["scribe"] = await self._activate_scribe(user_id, onboarding_data)
+
+        # Strategist: Build go-to-market and account strategy
+        activations["strategist"] = await self._activate_strategist(user_id, onboarding_data)
 
         # Record episodic memory event
         await self._record_activation_event(user_id, activations)
@@ -402,6 +406,60 @@ class OnboardingCompletionOrchestrator:
         except Exception as e:
             logger.error(
                 "Scribe activation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            return None
+
+
+    async def _activate_strategist(
+        self,
+        user_id: str,
+        onboarding_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Activate Strategist agent for go-to-market strategy.
+
+        Strategist:
+        - Synthesizes company intelligence into strategic recommendations
+        - Identifies key account priorities based on enrichment data
+        - Creates territory and engagement strategies
+
+        Args:
+            user_id: The user's ID.
+            onboarding_data: Collected intelligence.
+
+        Returns:
+            Created goal dict or None if activation failed.
+        """
+        try:
+            enrichment_data = onboarding_data.get("enrichment", {})
+            user_goal = onboarding_data.get("first_goal", {})
+
+            goal = GoalCreate(
+                title="Strategic Assessment & Prioritization",
+                description="ARIA analyzes your market position and recommends strategic account priorities.",
+                goal_type=GoalType.ANALYSIS,
+                config={
+                    "agent": "strategist",
+                    "agent_type": "strategist",
+                    "priority": "low",
+                    "company_type": enrichment_data.get("company_type"),
+                    "user_goal_type": user_goal.get("goal_type"),
+                    "source": "onboarding_activation",
+                },
+            )
+
+            created = await self._goal_service.create_goal(user_id, goal)
+
+            logger.info(
+                "Strategist agent activated for strategic assessment",
+                extra={"user_id": user_id, "goal_id": created["id"]},
+            )
+
+            return {"goal_id": created["id"]}
+
+        except Exception as e:
+            logger.error(
+                "Strategist activation failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
             return None

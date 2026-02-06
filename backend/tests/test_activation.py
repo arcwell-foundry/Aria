@@ -301,3 +301,50 @@ class TestOnboardingCompletionOrchestrator:
             assert goal_data.config["source"] == "onboarding_activation"
             assert goal_data.config["priority"] == "low"
             assert "agent" in goal_data.config
+
+    @pytest.mark.asyncio
+    async def test_activate_includes_strategist(self, activator, mock_goal_service):
+        """Strategist agent is activated with full onboarding data."""
+        mock_goal_service.create_goal.side_effect = [
+            {"id": "goal-1"},  # Scout
+            {"id": "goal-2"},  # Analyst
+            {"id": "goal-3"},  # Hunter
+            {"id": "goal-4"},  # Operator
+            {"id": "goal-5"},  # Scribe
+            {"id": "goal-6"},  # Strategist
+        ]
+
+        onboarding_data = {
+            "company_id": "company-123",
+            "company_discovery": {"website": "example.com"},
+            "enrichment": {"competitors": ["c1.com"]},
+            "integration_wizard": {"crm_connected": True, "email_connected": True},
+            "first_goal": {"goal_type": "lead_gen", "description": "Generate leads"},
+        }
+
+        with patch.object(activator, "_record_activation_event", new_callable=AsyncMock):
+            result = await activator.activate("user-123", onboarding_data)
+
+        assert result["activations"]["strategist"] is not None
+        assert "goal_id" in result["activations"]["strategist"]
+
+    @pytest.mark.asyncio
+    async def test_activate_strategist_without_integrations(self, activator, mock_goal_service):
+        """Strategist activates even without CRM/email — no gating."""
+        mock_goal_service.create_goal.side_effect = [
+            {"id": "goal-1"},  # Scout
+            {"id": "goal-2"},  # Strategist
+        ]
+
+        onboarding_data = {
+            "company_id": "company-123",
+            "company_discovery": {"website": "example.com"},
+            "enrichment": {},
+            "integration_wizard": {"crm_connected": False, "email_connected": False},
+            "first_goal": {},
+        }
+
+        with patch.object(activator, "_record_activation_event", new_callable=AsyncMock):
+            result = await activator.activate("user-123", onboarding_data)
+
+        assert result["activations"]["strategist"] is not None
