@@ -17,6 +17,7 @@ import {
   SignupPage,
   DashboardPage,
   GoalsPage,
+  SkillsPage,
 } from "@/pages";
 
 const queryClient = new QueryClient({
@@ -97,6 +98,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <EmailDraftsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/skills"
+              element={
+                <ProtectedRoute>
+                  <SkillsPage />
                 </ProtectedRoute>
               }
             />

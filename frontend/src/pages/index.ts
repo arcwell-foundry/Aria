@@ -12,3 +12,4 @@ export { MeetingBriefPage } from "./MeetingBrief";
 export { NotificationsPage } from "./NotificationsPage";
 export { PreferencesSettingsPage } from "./PreferencesSettings";
 export { SignupPage } from "./Signup";
+export { SkillsPage } from "./Skills";
