@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import {
+  AdminTeamPage,
   AriaChatPage,
   BattleCardsPage,
   EmailDraftsPage,
@@ -149,6 +150,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <SettingsAccountPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/team"
+              element={
+                <ProtectedRoute>
+                  <AdminTeamPage />
                 </ProtectedRoute>
               }
             />

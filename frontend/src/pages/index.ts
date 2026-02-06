@@ -1,4 +1,5 @@
 export { AriaChatPage } from "./AriaChat";
+export { AdminTeamPage } from "./AdminTeamPage";
 export { BattleCardsPage } from "./BattleCards";
 export { DashboardPage } from "./Dashboard";
 export { EmailDraftsPage } from "./EmailDrafts";
