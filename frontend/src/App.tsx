@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import {
   AdminTeamPage,
   AdminBillingPage,
@@ -39,6 +40,7 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <ErrorBoundary>
+      <OfflineBanner />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
