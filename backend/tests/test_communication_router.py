@@ -43,6 +43,15 @@ class TestMessagePriorityToChannels:
         assert channels == ["in_app"]
 
     @pytest.mark.asyncio
+    async def test_important_priority_with_in_app_first_uses_next_preferred(self):
+        """IMPORTANT with in_app first in preferences should use next non-in_app channel."""
+        router = CommunicationRouter()
+        channels = router._determine_channels(
+            MessagePriority.IMPORTANT, {"preferred_channels": ["in_app", "email"]}
+        )
+        assert set(channels) == {"in_app", "email"}
+
+    @pytest.mark.asyncio
     async def test_fyi_priority_uses_in_app_only(self):
         """FYI priority should only use in_app notifications."""
         router = CommunicationRouter()

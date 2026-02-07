@@ -131,9 +131,10 @@ class CommunicationRouter:
                 # CRITICAL: always in_app + push, regardless of preferences
                 return ["in_app", "push"]
             case MessagePriority.IMPORTANT:
-                # IMPORTANT: in_app + first preferred channel (if any)
-                if preferred and preferred != ["in_app"]:
-                    return ["in_app", preferred[0]]
+                # IMPORTANT: in_app + first non-in_app preferred channel (if any)
+                non_in_app = [ch for ch in preferred if ch != "in_app"]
+                if non_in_app:
+                    return ["in_app", non_in_app[0]]
                 return ["in_app"]
             case MessagePriority.FYI:
                 # FYI: in_app only
