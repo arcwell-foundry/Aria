@@ -1,11 +1,11 @@
 """Tests for Billing & Subscription Management Service (US-928)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
 
-from src.services.billing_service import BillingService, BillingError
+import pytest
+
 from src.core.exceptions import NotFoundError
+from src.services.billing_service import BillingError, BillingService
 
 
 @pytest.fixture
@@ -589,7 +589,7 @@ class TestBillingEmailNotifications:
 
     @pytest.mark.asyncio
     async def test_payment_email_failure_logs_warning(
-        self, billing_service, mock_supabase, caplog
+        self, billing_service, mock_supabase, caplog  # noqa: ARG002
     ):
         """Test that email sending failures are logged but don't break payment handling."""
         mock_client = MagicMock()
@@ -698,7 +698,7 @@ class TestWebhookEdgeCases:
 
     @pytest.mark.asyncio
     async def test_webhook_secret_not_configured(
-        self, billing_service, mock_stripe
+        self, billing_service, mock_stripe  # noqa: ARG002
     ):
         """Test that webhook raises when webhook secret is not configured."""
         with patch("src.services.billing_service.settings") as mock_settings:
@@ -728,7 +728,7 @@ class TestWebhookEdgeCases:
 
     @pytest.mark.asyncio
     async def test_checkout_completed_without_subscription(
-        self, billing_service, mock_stripe
+        self, billing_service, mock_stripe  # noqa: ARG002
     ):
         """Test checkout completed event when session has no subscription."""
         billing_service._update_subscription_status = AsyncMock()
@@ -801,7 +801,7 @@ class TestUpdateSubscriptionStatus:
 
     @pytest.mark.asyncio
     async def test_update_status_handles_database_error(
-        self, billing_service, mock_supabase, caplog
+        self, billing_service, mock_supabase, caplog  # noqa: ARG002
     ):
         """Test that database errors are caught and logged."""
         mock_client = MagicMock()
