@@ -46,6 +46,13 @@ from src.models.preferences import (
     PreferenceResponse,
     PreferenceUpdate,
 )
+from src.models.feedback import (
+    FeedbackRating,
+    FeedbackResponse,
+    FeedbackType,
+    GeneralFeedbackRequest,
+    ResponseFeedbackRequest,
+)
 from src.models.proactive_insight import (
     InsightType,
     ProactiveInsight,
@@ -68,7 +75,11 @@ __all__ = [
     "EmailDraftUpdate",
     "EmailRegenerateRequest",
     "EmailSendResponse",
+    "FeedbackRating",
+    "FeedbackResponse",
+    "FeedbackType",
     "ExtractedPrediction",
+    "GeneralFeedbackRequest",
     "GenerateBriefRequest",
     "MarkReadRequest",
     "MeetingBriefContent",
@@ -89,6 +100,7 @@ __all__ = [
     "PredictionValidate",
     "ProactiveInsight",
     "InsightType",
+    "ResponseFeedbackRequest",
     "SurfacedInsightRecord",
     "UnreadCountResponse",
     "UpcomingMeetingResponse",
