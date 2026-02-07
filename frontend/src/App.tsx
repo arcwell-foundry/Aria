@@ -12,6 +12,7 @@ import {
   AdminAuditLogPage,
   AdminTeamPage,
   AdminBillingPage,
+  ARIAConfigPage,
   AriaChatPage,
   BattleCardsPage,
   ChangelogPage,
@@ -196,6 +197,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <PreferencesSettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/aria-config"
+        element={
+          <ProtectedRoute>
+            <ARIAConfigPage />
           </ProtectedRoute>
         }
       />
