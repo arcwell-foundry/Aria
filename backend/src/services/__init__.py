@@ -21,6 +21,7 @@ from src.services.crm_sync_models import (
     SyncDirection,
     SyncStatus,
 )
+from src.services.email_service import EmailService
 from src.services.lead_collaboration import (
     Contribution,
     Contributor,
@@ -55,4 +56,6 @@ __all__ = [
     "LeadCollaborationService",
     "Contribution",
     "Contributor",
+    # Email service exports
+    "EmailService",
 ]
