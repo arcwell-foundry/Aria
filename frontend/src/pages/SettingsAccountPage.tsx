@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useProfile, useSessions, useUpdateProfile, useChangePassword, useSetup2FA, useVerify2FA, useDisable2FA, useRevokeSession, useDeleteAccount } from "@/hooks/useAccount";
 import { Shield, Key, Smartphone, Monitor, AlertTriangle, Camera, Mail, ChevronDown, ChevronUp, Check, X, Loader2 } from "lucide-react";
+import { EmailPreferencesSection } from "@/components/settings/EmailPreferencesSection";
 
 export function SettingsAccountPage() {
   const { data: profile, isLoading: profileLoading } = useProfile();
@@ -564,6 +565,9 @@ export function SettingsAccountPage() {
             </div>
           )}
         </div>
+
+        {/* Email Preferences */}
+        <EmailPreferencesSection />
 
         {/* Danger Zone */}
         <div className="bg-[#161B2E] border border-[#A66B6B]/30 rounded-xl p-6">
