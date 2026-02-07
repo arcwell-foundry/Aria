@@ -36,6 +36,7 @@ from src.api.routes import (
     skills,
 )
 from src.core.exceptions import ARIAException, RateLimitError
+from src.core.security import setup_security
 
 # Configure logging
 logging.basicConfig(
@@ -94,6 +95,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Security headers middleware (US-932)
+setup_security(app)
 
 # Include API routers
 app.include_router(account.router, prefix="/api/v1")
