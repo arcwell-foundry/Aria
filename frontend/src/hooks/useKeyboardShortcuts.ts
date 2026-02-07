@@ -11,7 +11,7 @@
  * - Esc: Close any overlay
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 
 interface ShortcutConfig {
   key: string;
@@ -54,28 +54,31 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   }, []);
 
   // Define shortcuts
-  const shortcuts = useRef<ShortcutConfig[]>([
-    {
-      key: 'k',
-      metaKey: true,
-      ctrlKey: true,
-      handler: () => onCommandPalette?.(),
-      description: 'Open command palette',
-    },
-    {
-      key: '/',
-      shiftKey: true,
-      metaKey: true,
-      ctrlKey: true,
-      handler: () => onShowShortcuts?.(),
-      description: 'Show keyboard shortcuts',
-    },
-    {
-      key: 'Escape',
-      handler: () => onCloseOverlay?.(),
-      description: 'Close overlay',
-    },
-  ]);
+  const shortcuts: ShortcutConfig[] = useMemo(
+    () => [
+      {
+        key: 'k',
+        metaKey: true,
+        ctrlKey: true,
+        handler: () => onCommandPalette?.(),
+        description: 'Open command palette',
+      },
+      {
+        key: '/',
+        shiftKey: true,
+        metaKey: true,
+        ctrlKey: true,
+        handler: () => onShowShortcuts?.(),
+        description: 'Show keyboard shortcuts',
+      },
+      {
+        key: 'Escape',
+        handler: () => onCloseOverlay?.(),
+        description: 'Close overlay',
+      },
+    ],
+    [onCommandPalette, onShowShortcuts, onCloseOverlay]
+  );
 
   // Handle single key shortcuts
   const handleKeyDown = useCallback(
@@ -118,7 +121,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       }
 
       // Check regular shortcuts
-      for (const shortcut of shortcuts.current) {
+      for (const shortcut of shortcuts) {
         if (
           shortcut.key.toLowerCase() === e.key.toLowerCase() &&
           (shortcut.ctrlKey === undefined || shortcut.ctrlKey === e.ctrlKey) &&
@@ -132,7 +135,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         }
       }
     },
-    [isEnabled, onCommandPalette, onShowShortcuts, onNavigate, onCloseOverlay, clearPendingKey]
+    [isEnabled, onCommandPalette, onShowShortcuts, onNavigate, onCloseOverlay, clearPendingKey, shortcuts]
   );
 
   useEffect(() => {

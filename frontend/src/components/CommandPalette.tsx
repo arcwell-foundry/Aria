@@ -77,20 +77,19 @@ export function CommandPalette({
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // Focus input when opened
+  /* eslint-disable react-hooks/set-state-in-effect */
+  // Focus input when opened, reset state when closing
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => searchInputRef.current?.focus(), 100);
-    }
-  }, [isOpen]);
-
-  // Reset state when closing
-  useEffect(() => {
-    if (!isOpen) {
+    } else {
+      // Reset state when closing to ensure clean state on next open
+      // This is intentional - we want synchronous reset when palette closes
       setQuery('');
       setSelectedIndex(0);
     }
   }, [isOpen]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
