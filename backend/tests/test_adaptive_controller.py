@@ -135,6 +135,45 @@ async def test_assess_next_step_returns_ooda_assessment(
     assert assessment.reasoning
 
 
+# --- assess_next_step result is JSON-serializable for route ---
+
+
+@pytest.mark.asyncio()
+async def test_assess_next_step_serializable_for_route(
+    controller: OnboardingOODAController,
+    mock_db: MagicMock,
+) -> None:
+    """OODAAssessment serializes to dict for the API route response."""
+    state_chain = _build_chain(_make_db_row(
+        completed_steps=["company_discovery"],
+        current_step="document_upload",
+    ))
+    facts_chain = _build_chain([{"fact": "fact 1", "metadata": {}}])
+    integrations_chain = _build_chain([])
+    classification_chain = _build_chain(
+        {"metadata": {"classification": {"company_type": "Biotech"}}}
+    )
+
+    mock_db.table.side_effect = [
+        state_chain,
+        facts_chain,
+        integrations_chain,
+        classification_chain,
+    ]
+
+    with patch.object(controller, "_log_assessment", new_callable=AsyncMock):
+        assessment = await controller.assess_next_step(
+            "user-123", OnboardingStep.COMPANY_DISCOVERY
+        )
+
+    result = assessment.model_dump()
+    assert "observation" in result
+    assert "orientation" in result
+    assert "decision" in result
+    assert "reasoning" in result
+    assert isinstance(result["reasoning"], str)
+
+
 # --- CDMO user gets manufacturing question injected ---
 
 

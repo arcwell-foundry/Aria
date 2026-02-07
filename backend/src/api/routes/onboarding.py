@@ -976,7 +976,43 @@ async def get_activation_status(
     return {"status": overall, "activations": activations}
 
 
-# Adaptive OODA Controller endpoint (US-916)
+# Adaptive OODA Controller endpoints (US-916)
+
+
+class AssessNextStepRequest(BaseModel):
+    """Request model for triggering an OODA assessment."""
+
+    completed_step: str
+
+
+@router.post("/assess-next-step")
+async def assess_next_step(
+    request: AssessNextStepRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Trigger an OODA assessment for onboarding adaptation.
+
+    Runs the full Observe → Orient → Decide → Act loop and returns
+    the assessment with step reordering, emphasis, injected questions,
+    and reasoning.
+
+    Returns:
+        OODAAssessment dict with observation, orientation, decision, reasoning.
+    """
+    from src.onboarding.adaptive_controller import OnboardingOODAController
+    from src.onboarding.models import OnboardingStep
+
+    try:
+        step = OnboardingStep(request.completed_step)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid step: {request.completed_step}",
+        ) from e
+
+    ooda = OnboardingOODAController()
+    assessment = await ooda.assess_next_step(current_user.id, step)
+    return assessment.model_dump()
 
 
 @router.get("/steps/{step}/injected-questions")
