@@ -146,7 +146,11 @@ const RESPONSE_DEPTH_OPTIONS: { value: ResponseDepth; label: string }[] = [
   { value: "detailed", label: "Detailed" },
 ];
 
-const CHANNEL_OPTIONS = ["In-App", "Email", "Slack"] as const;
+const CHANNEL_OPTIONS = [
+  { value: "in_app", label: "In-App" },
+  { value: "email", label: "Email" },
+  { value: "slack", label: "Slack" },
+] as const;
 
 // ─── Utility: Debounce Hook ──────────────────────────────────────────────────
 
@@ -378,10 +382,13 @@ function SegmentedControl<T extends string>({
         <button
           key={option.value}
           type="button"
+          role="radio"
+          aria-checked={value === option.value}
           onClick={() => !disabled && onChange(option.value)}
           disabled={disabled}
           className={`
             px-4 py-2 rounded-md text-sm font-medium transition-all duration-150 ease-out min-h-[44px]
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
             ${
               value === option.value
                 ? "bg-white text-[#1A1D27] shadow-sm border border-[#E2E0DC]"
@@ -578,7 +585,7 @@ export function ARIAConfigPage() {
   });
   const [competitorWatchlist, setCompetitorWatchlist] = useState<string[]>([]);
   const [communication, setCommunication] = useState<CommunicationPrefs>({
-    preferred_channels: ["In-App"],
+    preferred_channels: ["in_app"],
     notification_frequency: "balanced",
     response_depth: "moderate",
     briefing_time: "08:00",
@@ -869,13 +876,7 @@ export function ARIAConfigPage() {
                               : "text-[#6B7280]"
                           }`}
                         />
-                        <div
-                          className={`text-sm font-medium ${
-                            isSelected
-                              ? "text-[#1A1D27]"
-                              : "text-[#1A1D27]"
-                          }`}
-                        >
+                        <div className="text-sm font-medium text-[#1A1D27]">
                           {card.label}
                         </div>
                         <div className="text-xs text-[#6B7280] mt-0.5">
@@ -1095,24 +1096,24 @@ export function ARIAConfigPage() {
                     </label>
                     <div className="space-y-3">
                       {CHANNEL_OPTIONS.map((channel) => {
-                        const channelId = `aria-config-channel-${channel.toLowerCase().replace(/[^a-z]/g, "-")}`;
+                        const channelId = `aria-config-channel-${channel.value}`;
                         return (
                           <div
-                            key={channel}
+                            key={channel.value}
                             className="flex items-center justify-between py-2"
                           >
                             <label
                               htmlFor={channelId}
                               className="text-sm text-[#1A1D27]"
                             >
-                              {channel}
+                              {channel.label}
                             </label>
                             <ToggleSwitch
                               id={channelId}
                               enabled={communication.preferred_channels.includes(
-                                channel
+                                channel.value
                               )}
-                              onChange={() => handleChannelToggle(channel)}
+                              onChange={() => handleChannelToggle(channel.value)}
                               disabled={isPending}
                             />
                           </div>

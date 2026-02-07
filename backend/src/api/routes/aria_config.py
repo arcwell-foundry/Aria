@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.api.deps import CurrentUser, get_current_user  # noqa: F401
 from src.models.aria_config import ARIAConfigResponse, ARIAConfigUpdate, PreviewResponse
-from src.services.aria_config_service import ARIAConfigService
+from src.services.aria_config_service import ARIAConfigService, get_aria_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +15,12 @@ router = APIRouter(prefix="/aria-config", tags=["aria-config"])
 
 
 def _get_service() -> ARIAConfigService:
-    """Get ARIA config service instance.
+    """Get ARIA config service singleton.
 
     Returns:
-        ARIAConfigService instance.
+        ARIAConfigService singleton instance.
     """
-    return ARIAConfigService()
+    return get_aria_config_service()
 
 
 @router.get("", response_model=ARIAConfigResponse)

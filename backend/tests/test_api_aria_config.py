@@ -48,14 +48,16 @@ def default_config() -> dict:
 @pytest.mark.asyncio
 async def test_get_aria_config(mock_user: MagicMock, default_config: dict) -> None:
     """GET /aria-config returns config for authenticated user."""
+    mock_service = MagicMock()
+    mock_service.get_config = AsyncMock(return_value=default_config)
+
     with (
-        patch("src.api.routes.aria_config.ARIAConfigService") as mock_service_class,
+        patch(
+            "src.api.routes.aria_config.get_aria_config_service",
+            return_value=mock_service,
+        ),
         patch("src.api.routes.aria_config.get_current_user", return_value=mock_user),
     ):
-        mock_service = MagicMock()
-        mock_service.get_config = AsyncMock(return_value=default_config)
-        mock_service_class.return_value = mock_service
-
         from src.api.routes.aria_config import get_aria_config
 
         result = await get_aria_config(mock_user)
@@ -66,13 +68,15 @@ async def test_get_aria_config(mock_user: MagicMock, default_config: dict) -> No
 @pytest.mark.asyncio
 async def test_update_aria_config(mock_user: MagicMock, default_config: dict) -> None:
     """PUT /aria-config saves and returns updated config."""
-    with patch("src.api.routes.aria_config.ARIAConfigService") as mock_service_class:
-        updated = dict(default_config)
-        updated["role"] = "bd_sales"
-        mock_service = MagicMock()
-        mock_service.update_config = AsyncMock(return_value=updated)
-        mock_service_class.return_value = mock_service
+    updated = dict(default_config)
+    updated["role"] = "bd_sales"
+    mock_service = MagicMock()
+    mock_service.update_config = AsyncMock(return_value=updated)
 
+    with patch(
+        "src.api.routes.aria_config.get_aria_config_service",
+        return_value=mock_service,
+    ):
         from src.api.routes.aria_config import update_aria_config
         from src.models.aria_config import (
             ARIAConfigUpdate,
@@ -94,11 +98,13 @@ async def test_update_aria_config(mock_user: MagicMock, default_config: dict) ->
 @pytest.mark.asyncio
 async def test_reset_personality(mock_user: MagicMock, default_config: dict) -> None:
     """POST /aria-config/reset-personality resets personality sliders."""
-    with patch("src.api.routes.aria_config.ARIAConfigService") as mock_service_class:
-        mock_service = MagicMock()
-        mock_service.reset_personality = AsyncMock(return_value=default_config)
-        mock_service_class.return_value = mock_service
+    mock_service = MagicMock()
+    mock_service.reset_personality = AsyncMock(return_value=default_config)
 
+    with patch(
+        "src.api.routes.aria_config.get_aria_config_service",
+        return_value=mock_service,
+    ):
         from src.api.routes.aria_config import reset_personality
 
         await reset_personality(mock_user)
@@ -108,13 +114,15 @@ async def test_reset_personality(mock_user: MagicMock, default_config: dict) -> 
 @pytest.mark.asyncio
 async def test_generate_preview(mock_user: MagicMock) -> None:
     """POST /aria-config/preview generates preview message."""
-    with patch("src.api.routes.aria_config.ARIAConfigService") as mock_service_class:
-        mock_service = MagicMock()
-        mock_service.generate_preview = AsyncMock(
-            return_value={"preview_message": "Good morning.", "role_label": "BD/Sales"}
-        )
-        mock_service_class.return_value = mock_service
+    mock_service = MagicMock()
+    mock_service.generate_preview = AsyncMock(
+        return_value={"preview_message": "Good morning.", "role_label": "BD/Sales"}
+    )
 
+    with patch(
+        "src.api.routes.aria_config.get_aria_config_service",
+        return_value=mock_service,
+    ):
         from src.api.routes.aria_config import generate_preview
         from src.models.aria_config import (
             ARIAConfigUpdate,
