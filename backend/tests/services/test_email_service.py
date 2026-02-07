@@ -1,8 +1,9 @@
 """Tests for EmailService (US-934)."""
 
-import resend
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+import resend
 
 from src.services.email_service import EmailService
 

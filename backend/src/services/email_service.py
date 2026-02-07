@@ -5,6 +5,7 @@ Handles welcome emails, onboarding complete, team invites,
 password resets, weekly summaries, and payment notifications.
 """
 
+import html as html_escape
 import logging
 from pathlib import Path
 from string import Template
@@ -250,7 +251,9 @@ class EmailService:
         # Format summary data as HTML list
         summary_html = ""
         for key, value in summary_data.items():
-            summary_html += f'<p style="margin: 0 0 8px; color: #374151; font-size: 14px;"><strong>{key}:</strong> {value}</p>'
+            safe_key = html_escape.escape(str(key))
+            safe_value = html_escape.escape(str(value))
+            summary_html += f'<p style="margin: 0 0 8px; color: #374151; font-size: 14px;"><strong>{safe_key}:</strong> {safe_value}</p>'
 
         html = template.substitute(
             name=name,
