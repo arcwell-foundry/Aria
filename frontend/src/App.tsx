@@ -4,6 +4,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { ErrorToaster } from "@/components/ErrorToaster";
 import {
   AdminTeamPage,
   AdminBillingPage,
@@ -41,6 +42,7 @@ function App() {
   return (
     <ErrorBoundary>
       <OfflineBanner />
+      <ErrorToaster />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
