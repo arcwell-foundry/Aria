@@ -42,5 +42,9 @@ qrcode>=7.4.2,<8.0.0
 # Billing & Payments (US-928)
 stripe>=8.0.0,<10.0.0
 
+# Rate Limiting (US-930)
+slowapi==0.1.9
+limits>=3.0.0,<4.0.0
+
 # Types for dependencies
 # (types installed automatically with packages)

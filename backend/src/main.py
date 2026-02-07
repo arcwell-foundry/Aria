@@ -35,7 +35,7 @@ from src.api.routes import (
     signals,
     skills,
 )
-from src.core.exceptions import ARIAException
+from src.core.exceptions import ARIAException, RateLimitError
 
 # Configure logging
 logging.basicConfig(
@@ -265,5 +265,40 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "detail": "An internal server error occurred",
             "code": "INTERNAL_ERROR",
             "request_id": request_id,
+        },
+    )
+
+
+# Rate limit exception handler
+@app.exception_handler(RateLimitError)
+async def rate_limit_exception_handler(request: Request, exc: RateLimitError) -> JSONResponse:
+    """Handle rate limit exceeded errors.
+
+    Args:
+        request: The incoming request.
+        exc: The rate limit exception.
+
+    Returns:
+        JSON error response with retry information.
+    """
+    request_id = str(uuid.uuid4())
+    logger.warning(
+        "Rate limit exceeded",
+        extra={
+            "code": exc.code,
+            "status_code": exc.status_code,
+            "request_id": request_id,
+            "path": request.url.path,
+            "details": exc.details,
+        },
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.message,
+            "code": exc.code,
+            "request_id": request_id,
+            "retry_after": exc.details.get("retry_after"),
+            "limit": exc.details.get("limit"),
         },
     )

@@ -733,3 +733,31 @@ class CRMSyncNotFoundError(NotFoundError):
             lead_id: The lead ID with no sync state.
         """
         super().__init__(resource="CRM sync state", resource_id=lead_id)
+
+
+class RateLimitError(ARIAException):
+    """Rate limit exceeded error (429).
+
+    Raised when a client exceeds their rate limit for API requests.
+    """
+
+    def __init__(
+        self,
+        retry_after: int,
+        limit: str,
+        message: str | None = None,
+    ) -> None:
+        """Initialize rate limit error.
+
+        Args:
+            retry_after: Seconds until the client can retry.
+            limit: The rate limit that was exceeded (e.g., "100/hour").
+            message: Optional custom error message.
+        """
+        error_message = message or f"Rate limit exceeded: {limit}. Try again in {retry_after} seconds."
+        super().__init__(
+            message=error_message,
+            code="RATE_LIMIT_EXCEEDED",
+            status_code=429,
+            details={"retry_after": retry_after, "limit": limit},
+        )

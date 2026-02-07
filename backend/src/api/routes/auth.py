@@ -3,10 +3,11 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
+from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,8 @@ class MessageResponse(BaseModel):
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def signup(request: SignupRequest) -> TokenResponse:
+@rate_limit(RateLimitConfig(requests=5, window_seconds=60))
+async def signup(request: Request, signup_request: SignupRequest) -> TokenResponse:  # noqa: ARG001
     """Create a new user account.
 
     Args:
@@ -82,8 +84,8 @@ async def signup(request: SignupRequest) -> TokenResponse:
         # Create auth user
         auth_response = client.auth.sign_up(
             {
-                "email": request.email,
-                "password": request.password,
+                "email": signup_request.email,
+                "password": signup_request.password,
             }
         )
 
@@ -97,14 +99,14 @@ async def signup(request: SignupRequest) -> TokenResponse:
 
         # Create company if provided
         company_id: str | None = None
-        if request.company_name:
-            company = await SupabaseClient.create_company(name=request.company_name)
+        if signup_request.company_name:
+            company = await SupabaseClient.create_company(name=signup_request.company_name)
             company_id = company["id"]
 
         # Create user profile
         await SupabaseClient.create_user_profile(
             user_id=user_id,
-            full_name=request.full_name,
+            full_name=signup_request.full_name,
             company_id=company_id,
         )
 
@@ -131,7 +133,8 @@ async def signup(request: SignupRequest) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest) -> TokenResponse:
+@rate_limit(RateLimitConfig(requests=5, window_seconds=60))
+async def login(request: Request, login_request: LoginRequest) -> TokenResponse:  # noqa: ARG001
     """Authenticate user with email and password.
 
     Args:
@@ -148,8 +151,8 @@ async def login(request: LoginRequest) -> TokenResponse:
 
         auth_response = client.auth.sign_in_with_password(
             {
-                "email": request.email,
-                "password": request.password,
+                "email": login_request.email,
+                "password": login_request.password,
             }
         )
 
@@ -204,7 +207,8 @@ async def logout(current_user: CurrentUser) -> MessageResponse:
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshTokenRequest) -> TokenResponse:
+@rate_limit(RateLimitConfig(requests=10, window_seconds=60))
+async def refresh_token(http_request: Request, refresh_request: RefreshTokenRequest) -> TokenResponse:  # noqa: ARG001
     """Refresh the access token using a refresh token.
 
     Args:
@@ -219,7 +223,7 @@ async def refresh_token(request: RefreshTokenRequest) -> TokenResponse:
     try:
         client = SupabaseClient.get_client()
 
-        auth_response = client.auth.refresh_session(request.refresh_token)
+        auth_response = client.auth.refresh_session(refresh_request.refresh_token)
 
         if auth_response.session is None:
             raise HTTPException(

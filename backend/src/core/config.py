@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PRICE_ID: str = ""  # Default price ID for annual subscription
 
+    # Rate Limiting Configuration (US-930)
+    RATE_LIMIT_ENABLED: bool = True  # Global rate limiting toggle
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 100  # Default limit for all endpoints
+
     # CORS Configuration
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
