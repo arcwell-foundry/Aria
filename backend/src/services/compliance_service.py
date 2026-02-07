@@ -93,32 +93,21 @@ class ComplianceService:
 
             # Get user profile
             profile_response = (
-                client.table("user_profiles")
-                .select("*")
-                .eq("id", user_id)
-                .single()
-                .execute()
+                client.table("user_profiles").select("*").eq("id", user_id).single().execute()
             )
             if profile_response.data:
                 export_data["user_profile"] = profile_response.data
 
             # Get user settings
             settings_response = (
-                client.table("user_settings")
-                .select("*")
-                .eq("user_id", user_id)
-                .single()
-                .execute()
+                client.table("user_settings").select("*").eq("user_id", user_id).single().execute()
             )
             if settings_response.data:
                 export_data["user_settings"] = settings_response.data
 
             # Get onboarding state
             onboarding_response = (
-                client.table("onboarding_state")
-                .select("*")
-                .eq("user_id", user_id)
-                .execute()
+                client.table("onboarding_state").select("*").eq("user_id", user_id).execute()
             )
             if onboarding_response.data:
                 export_data["onboarding_state"] = onboarding_response.data
@@ -126,10 +115,7 @@ class ComplianceService:
             # Get semantic memory (if table exists)
             try:
                 semantic_response = (
-                    client.table("memory_semantic")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("memory_semantic").select("*").eq("user_id", user_id).execute()
                 )
                 export_data["semantic_memory"] = semantic_response.data
             except Exception:
@@ -138,10 +124,7 @@ class ComplianceService:
             # Get prospective memory
             try:
                 prospective_response = (
-                    client.table("memory_prospective")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("memory_prospective").select("*").eq("user_id", user_id).execute()
                 )
                 export_data["prospective_memory"] = prospective_response.data
             except Exception:
@@ -150,10 +133,7 @@ class ComplianceService:
             # Get conversations
             try:
                 conversations_response = (
-                    client.table("conversations")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("conversations").select("*").eq("user_id", user_id).execute()
                 )
                 export_data["conversations"] = conversations_response.data
             except Exception:
@@ -162,7 +142,12 @@ class ComplianceService:
             # Get messages (by conversation if we have them)
             if export_data.get("conversations"):
                 try:
-                    conversation_ids = [c["id"] for c in export_data["conversations"]]
+                    # Safe dict access - filter out malformed entries
+                    conversation_ids = [
+                        c.get("id")
+                        for c in export_data["conversations"]
+                        if isinstance(c, dict) and c.get("id")
+                    ]
                     if conversation_ids:
                         messages_response = (
                             client.table("messages")
@@ -193,16 +178,13 @@ class ComplianceService:
             # Get security audit log entries for user
             try:
                 audit_response = (
-                    client.table("security_audit_log")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("security_audit_log").select("*").eq("user_id", user_id).execute()
                 )
                 export_data["audit_log"] = audit_response.data
             except Exception:
                 export_data["audit_log"] = []
 
-            logger.info(f"User data exported for {user_id}")
+            logger.info("User data exported for %s", user_id)
             return export_data
 
         except Exception as e:
@@ -246,30 +228,20 @@ class ComplianceService:
 
             # Get company info
             company_response = (
-                client.table("companies")
-                .select("*")
-                .eq("id", company_id)
-                .single()
-                .execute()
+                client.table("companies").select("*").eq("id", company_id).single().execute()
             )
             if company_response.data:
                 export_data["company"] = company_response.data
 
             # Get all users in company
             users_response = (
-                client.table("user_profiles")
-                .select("*")
-                .eq("company_id", company_id)
-                .execute()
+                client.table("user_profiles").select("*").eq("company_id", company_id).execute()
             )
             export_data["users"] = users_response.data
 
             # Get all company documents
             documents_response = (
-                client.table("company_documents")
-                .select("*")
-                .eq("company_id", company_id)
-                .execute()
+                client.table("company_documents").select("*").eq("company_id", company_id).execute()
             )
             export_data["documents"] = documents_response.data
 
@@ -278,7 +250,7 @@ class ComplianceService:
                 "note": "Corporate memory stored in Graphiti/Neo4j - use separate export"
             }
 
-            logger.info(f"Company data exported for {company_id} by {admin_id}")
+            logger.info("Company data exported for %s by %s", company_id, admin_id)
             return export_data
 
         except ComplianceError:
@@ -287,9 +259,7 @@ class ComplianceService:
             logger.exception("Error exporting company data", extra={"company_id": company_id})
             raise ComplianceError(f"Failed to export company data: {e}") from e
 
-    async def delete_user_data(
-        self, user_id: str, confirmation: str
-    ) -> dict[str, Any]:
+    async def delete_user_data(self, user_id: str, confirmation: str) -> dict[str, Any]:
         """Delete all user data with cascade (GDPR right to erasure).
 
         Deletion order (cascade):
@@ -326,36 +296,36 @@ class ComplianceService:
             # Delete semantic memory
             try:
                 semantic_result = (
-                    client.table("memory_semantic")
-                    .delete()
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("memory_semantic").delete().eq("user_id", user_id).execute()
                 )
-                summary["summary"]["semantic_memory"] = len(semantic_result.data) if semantic_result.data else 0
+                summary["summary"]["semantic_memory"] = (
+                    len(semantic_result.data) if semantic_result.data else 0
+                )
             except Exception:
                 summary["summary"]["semantic_memory"] = 0
 
             # Delete prospective memory
             try:
                 prospective_result = (
-                    client.table("memory_prospective")
-                    .delete()
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("memory_prospective").delete().eq("user_id", user_id).execute()
                 )
-                summary["summary"]["prospective_memory"] = len(prospective_result.data) if prospective_result.data else 0
+                summary["summary"]["prospective_memory"] = (
+                    len(prospective_result.data) if prospective_result.data else 0
+                )
             except Exception:
                 summary["summary"]["prospective_memory"] = 0
 
             # Get user's conversations first
             try:
                 conversations_result = (
-                    client.table("conversations")
-                    .select("id")
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("conversations").select("id").eq("user_id", user_id).execute()
                 )
-                conversation_ids = [c["id"] for c in conversations_result.data] if conversations_result.data else []
+                # Safe dict access - filter out malformed entries
+                conversation_ids = [
+                    c.get("id")
+                    for c in (conversations_result.data or [])
+                    if isinstance(c, dict) and c.get("id")
+                ]
             except Exception:
                 conversation_ids = []
 
@@ -379,10 +349,7 @@ class ComplianceService:
             if conversation_ids:
                 try:
                     conv_result = (
-                        client.table("conversations")
-                        .delete()
-                        .in_("id", conversation_ids)
-                        .execute()
+                        client.table("conversations").delete().in_("id", conversation_ids).execute()
                     )
                     conversations_deleted = len(conv_result.data) if conv_result.data else 0
                 except Exception:
@@ -392,22 +359,18 @@ class ComplianceService:
             # Delete documents uploaded by user
             try:
                 documents_result = (
-                    client.table("company_documents")
-                    .delete()
-                    .eq("uploaded_by", user_id)
-                    .execute()
+                    client.table("company_documents").delete().eq("uploaded_by", user_id).execute()
                 )
-                summary["summary"]["documents"] = len(documents_result.data) if documents_result.data else 0
+                summary["summary"]["documents"] = (
+                    len(documents_result.data) if documents_result.data else 0
+                )
             except Exception:
                 summary["summary"]["documents"] = 0
 
             # Delete onboarding state
             try:
                 onboarding_result = (
-                    client.table("onboarding_state")
-                    .delete()
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("onboarding_state").delete().eq("user_id", user_id).execute()
                 )
                 summary["summary"]["onboarding"] = 1 if onboarding_result.data else 0
             except Exception:
@@ -416,10 +379,7 @@ class ComplianceService:
             # Delete user settings
             try:
                 settings_result = (
-                    client.table("user_settings")
-                    .delete()
-                    .eq("user_id", user_id)
-                    .execute()
+                    client.table("user_settings").delete().eq("user_id", user_id).execute()
                 )
                 summary["summary"]["settings"] = 1 if settings_result.data else 0
             except Exception:
@@ -427,12 +387,7 @@ class ComplianceService:
 
             # Delete user profile
             try:
-                profile_result = (
-                    client.table("user_profiles")
-                    .delete()
-                    .eq("id", user_id)
-                    .execute()
-                )
+                profile_result = client.table("user_profiles").delete().eq("id", user_id).execute()
                 summary["summary"]["profile"] = 1 if profile_result.data else 0
             except Exception:
                 summary["summary"]["profile"] = 0
@@ -441,7 +396,7 @@ class ComplianceService:
             # This is handled separately via Supabase Auth admin API
             summary["summary"]["auth_user"] = "Requires Supabase Auth admin API"
 
-            logger.info(f"User data deleted for {user_id}", extra=summary["summary"])
+            logger.info("User data deleted for %s", user_id, extra=summary["summary"])
             return summary
 
         except ComplianceError:
@@ -484,6 +439,10 @@ class ComplianceService:
             preferences = settings_response.data.get("preferences", {})
             if "digital_twin" in preferences:
                 # Remove Digital Twin specific fields
+                # NOTE: We preserve deletion marker for audit trail compliance.
+                # This ensures we can prove when the Digital Twin was deleted
+                # if required for GDPR/CCPA audits. The actual sensitive data
+                # (writing_style, communication_patterns) is removed.
                 preferences["digital_twin"] = {
                     "deleted_at": datetime.now(UTC).isoformat(),
                     "deleted": True,
@@ -497,7 +456,7 @@ class ComplianceService:
                     .execute()
                 )
 
-            logger.info(f"Digital Twin deleted for user {user_id}")
+            logger.info("Digital Twin deleted for user %s", user_id)
             return {
                 "deleted": True,
                 "user_id": user_id,
@@ -531,9 +490,7 @@ class ComplianceService:
             )
 
             preferences = (
-                settings_response.data.get("preferences", {})
-                if settings_response.data
-                else {}
+                settings_response.data.get("preferences", {}) if settings_response.data else {}
             )
             consent = preferences.get("consent", {})
 
@@ -544,13 +501,13 @@ class ComplianceService:
             }
 
         except Exception:
-            logger.exception("Error getting consent status", extra={"user_id": user_id})
+            logger.exception(
+                "Error getting consent status, returning defaults", extra={"user_id": user_id}
+            )
             # Return defaults on error
             return dict.fromkeys(self.ALL_CONSENT_CATEGORIES, True)
 
-    async def update_consent(
-        self, user_id: str, category: str, granted: bool
-    ) -> dict[str, Any]:
+    async def update_consent(self, user_id: str, category: str, granted: bool) -> dict[str, Any]:
         """Update consent for a specific category.
 
         Args:
@@ -604,9 +561,7 @@ class ComplianceService:
                     .execute()
                 )
 
-            logger.info(
-                f"Consent updated for {user_id}: {category}={granted}"
-            )
+            logger.info("Consent updated for %s: %s=%s", user_id, category, granted)
             return {
                 "category": category,
                 "granted": granted,
@@ -614,12 +569,12 @@ class ComplianceService:
             }
 
         except Exception as e:
-            logger.exception("Error updating consent", extra={"user_id": user_id, "category": category})
+            logger.exception(
+                "Error updating consent", extra={"user_id": user_id, "category": category}
+            )
             raise ComplianceError(f"Failed to update consent: {e}") from e
 
-    async def mark_dont_learn(
-        self, user_id: str, content_ids: list[str]
-    ) -> dict[str, Any]:
+    async def mark_dont_learn(self, user_id: str, content_ids: list[str]) -> dict[str, Any]:
         """Mark semantic memory entries as excluded from learning.
 
         Args:
@@ -646,12 +601,17 @@ class ComplianceService:
                         .execute()
                     )
                     marked_count += 1
-                except Exception:
-                    # Log but continue with other IDs
-                    pass
+                except Exception as e:
+                    # Log individual failures but continue with other IDs
+                    logger.warning(
+                        "Failed to mark %s as don't learn for user %s: %s", content_id, user_id, e
+                    )
 
             logger.info(
-                f"Marked {marked_count}/{len(content_ids)} entries as don't learn for {user_id}"
+                "Marked %s/%s entries as don't learn for %s",
+                marked_count,
+                len(content_ids),
+                user_id,
             )
             return {
                 "marked_count": marked_count,
