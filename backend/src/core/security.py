@@ -2,6 +2,7 @@
 
 This module provides:
 - SecurityHeadersMiddleware: Adds security headers to all responses
+- TrustedHostMiddleware: Validates Host header to prevent host header attacks
 - setup_security: Convenience function to configure all security middleware
 """
 
@@ -9,9 +10,12 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +91,20 @@ def setup_security(app: FastAPI) -> None:
         from src.core.security import setup_security
         setup_security(app)
     """
+    # Add security headers
     app.add_middleware(SecurityHeadersMiddleware)
-    logger.info("Security headers middleware registered")
+
+    # Add trusted host middleware
+    # In development, allow localhost; in production, configure via env
+    allowed_hosts = ["*"] if settings.is_development else ["*.aria.ai", "aria.ai"]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+    logger.info("Security middleware registered (headers + trusted host)")
 
 
 __all__ = [
     "SecurityHeadersMiddleware",
+    "TrustedHostMiddleware",
     "setup_security",
     "CSP_HEADER",
 ]

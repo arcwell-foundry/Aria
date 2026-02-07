@@ -1,5 +1,6 @@
 """Tests for security middleware and headers (US-932)."""
 
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -51,3 +52,9 @@ def test_permissions_policy_restricts_sensitive_features():
     assert "camera=()" in permissions
     assert "microphone=()" in permissions
     assert "geolocation=()" in permissions
+
+
+def test_trusted_host_middleware_is_registered():
+    """Test that TrustedHostMiddleware is registered."""
+    middleware_classes = [m.cls for m in app.user_middleware]
+    assert TrustedHostMiddleware in middleware_classes
