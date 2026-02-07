@@ -5,6 +5,7 @@ export { BattleCardsPage } from "./BattleCards";
 export { DashboardPage } from "./Dashboard";
 export { EmailDraftsPage } from "./EmailDrafts";
 export { GoalsPage } from "./Goals";
+export { HelpPage } from "./HelpPage";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";
 export { LeadDetailPage } from "./LeadDetail";
 export { LeadsPage } from "./Leads";

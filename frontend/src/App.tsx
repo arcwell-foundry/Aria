@@ -14,6 +14,7 @@ import {
   AriaChatPage,
   BattleCardsPage,
   EmailDraftsPage,
+  HelpPage,
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
   LeadDetailPage,
@@ -223,6 +224,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <NotificationsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/help"
+        element={
+          <ProtectedRoute>
+            <HelpPage />
           </ProtectedRoute>
         }
       />
