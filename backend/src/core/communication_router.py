@@ -207,11 +207,7 @@ class CommunicationRouter:
             client = SupabaseClient.get_client()
             # Try to get from user_profiles first
             response = (
-                client.table("user_profiles")
-                .select("email")
-                .eq("id", user_id)
-                .single()
-                .execute()
+                client.table("user_profiles").select("email").eq("id", user_id).single().execute()
             )
             if response.data:
                 # Cast response data to dict type

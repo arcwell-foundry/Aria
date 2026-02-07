@@ -37,9 +37,7 @@ class TestMessagePriorityToChannels:
     async def test_important_priority_with_no_preference_uses_in_app_only(self):
         """IMPORTANT with no preference defaults to in_app only."""
         router = CommunicationRouter()
-        channels = router._determine_channels(
-            MessagePriority.IMPORTANT, {"preferred_channels": []}
-        )
+        channels = router._determine_channels(MessagePriority.IMPORTANT, {"preferred_channels": []})
         assert channels == ["in_app"]
 
     @pytest.mark.asyncio
@@ -77,9 +75,7 @@ class TestUserPreferenceRetrieval:
     async def test_get_user_preferences_returns_defaults(self):
         """Should return default preferences when none set."""
         router = CommunicationRouter()
-        with patch.object(
-            router, "_get_user_settings", return_value={"preferences": {}}
-        ):
+        with patch.object(router, "_get_user_settings", return_value={"preferences": {}}):
             prefs = await router._get_user_preferences("user-123")
             assert prefs == {
                 "preferred_channels": ["in_app"],
@@ -155,9 +151,7 @@ class TestChannelSending:
             mock_email_service.return_value = mock_instance
 
             # Mock getting user email
-            with patch.object(
-                router, "_get_user_email", return_value="user@example.com"
-            ):
+            with patch.object(router, "_get_user_email", return_value="user@example.com"):
                 result = await router._send_to_channel(
                     request.user_id, request.message, "email", request
                 )
@@ -175,9 +169,7 @@ class TestChannelSending:
             priority=MessagePriority.IMPORTANT,
         )
 
-        result = await router._send_to_channel(
-            request.user_id, request.message, "slack", request
-        )
+        result = await router._send_to_channel(request.user_id, request.message, "slack", request)
 
         # Should not crash, but indicate not configured
         assert result["success"] is False
@@ -198,13 +190,16 @@ class TestRouteMessage:
             title="FYI",
         )
 
-        with patch.object(
-            router, "_get_user_preferences", return_value={"preferred_channels": ["in_app"]}
-        ), patch.object(
-            router,
-            "_send_to_channel",
-            new_callable=AsyncMock,
-            return_value={"success": True, "channel": "in_app", "message_id": "notif-1"},
+        with (
+            patch.object(
+                router, "_get_user_preferences", return_value={"preferred_channels": ["in_app"]}
+            ),
+            patch.object(
+                router,
+                "_send_to_channel",
+                new_callable=AsyncMock,
+                return_value={"success": True, "channel": "in_app", "message_id": "notif-1"},
+            ),
         ):
             response = await router.route_message(request)
 
@@ -252,9 +247,10 @@ class TestRouteMessage:
                 return {"success": False, "channel": "in_app", "error": "Failed"}
             return {"success": True, "channel": "push", "message_id": "push-1"}
 
-        with patch.object(
-            router, "_get_user_preferences", return_value={}
-        ), patch.object(router, "_send_to_channel", side_effect=mock_send):
+        with (
+            patch.object(router, "_get_user_preferences", return_value={}),
+            patch.object(router, "_send_to_channel", side_effect=mock_send),
+        ):
             response = await router.route_message(request)
 
             # Both channels attempted
