@@ -9,6 +9,7 @@ import { ErrorToaster } from "@/components/ErrorToaster";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import {
+  AdminAuditLogPage,
   AdminTeamPage,
   AdminBillingPage,
   AriaChatPage,
@@ -217,6 +218,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <AdminBillingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/audit-log"
+        element={
+          <ProtectedRoute>
+            <AdminAuditLogPage />
           </ProtectedRoute>
         }
       />

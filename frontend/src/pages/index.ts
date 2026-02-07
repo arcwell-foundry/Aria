@@ -1,3 +1,4 @@
+export { AdminAuditLogPage } from "./AdminAuditLogPage";
 export { AriaChatPage } from "./AriaChat";
 export { AdminTeamPage } from "./AdminTeamPage";
 export { AdminBillingPage } from "./AdminBillingPage";

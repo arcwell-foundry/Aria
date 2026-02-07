@@ -1,16 +1,20 @@
-"""Team & Company Administration API Routes (US-927).
+"""Team & Company Administration API Routes (US-927, US-932).
 
 All routes require admin or manager role for access.
 Admins have full access. Managers can view team and invite members.
 """
 
+import csv
+import io
 import logging
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from src.api.deps import CurrentUser
+from src.api.deps import AdminUser, CurrentUser
 from src.services.account_service import AccountService
 from src.services.team_service import TeamService
 
@@ -424,4 +428,235 @@ async def update_company(
         company_id=company_id,
         name=data.name,
         settings=data.settings,
+    )
+
+
+# --- Audit Trail Routes (US-932) ---
+
+
+class AuditLogEntryResponse(BaseModel):
+    """Individual audit log entry."""
+
+    id: str
+    user_id: str | None = None
+    event_type: str
+    source: str  # "security" or "memory"
+    resource_type: str | None = None
+    resource_id: str | None = None
+    ip_address: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class AuditLogResponse(BaseModel):
+    """Paginated audit log response."""
+
+    items: list[AuditLogEntryResponse]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
+@router.get("/audit-log", response_model=AuditLogResponse, status_code=status.HTTP_200_OK)
+async def get_audit_log(
+    _current_user: AdminUser,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Results per page"),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    user_id: str | None = Query(None, description="Filter by user ID"),
+    date_from: str | None = Query(None, description="Filter from date (ISO format)"),
+    date_to: str | None = Query(None, description="Filter to date (ISO format)"),
+    search: str | None = Query(None, description="Search in resource ID or metadata"),
+) -> dict[str, Any]:
+    """Query the unified audit trail (security + memory events).
+
+    Combines security_audit_log and memory_audit_log into a single
+    chronological view for admin compliance monitoring.
+
+    Args:
+        _current_user: Authenticated admin user.
+        page: Page number (1-indexed).
+        page_size: Results per page (max 100).
+        event_type: Filter by operation/event type.
+        user_id: Filter by specific user.
+        date_from: Start date filter (ISO 8601).
+        date_to: End date filter (ISO 8601).
+        search: Search term for resource_id or metadata.
+
+    Returns:
+        Paginated audit log entries.
+    """
+    from src.db.supabase import SupabaseClient
+
+    client = SupabaseClient.get_client()
+    offset = (page - 1) * page_size
+
+    items: list[dict[str, Any]] = []
+
+    # Query security_audit_log
+    sec_query = client.table("security_audit_log").select("*", count="exact")
+    if user_id:
+        sec_query = sec_query.eq("user_id", user_id)
+    if event_type:
+        sec_query = sec_query.eq("event_type", event_type)
+    if date_from:
+        sec_query = sec_query.gte("created_at", date_from)
+    if date_to:
+        sec_query = sec_query.lte("created_at", date_to)
+
+    sec_response = sec_query.order("created_at", desc=True).execute()
+    sec_data = sec_response.data or []
+
+    for row in sec_data:
+        metadata = row.get("metadata") or {}
+        items.append({
+            "id": str(row["id"]),
+            "user_id": str(row.get("user_id") or ""),
+            "event_type": row.get("event_type", ""),
+            "source": "security",
+            "resource_type": "account",
+            "resource_id": metadata.get("target_user_id") or metadata.get("session_id"),
+            "ip_address": row.get("ip_address"),
+            "metadata": metadata,
+            "created_at": row.get("created_at", ""),
+        })
+
+    # Query memory_audit_log
+    mem_query = client.table("memory_audit_log").select("*", count="exact")
+    if user_id:
+        mem_query = mem_query.eq("user_id", user_id)
+    if event_type:
+        mem_query = mem_query.eq("operation", event_type)
+    if date_from:
+        mem_query = mem_query.gte("created_at", date_from)
+    if date_to:
+        mem_query = mem_query.lte("created_at", date_to)
+
+    mem_response = mem_query.order("created_at", desc=True).execute()
+    mem_data = mem_response.data or []
+
+    for row in mem_data:
+        items.append({
+            "id": str(row["id"]),
+            "user_id": str(row.get("user_id") or ""),
+            "event_type": row.get("operation", ""),
+            "source": "memory",
+            "resource_type": row.get("memory_type"),
+            "resource_id": row.get("memory_id"),
+            "ip_address": None,
+            "metadata": row.get("metadata") or {},
+            "created_at": row.get("created_at", ""),
+        })
+
+    # Sort combined results by created_at descending
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+    # Apply search filter on combined results
+    if search:
+        search_lower = search.lower()
+        items = [
+            item for item in items
+            if (item.get("resource_id") and search_lower in str(item["resource_id"]).lower())
+            or search_lower in str(item.get("metadata", {})).lower()
+            or search_lower in str(item.get("event_type", "")).lower()
+        ]
+
+    total = len(items)
+    paginated = items[offset : offset + page_size]
+
+    return {
+        "items": paginated,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_more": (offset + page_size) < total,
+    }
+
+
+@router.get("/audit-log/export", status_code=status.HTTP_200_OK)
+async def export_audit_log(
+    _current_user: AdminUser,
+    event_type: str | None = Query(None),
+    user_id: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    search: str | None = Query(None),
+) -> StreamingResponse:
+    """Export audit log as CSV for compliance reporting.
+
+    Args:
+        _current_user: Authenticated admin user.
+        event_type: Filter by operation/event type.
+        user_id: Filter by specific user.
+        date_from: Start date filter (ISO 8601).
+        date_to: End date filter (ISO 8601).
+        search: Search term for resource_id or metadata.
+
+    Returns:
+        CSV file download.
+    """
+    # Reuse the query logic with max page size
+    result = await get_audit_log(
+        _current_user=_current_user,
+        page=1,
+        page_size=100,
+        event_type=event_type,
+        user_id=user_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+
+    # Fetch all pages
+    all_items = list(result["items"])
+    total = result["total"]
+    fetched = len(all_items)
+
+    while fetched < total:
+        next_page = (fetched // 100) + 2
+        more = await get_audit_log(
+            _current_user=_current_user,
+            page=next_page,
+            page_size=100,
+            event_type=event_type,
+            user_id=user_id,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+        )
+        all_items.extend(more["items"])
+        fetched = len(all_items)
+        if not more["has_more"]:
+            break
+
+    # Generate CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Timestamp", "User ID", "Event Type", "Source",
+        "Resource Type", "Resource ID", "IP Address", "Details",
+    ])
+
+    for item in all_items:
+        writer.writerow([
+            item.get("created_at", ""),
+            item.get("user_id", ""),
+            item.get("event_type", ""),
+            item.get("source", ""),
+            item.get("resource_type", ""),
+            item.get("resource_id", ""),
+            item.get("ip_address", ""),
+            str(item.get("metadata", {})),
+        ])
+
+    output.seek(0)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=audit_log_{timestamp}.csv",
+        },
     )
