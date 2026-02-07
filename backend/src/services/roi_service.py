@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 
 from src.core.exceptions import ARIAException, DatabaseError
+from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +26,20 @@ TIME_SAVED_MINUTES = {
 class ROIService:
     """Service for calculating ROI metrics from ARIA activity."""
 
-    def __init__(self, db_client: Any) -> None:
-        """Initialize ROIService.
+    def __init__(self) -> None:
+        """Initialize ROIService."""
+        self._client: Any = None
 
-        Args:
-            db_client: Supabase client instance.
+    @property
+    def db(self) -> Any:
+        """Get Supabase client lazily.
+
+        Returns:
+            Supabase client instance.
         """
-        self.db = db_client
+        if self._client is None:
+            self._client = SupabaseClient.get_client()
+        return self._client
 
     def _get_period_start(self, period: str) -> datetime:
         """Get the start datetime for a given period.
@@ -414,7 +422,7 @@ class ROIService:
         try:
             period_start = self._get_period_start(period)
 
-            # Fetch all metrics in parallel
+            # Fetch all metrics sequentially
             time_saved = await self.get_time_saved_metrics(user_id, period_start)
             intelligence = await self.get_intelligence_metrics(user_id, period_start)
             actions = await self.get_actions_metrics(user_id, period_start)
