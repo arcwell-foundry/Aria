@@ -1,7 +1,5 @@
 """Pydantic models for ROI (Return on Investment) metrics."""
 
-from dataclasses import dataclass
-
 from pydantic import BaseModel, Field
 from pydantic import field_validator
 
@@ -9,19 +7,19 @@ from pydantic import field_validator
 class TimeSavedBreakdown(BaseModel):
     """Detailed breakdown of time saved across activities."""
 
-    email_drafts: dict[str, int] = Field(
+    email_drafts: dict[str, int | float] = Field(
         default_factory=dict,
         description="Email drafts time savings: {count, estimated_hours}",
     )
-    meeting_prep: dict[str, int] = Field(
+    meeting_prep: dict[str, int | float] = Field(
         default_factory=dict,
         description="Meeting prep time savings: {count, estimated_hours}",
     )
-    research_reports: dict[str, int] = Field(
+    research_reports: dict[str, int | float] = Field(
         default_factory=dict,
         description="Research reports time savings: {count, estimated_hours}",
     )
-    crm_updates: dict[str, int] = Field(
+    crm_updates: dict[str, int | float] = Field(
         default_factory=dict,
         description="CRM updates time savings: {count, estimated_hours}",
     )
