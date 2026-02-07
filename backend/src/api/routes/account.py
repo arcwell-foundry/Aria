@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
+from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.services.account_service import AccountService
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,7 @@ async def change_password(
     response_model=PasswordResetResponse,
     status_code=status.HTTP_200_OK,
 )
+@rate_limit(RateLimitConfig(requests=3, window_seconds=3600))
 async def request_password_reset(
     data: PasswordResetRequest,
     _request: Request,
@@ -239,6 +241,7 @@ async def setup_2fa(
 
 
 @router.post("/2fa/verify", response_model=ProfileResponse, status_code=status.HTTP_200_OK)
+@rate_limit(RateLimitConfig(requests=5, window_seconds=60))
 async def verify_2fa(
     _request: Request,
     data: VerifyTwoFactorRequest,
