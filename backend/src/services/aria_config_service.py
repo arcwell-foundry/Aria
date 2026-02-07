@@ -153,6 +153,53 @@ class ARIAConfigService:
         logger.info("ARIA personality reset to defaults", extra={"user_id": user_id})
         return cast(dict[str, Any], aria_config)
 
+    async def generate_preview(
+        self,
+        user_id: str,  # noqa: ARG002
+        data: ARIAConfigUpdate,
+    ) -> dict[str, Any]:
+        """Generate a sample ARIA message with given configuration.
+
+        Args:
+            user_id: The user's ID.
+            data: Config to preview.
+
+        Returns:
+            Preview response dict.
+        """
+        role_labels = {
+            ARIARole.SALES_OPS: "Sales Operations",
+            ARIARole.BD_SALES: "BD/Sales",
+            ARIARole.MARKETING: "Marketing",
+            ARIARole.EXECUTIVE_SUPPORT: "Executive Support",
+            ARIARole.CUSTOM: "Custom",
+        }
+        role_label = role_labels.get(data.role, "Sales Operations")
+
+        p = data.personality
+        preview = (
+            f"Good morning. I've reviewed overnight developments relevant to your "
+            f"{role_label.lower()} priorities. "
+        )
+        if data.domain_focus.therapeutic_areas:
+            areas = ", ".join(data.domain_focus.therapeutic_areas[:2])
+            preview += f"In {areas}, "
+        if data.competitor_watchlist:
+            competitor = data.competitor_watchlist[0]
+            preview += f"{competitor} announced a new partnership yesterday — "
+            preview += "I've prepared a competitive analysis. "
+        else:
+            preview += "there are three signals worth your attention. "
+
+        if p.verbosity > 0.7:
+            preview += "I've compiled detailed briefings for each item with supporting data."
+        elif p.verbosity < 0.3:
+            preview += "Summary attached."
+        else:
+            preview += "Shall I walk you through the highlights?"
+
+        return {"preview_message": preview, "role_label": role_label}
+
     async def _get_preferences(self, user_id: str) -> dict[str, Any]:
         """Read user_settings.preferences for a user.
 

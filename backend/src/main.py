@@ -14,6 +14,7 @@ from src.api.routes import (
     account,
     admin,
     analytics,
+    aria_config,
     auth,
     battle_cards,
     billing,
@@ -108,6 +109,7 @@ setup_security(app)
 app.include_router(account.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(aria_config.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
