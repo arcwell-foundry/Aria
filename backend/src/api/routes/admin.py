@@ -660,3 +660,169 @@ async def export_audit_log(
             "Content-Disposition": f"attachment; filename=audit_log_{timestamp}.csv",
         },
     )
+
+
+# --- Onboarding Outcomes Routes (US-924) ---
+
+
+class OnboardingOutcomeResponse(BaseModel):
+    """Individual onboarding outcome response."""
+
+    id: str
+    user_id: str
+    completion_time_minutes: float | None = None
+    steps_completed: int = 0
+    steps_skipped: int = 0
+    company_type: str | None = None
+    first_goal_category: str | None = None
+    documents_uploaded: int = 0
+    email_connected: bool = False
+    crm_connected: bool = False
+    readiness_snapshot: dict[str, float] = Field(default_factory=dict)
+    created_at: str
+
+
+class OnboardingOutcomesResponse(BaseModel):
+    """Paginated onboarding outcomes response."""
+
+    items: list[OnboardingOutcomeResponse]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
+class OnboardingInsightResponse(BaseModel):
+    """Onboarding insight response."""
+
+    pattern: str
+    description: str
+    value: float | None = None
+    evidence_count: int = 1
+    confidence: float = 0.5
+
+
+@router.get(
+    "/onboarding/outcomes",
+    response_model=OnboardingOutcomesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_onboarding_outcomes(
+    _current_user: AdminUser,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Results per page"),
+    company_type: str | None = Query(None, description="Filter by company type"),
+) -> dict[str, Any]:
+    """Get paginated list of onboarding outcomes.
+
+    Args:
+        _current_user: Authenticated admin user.
+        page: Page number (1-indexed).
+        page_size: Results per page (max 100).
+        company_type: Optional filter by company type.
+
+    Returns:
+        Paginated onboarding outcomes.
+    """
+    from src.db.supabase import SupabaseClient
+
+    client = SupabaseClient.get_client()
+    offset = (page - 1) * page_size
+
+    query = client.table("onboarding_outcomes").select("*", count="exact")
+
+    if company_type:
+        query = query.eq("company_type", company_type)
+
+    response = query.order("created_at", desc=True).range(offset, offset + page_size - 1).execute()
+
+    items = response.data or []
+    total = response.count if hasattr(response, "count") else len(items)
+
+    return {
+        "items": [
+            {
+                "id": str(row["id"]),
+                "user_id": str(row.get("user_id", "")),
+                "completion_time_minutes": row.get("completion_time_minutes"),
+                "steps_completed": row.get("steps_completed", 0),
+                "steps_skipped": row.get("steps_skipped", 0),
+                "company_type": row.get("company_type"),
+                "first_goal_category": row.get("first_goal_category"),
+                "documents_uploaded": row.get("documents_uploaded", 0),
+                "email_connected": row.get("email_connected", False),
+                "crm_connected": row.get("crm_connected", False),
+                "readiness_snapshot": row.get("readiness_snapshot", {}),
+                "created_at": row.get("created_at", ""),
+            }
+            for row in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_more": (offset + page_size) < total,
+    }
+
+
+@router.get(
+    "/onboarding/insights",
+    response_model=list[OnboardingInsightResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def get_onboarding_insights(
+    _current_user: AdminUser,
+) -> list[dict[str, Any]]:
+    """Get system-level onboarding insights from procedural memory.
+
+    Returns aggregated patterns like average readiness by company type,
+    completion times, and correlations between onboarding behaviors
+    and outcomes.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        List of insight dictionaries.
+    """
+    from src.onboarding.outcome_tracker import OnboardingOutcomeTracker
+
+    tracker = OnboardingOutcomeTracker()
+    insights = await tracker.get_system_insights()
+
+    return [
+        {
+            "pattern": insight.get("pattern", ""),
+            "description": tracker._format_insight(insight),
+            "value": insight.get("value"),
+            "evidence_count": insight.get("evidence_count", 1),
+            "confidence": insight.get("confidence", 0.5),
+        }
+        for insight in insights
+    ]
+
+
+@router.post(
+    "/onboarding/consolidate",
+    response_model=dict[str, str],
+    status_code=status.HTTP_200_OK,
+)
+async def consolidate_procedural_insights(
+    _current_user: AdminUser,
+) -> dict[str, str]:
+    """Trigger consolidation of episodic outcomes to procedural insights.
+
+    Typically run quarterly via cron, but can be triggered manually
+    by admins to refresh insights.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        Success message with count of new insights created.
+    """
+    from src.onboarding.outcome_tracker import OnboardingOutcomeTracker
+
+    tracker = OnboardingOutcomeTracker()
+    count = await tracker.consolidate_to_procedural()
+
+    return {"message": f"Consolidated {count} new procedural insights"}
