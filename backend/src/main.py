@@ -22,6 +22,7 @@ from src.api.routes import (
     briefings,
     chat,
     cognitive_load,
+    communication,
     compliance,
     debriefs,
     drafts,
@@ -117,25 +118,26 @@ app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(cognitive_load.router, prefix="/api/v1")
+app.include_router(communication.router, prefix="/api/v1")
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(email_preferences.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
+app.include_router(insights.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
+app.include_router(leads.router, prefix="/api/v1")
 app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
-app.include_router(signals.router, prefix="/api/v1")
-app.include_router(cognitive_load.router, prefix="/api/v1")
-app.include_router(insights.router, prefix="/api/v1")
-app.include_router(leads.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
 app.include_router(preferences.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
+app.include_router(signals.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 
 
