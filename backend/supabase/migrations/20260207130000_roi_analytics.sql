@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS aria_actions (
         'user_approved',
         'rejected'
     )),
-    estimated_minutes_saved INTEGER NOT NULL DEFAULT 0,
+    estimated_minutes_saved INTEGER NOT NULL DEFAULT 0 CHECK (estimated_minutes_saved >= 0),
     metadata JSONB DEFAULT '{}', -- Additional context about the action
     created_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS pipeline_impact (
         'deal_influenced'
     )),
     source_id TEXT, -- Reference to related entity (lead_id, opportunity_id, etc.)
-    estimated_value FLOAT, -- Estimated value in USD
+    estimated_value FLOAT CHECK (estimated_value >= 0), -- Estimated value in USD
     metadata JSONB DEFAULT '{}', -- Additional context about the impact
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -89,6 +89,13 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'users_own_actions_insert' AND tablename = 'aria_actions') THEN
         CREATE POLICY "users_own_actions_insert" ON aria_actions
             FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'users_own_actions_update' AND tablename = 'aria_actions') THEN
+        CREATE POLICY "users_own_actions_update" ON aria_actions
+            FOR UPDATE TO authenticated USING (user_id = auth.uid());
     END IF;
 END $$;
 
@@ -129,6 +136,13 @@ DO $$ BEGIN
 END $$;
 
 DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'users_own_intelligence_update' AND tablename = 'intelligence_delivered') THEN
+        CREATE POLICY "users_own_intelligence_update" ON intelligence_delivered
+            FOR UPDATE TO authenticated USING (user_id = auth.uid());
+    END IF;
+END $$;
+
+DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'admin_can_read_intelligence' AND tablename = 'intelligence_delivered') THEN
         CREATE POLICY "admin_can_read_intelligence" ON intelligence_delivered
             FOR SELECT TO authenticated
@@ -161,6 +175,13 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'users_own_impact_insert' AND tablename = 'pipeline_impact') THEN
         CREATE POLICY "users_own_impact_insert" ON pipeline_impact
             FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'users_own_impact_update' AND tablename = 'pipeline_impact') THEN
+        CREATE POLICY "users_own_impact_update" ON pipeline_impact
+            FOR UPDATE TO authenticated USING (user_id = auth.uid());
     END IF;
 END $$;
 
