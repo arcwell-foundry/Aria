@@ -98,9 +98,22 @@ async def test_lifespan_closes_graphiti_on_shutdown() -> None:
         mock_client_class.close = AsyncMock()
         mock_client_class.is_initialized.return_value = True
 
-        from src.main import lifespan, app
+        from src.main import app, lifespan
 
         async with lifespan(app):
             pass  # Simulate app running
 
         mock_client_class.close.assert_called_once()
+
+
+def test_security_middleware_is_registered() -> None:
+    """Test that security middleware is registered on app startup (US-932)."""
+    from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+    from src.core.security import SecurityHeadersMiddleware
+
+    # Check that middleware is registered
+    middleware_classes = [m.cls for m in app.user_middleware]
+
+    assert SecurityHeadersMiddleware in middleware_classes
+    assert TrustedHostMiddleware in middleware_classes
