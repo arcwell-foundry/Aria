@@ -36,3 +36,7 @@ export { ErrorToaster } from './ErrorToaster';
 
 // Status Indicators
 export { AgentActivationStatus } from './AgentActivationStatus';
+
+// Help & Content
+export { HelpTooltip } from './HelpTooltip';
+export type { HelpTooltipProps } from './HelpTooltip';
