@@ -2,14 +2,16 @@
 
 Provides a unified profile API that merges user details, company details,
 documents, and integrations. Saves trigger US-922 Memory Merge Pipeline
-via audit events.
+via ProfileMergeService.
 """
 
+import asyncio
 import logging
 from typing import Any, cast
 
 from src.core.exceptions import ARIAException, NotFoundError
 from src.db.supabase import SupabaseClient
+from src.memory.profile_merge import ProfileMergeService
 
 logger = logging.getLogger(__name__)
 
@@ -156,14 +158,15 @@ class ProfileService:
     ) -> dict[str, Any]:
         """Update user profile fields.
 
-        Filters to allowed fields only. Logs audit event for US-922 pipeline.
+        Filters to allowed fields only. Fires US-922 Memory Merge Pipeline
+        as a background task after saving.
 
         Args:
             user_id: The user's UUID.
             data: Dict of fields to update.
 
         Returns:
-            Updated user profile row.
+            Updated user profile row with merge_pending flag.
 
         Raises:
             ARIAException: If operation fails.
@@ -176,6 +179,10 @@ class ProfileService:
                 profile = await self.get_full_profile(user_id)
                 return profile["user"]
 
+            # Snapshot old data for US-922 diff detection
+            old_profile = await SupabaseClient.get_user_by_id(user_id)
+            old_data = {k: old_profile.get(k) for k in update_data}
+
             response = (
                 self.db.table("user_profiles").update(update_data).eq("id", user_id).execute()
             )
@@ -183,14 +190,21 @@ class ProfileService:
             if not response.data:
                 raise NotFoundError("User profile", user_id)
 
-            # Log audit event (triggers US-922 merge pipeline)
+            # Log audit event
             await self._log_audit_event(
                 user_id=user_id,
                 event_type="profile_updated",
                 metadata={"fields": list(update_data.keys()), "section": "user_details"},
             )
 
-            return cast(dict[str, Any], response.data[0])
+            # Fire US-922 Memory Merge Pipeline (background)
+            asyncio.create_task(
+                ProfileMergeService().process_update(user_id, old_data, update_data)
+            )
+
+            result = cast(dict[str, Any], response.data[0])
+            result["merge_pending"] = True
+            return result
 
         except NotFoundError:
             raise
@@ -246,6 +260,15 @@ class ProfileService:
                 )
                 return cast(dict[str, Any], response.data)
 
+            # Snapshot old company data for US-922 diff detection
+            old_company_resp = (
+                self.db.table("companies").select("*").eq("id", company_id).single().execute()
+            )
+            old_company = (
+                cast(dict[str, Any], old_company_resp.data) if old_company_resp.data else {}
+            )
+            old_data = {k: old_company.get(k) for k in update_data}
+
             response = self.db.table("companies").update(update_data).eq("id", company_id).execute()
 
             if not response.data:
@@ -258,7 +281,14 @@ class ProfileService:
                 metadata={"fields": list(update_data.keys()), "company_id": company_id},
             )
 
-            return cast(dict[str, Any], response.data[0])
+            # Fire US-922 Memory Merge Pipeline (background)
+            # Include company_id in new_data so re-enrichment can use it
+            merge_data = {**update_data, "id": company_id}
+            asyncio.create_task(ProfileMergeService().process_update(user_id, old_data, merge_data))
+
+            result = cast(dict[str, Any], response.data[0])
+            result["merge_pending"] = True
+            return result
 
         except ARIAException:
             raise

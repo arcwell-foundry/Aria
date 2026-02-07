@@ -28,6 +28,8 @@ import {
   useUpdateUserDetails,
   useUpdateCompanyDetails,
 } from "@/hooks/useProfilePage";
+import { useMemoryDelta } from "@/hooks/useMemoryDelta";
+import { MemoryDelta } from "@/components/memory/MemoryDelta";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import type { FullProfile, ProfileDocuments } from "@/api/profile";
 
@@ -156,6 +158,11 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Memory Delta (US-922): track when profile was last saved to fetch deltas
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const { data: memoryDeltas } = useMemoryDelta(lastSavedAt ?? undefined);
+  const [showDelta, setShowDelta] = useState(false);
+
   const showToast = useCallback((type: "success" | "error", message: string) => {
     setToast({ type, message });
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -215,6 +222,9 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
         privacy_exclusions: privacyExclusions,
       });
       showToast("success", "Personal details saved");
+      // US-922: trigger Memory Delta fetch after save
+      setLastSavedAt(new Date().toISOString());
+      setShowDelta(true);
     } catch (err: unknown) {
       showToast("error", err instanceof Error ? err.message : "Failed to save");
     }
@@ -231,6 +241,9 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
         key_products: companyProducts.length > 0 ? companyProducts : undefined,
       });
       showToast("success", "Company details saved");
+      // US-922: trigger Memory Delta fetch after save
+      setLastSavedAt(new Date().toISOString());
+      setShowDelta(true);
     } catch (err: unknown) {
       showToast("error", err instanceof Error ? err.message : "Failed to save");
     }
@@ -1045,6 +1058,55 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
           </div>
         </div>
       </div>
+
+      {/* US-922: Memory Delta panel — shows what ARIA learned after profile save */}
+      {showDelta && memoryDeltas && memoryDeltas.length > 0 && (
+        <div className="fixed inset-0 z-40 bg-black/20 flex items-end justify-center sm:items-center">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[#E2E0DC] w-full max-w-lg max-h-[80vh] overflow-y-auto">
+            <div className="px-6 pt-6 pb-4 border-b border-[#E2E0DC]">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-[1.25rem] text-[#1A1D27]">
+                  ARIA updated her knowledge
+                </h3>
+                <button
+                  onClick={() => setShowDelta(false)}
+                  className="p-1.5 text-[#6B7280] hover:text-[#1A1D27] rounded-lg hover:bg-[#F5F5F0] transition-colors cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-[#6B7280] text-[0.8125rem] font-sans mt-1">
+                Review what changed and correct anything that looks off.
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <MemoryDelta
+                deltas={memoryDeltas}
+                surface="light"
+                title="Here's what changed"
+                onConfirmDomain={() => {}}
+                onFlagDomain={() => {}}
+              />
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowDelta(false)}
+                className={secondaryBtnCls}
+              >
+                Something's off
+              </button>
+              <button
+                onClick={() => setShowDelta(false)}
+                className={primaryBtnCls}
+              >
+                <Check className="w-4 h-4 mr-1.5" />
+                Looks right
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast notification */}
       {toast && (
