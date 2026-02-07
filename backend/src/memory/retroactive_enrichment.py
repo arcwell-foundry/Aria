@@ -619,7 +619,7 @@ class RetroactiveEnrichmentService:
             significant: List of significant enrichment results.
         """
         try:
-            briefing_items = [
+            briefing_items: list[dict[str, Any]] = [
                 {
                     "entity_name": e.entity_name,
                     "entity_type": e.entity_type,
@@ -634,13 +634,12 @@ class RetroactiveEnrichmentService:
                 for e in significant
             ]
 
-            self._db.table("memory_briefing_queue").insert(
-                {
-                    "user_id": user_id,
-                    "briefing_type": "retroactive_enrichment",
-                    "items": briefing_items,
-                }
-            ).execute()
+            insert_data: dict[str, Any] = {
+                "user_id": user_id,
+                "briefing_type": "retroactive_enrichment",
+                "items": briefing_items,
+            }
+            self._db.table("memory_briefing_queue").insert(insert_data).execute()
 
             logger.info(
                 "Flagged %d significant enrichments for briefing",

@@ -13,7 +13,6 @@ Tests cover:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,10 +24,10 @@ from src.memory.retroactive_enrichment import (
     RetroactiveEnrichmentService,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_supabase() -> MagicMock:
@@ -38,16 +37,10 @@ def mock_supabase() -> MagicMock:
     # Default: empty query results
     mock_response = MagicMock()
     mock_response.data = []
-    mock.table.return_value.select.return_value.eq.return_value.execute.return_value = (
-        mock_response
-    )
-    mock.table.return_value.select.return_value.eq.return_value.gt.return_value.execute.return_value = (
-        mock_response
-    )
+    mock.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_response
+    mock.table.return_value.select.return_value.eq.return_value.gt.return_value.execute.return_value = mock_response
     mock.table.return_value.insert.return_value.execute.return_value = mock_response
-    mock.table.return_value.update.return_value.eq.return_value.execute.return_value = (
-        mock_response
-    )
+    mock.table.return_value.update.return_value.eq.return_value.execute.return_value = mock_response
     return mock
 
 
@@ -64,6 +57,7 @@ def service(mock_supabase: MagicMock) -> RetroactiveEnrichmentService:
 # EnrichmentTrigger enum
 # ---------------------------------------------------------------------------
 
+
 def test_enrichment_trigger_enum_values() -> None:
     """EnrichmentTrigger has expected trigger types."""
     assert EnrichmentTrigger.EMAIL_ARCHIVE.value == "email_archive"
@@ -74,6 +68,7 @@ def test_enrichment_trigger_enum_values() -> None:
 # ---------------------------------------------------------------------------
 # EnrichmentResult model
 # ---------------------------------------------------------------------------
+
 
 def test_enrichment_result_initialization() -> None:
     """EnrichmentResult stores enrichment outcome for a single entity."""
@@ -124,6 +119,7 @@ def test_enrichment_result_is_significant() -> None:
 # ---------------------------------------------------------------------------
 # Overlap detection
 # ---------------------------------------------------------------------------
+
 
 def test_find_overlaps_exact_name_match() -> None:
     """Finds overlaps when entity names match exactly (case-insensitive)."""
@@ -190,6 +186,7 @@ def test_find_overlaps_empty_name_ignored() -> None:
 # Entity enrichment (merge logic)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_enrich_entity_merges_new_facts(
     service: RetroactiveEnrichmentService,
@@ -237,7 +234,6 @@ async def test_enrich_entity_merges_new_facts(
 @pytest.mark.asyncio
 async def test_enrich_entity_respects_source_hierarchy(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """New data from lower-confidence source does not supersede higher-confidence existing facts."""
     overlap: dict[str, Any] = {
@@ -324,6 +320,7 @@ async def test_enrich_entity_supersedes_lower_confidence(
 # Significance calculation
 # ---------------------------------------------------------------------------
 
+
 def test_calculate_significance_high_for_many_new_facts() -> None:
     """Significance is high when many new facts and relationships are discovered."""
     service = RetroactiveEnrichmentService.__new__(RetroactiveEnrichmentService)
@@ -379,43 +376,42 @@ def test_calculate_significance_bounded_0_to_1() -> None:
 # Full enrichment pipeline (enrich_from_new_data)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_returns_counts(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """enrich_from_new_data returns enriched and significant counts."""
     # Mock _get_existing_entities to return known entities
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[
-            {"name": "Moderna", "type": "company", "confidence": 0.55},
-        ],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=EnrichmentResult(
-            entity_name="Moderna",
-            entity_type="company",
-            facts_added=5,
-            facts_updated=2,
-            relationships_discovered=3,
-            confidence_before=0.55,
-            confidence_after=0.85,
-            significance=0.8,
-            trigger="email_archive",
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[
+                {"name": "Moderna", "type": "company", "confidence": 0.55},
+            ],
         ),
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_flag_for_briefing", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=EnrichmentResult(
+                entity_name="Moderna",
+                entity_type="company",
+                facts_added=5,
+                facts_updated=2,
+                relationships_discovered=3,
+                confidence_before=0.55,
+                confidence_after=0.85,
+                significance=0.8,
+                trigger="email_archive",
+            ),
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_flag_for_briefing", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
     ):
         result = await service.enrich_from_new_data(
             user_id="user-123",
@@ -432,18 +428,18 @@ async def test_enrich_from_new_data_returns_counts(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_no_overlaps(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """When no overlaps exist, returns zero enrichments."""
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[
-            {"name": "Pfizer", "type": "company"},
-        ],
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[
+                {"name": "Pfizer", "type": "company"},
+            ],
+        ),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
     ):
         result = await service.enrich_from_new_data(
             user_id="user-123",
@@ -460,7 +456,6 @@ async def test_enrich_from_new_data_no_overlaps(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_calls_stakeholder_update(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """Pipeline calls _update_stakeholder_maps with enriched results."""
     mock_result = EnrichmentResult(
@@ -475,24 +470,25 @@ async def test_enrich_from_new_data_calls_stakeholder_update(
         trigger="email_archive",
     )
 
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ) as mock_stakeholders, patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_flag_for_briefing", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+        patch.object(
+            service, "_update_stakeholder_maps", new_callable=AsyncMock
+        ) as mock_stakeholders,
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_flag_for_briefing", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
     ):
         await service.enrich_from_new_data(
             user_id="user-123",
@@ -506,7 +502,6 @@ async def test_enrich_from_new_data_calls_stakeholder_update(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_calls_health_score_recalculation(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """Pipeline calls _recalculate_health_scores with enriched results."""
     mock_result = EnrichmentResult(
@@ -521,24 +516,23 @@ async def test_enrich_from_new_data_calls_health_score_recalculation(
         trigger="crm_sync",
     )
 
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ) as mock_health, patch.object(
-        service, "_flag_for_briefing", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock) as mock_health,
+        patch.object(service, "_flag_for_briefing", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
     ):
         await service.enrich_from_new_data(
             user_id="user-123",
@@ -552,7 +546,6 @@ async def test_enrich_from_new_data_calls_health_score_recalculation(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_flags_significant_for_briefing(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """Significant enrichments (significance > 0.7) are flagged for briefing."""
     significant_result = EnrichmentResult(
@@ -567,24 +560,23 @@ async def test_enrich_from_new_data_flags_significant_for_briefing(
         trigger="email_archive",
     )
 
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=significant_result,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_flag_for_briefing", new_callable=AsyncMock
-    ) as mock_flag, patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=significant_result,
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_flag_for_briefing", new_callable=AsyncMock) as mock_flag,
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
     ):
         await service.enrich_from_new_data(
             user_id="user-123",
@@ -602,7 +594,6 @@ async def test_enrich_from_new_data_flags_significant_for_briefing(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_records_episodic_memory(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """Each enrichment is recorded as episodic memory."""
     mock_result = EnrichmentResult(
@@ -617,23 +608,23 @@ async def test_enrich_from_new_data_records_episodic_memory(
         trigger="document_batch",
     )
 
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
-    ) as mock_episodic:
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock) as mock_episodic,
+    ):
         await service.enrich_from_new_data(
             user_id="user-123",
             trigger=EnrichmentTrigger.DOCUMENT_BATCH,
@@ -646,26 +637,25 @@ async def test_enrich_from_new_data_records_episodic_memory(
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_skips_none_results(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """If _enrich_entity returns None for an overlap, it is skipped."""
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
-    ) as mock_episodic:
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock) as mock_episodic,
+    ):
         result = await service.enrich_from_new_data(
             user_id="user-123",
             trigger=EnrichmentTrigger.EMAIL_ARCHIVE,
@@ -680,10 +670,10 @@ async def test_enrich_from_new_data_skips_none_results(
 # Audit logging
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_enrich_from_new_data_logs_audit(
     service: RetroactiveEnrichmentService,
-    mock_supabase: MagicMock,
 ) -> None:
     """The enrichment pipeline logs an audit entry."""
     mock_result = EnrichmentResult(
@@ -698,26 +688,27 @@ async def test_enrich_from_new_data_logs_audit(
         trigger="email_archive",
     )
 
-    with patch.object(
-        service,
-        "_get_existing_entities",
-        new_callable=AsyncMock,
-        return_value=[{"name": "Moderna", "type": "company"}],
-    ), patch.object(
-        service,
-        "_enrich_entity",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ), patch.object(
-        service, "_update_stakeholder_maps", new_callable=AsyncMock
-    ), patch.object(
-        service, "_recalculate_health_scores", new_callable=AsyncMock
-    ), patch.object(
-        service, "_record_episodic", new_callable=AsyncMock
-    ), patch(
-        "src.memory.retroactive_enrichment.log_memory_operation",
-        new_callable=AsyncMock,
-    ) as mock_audit:
+    with (
+        patch.object(
+            service,
+            "_get_existing_entities",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Moderna", "type": "company"}],
+        ),
+        patch.object(
+            service,
+            "_enrich_entity",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+        patch.object(service, "_update_stakeholder_maps", new_callable=AsyncMock),
+        patch.object(service, "_recalculate_health_scores", new_callable=AsyncMock),
+        patch.object(service, "_record_episodic", new_callable=AsyncMock),
+        patch(
+            "src.memory.retroactive_enrichment.log_memory_operation",
+            new_callable=AsyncMock,
+        ) as mock_audit,
+    ):
         await service.enrich_from_new_data(
             user_id="user-123",
             trigger=EnrichmentTrigger.EMAIL_ARCHIVE,
@@ -736,6 +727,7 @@ async def test_enrich_from_new_data_logs_audit(
 # get_existing_entities
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_existing_entities_queries_semantic_memory(
     service: RetroactiveEnrichmentService,
@@ -746,9 +738,7 @@ async def test_get_existing_entities_queries_semantic_memory(
     mock_response.data = [
         {"fact": "Moderna is a biotech company", "metadata": {"entity_name": "Moderna"}},
     ]
-    mock_supabase.table.return_value.select.return_value.eq.return_value.gt.return_value.execute.return_value = (
-        mock_response
-    )
+    mock_supabase.table.return_value.select.return_value.eq.return_value.gt.return_value.execute.return_value = mock_response
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
         mock_response
     )
@@ -762,6 +752,7 @@ async def test_get_existing_entities_queries_semantic_memory(
 # ---------------------------------------------------------------------------
 # Source confidence helper
 # ---------------------------------------------------------------------------
+
 
 def test_source_confidence_returns_correct_hierarchy() -> None:
     """Source confidence follows CLAUDE.md hierarchy."""
@@ -779,6 +770,7 @@ def test_source_confidence_returns_correct_hierarchy() -> None:
 # ---------------------------------------------------------------------------
 # Convenience trigger methods
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_enrich_after_email_archive(

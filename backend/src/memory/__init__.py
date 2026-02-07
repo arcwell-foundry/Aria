@@ -67,11 +67,6 @@ from src.memory.lead_patterns import (
     SilentLead,
 )
 from src.memory.lead_triggers import LeadTriggerService
-from src.memory.retroactive_enrichment import (
-    EnrichmentResult,
-    EnrichmentTrigger,
-    RetroactiveEnrichmentService,
-)
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -80,6 +75,11 @@ from src.memory.prospective import (
     TaskPriority,
     TaskStatus,
     TriggerType,
+)
+from src.memory.retroactive_enrichment import (
+    EnrichmentResult,
+    EnrichmentTrigger,
+    RetroactiveEnrichmentService,
 )
 from src.memory.salience import SalienceService
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
