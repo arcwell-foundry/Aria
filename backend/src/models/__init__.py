@@ -1,5 +1,12 @@
 """Models package for ARIA backend."""
 
+from src.models.communication import (
+    ChannelResult,
+    ChannelType,
+    CommunicationRequest,
+    CommunicationResponse,
+    MessagePriority,
+)
 from src.models.email_draft import (
     EmailDraftCreate,
     EmailDraftListResponse,
@@ -64,6 +71,10 @@ __all__ = [
     "AttendeeProfileResponse",
     "BriefStatus",
     "CalibrationStatsResponse",
+    "ChannelResult",
+    "ChannelType",
+    "CommunicationRequest",
+    "CommunicationResponse",
     "CompanyResearchResponse",
     "DefaultTone",
     "EmailDraftCreate",
@@ -85,6 +96,7 @@ __all__ = [
     "MeetingBriefContent",
     "MeetingBriefLeadHours",
     "MeetingBriefResponse",
+    "MessagePriority",
     "NotificationCreate",
     "NotificationListResponse",
     "NotificationResponse",
