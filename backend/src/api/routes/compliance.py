@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.api.deps import AdminUser, CurrentUser
 from src.services.compliance_service import ComplianceError, ComplianceService
@@ -69,6 +69,20 @@ class UpdateConsentRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=50)
     granted: bool
 
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: str) -> str:
+        """Validate consent category against allowed values."""
+        # Import here to avoid circular dependency
+        from src.services.compliance_service import ComplianceService
+
+        valid_categories = ComplianceService.ALL_CONSENT_CATEGORIES
+        if v not in valid_categories:
+            raise ValueError(
+                f"Invalid consent category. Must be one of: {valid_categories}"
+            )
+        return v
+
 
 class UpdateConsentResponse(BaseModel):
     """Response for consent update."""
@@ -108,8 +122,8 @@ class CompanyDataExportResponse(BaseModel):
     company_id: str
     exported_by: str
     company: dict[str, Any] | None = None
-    users: list[Any] | None = None
-    documents: list[Any] | None = None
+    users: list[Any]
+    documents: list[Any]
     corporate_memory: dict[str, Any] | None = None
 
 
@@ -140,8 +154,14 @@ async def get_data_export(
     """
     try:
         return await compliance_service.export_user_data(current_user.id)
+    except ComplianceError as e:
+        logger.exception("Compliance error exporting user data")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error exporting user data")
+        logger.exception("Unexpected error exporting user data")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export user data",
@@ -186,8 +206,14 @@ async def delete_user_data(
             current_user.id,
             request_data.confirmation,
         )
+    except ComplianceError as e:
+        logger.exception("Compliance error deleting user data")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error deleting user data")
+        logger.exception("Unexpected error deleting user data")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user data",
@@ -215,8 +241,14 @@ async def delete_digital_twin(
     """
     try:
         return await compliance_service.delete_digital_twin(current_user.id)
+    except ComplianceError as e:
+        logger.exception("Compliance error deleting digital twin")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error deleting digital twin")
+        logger.exception("Unexpected error deleting digital twin")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete digital twin",
@@ -247,8 +279,14 @@ async def get_consent_status(
     """
     try:
         return await compliance_service.get_consent_status(current_user.id)
+    except ComplianceError as e:
+        logger.exception("Compliance error getting consent status")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error getting consent status")
+        logger.exception("Unexpected error getting consent status")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get consent status",
@@ -319,8 +357,14 @@ async def mark_dont_learn(
             current_user.id,
             request_data.content_ids,
         )
+    except ComplianceError as e:
+        logger.exception("Compliance error marking don't learn")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error marking don't learn")
+        logger.exception("Unexpected error marking don't learn")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to mark content as don't learn",
@@ -354,8 +398,14 @@ async def get_retention_policies(
         company_id = profile.get("company_id", "unknown")
 
         return await compliance_service.get_retention_policies(company_id)
+    except ComplianceError as e:
+        logger.exception("Compliance error getting retention policies")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error getting retention policies")
+        logger.exception("Unexpected error getting retention policies")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get retention policies",
@@ -400,8 +450,14 @@ async def export_company_data(
         )
     except NotFoundError:
         raise
+    except ComplianceError as e:
+        logger.exception("Compliance error exporting company data")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
-        logger.exception("Error exporting company data")
+        logger.exception("Unexpected error exporting company data")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export company data",

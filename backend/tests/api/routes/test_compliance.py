@@ -362,20 +362,20 @@ class TestUpdateConsent:
         assert data["granted"] is False
 
     def test_update_consent_invalid_category(self, test_client: TestClient) -> None:
-        """Test that invalid consent category returns error."""
-        with patch.object(
-            compliance.compliance_service,
-            "update_consent",
-            new=AsyncMock(
-                side_effect=compliance.ComplianceError("Invalid consent category: invalid")
-            ),
-        ):
-            response = test_client.patch(
-                "/api/v1/compliance/consent",
-                json={"category": "invalid", "granted": False},
-            )
+        """Test that invalid consent category returns validation error.
 
-        assert response.status_code == 500
+        After adding API-level validation (field_validator), invalid categories
+        are caught at request validation time and return HTTP 422 instead of
+        reaching the service layer. This is the desired behavior - faster
+        failure with clearer error messages.
+        """
+        response = test_client.patch(
+            "/api/v1/compliance/consent",
+            json={"category": "invalid", "granted": False},
+        )
+
+        # API-level validation returns 422 (Unprocessable Entity)
+        assert response.status_code == 422
 
     def test_update_consent_service_error(self, test_client: TestClient) -> None:
         """Test that consent update handles service errors."""
