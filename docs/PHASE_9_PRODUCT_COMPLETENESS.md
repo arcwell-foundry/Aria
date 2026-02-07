@@ -1157,22 +1157,24 @@ CREATE POLICY "own_onboarding" ON onboarding_state
 
 ### US-943: Reporting & Value Demonstration
 
-**As a** user / buyer  
-**I want** to see ARIA's ROI  
+**As a** user / buyer
+**I want** to see ARIA's ROI
 **So that** I can justify the $200K/year investment
 
 #### Acceptance Criteria
-- [ ] ROI dashboard: `/dashboard/roi`
-- [ ] Time saved metrics:
+- [x] ROI dashboard: `/dashboard/roi`
+- [x] Time saved metrics:
   - Hours saved on meeting prep (vs. manual research)
   - Hours saved on email drafting (vs. writing from scratch)
   - Hours saved on competitive intel (vs. manual monitoring)
-- [ ] Activity metrics: Emails drafted, research briefs generated, signals surfaced, leads discovered
-- [ ] Outcome metrics: Deals influenced, pipeline generated, meetings prepared
-- [ ] Usage reports: Feature adoption, active days, agent utilization
-- [ ] Activity attribution: Which ARIA action led to which outcome
-- [ ] Exportable reports (PDF) for executive presentations
-- [ ] Comparison: "Your team with ARIA" vs. industry benchmarks
+- [x] Activity metrics: Emails drafted, research briefs generated, signals surfaced, leads discovered
+- [x] Outcome metrics: Deals influenced, pipeline generated, meetings prepared
+- [x] Usage reports: Feature adoption, active days, agent utilization
+- [x] Activity attribution: Which ARIA action led to which outcome
+- [x] Exportable reports (PDF) for executive presentations
+- [x] Comparison: "Your team with ARIA" vs. industry benchmarks
+
+**Status:** COMPLETED - Feb 7, 2026
 
 ---
 
@@ -1208,7 +1210,7 @@ Before declaring Phase 9 complete, verify:
 - [ ] Goal lifecycle from creation to retrospective
 - [ ] Action queue with approval workflow operational
 - [ ] Activity feed showing real-time ARIA activity
-- [ ] ROI dashboard calculating meaningful metrics
+- [x] ROI dashboard calculating meaningful metrics (US-943 completed)
 
 ---
 
