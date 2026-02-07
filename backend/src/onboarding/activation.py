@@ -18,6 +18,7 @@ from typing import Any
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.models.goal import GoalCreate, GoalType
+from src.onboarding.outcome_tracker import OnboardingOutcomeTracker
 from src.services.goal_service import GoalService
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,20 @@ class OnboardingCompletionOrchestrator:
 
         # Record episodic memory event
         await self._record_activation_event(user_id, activations)
+
+        # Record onboarding outcome for procedural memory (US-924)
+        try:
+            outcome_tracker = OnboardingOutcomeTracker()
+            await outcome_tracker.record_outcome(user_id)
+            logger.info(
+                "Onboarding outcome recorded",
+                extra={"user_id": user_id},
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to record onboarding outcome",
+                extra={"user_id": user_id, "error": str(e)},
+            )
 
         logger.info(
             "Post-onboarding agent activation complete",
