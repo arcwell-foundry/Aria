@@ -13,6 +13,7 @@ import {
   AdminBillingPage,
   AriaChatPage,
   BattleCardsPage,
+  ChangelogPage,
   EmailDraftsPage,
   HelpPage,
   IntegrationsCallbackPage,
@@ -232,6 +233,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <HelpPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/changelog"
+        element={
+          <ProtectedRoute>
+            <ChangelogPage />
           </ProtectedRoute>
         }
       />

@@ -2,6 +2,7 @@ export { AriaChatPage } from "./AriaChat";
 export { AdminTeamPage } from "./AdminTeamPage";
 export { AdminBillingPage } from "./AdminBillingPage";
 export { BattleCardsPage } from "./BattleCards";
+export { ChangelogPage } from "./ChangelogPage";
 export { DashboardPage } from "./Dashboard";
 export { EmailDraftsPage } from "./EmailDrafts";
 export { GoalsPage } from "./Goals";
