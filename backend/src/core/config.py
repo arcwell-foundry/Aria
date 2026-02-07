@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PRICE_ID: str = ""  # Default price ID for annual subscription
 
+    # Resend Email Configuration (US-934)
+    RESEND_API_KEY: SecretStr = SecretStr("")
+    FROM_EMAIL: str = "ARIA <aria@luminone.com>"
+
     # Rate Limiting Configuration (US-930)
     RATE_LIMIT_ENABLED: bool = True  # Global rate limiting toggle
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 100  # Default limit for all endpoints
