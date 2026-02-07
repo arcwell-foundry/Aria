@@ -224,7 +224,7 @@ describe("ROIDashboardPage", () => {
         error: null,
       });
 
-      const { container } = renderWithQueryClient(<ROIDashboardPage />, queryClient);
+      renderWithQueryClient(<ROIDashboardPage />, queryClient);
 
       await waitFor(() => {
         // Find all period buttons
