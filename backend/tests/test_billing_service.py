@@ -642,3 +642,485 @@ class TestBillingEmailNotifications:
 
             # Email was attempted
             mock_email_instance.send_payment_receipt.assert_called_once()
+
+
+class TestBillingServiceNotConfigured:
+    """Test BillingService behavior when Stripe is not configured."""
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_customer_raises_when_not_configured(
+        self, billing_service
+    ):
+        """Test that creating a customer raises BillingError when Stripe is not configured."""
+        billing_service._stripe_key = ""
+        with pytest.raises(BillingError, match="Stripe is not configured"):
+            await billing_service.get_or_create_customer("company-123", "admin@example.com")
+
+    @pytest.mark.asyncio
+    async def test_create_checkout_session_raises_when_not_configured(
+        self, billing_service
+    ):
+        """Test that creating a checkout session raises when Stripe is not configured."""
+        billing_service._stripe_key = ""
+        with pytest.raises(BillingError, match="Stripe is not configured"):
+            await billing_service.create_checkout_session("company-123", "admin@example.com")
+
+    @pytest.mark.asyncio
+    async def test_create_portal_session_raises_when_not_configured(
+        self, billing_service
+    ):
+        """Test that creating a portal session raises when Stripe is not configured."""
+        billing_service._stripe_key = ""
+        with pytest.raises(BillingError, match="Stripe is not configured"):
+            await billing_service.create_portal_session("company-123")
+
+    @pytest.mark.asyncio
+    async def test_get_invoices_returns_empty_when_not_configured(
+        self, billing_service
+    ):
+        """Test that get_invoices returns empty list when Stripe is not configured."""
+        billing_service._stripe_key = ""
+        result = await billing_service.get_invoices("company-123")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_handle_webhook_raises_when_not_configured(
+        self, billing_service
+    ):
+        """Test that handling webhooks raises when Stripe is not configured."""
+        billing_service._stripe_key = ""
+        with pytest.raises(BillingError, match="Stripe is not configured"):
+            await billing_service.handle_webhook(b"payload", "sig_header")
+
+
+class TestWebhookEdgeCases:
+    """Test webhook handling edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_webhook_secret_not_configured(
+        self, billing_service, mock_stripe
+    ):
+        """Test that webhook raises when webhook secret is not configured."""
+        with patch("src.services.billing_service.settings") as mock_settings:
+            mock_settings.STRIPE_WEBHOOK_SECRET.get_secret_value.return_value = ""
+            with pytest.raises(BillingError, match="Webhook secret not configured"):
+                await billing_service.handle_webhook(b"payload", "sig_header")
+
+    @pytest.mark.asyncio
+    async def test_unhandled_webhook_event_type(
+        self, billing_service, mock_stripe
+    ):
+        """Test that unhandled event types are logged but don't raise."""
+        payload = b"test_payload"
+        sig_header = "t=123,v1=abc123"
+
+        with patch("src.services.billing_service.settings") as mock_settings:
+            mock_settings.STRIPE_WEBHOOK_SECRET.get_secret_value.return_value = "whsec_test"
+
+            mock_event = MagicMock()
+            mock_event.type = "customer.updated"
+            mock_event.data.object = MagicMock()
+
+            mock_stripe.Webhook.construct_event.return_value = mock_event
+
+            # Should not raise
+            await billing_service.handle_webhook(payload, sig_header)
+
+    @pytest.mark.asyncio
+    async def test_checkout_completed_without_subscription(
+        self, billing_service, mock_stripe
+    ):
+        """Test checkout completed event when session has no subscription."""
+        billing_service._update_subscription_status = AsyncMock()
+
+        mock_session = MagicMock()
+        mock_session.customer = "cus_123"
+        mock_session.subscription = None
+
+        await billing_service._handle_checkout_completed(mock_session)
+
+        billing_service._update_subscription_status.assert_not_called()
+
+
+class TestUpdateSubscriptionStatus:
+    """Test internal subscription status update logic."""
+
+    @pytest.mark.asyncio
+    async def test_update_status_no_company_found(
+        self, billing_service, mock_supabase
+    ):
+        """Test status update when no company found for customer ID."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+
+        mock_source = MagicMock()
+        mock_source.customer = "cus_unknown"
+
+        await billing_service._update_subscription_status(
+            "cus_unknown", "active", mock_source
+        )
+
+        mock_client.table.return_value.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_status_builds_metadata_from_subscription(
+        self, billing_service, mock_supabase
+    ):
+        """Test that metadata is correctly extracted from subscription source."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "company-123"}
+        )
+
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+        mock_source = MagicMock()
+        mock_source.current_period_end = 1735689600
+        mock_source.cancel_at_period_end = True
+        mock_price = MagicMock()
+        mock_price.nickname = "ARIA Annual"
+        mock_item = MagicMock()
+        mock_item.price = mock_price
+        mock_source.items = MagicMock()
+        mock_source.items.data = [mock_item]
+
+        await billing_service._update_subscription_status(
+            "cus_123", "active", mock_source
+        )
+
+        mock_client.table.return_value.update.assert_called_once()
+        call_args = mock_client.table.return_value.update.call_args[0][0]
+        assert call_args["subscription_status"] == "active"
+        assert call_args["subscription_metadata"]["cancel_at_period_end"] is True
+        assert call_args["subscription_metadata"]["plan"] == "ARIA Annual"
+
+    @pytest.mark.asyncio
+    async def test_update_status_handles_database_error(
+        self, billing_service, mock_supabase, caplog
+    ):
+        """Test that database errors are caught and logged."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.side_effect = Exception("Database connection failed")
+
+        mock_source = MagicMock()
+
+        await billing_service._update_subscription_status(
+            "cus_123", "active", mock_source
+        )
+
+
+class TestGetCompanyAdminEmail:
+    """Test admin email lookup for billing notifications."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_company(
+        self, billing_service, mock_supabase
+    ):
+        """Test that None is returned when company not found."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+
+        result = await billing_service._get_company_admin_email("cus_unknown")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_admin_users(
+        self, billing_service, mock_supabase
+    ):
+        """Test that None is returned when company has no admin users."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_companies_table = MagicMock()
+        mock_companies_table.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "company-123"}
+        )
+
+        mock_user_profiles_table = MagicMock()
+        mock_user_profiles_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        def table_side_effect(table_name):
+            if table_name == "companies":
+                return mock_companies_table
+            elif table_name == "user_profiles":
+                return mock_user_profiles_table
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+
+        result = await billing_service._get_company_admin_email("cus_123")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_exception(
+        self, billing_service, mock_supabase
+    ):
+        """Test that None is returned on database exceptions."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.side_effect = Exception("Database error")
+
+        result = await billing_service._get_company_admin_email("cus_123")
+        assert result is None
+
+
+class TestCheckoutSessionCreation:
+    """Test checkout session creation edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_creates_setup_mode_without_price_id(
+        self, billing_service, mock_stripe
+    ):
+        """Test that checkout creates setup mode when STRIPE_PRICE_ID is not set."""
+        billing_service.get_or_create_customer = AsyncMock(return_value="cus_123")
+
+        mock_session = MagicMock()
+        mock_session.url = "https://checkout.stripe.com/session"
+        mock_session.id = "cs_test_123"
+        mock_stripe.checkout.Session.create.return_value = mock_session
+
+        with patch("src.services.billing_service.settings") as mock_settings:
+            mock_settings.STRIPE_PRICE_ID = ""
+            mock_settings.APP_URL = "http://localhost:3000"
+
+            result = await billing_service.create_checkout_session(
+                "company-123", "admin@example.com"
+            )
+
+            assert result == "https://checkout.stripe.com/session"
+            call_args = mock_stripe.checkout.Session.create.call_args
+            assert call_args.kwargs.get("mode") == "setup" or call_args[1].get("mode") == "setup"
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_urls_when_provided(
+        self, billing_service, mock_stripe
+    ):
+        """Test that custom success and cancel URLs are used when provided."""
+        billing_service.get_or_create_customer = AsyncMock(return_value="cus_123")
+
+        mock_session = MagicMock()
+        mock_session.url = "https://checkout.stripe.com/session"
+        mock_session.id = "cs_test_123"
+        mock_stripe.checkout.Session.create.return_value = mock_session
+
+        with patch("src.services.billing_service.settings") as mock_settings:
+            mock_settings.STRIPE_PRICE_ID = "price_123"
+            mock_settings.APP_URL = "http://localhost:3000"
+
+            await billing_service.create_checkout_session(
+                "company-123",
+                "admin@example.com",
+                success_url="https://custom.com/success",
+                cancel_url="https://custom.com/cancel",
+            )
+
+            call_args = mock_stripe.checkout.Session.create.call_args
+            assert "https://custom.com/success" in str(call_args)
+            assert "https://custom.com/cancel" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_portal_session_no_stripe_customer(
+        self, billing_service, mock_supabase
+    ):
+        """Test portal session creation when company has no Stripe customer."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "company-123", "stripe_customer_id": None}
+        )
+
+        with pytest.raises(BillingError, match="No Stripe customer"):
+            await billing_service.create_portal_session("company-123")
+
+
+class TestInvoiceEdgeCases:
+    """Test invoice retrieval edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_invoice_with_null_fields(
+        self, billing_service, mock_supabase, mock_stripe
+    ):
+        """Test handling invoices with null total, created, or pdf fields."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "company-123", "stripe_customer_id": "cus_123"}
+        )
+
+        mock_invoice = MagicMock()
+        mock_invoice.id = "in_null"
+        mock_invoice.total = None
+        mock_invoice.currency = "usd"
+        mock_invoice.status = "draft"
+        mock_invoice.created = None
+        mock_invoice.invoice_pdf = None
+
+        mock_stripe.Invoice.list.return_value = MagicMock(data=[mock_invoice])
+
+        result = await billing_service.get_invoices("company-123")
+
+        assert len(result) == 1
+        assert result[0]["amount"] == 0
+        assert result[0]["date"] is None
+        assert result[0]["pdf_url"] is None
+
+    @pytest.mark.asyncio
+    async def test_invoice_zero_amount(
+        self, billing_service, mock_supabase, mock_stripe
+    ):
+        """Test handling zero-amount invoices."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"id": "company-123", "stripe_customer_id": "cus_123"}
+        )
+
+        mock_invoice = MagicMock()
+        mock_invoice.id = "in_zero"
+        mock_invoice.total = 0
+        mock_invoice.currency = "usd"
+        mock_invoice.status = "paid"
+        mock_invoice.created = 1704067200
+        mock_invoice.invoice_pdf = "https://example.com/invoice.pdf"
+
+        mock_stripe.Invoice.list.return_value = MagicMock(data=[mock_invoice])
+
+        result = await billing_service.get_invoices("company-123")
+
+        assert result[0]["amount"] == 0.0
+
+
+class TestSubscriptionStatusEdgeCases:
+    """Test subscription status parsing edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_status_with_no_stripe_customer(
+        self, billing_service, mock_supabase
+    ):
+        """Test status falls back to database when no Stripe customer."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={
+                "id": "company-123",
+                "stripe_customer_id": None,
+                "subscription_status": "trial",
+                "subscription_metadata": {},
+            }
+        )
+
+        mock_seats = MagicMock()
+        mock_seats.count = 1
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_seats
+
+        result = await billing_service.get_subscription_status("company-123")
+
+        assert result["status"] == "trial"
+        assert result["seats_used"] == 1
+
+    @pytest.mark.asyncio
+    async def test_status_stripe_api_failure_falls_back(
+        self, billing_service, mock_supabase, mock_stripe
+    ):
+        """Test that Stripe API failure falls back to database data."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={
+                "id": "company-123",
+                "stripe_customer_id": "cus_123",
+                "subscription_status": "active",
+                "subscription_metadata": {"plan": "ARIA Annual"},
+            }
+        )
+
+        mock_seats = MagicMock()
+        mock_seats.count = 2
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_seats
+
+        mock_stripe.Subscription.list.side_effect = Exception("Stripe API error")
+
+        result = await billing_service.get_subscription_status("company-123")
+
+        assert result["status"] == "active"
+        assert result["plan"] == "ARIA Annual"
+
+    @pytest.mark.asyncio
+    async def test_status_subscription_no_price_nickname(
+        self, billing_service, mock_supabase, mock_stripe
+    ):
+        """Test status parsing when subscription price has no nickname."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={
+                "id": "company-123",
+                "stripe_customer_id": "cus_123",
+                "subscription_status": "trial",
+                "subscription_metadata": {},
+            }
+        )
+
+        mock_seats = MagicMock()
+        mock_seats.count = 1
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_seats
+
+        mock_subscription = MagicMock()
+        mock_subscription.status = "active"
+        mock_subscription.current_period_end = 1735689600
+        mock_subscription.cancel_at_period_end = False
+
+        mock_price = MagicMock()
+        mock_price.nickname = None
+        mock_price.id = "price_abc123"
+
+        mock_item = MagicMock()
+        mock_item.price = mock_price
+        mock_subscription.items = MagicMock()
+        mock_subscription.items.data = [mock_item]
+
+        mock_stripe.Subscription.list.return_value = MagicMock(data=[mock_subscription])
+
+        result = await billing_service.get_subscription_status("company-123")
+
+        # nickname is None so plan resolves to None (no fallback in get_subscription_status)
+        assert result["plan"] is None
+
+    @pytest.mark.asyncio
+    async def test_status_seats_count_none(
+        self, billing_service, mock_supabase
+    ):
+        """Test status when seats count returns None."""
+        mock_client = MagicMock()
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={
+                "id": "company-123",
+                "stripe_customer_id": None,
+                "subscription_status": "trial",
+                "subscription_metadata": {},
+            }
+        )
+
+        mock_seats = MagicMock()
+        mock_seats.count = None
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_seats
+
+        result = await billing_service.get_subscription_status("company-123")
+
+        assert result["seats_used"] == 0
