@@ -18,6 +18,7 @@ from typing import Any
 import pyotp
 import qrcode
 
+from src.core.config import settings
 from src.core.exceptions import ARIAException, NotFoundError
 from src.db.supabase import SupabaseClient
 from supabase import Client
@@ -250,8 +251,18 @@ class AccountService:
             ARIAException: If operation fails.
         """
         try:
-            # Supabase Auth handles password reset emails
-            self.client.auth.reset_password_email(email)
+            # Send password reset email via EmailService
+            reset_url = f"{settings.APP_URL}/reset-password?email={email}"
+            try:
+                from src.services.email_service import EmailService
+                email_service = EmailService()
+                await email_service.send_password_reset(email, reset_url)
+            except Exception as email_error:
+                # Log email error but don't fail the password reset request
+                logger.warning(
+                    "Failed to send password reset email",
+                    extra={"email": email, "error": str(email_error)},
+                )
 
             # Log security event (without user_id since we only have email)
             logger.info("Password reset requested", extra={"email": email})

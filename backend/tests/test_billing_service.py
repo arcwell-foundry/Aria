@@ -469,3 +469,176 @@ class TestSubscriptionStatusParsing:
         assert result["plan"] == "ARIA Annual"
         assert result["cancel_at_period_end"] is False
         assert result["seats_used"] == 3
+
+
+class TestBillingEmailNotifications:
+    """Test suite for email notifications on billing events."""
+
+    @pytest.mark.asyncio
+    async def test_payment_success_sends_email(self, billing_service, mock_supabase):
+        """Test that payment success sends an email receipt."""
+        mock_client = MagicMock()
+
+        # Mock _update_subscription_status to avoid database calls
+        billing_service._update_subscription_status = AsyncMock()
+
+        # Create separate mock chains for companies and user_profiles queries
+        # Companies query
+        mock_companies_table = MagicMock()
+        mock_companies_execute = MagicMock()
+        mock_companies_execute.data = {"id": "company-123", "name": "Test Company"}
+        mock_companies_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_companies_execute
+
+        # User profiles query
+        mock_user_profiles_table = MagicMock()
+        mock_user_execute = MagicMock()
+        mock_user_execute.data = [{"id": "admin-123", "full_name": "Admin User"}]
+        mock_user_profiles_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_user_execute
+
+        # Make table() return different mocks based on argument
+        def table_side_effect(table_name):
+            if table_name == "companies":
+                return mock_companies_table
+            elif table_name == "user_profiles":
+                return mock_user_profiles_table
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+
+        # Mock auth admin for getting user email
+        mock_auth_admin = MagicMock()
+        mock_user_data = MagicMock()
+        mock_user_data.user.email = "admin@example.com"
+        mock_auth_admin.get_user_by_id.return_value = mock_user_data
+        mock_client.auth.admin = mock_auth_admin
+
+        mock_supabase.get_client.return_value = mock_client
+
+        # Create mock invoice
+        mock_invoice = MagicMock()
+        mock_invoice.customer = "cus_123"
+        mock_invoice.total = 200000  # $2000.00 in cents
+        mock_invoice.created = 1704067200  # Timestamp
+
+        with patch("src.services.email_service.EmailService") as mock_email_service_class:
+            mock_email_instance = MagicMock()
+            mock_email_instance.send_payment_receipt = AsyncMock(return_value="email_id")
+            mock_email_service_class.return_value = mock_email_instance
+
+            await billing_service._handle_payment_succeeded(mock_invoice)
+
+            # Verify email was sent
+            mock_email_instance.send_payment_receipt.assert_called_once()
+            call_args = mock_email_instance.send_payment_receipt.call_args
+            assert call_args[0][0] == "admin@example.com"  # to
+            assert call_args[0][1] == 200000  # amount in cents
+
+    @pytest.mark.asyncio
+    async def test_payment_failed_sends_email(self, billing_service, mock_supabase):
+        """Test that payment failure sends an email notification."""
+        mock_client = MagicMock()
+
+        # Mock _update_subscription_status to avoid database calls
+        billing_service._update_subscription_status = AsyncMock()
+
+        # Create separate mock chains for companies and user_profiles queries
+        mock_companies_table = MagicMock()
+        mock_companies_execute = MagicMock()
+        mock_companies_execute.data = {"id": "company-123", "name": "Test Company"}
+        mock_companies_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_companies_execute
+
+        mock_user_profiles_table = MagicMock()
+        mock_user_execute = MagicMock()
+        mock_user_execute.data = [{"id": "admin-123", "full_name": "Admin User"}]
+        mock_user_profiles_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_user_execute
+
+        def table_side_effect(table_name):
+            if table_name == "companies":
+                return mock_companies_table
+            elif table_name == "user_profiles":
+                return mock_user_profiles_table
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+
+        # Mock auth admin for getting user email
+        mock_auth_admin = MagicMock()
+        mock_user_data = MagicMock()
+        mock_user_data.user.email = "admin@example.com"
+        mock_auth_admin.get_user_by_id.return_value = mock_user_data
+        mock_client.auth.admin = mock_auth_admin
+
+        mock_supabase.get_client.return_value = mock_client
+
+        # Create mock invoice
+        mock_invoice = MagicMock()
+        mock_invoice.customer = "cus_123"
+
+        with patch("src.services.email_service.EmailService") as mock_email_service_class:
+            mock_email_instance = MagicMock()
+            mock_email_instance.send_payment_failed = AsyncMock(return_value="email_id")
+            mock_email_service_class.return_value = mock_email_instance
+
+            await billing_service._handle_payment_failed(mock_invoice)
+
+            # Verify email was sent
+            mock_email_instance.send_payment_failed.assert_called_once()
+            call_args = mock_email_instance.send_payment_failed.call_args
+            assert call_args[0][0] == "admin@example.com"  # to
+            assert call_args[0][1] == "Admin User"  # name
+
+    @pytest.mark.asyncio
+    async def test_payment_email_failure_logs_warning(
+        self, billing_service, mock_supabase, caplog
+    ):
+        """Test that email sending failures are logged but don't break payment handling."""
+        mock_client = MagicMock()
+
+        # Mock _update_subscription_status to avoid database calls
+        billing_service._update_subscription_status = AsyncMock()
+
+        mock_companies_table = MagicMock()
+        mock_companies_execute = MagicMock()
+        mock_companies_execute.data = {"id": "company-123", "name": "Test Company"}
+        mock_companies_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_companies_execute
+
+        mock_user_profiles_table = MagicMock()
+        mock_user_execute = MagicMock()
+        mock_user_execute.data = [{"id": "admin-123", "full_name": "Admin User"}]
+        mock_user_profiles_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_user_execute
+
+        def table_side_effect(table_name):
+            if table_name == "companies":
+                return mock_companies_table
+            elif table_name == "user_profiles":
+                return mock_user_profiles_table
+            return MagicMock()
+
+        mock_client.table.side_effect = table_side_effect
+
+        # Mock auth admin for getting user email
+        mock_auth_admin = MagicMock()
+        mock_user_data = MagicMock()
+        mock_user_data.user.email = "admin@example.com"
+        mock_auth_admin.get_user_by_id.return_value = mock_user_data
+        mock_client.auth.admin = mock_auth_admin
+
+        mock_supabase.get_client.return_value = mock_client
+
+        mock_invoice = MagicMock()
+        mock_invoice.customer = "cus_123"
+        mock_invoice.total = 200000
+        mock_invoice.created = 1704067200
+
+        with patch("src.services.email_service.EmailService") as mock_email_service_class:
+            mock_email_instance = MagicMock()
+            mock_email_instance.send_payment_receipt = AsyncMock(
+                side_effect=Exception("Email service down")
+            )
+            mock_email_service_class.return_value = mock_email_instance
+
+            # Should not raise even if email fails
+            await billing_service._handle_payment_succeeded(mock_invoice)
+
+            # Email was attempted
+            mock_email_instance.send_payment_receipt.assert_called_once()

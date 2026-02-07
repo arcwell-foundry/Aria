@@ -460,6 +460,24 @@ class BillingService:
         customer_id = invoice.customer
         await self._update_subscription_status(customer_id, self.STATUS_ACTIVE, invoice)
 
+        # Send payment receipt email
+        try:
+            from src.services.email_service import EmailService
+            email_service = EmailService()
+
+            # Fetch company admin email
+            admin_email = await self._get_company_admin_email(customer_id)
+            if admin_email:
+                # Get amount and date from invoice
+                amount = invoice.total or 0
+                date = datetime.fromtimestamp(invoice.created, tz=UTC).isoformat() if invoice.created else ""
+                await email_service.send_payment_receipt(admin_email, amount, date)
+        except Exception as email_error:
+            logger.warning(
+                "Failed to send payment receipt email",
+                extra={"customer_id": customer_id, "error": str(email_error)},
+            )
+
     async def _handle_payment_failed(self, invoice: stripe.Invoice) -> None:
         """Handle failed payment webhook.
 
@@ -468,6 +486,23 @@ class BillingService:
         """
         customer_id = invoice.customer
         await self._update_subscription_status(customer_id, self.STATUS_PAST_DUE, invoice)
+
+        # Send payment failed email
+        try:
+            from src.services.email_service import EmailService
+            email_service = EmailService()
+
+            # Fetch company admin email and name
+            admin_info = await self._get_company_admin_info(customer_id)
+            if admin_info:
+                await email_service.send_payment_failed(
+                    admin_info["email"], admin_info["full_name"]
+                )
+        except Exception as email_error:
+            logger.warning(
+                "Failed to send payment failed email",
+                extra={"customer_id": customer_id, "error": str(email_error)},
+            )
 
     async def _handle_subscription_deleted(self, subscription: stripe.Subscription) -> None:
         """Handle subscription deletion webhook.
@@ -561,3 +596,116 @@ class BillingService:
                 "Error updating subscription status",
                 extra={"customer_id": customer_id, "status": status},
             )
+
+    async def _get_company_admin_email(self, customer_id: str) -> str | None:
+        """Get the email of a company admin for billing notifications.
+
+        Args:
+            customer_id: Stripe customer ID.
+
+        Returns:
+            Admin email address or None if not found.
+        """
+        try:
+            client = SupabaseClient.get_client()
+
+            # Find company by stripe_customer_id
+            company_response = (
+                client.table("companies")
+                .select("id")
+                .eq("stripe_customer_id", customer_id)
+                .single()
+                .execute()
+            )
+
+            if not company_response.data:
+                logger.warning(f"No company found for Stripe customer {customer_id}")
+                return None
+
+            company_id = company_response.data["id"]
+
+            # Get first admin user for the company
+            user_response = (
+                client.table("user_profiles")
+                .select("id", "full_name")
+                .eq("company_id", company_id)
+                .eq("role", "admin")
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+
+            if user_response.data and len(user_response.data) > 0:
+                # Get email from auth.users via admin API
+                user_id = user_response.data[0]["id"]
+                user_data = client.auth.admin.get_user_by_id(user_id)
+                if user_data and user_data.user and user_data.user.email:
+                    return user_data.user.email
+
+            return None
+
+        except Exception:
+            logger.exception(
+                "Error fetching company admin email",
+                extra={"customer_id": customer_id},
+            )
+            return None
+
+    async def _get_company_admin_info(self, customer_id: str) -> dict[str, str] | None:
+        """Get info of a company admin for billing notifications.
+
+        Args:
+            customer_id: Stripe customer ID.
+
+        Returns:
+            Dictionary with email and full_name or None if not found.
+        """
+        try:
+            client = SupabaseClient.get_client()
+
+            # Find company by stripe_customer_id
+            company_response = (
+                client.table("companies")
+                .select("id")
+                .eq("stripe_customer_id", customer_id)
+                .single()
+                .execute()
+            )
+
+            if not company_response.data:
+                logger.warning(f"No company found for Stripe customer {customer_id}")
+                return None
+
+            company_id = company_response.data["id"]
+
+            # Get first admin user for the company
+            user_response = (
+                client.table("user_profiles")
+                .select("id", "full_name")
+                .eq("company_id", company_id)
+                .eq("role", "admin")
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+
+            if user_response.data and len(user_response.data) > 0:
+                user_profile = user_response.data[0]
+                user_id = user_profile["id"]
+
+                # Get email from auth.users via admin API
+                user_data = client.auth.admin.get_user_by_id(user_id)
+                if user_data and user_data.user and user_data.user.email:
+                    return {
+                        "email": user_data.user.email,
+                        "full_name": user_profile.get("full_name", "Admin"),
+                    }
+
+            return None
+
+        except Exception:
+            logger.exception(
+                "Error fetching company admin info",
+                extra={"customer_id": customer_id},
+            )
+            return None

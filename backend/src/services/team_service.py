@@ -11,6 +11,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.core.config import settings
 from src.core.exceptions import ARIAException, NotFoundError, ValidationError
 from src.db.supabase import SupabaseClient
 from supabase import Client
@@ -149,6 +150,23 @@ class TeamService:
                     message="Failed to create invite",
                     code="INVITE_CREATE_FAILED",
                     status_code=500,
+                )
+
+            # Send team invite email
+            try:
+                from src.services.email_service import EmailService
+                email_service = EmailService()
+                invite_url = f"{settings.APP_URL}/accept-invite?token={token}"
+                await email_service.send_team_invite(
+                    to=email.lower(),
+                    inviter_name="Your colleague",
+                    company_name="Your company",
+                    invite_url=invite_url,
+                )
+            except Exception as email_error:
+                logger.warning(
+                    "Failed to send invite email",
+                    extra={"email": email, "error": str(email_error)},
                 )
 
             # Check for escalation trigger (>5 users without verified admin)
