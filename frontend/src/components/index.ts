@@ -38,5 +38,6 @@ export { ErrorToaster } from './ErrorToaster';
 export { AgentActivationStatus } from './AgentActivationStatus';
 
 // Help & Content
+export { FeedbackWidget } from './FeedbackWidget';
 export { HelpTooltip } from './HelpTooltip';
 export type { HelpTooltipProps } from './HelpTooltip';
