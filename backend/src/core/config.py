@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
+    APP_URL: str = "http://localhost:3000"  # Base URL for webhook callbacks
+
+    # Stripe Configuration (US-928)
+    STRIPE_SECRET_KEY: SecretStr = SecretStr("")
+    STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
+    STRIPE_PRICE_ID: str = ""  # Default price ID for annual subscription
 
     # CORS Configuration
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"

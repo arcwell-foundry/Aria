@@ -4,6 +4,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import {
   AdminTeamPage,
+  AdminBillingPage,
   AriaChatPage,
   BattleCardsPage,
   EmailDraftsPage,
@@ -158,6 +159,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <AdminTeamPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/billing"
+              element={
+                <ProtectedRoute>
+                  <AdminBillingPage />
                 </ProtectedRoute>
               }
             />

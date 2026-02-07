@@ -15,6 +15,7 @@ from src.api.routes import (
     admin,
     auth,
     battle_cards,
+    billing,
     briefings,
     chat,
     cognitive_load,
@@ -98,6 +99,7 @@ app.include_router(account.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(battle_cards.router, prefix="/api/v1")
+app.include_router(billing.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
