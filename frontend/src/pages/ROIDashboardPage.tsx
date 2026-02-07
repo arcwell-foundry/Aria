@@ -4,7 +4,7 @@ import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { useROIMetrics, useROITrend } from "@/hooks/useROI";
-import type { TimeSavedBreakdown } from "@/api/roi";
+import type { TimeSavedBreakdown } from "@/types/roi";
 import {
   XAxis,
   YAxis,
