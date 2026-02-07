@@ -510,17 +510,19 @@ async def get_audit_log(
 
     for row in sec_data:
         metadata = row.get("metadata") or {}
-        items.append({
-            "id": str(row["id"]),
-            "user_id": str(row.get("user_id") or ""),
-            "event_type": row.get("event_type", ""),
-            "source": "security",
-            "resource_type": "account",
-            "resource_id": metadata.get("target_user_id") or metadata.get("session_id"),
-            "ip_address": row.get("ip_address"),
-            "metadata": metadata,
-            "created_at": row.get("created_at", ""),
-        })
+        items.append(
+            {
+                "id": str(row["id"]),
+                "user_id": str(row.get("user_id") or ""),
+                "event_type": row.get("event_type", ""),
+                "source": "security",
+                "resource_type": "account",
+                "resource_id": metadata.get("target_user_id") or metadata.get("session_id"),
+                "ip_address": row.get("ip_address"),
+                "metadata": metadata,
+                "created_at": row.get("created_at", ""),
+            }
+        )
 
     # Query memory_audit_log
     mem_query = client.table("memory_audit_log").select("*", count="exact")
@@ -537,17 +539,19 @@ async def get_audit_log(
     mem_data = mem_response.data or []
 
     for row in mem_data:
-        items.append({
-            "id": str(row["id"]),
-            "user_id": str(row.get("user_id") or ""),
-            "event_type": row.get("operation", ""),
-            "source": "memory",
-            "resource_type": row.get("memory_type"),
-            "resource_id": row.get("memory_id"),
-            "ip_address": None,
-            "metadata": row.get("metadata") or {},
-            "created_at": row.get("created_at", ""),
-        })
+        items.append(
+            {
+                "id": str(row["id"]),
+                "user_id": str(row.get("user_id") or ""),
+                "event_type": row.get("operation", ""),
+                "source": "memory",
+                "resource_type": row.get("memory_type"),
+                "resource_id": row.get("memory_id"),
+                "ip_address": None,
+                "metadata": row.get("metadata") or {},
+                "created_at": row.get("created_at", ""),
+            }
+        )
 
     # Sort combined results by created_at descending
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -556,7 +560,8 @@ async def get_audit_log(
     if search:
         search_lower = search.lower()
         items = [
-            item for item in items
+            item
+            for item in items
             if (item.get("resource_id") and search_lower in str(item["resource_id"]).lower())
             or search_lower in str(item.get("metadata", {})).lower()
             or search_lower in str(item.get("event_type", "")).lower()
@@ -633,22 +638,32 @@ async def export_audit_log(
     # Generate CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Timestamp", "User ID", "Event Type", "Source",
-        "Resource Type", "Resource ID", "IP Address", "Details",
-    ])
+    writer.writerow(
+        [
+            "Timestamp",
+            "User ID",
+            "Event Type",
+            "Source",
+            "Resource Type",
+            "Resource ID",
+            "IP Address",
+            "Details",
+        ]
+    )
 
     for item in all_items:
-        writer.writerow([
-            item.get("created_at", ""),
-            item.get("user_id", ""),
-            item.get("event_type", ""),
-            item.get("source", ""),
-            item.get("resource_type", ""),
-            item.get("resource_id", ""),
-            item.get("ip_address", ""),
-            str(item.get("metadata", {})),
-        ])
+        writer.writerow(
+            [
+                item.get("created_at", ""),
+                item.get("user_id", ""),
+                item.get("event_type", ""),
+                item.get("source", ""),
+                item.get("resource_type", ""),
+                item.get("resource_id", ""),
+                item.get("ip_address", ""),
+                str(item.get("metadata", {})),
+            ]
+        )
 
     output.seek(0)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")

@@ -5,7 +5,7 @@ at the system level. Multi-tenant safe: learns about the PROCESS, not company da
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -70,16 +70,20 @@ class OnboardingOutcomeTracker:
             raise ValueError(f"Onboarding state not found for user {user_id}")
 
         state = state_response.data
+        if not isinstance(state, dict):
+            raise ValueError(f"Invalid onboarding state data for user {user_id}")
 
         # Extract step data
         step_data = state.get("step_data", {})
+        if not isinstance(step_data, dict):
+            step_data = {}
 
         # Calculate completion time
         started_at = state.get("started_at")
         completed_at = state.get("completed_at") or datetime.now(UTC).isoformat()
 
         time_minutes = 0.0
-        if started_at:
+        if started_at and isinstance(started_at, str) and isinstance(completed_at, str):
             try:
                 start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
                 end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
@@ -89,27 +93,60 @@ class OnboardingOutcomeTracker:
 
         # Extract integration status
         integration_data = step_data.get("integration_wizard", {})
-        email_connected = integration_data.get("email_connected", False)
-        crm_connected = integration_data.get("crm_connected", False)
+        if not isinstance(integration_data, dict):
+            integration_data = {}
+        email_connected = (
+            integration_data.get("email_connected", False)
+            if isinstance(integration_data.get("email_connected"), bool)
+            else False
+        )
+        crm_connected = (
+            integration_data.get("crm_connected", False)
+            if isinstance(integration_data.get("crm_connected"), bool)
+            else False
+        )
 
         # Extract company type and goal
         company_discovery = step_data.get("company_discovery", {})
-        company_type = company_discovery.get("company_type", "")
+        if not isinstance(company_discovery, dict):
+            company_discovery = {}
+        company_type = (
+            company_discovery.get("company_type", "")
+            if isinstance(company_discovery.get("company_type"), str)
+            else ""
+        )
 
         first_goal = step_data.get("first_goal", {})
-        first_goal_category = first_goal.get("goal_type")
+        if not isinstance(first_goal, dict):
+            first_goal = {}
+        first_goal_category = (
+            first_goal.get("goal_type") if isinstance(first_goal.get("goal_type"), str) else None
+        )
 
         # Count documents
         metadata = state.get("metadata", {})
-        documents_uploaded = metadata.get("documents_uploaded", 0)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        documents_uploaded = (
+            metadata.get("documents_uploaded", 0)
+            if isinstance(metadata.get("documents_uploaded"), int)
+            else 0
+        )
 
         # Build outcome
+        readiness_scores = state.get("readiness_scores", {})
+        if not isinstance(readiness_scores, dict):
+            readiness_scores = {}
+
+        completed_steps = state.get("completed_steps", [])
+        skipped_steps = state.get("skipped_steps", [])
+
         outcome = OnboardingOutcome(
             user_id=user_id,
-            readiness_at_completion=state.get("readiness_scores", {}),
+            readiness_at_completion=readiness_scores,
             time_to_complete_minutes=round(time_minutes, 1),
-            steps_completed=len(state.get("completed_steps", [])),
-            steps_skipped=len(state.get("skipped_steps", [])),
+            steps_completed=len(completed_steps) if isinstance(completed_steps, list) else 0,
+            steps_skipped=len(skipped_steps) if isinstance(skipped_steps, list) else 0,
             company_type=company_type,
             first_goal_category=first_goal_category,
             documents_uploaded=documents_uploaded,
@@ -120,18 +157,20 @@ class OnboardingOutcomeTracker:
         # Insert to database (upsert for idempotency)
         (
             self._db.table("onboarding_outcomes")
-            .insert({
-                "user_id": user_id,
-                "readiness_snapshot": outcome.readiness_at_completion,
-                "completion_time_minutes": outcome.time_to_complete_minutes,
-                "steps_completed": outcome.steps_completed,
-                "steps_skipped": outcome.steps_skipped,
-                "company_type": outcome.company_type,
-                "first_goal_category": outcome.first_goal_category,
-                "documents_uploaded": outcome.documents_uploaded,
-                "email_connected": outcome.email_connected,
-                "crm_connected": outcome.crm_connected,
-            })
+            .insert(
+                {
+                    "user_id": user_id,
+                    "readiness_snapshot": outcome.readiness_at_completion,
+                    "completion_time_minutes": outcome.time_to_complete_minutes,
+                    "steps_completed": outcome.steps_completed,
+                    "steps_skipped": outcome.steps_skipped,
+                    "company_type": outcome.company_type,
+                    "first_goal_category": outcome.first_goal_category,
+                    "documents_uploaded": outcome.documents_uploaded,
+                    "email_connected": outcome.email_connected,
+                    "crm_connected": outcome.crm_connected,
+                }
+            )
             .execute()
         )
 
@@ -157,13 +196,11 @@ class OnboardingOutcomeTracker:
             List of insight dictionaries with pattern, evidence, confidence.
         """
         # Query all outcomes
-        response = (
-            self._db.table("onboarding_outcomes")
-            .select("*")
-            .execute()
-        )
+        response = self._db.table("onboarding_outcomes").select("*").execute()
 
-        outcomes = response.data or []
+        # Type-safe outcome extraction
+        raw_outcomes = response.data or []
+        outcomes: list[dict[str, Any]] = [o for o in raw_outcomes if isinstance(o, dict)]
 
         if not outcomes:
             return []
@@ -173,7 +210,11 @@ class OnboardingOutcomeTracker:
         # Group by company_type
         by_company_type: dict[str, list[dict[str, Any]]] = {}
         for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                continue
             company_type = outcome.get("company_type", "unknown")
+            if not isinstance(company_type, str):
+                company_type = "unknown"
             by_company_type.setdefault(company_type, []).append(outcome)
 
         # Calculate average readiness by company type
@@ -181,59 +222,101 @@ class OnboardingOutcomeTracker:
             if len(type_outcomes) < 3:
                 continue  # Need minimum sample size
 
-            readiness_scores = []
+            readiness_scores: list[float] = []
             for o in type_outcomes:
+                if not isinstance(o, dict):
+                    continue
                 snapshot = o.get("readiness_snapshot", {})
+                if not isinstance(snapshot, dict):
+                    continue
                 overall = snapshot.get("overall", 0)
-                readiness_scores.append(overall)
+                if isinstance(overall, (int, float)):
+                    readiness_scores.append(float(overall))
 
             avg_readiness = sum(readiness_scores) / len(readiness_scores)
 
-            insights.append({
-                "pattern": f"avg_readiness_by_company_type",
-                "company_type": company_type,
-                "value": round(avg_readiness, 1),
-                "sample_size": len(type_outcomes),
-                "evidence_count": len(type_outcomes),
-                "confidence": min(len(type_outcomes) * 0.1, 0.95),
-            })
+            insights.append(
+                {
+                    "pattern": "avg_readiness_by_company_type",
+                    "company_type": company_type,
+                    "value": round(avg_readiness, 1),
+                    "sample_size": len(type_outcomes),
+                    "evidence_count": len(type_outcomes),
+                    "confidence": min(len(type_outcomes) * 0.1, 0.95),
+                }
+            )
 
         # Correlation: documents uploaded vs readiness
-        with_docs = [o for o in outcomes if o.get("documents_uploaded", 0) > 0]
-        without_docs = [o for o in outcomes if o.get("documents_uploaded", 0) == 0]
+        with_docs = [
+            o
+            for o in outcomes
+            if isinstance(o, dict)
+            and isinstance(o.get("documents_uploaded", 0), int)
+            and o.get("documents_uploaded", 0) > 0
+        ]
+        without_docs = [
+            o
+            for o in outcomes
+            if isinstance(o, dict)
+            and isinstance(o.get("documents_uploaded", 0), int)
+            and o.get("documents_uploaded", 0) == 0
+        ]
 
         if len(with_docs) >= 3 and len(without_docs) >= 3:
-            with_docs_readiness = [
-                o.get("readiness_snapshot", {}).get("overall", 0) for o in with_docs
-            ]
-            without_docs_readiness = [
-                o.get("readiness_snapshot", {}).get("overall", 0) for o in without_docs
-            ]
+            with_docs_readiness: list[float] = []
+            without_docs_readiness: list[float] = []
 
-            avg_with = sum(with_docs_readiness) / len(with_docs_readiness)
-            avg_without = sum(without_docs_readiness) / len(without_docs_readiness)
+            for o in with_docs:
+                if isinstance(o, dict):
+                    snapshot = o.get("readiness_snapshot", {})
+                    if isinstance(snapshot, dict):
+                        overall = snapshot.get("overall", 0)
+                        if isinstance(overall, (int, float)):
+                            with_docs_readiness.append(float(overall))
+
+            for o in without_docs:
+                if isinstance(o, dict):
+                    snapshot = o.get("readiness_snapshot", {})
+                    if isinstance(snapshot, dict):
+                        overall = snapshot.get("overall", 0)
+                        if isinstance(overall, (int, float)):
+                            without_docs_readiness.append(float(overall))
+
+            if with_docs_readiness and without_docs_readiness:
+                avg_with = sum(with_docs_readiness) / len(with_docs_readiness)
+                avg_without = sum(without_docs_readiness) / len(without_docs_readiness)
 
             if avg_with > avg_without + 10:  # Meaningful difference
-                insights.append({
-                    "pattern": "documents_correlate_with_readiness",
-                    "with_documents_avg": round(avg_with, 1),
-                    "without_documents_avg": round(avg_without, 1),
-                    "improvement_pct": round(((avg_with - avg_without) / avg_without) * 100, 1),
-                    "evidence_count": len(with_docs) + len(without_docs),
-                    "confidence": 0.7,
-                })
+                insights.append(
+                    {
+                        "pattern": "documents_correlate_with_readiness",
+                        "with_documents_avg": round(avg_with, 1),
+                        "without_documents_avg": round(avg_without, 1),
+                        "improvement_pct": round(((avg_with - avg_without) / avg_without) * 100, 1),
+                        "evidence_count": len(with_docs) + len(without_docs),
+                        "confidence": 0.7,
+                    }
+                )
 
         # Average completion time
-        completion_times = [o.get("completion_time_minutes", 0) for o in outcomes if o.get("completion_time_minutes")]
+        completion_times: list[float] = []
+        for o in outcomes:
+            if isinstance(o, dict):
+                time_val = o.get("completion_time_minutes", 0)
+                if isinstance(time_val, (int, float)):
+                    completion_times.append(float(time_val))
+
         if completion_times:
             avg_time = sum(completion_times) / len(completion_times)
-            insights.append({
-                "pattern": "avg_completion_time",
-                "value_minutes": round(avg_time, 1),
-                "sample_size": len(completion_times),
-                "evidence_count": len(completion_times),
-                "confidence": 0.8,
-            })
+            insights.append(
+                {
+                    "pattern": "avg_completion_time",
+                    "value_minutes": round(avg_time, 1),
+                    "sample_size": len(completion_times),
+                    "evidence_count": len(completion_times),
+                    "confidence": 0.8,
+                }
+            )
 
         return insights
 
@@ -254,41 +337,61 @@ class OnboardingOutcomeTracker:
             .execute()
         )
 
-        existing_insights = {row.get("insight") for row in (existing_response.data or [])}
+        existing_insights: set[str] = set()
+        for row in existing_response.data or []:
+            if isinstance(row, dict):
+                insight_val = row.get("insight")
+                if isinstance(insight_val, str):
+                    existing_insights.add(insight_val)
 
         # Generate new insights from system insights
         system_insights = await self.get_system_insights()
         created_count = 0
 
         for insight in system_insights:
-            pattern = insight.get("pattern", "")
-
             # Generate human-readable insight text
             insight_text = self._format_insight(insight)
 
             # Skip if already exists
             if insight_text in existing_insights:
                 # Update evidence count and confidence instead
-                (
-                    self._db.table("procedural_insights")
-                    .update({
-                        "evidence_count": existing_response.data[0].get("evidence_count", 1) + insight.get("evidence_count", 1),
-                        "confidence": min(0.95, existing_response.data[0].get("confidence", 0.5) + 0.05),
-                    })
-                    .eq("insight", insight_text)
-                    .execute()
-                )
+                for existing_row in existing_response.data or []:
+                    if (
+                        isinstance(existing_row, dict)
+                        and existing_row.get("insight") == insight_text
+                    ):
+                        current_evidence = existing_row.get("evidence_count", 1)
+                        current_confidence = existing_row.get("confidence", 0.5)
+                        if isinstance(current_evidence, (int, float)) and isinstance(
+                            current_confidence, (int, float)
+                        ):
+                            new_evidence = insight.get("evidence_count", 1)
+                            new_confidence = min(0.95, current_confidence + 0.05)
+                            if isinstance(new_evidence, (int, float)):
+                                (
+                                    self._db.table("procedural_insights")
+                                    .update(
+                                        {
+                                            "evidence_count": current_evidence + new_evidence,
+                                            "confidence": new_confidence,
+                                        }
+                                    )
+                                    .eq("insight", insight_text)
+                                    .execute()
+                                )
                 continue
 
             # Insert new insight
             (
                 self._db.table("procedural_insights")
-                .insert({
-                    "insight": insight_text,
-                    "evidence_count": insight.get("evidence_count", 1),
-                    "confidence": insight.get("confidence", 0.5),
-                    "insight_type": "onboarding",
-                })
+                .insert(
+                    {
+                        "insight": insight_text,
+                        "evidence_count": insight.get("evidence_count", 1),
+                        "confidence": insight.get("confidence", 0.5),
+                        "insight_type": "onboarding",
+                    }
+                )
                 .execute()
             )
 
