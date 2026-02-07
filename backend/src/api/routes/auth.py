@@ -9,10 +9,12 @@ from pydantic import BaseModel, EmailStr, Field
 from src.api.deps import CurrentUser
 from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.db.supabase import SupabaseClient
+from src.services.account_service import AccountService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+account_service = AccountService()
 
 
 # Request/Response Models
@@ -62,6 +64,27 @@ class MessageResponse(BaseModel):
     """Generic message response."""
 
     message: str
+
+
+def _get_client_ip(request: Request) -> str | None:
+    """Extract client IP from request.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        Client IP address or None.
+    """
+    # Check various headers for the real IP
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+
+    return None
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -134,7 +157,7 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
 
 @router.post("/login", response_model=TokenResponse)
 @rate_limit(RateLimitConfig(requests=5, window_seconds=60))
-async def login(request: Request, login_request: LoginRequest) -> TokenResponse:  # noqa: ARG001
+async def login(request: Request, login_request: LoginRequest) -> TokenResponse:
     """Authenticate user with email and password.
 
     Args:
@@ -146,6 +169,9 @@ async def login(request: Request, login_request: LoginRequest) -> TokenResponse:
     Raises:
         HTTPException: If login fails.
     """
+    client_ip = _get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+
     try:
         client = SupabaseClient.get_client()
 
@@ -162,6 +188,14 @@ async def login(request: Request, login_request: LoginRequest) -> TokenResponse:
                 detail="Invalid email or password",
             )
 
+        # Log successful login
+        await account_service.log_security_event(
+            user_id=auth_response.user.id,
+            event_type=account_service.EVENT_LOGIN,
+            ip_address=client_ip,
+            user_agent=user_agent,
+        )
+
         logger.info("User logged in successfully", extra={"user_id": auth_response.user.id})
 
         return TokenResponse(
@@ -171,8 +205,51 @@ async def login(request: Request, login_request: LoginRequest) -> TokenResponse:
         )
 
     except HTTPException:
+        # For login failures, try to get user_id for logging
+        # We need to look up the user by email to log the failed attempt
+        try:
+            admin_client = client.auth.admin
+            # List users to find by email (Supabase limitation)
+            users_response = admin_client.list_users()
+            user_id = None
+            # users_response is actually a list of User objects
+            for user in users_response:
+                if user.email == login_request.email:
+                    user_id = user.id
+                    break
+
+            if user_id:
+                await account_service.log_security_event(
+                    user_id=user_id,
+                    event_type=account_service.EVENT_LOGIN_FAILED,
+                    ip_address=client_ip,
+                    user_agent=user_agent,
+                )
+        except Exception:
+            # Don't let logging failures prevent the error response
+            pass
         raise
     except Exception as e:
+        # Log failed login attempt
+        try:
+            admin_client = client.auth.admin
+            users_response = admin_client.list_users()
+            user_id = None
+            # users_response is actually a list of User objects
+            for user in users_response:
+                if user.email == login_request.email:
+                    user_id = user.id
+                    break
+
+            if user_id:
+                await account_service.log_security_event(
+                    user_id=user_id,
+                    event_type=account_service.EVENT_LOGIN_FAILED,
+                    ip_address=client_ip,
+                    user_agent=user_agent,
+                )
+        except Exception:
+            pass
         logger.exception("Error during login")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -181,18 +258,30 @@ async def login(request: Request, login_request: LoginRequest) -> TokenResponse:
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(current_user: CurrentUser) -> MessageResponse:
+async def logout(request: Request, current_user: CurrentUser) -> MessageResponse:
     """Invalidate the current user's session.
 
     Args:
+        request: FastAPI request.
         current_user: The authenticated user.
 
     Returns:
         Success message.
     """
+    client_ip = _get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+
     try:
         client = SupabaseClient.get_client()
         client.auth.sign_out()
+
+        # Log logout event
+        await account_service.log_security_event(
+            user_id=current_user.id,
+            event_type=account_service.EVENT_LOGOUT,
+            ip_address=client_ip,
+            user_agent=user_agent,
+        )
 
         logger.info("User logged out successfully", extra={"user_id": current_user.id})
 

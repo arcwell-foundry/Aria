@@ -30,6 +30,7 @@ class AccountService:
 
     # Security event types for audit logging
     EVENT_LOGIN = "login"
+    EVENT_LOGIN_FAILED = "login_failed"
     EVENT_LOGOUT = "logout"
     EVENT_PASSWORD_CHANGE = "password_change"
     EVENT_PASSWORD_RESET_REQUEST = "password_reset_request"
@@ -39,6 +40,9 @@ class AccountService:
     EVENT_SESSION_REVOKED = "session_revoked"
     EVENT_ACCOUNT_DELETED = "account_deleted"
     EVENT_PROFILE_UPDATED = "profile_updated"
+    EVENT_ROLE_CHANGED = "role_changed"
+    EVENT_DATA_EXPORT = "data_export"
+    EVENT_DATA_DELETION = "data_deletion"
 
     def __init__(self) -> None:
         """Initialize AccountService."""
