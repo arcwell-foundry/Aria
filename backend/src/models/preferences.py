@@ -87,3 +87,33 @@ class PreferenceResponse(BaseModel):
     timezone: str = Field(..., description="User timezone")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Last update timestamp")
+
+
+class EmailPreferencesUpdate(BaseModel):
+    """Request model for updating email preferences (partial updates supported).
+
+    Note: security_alerts cannot be disabled and will always return True.
+    """
+
+    weekly_summary: bool | None = Field(
+        None, description="Receive weekly summary emails"
+    )
+    feature_announcements: bool | None = Field(
+        None, description="Receive feature announcement emails"
+    )
+    security_alerts: bool | None = Field(
+        None, description="Security alerts (cannot be disabled - always True)"
+    )
+
+
+class EmailPreferencesResponse(BaseModel):
+    """Response model for email preferences."""
+
+    user_id: str = Field(..., description="User ID")
+    weekly_summary: bool = Field(..., description="Receive weekly summary emails")
+    feature_announcements: bool = Field(
+        ..., description="Receive feature announcement emails"
+    )
+    security_alerts: bool = Field(
+        ..., description="Security alerts (always True - cannot be disabled)"
+    )
