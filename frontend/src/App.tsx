@@ -32,6 +32,7 @@ import {
   SkillsPage,
   SettingsAccountPage,
   SettingsPrivacyPage,
+  SettingsProfilePage,
 } from "@/pages";
 import { PostAuthRouter } from "@/components/PostAuthRouter";
 import type { SearchResult, RecentItem } from "@/api/search";
@@ -186,6 +187,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <PreferencesSettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/profile"
+        element={
+          <ProtectedRoute>
+            <SettingsProfilePage />
           </ProtectedRoute>
         }
       />

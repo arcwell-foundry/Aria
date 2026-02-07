@@ -21,3 +21,4 @@ export { SignupPage } from "./Signup";
 export { SkillsPage } from "./Skills";
 export { SettingsAccountPage } from "./SettingsAccountPage";
 export { SettingsPrivacyPage } from "./SettingsPrivacyPage";
+export { SettingsProfilePage } from "./SettingsProfilePage";
