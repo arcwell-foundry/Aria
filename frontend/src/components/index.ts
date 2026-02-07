@@ -41,3 +41,5 @@ export { AgentActivationStatus } from './AgentActivationStatus';
 export { FeedbackWidget } from './FeedbackWidget';
 export { HelpTooltip } from './HelpTooltip';
 export type { HelpTooltipProps } from './HelpTooltip';
+export { OnboardingTooltip } from './OnboardingTooltip';
+export type { OnboardingTooltipProps } from './OnboardingTooltip';
