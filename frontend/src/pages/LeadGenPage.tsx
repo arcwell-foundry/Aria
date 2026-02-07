@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { ICPBuilder } from "@/components/leads/ICPBuilder";
+import { LeadReviewQueue } from "@/components/leads/LeadReviewQueue";
+import { PipelineView } from "@/components/leads/PipelineView";
 import { Target, ListChecks, BarChart3 } from "lucide-react";
 
 type Tab = "icp" | "review" | "pipeline";
@@ -49,12 +51,8 @@ export function LeadGenPage() {
 
           {/* Tab Content */}
           {activeTab === "icp" && <ICPBuilder />}
-          {activeTab === "review" && (
-            <div className="text-slate-400 text-center py-16">Review Queue — coming soon</div>
-          )}
-          {activeTab === "pipeline" && (
-            <div className="text-slate-400 text-center py-16">Pipeline View — coming soon</div>
-          )}
+          {activeTab === "review" && <LeadReviewQueue />}
+          {activeTab === "pipeline" && <PipelineView />}
         </div>
       </div>
     </DashboardLayout>
