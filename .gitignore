@@ -54,5 +54,8 @@ htmlcov/
 # Build
 *.log
 
+# Worktrees
+.worktrees/
+
 # AI-generated context files
 CLAUDE.md
