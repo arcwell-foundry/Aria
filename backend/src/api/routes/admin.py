@@ -25,7 +25,7 @@ class TeamMemberResponse(BaseModel):
 
     id: str
     full_name: str | None = None
-    email: str
+    email: EmailStr
     role: str = "user"
     is_active: bool = True
     last_active: str | None = None
@@ -43,7 +43,7 @@ class InviteResponse(BaseModel):
     """Team invite response."""
 
     id: str
-    email: str
+    email: EmailStr
     role: str
     status: str = "pending"
     expires_at: str

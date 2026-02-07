@@ -41,7 +41,7 @@ class MarkedReadResponse(BaseModel):
 class RemoveResponse(BaseModel):
     """Response model for removing monitored entity."""
 
-    status: str = Field(..., description="Status of removal operation")
+    status: str = Field(..., min_length=1, max_length=50, description="Status of removal operation")
 
 
 # Market Signals Endpoints

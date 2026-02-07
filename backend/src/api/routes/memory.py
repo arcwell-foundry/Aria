@@ -309,7 +309,7 @@ class PrimeConversationResponse(BaseModel):
     salient_facts: list[dict[str, Any]] = Field(
         default_factory=list, description="High-salience facts about entities"
     )
-    formatted_context: str = Field(..., description="Pre-formatted context for LLM consumption")
+    formatted_context: str = Field(..., min_length=1, max_length=50000, description="Pre-formatted context for LLM consumption")
 
 
 class MemoryQueryService:

@@ -27,8 +27,8 @@ def _get_service() -> DebriefService:
 class DebriefCreate(BaseModel):
     """Request model for creating a debrief."""
 
-    meeting_id: str = Field(..., description="The meeting's unique identifier")
-    notes: str = Field(..., description="User's debrief notes")
+    meeting_id: str = Field(..., min_length=1, max_length=100, description="The meeting's unique identifier")
+    notes: str = Field(..., min_length=1, max_length=10000, description="User's debrief notes")
     meeting_context: dict[str, Any] | None = Field(
         None, description="Optional meeting context (title, attendees, etc)"
     )

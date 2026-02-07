@@ -85,13 +85,13 @@ class TrustInfoResponse(BaseModel):
 class InstallSkillRequest(BaseModel):
     """Request to install a skill."""
 
-    skill_id: str = Field(..., description="UUID of the skill to install")
+    skill_id: str = Field(..., min_length=1, max_length=100, description="UUID of the skill to install")
 
 
 class ExecuteSkillRequest(BaseModel):
     """Request to execute a skill."""
 
-    skill_id: str = Field(..., description="UUID of the skill to execute")
+    skill_id: str = Field(..., min_length=1, max_length=100, description="UUID of the skill to execute")
     input_data: dict[str, Any] = Field(default_factory=dict, description="Input data for the skill")
 
 

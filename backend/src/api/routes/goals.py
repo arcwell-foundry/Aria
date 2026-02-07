@@ -32,7 +32,7 @@ def _get_service() -> GoalService:
 class DeleteResponse(BaseModel):
     """Response model for delete operations."""
 
-    status: str = Field(..., description="Status of deletion operation")
+    status: str = Field(..., min_length=1, max_length=50, description="Status of deletion operation")
 
 
 # Goal Endpoints

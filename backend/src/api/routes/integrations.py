@@ -20,7 +20,7 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 class AuthUrlRequest(BaseModel):
     """Request model for generating OAuth URL."""
 
-    redirect_uri: str = Field(..., description="OAuth callback URL")
+    redirect_uri: str = Field(..., min_length=10, max_length=500, description="OAuth callback URL")
 
 
 class AuthUrlResponse(BaseModel):
@@ -34,8 +34,8 @@ class AuthUrlResponse(BaseModel):
 class OAuthCallbackRequest(BaseModel):
     """Request model for OAuth callback."""
 
-    code: str = Field(..., description="OAuth authorization code")
-    state: str | None = Field(None, description="OAuth state parameter")
+    code: str = Field(..., min_length=10, max_length=500, description="OAuth authorization code")
+    state: str | None = Field(None, max_length=100, description="OAuth state parameter")
 
 
 class IntegrationResponse(BaseModel):

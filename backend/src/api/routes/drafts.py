@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.core.exceptions import EmailDraftError, EmailSendError, NotFoundError
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/drafts", tags=["drafts"])
 class MessageResponse(BaseModel):
     """Generic message response."""
 
-    message: str
+    message: str = Field(..., min_length=1, max_length=500)
 
 
 @router.post("/email", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED)

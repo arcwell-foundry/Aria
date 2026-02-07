@@ -53,7 +53,7 @@ class UserResponse(BaseModel):
     """Response model for user data."""
 
     id: str
-    email: str
+    email: EmailStr
     full_name: str | None = None
     company_id: str | None = None
     role: str = "user"

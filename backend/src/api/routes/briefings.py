@@ -18,20 +18,20 @@ router = APIRouter(prefix="/briefings", tags=["briefings"])
 class BriefingContent(BaseModel):
     """Content of a daily briefing."""
 
-    summary: str = Field(..., description="Executive summary")
+    summary: str = Field(..., min_length=1, max_length=5000, description="Executive summary")
     calendar: dict[str, Any] = Field(..., description="Calendar information")
     leads: dict[str, Any] = Field(..., description="Lead status summary")
     signals: dict[str, Any] = Field(..., description="Market signals")
     tasks: dict[str, Any] = Field(..., description="Task status")
-    generated_at: str = Field(..., description="ISO timestamp of generation")
+    generated_at: str = Field(..., min_length=1, max_length=100, description="ISO timestamp of generation")
 
 
 class BriefingResponse(BaseModel):
     """Response model for a briefing."""
 
-    id: str = Field(..., description="Briefing ID")
-    user_id: str = Field(..., description="User ID")
-    briefing_date: str = Field(..., description="Briefing date (ISO format)")
+    id: str = Field(..., min_length=1, max_length=50, description="Briefing ID")
+    user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
+    briefing_date: str = Field(..., min_length=10, max_length=10, description="Briefing date (ISO format)")
     content: BriefingContent = Field(..., description="Briefing content")
 
 

@@ -62,7 +62,7 @@ class VerifyTwoFactorRequest(BaseModel):
     """Request to verify 2FA code."""
 
     code: str = Field(..., pattern=r"^\d{6}$", description="6-digit verification code")
-    secret: str = Field(..., description="TOTP secret from setup")
+    secret: str = Field(..., min_length=16, max_length=64, description="TOTP secret from setup")
 
 
 class DisableTwoFactorRequest(BaseModel):
@@ -87,6 +87,9 @@ class DeleteAccountRequest(BaseModel):
 
     confirmation: str = Field(
         ...,
+        min_length=1,
+        max_length=100,
+        pattern=r"^DELETE MY ACCOUNT$",
         description='Must be exactly "DELETE MY ACCOUNT"',
     )
     password: str = Field(..., min_length=1)
