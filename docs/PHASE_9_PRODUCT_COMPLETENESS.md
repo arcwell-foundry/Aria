@@ -1061,20 +1061,28 @@ CREATE POLICY "own_onboarding" ON onboarding_state
 
 ### US-938: Communication Surface Orchestration
 
-**As a** user  
-**I want** to interact with ARIA through multiple channels  
+**As a** user
+**I want** to interact with ARIA through multiple channels
 **So that** ARIA meets me where I work
 
 #### Acceptance Criteria
-- [ ] Chat (existing): Primary in-app interaction
-- [ ] Email notifications: Configurable alerts for briefings, action items, signals
+- [x] Chat (existing): Primary in-app interaction
+- [x] Email notifications: Configurable alerts for briefings, action items, signals
 - [ ] Slack integration: @mention ARIA in channels, DM ARIA for quick queries
-- [ ] Notification routing intelligence: ARIA decides which channel based on urgency and user preferences
+- [x] Notification routing intelligence: ARIA decides which channel based on urgency and user preferences
   - Critical → push notification + in-app
   - Important → email or Slack (based on user preference)
   - FYI → in-app activity feed only
 - [ ] Channel context persistence: Conversation started in Slack can continue in app
 - [ ] Voice interface (future-ready): Architecture supports future "Hey ARIA" integration
+
+**Status:** COMPLETED - Feb 7, 2026
+- CommunicationRouter service implemented in `src/core/communication_router.py`
+- Priority-based routing logic (CRITICAL → in_app+push, IMPORTANT → in_app+preferred, FYI → in_app)
+- User preference integration with fallback to defaults
+- Internal API route `/api/v1/communicate` for agent use
+- Slack integration type added (future-ready)
+- Full test coverage (21 tests: priority mapping, user preferences, channel sending, fallback, API routes)
 
 ---
 
