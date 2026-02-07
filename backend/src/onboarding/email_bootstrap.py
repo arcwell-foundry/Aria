@@ -189,6 +189,9 @@ class PriorityEmailIngestion:
             # 11. Record episodic
             await self._record_episodic(user_id, result)
 
+            # 12. Trigger retroactive enrichment (US-923)
+            await self._trigger_retroactive_enrichment(user_id, contacts)
+
             if progress_callback:
                 await progress_callback(
                     {
@@ -798,3 +801,56 @@ class PriorityEmailIngestion:
             await memory.store_episode(episode)
         except Exception as e:
             logger.warning("Episodic record failed: %s", e)
+
+    async def _trigger_retroactive_enrichment(
+        self,
+        user_id: str,
+        contacts: list[dict[str, Any]],
+    ) -> None:
+        """Trigger retroactive enrichment after email processing (US-923).
+
+        Converts discovered contacts into entity dicts and calls the
+        RetroactiveEnrichmentService to cross-reference against existing
+        memory and enrich partially-known entities.
+
+        Args:
+            user_id: User whose memory to enrich.
+            contacts: Contacts extracted from email processing.
+        """
+        try:
+            from src.memory.retroactive_enrichment import (
+                RetroactiveEnrichmentService,
+            )
+
+            entities = [
+                {
+                    "name": c.get("name", c.get("email", "")),
+                    "type": c.get("relationship", "contact"),
+                    "confidence": 0.75,
+                    "source": "email_archive",
+                    "facts": [
+                        f"{c.get('name', 'Unknown')} contacted via email "
+                        f"({c.get('email_count', 0)} messages)"
+                    ],
+                    "relationships": [],
+                }
+                for c in contacts
+                if c.get("name") or c.get("email")
+            ]
+
+            if entities:
+                service = RetroactiveEnrichmentService()
+                result = await service.enrich_after_email_archive(user_id, entities)
+                logger.info(
+                    "Retroactive enrichment after email bootstrap: "
+                    "%d entities enriched, %d significant",
+                    result.get("enriched", 0),
+                    result.get("significant", 0),
+                    extra={"user_id": user_id},
+                )
+        except Exception as e:
+            logger.warning(
+                "Retroactive enrichment failed (non-blocking): %s",
+                e,
+                extra={"user_id": user_id},
+            )

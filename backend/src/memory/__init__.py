@@ -67,6 +67,11 @@ from src.memory.lead_patterns import (
     SilentLead,
 )
 from src.memory.lead_triggers import LeadTriggerService
+from src.memory.retroactive_enrichment import (
+    EnrichmentResult,
+    EnrichmentTrigger,
+    RetroactiveEnrichmentService,
+)
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.procedural import ProceduralMemory, Workflow
 from src.memory.prospective import (
@@ -165,4 +170,8 @@ __all__ = [
     "EngagementPattern",
     "SilentLead",
     "LeadWarning",
+    # Retroactive Enrichment (US-923)
+    "RetroactiveEnrichmentService",
+    "EnrichmentResult",
+    "EnrichmentTrigger",
 ]
