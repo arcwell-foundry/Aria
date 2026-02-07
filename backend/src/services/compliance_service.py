@@ -15,6 +15,7 @@ from typing import Any
 
 from src.core.exceptions import NotFoundError
 from src.db.supabase import SupabaseClient
+from src.services.account_service import AccountService
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,14 @@ class ComplianceService:
     RETENTION_AUDIT_WRITE_LOGS = -1  # Permanent
     RETENTION_EMAIL_DATA = 365
     RETENTION_CONVERSATION_HISTORY = -1  # Permanent unless deleted
+
+    def __init__(self, account_service: AccountService | None = None) -> None:
+        """Initialize ComplianceService.
+
+        Args:
+            account_service: Optional AccountService for security logging.
+        """
+        self.account_service = account_service or AccountService()
 
     async def export_user_data(self, user_id: str) -> dict[str, Any]:
         """Export all user data for GDPR right to access.
@@ -183,6 +192,13 @@ class ComplianceService:
                 export_data["audit_log"] = audit_response.data
             except Exception:
                 export_data["audit_log"] = []
+
+            # Log security event
+            await self.account_service.log_security_event(
+                user_id=user_id,
+                event_type=self.account_service.EVENT_DATA_EXPORT,
+                metadata={"data_types": list(export_data.keys())},
+            )
 
             logger.info("User data exported for %s", user_id)
             return export_data
@@ -395,6 +411,13 @@ class ComplianceService:
             # Note: Auth user deletion requires admin.service_role client
             # This is handled separately via Supabase Auth admin API
             summary["summary"]["auth_user"] = "Requires Supabase Auth admin API"
+
+            # Log security event
+            await self.account_service.log_security_event(
+                user_id=user_id,
+                event_type=self.account_service.EVENT_DATA_DELETION,
+                metadata=summary["summary"],
+            )
 
             logger.info("User data deleted for %s", user_id, extra=summary["summary"])
             return summary

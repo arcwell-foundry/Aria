@@ -117,6 +117,22 @@ class Settings(BaseSettings):
             and self.ANTHROPIC_API_KEY.get_secret_value()
         )
 
+    def validate_startup(self) -> None:
+        """Validate that all required secrets are configured.
+
+        Raises:
+            ValueError: If any required secret is missing or empty.
+        """
+        required_secrets = {
+            "SUPABASE_URL": self.SUPABASE_URL,
+            "SUPABASE_SERVICE_ROLE_KEY": self.SUPABASE_SERVICE_ROLE_KEY.get_secret_value(),
+            "ANTHROPIC_API_KEY": self.ANTHROPIC_API_KEY.get_secret_value(),
+            "APP_SECRET_KEY": self.APP_SECRET_KEY.get_secret_value(),
+        }
+        missing = [name for name, value in required_secrets.items() if not value or value == ""]
+        if missing:
+            raise ValueError(f"Required secrets are missing or empty: {', '.join(missing)}")
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -124,8 +140,13 @@ def get_settings() -> Settings:
 
     Returns:
         Settings instance with validated configuration.
+
+    Raises:
+        ValueError: If required secrets are missing.
     """
-    return Settings()
+    settings = Settings()
+    settings.validate_startup()
+    return settings
 
 
 # Global settings instance - import this for easy access

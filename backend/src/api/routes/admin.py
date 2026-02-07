@@ -11,12 +11,14 @@ from fastapi import APIRouter, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
+from src.services.account_service import AccountService
 from src.services.team_service import TeamService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 team_service = TeamService()
+account_service = AccountService()
 
 
 # Request/Response Models
@@ -291,10 +293,25 @@ async def change_role(
             detail="You must belong to a company",
         )
 
+    # Get old role before change for logging
+    target_profile = await SupabaseClient.get_user_by_id(user_id)
+    old_role = target_profile.get("role", "user")
+
     updated_profile = await team_service.change_role(
         company_id=company_id,
         user_id=user_id,
         new_role=data.role,
+    )
+
+    # Log security event for role change
+    await account_service.log_security_event(
+        user_id=current_user.id,  # Log as the admin who made the change
+        event_type=account_service.EVENT_ROLE_CHANGED,
+        metadata={
+            "target_user_id": user_id,
+            "old_role": old_role,
+            "new_role": data.role,
+        },
     )
 
     return {
