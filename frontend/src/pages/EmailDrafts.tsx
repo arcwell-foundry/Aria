@@ -18,6 +18,7 @@ import {
   useRegenerateDraft,
   useSendDraft,
 } from "@/hooks/useDrafts";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 type StatusFilter = EmailDraftStatus | "all";
 
@@ -99,7 +100,10 @@ export function EmailDraftsPage() {
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
-              <h1 className="text-3xl font-bold text-white">Email Drafts</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-bold text-white">Email Drafts</h1>
+                <HelpTooltip content="AI-drafted emails from ARIA. Review, edit, and send from here." placement="right" />
+              </div>
               <p className="mt-1 text-slate-400">
                 AI-powered emails crafted in your style
               </p>

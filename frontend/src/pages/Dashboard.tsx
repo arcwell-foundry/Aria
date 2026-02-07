@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { AgentActivationStatus } from "@/components/AgentActivationStatus";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import {
   BriefingEmpty,
   BriefingHeader,
@@ -69,6 +70,10 @@ export function DashboardPage() {
       <div className="p-4 lg:p-8">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
+          <div className="flex items-center gap-2 mb-2">
+            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+            <HelpTooltip content="Your daily briefing from ARIA with key insights, tasks, and signals. Refreshes each morning." placement="right" />
+          </div>
           <BriefingHeader
             userName={user?.full_name ?? undefined}
             generatedAt={briefing?.generated_at}

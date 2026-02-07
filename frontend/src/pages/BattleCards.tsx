@@ -13,6 +13,7 @@ import {
   useCreateBattleCard,
   useUpdateBattleCard,
 } from "@/hooks/useBattleCards";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 export function BattleCardsPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -104,7 +105,10 @@ export function BattleCardsPage() {
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
-              <h1 className="text-3xl font-bold text-white">Battle Cards</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-bold text-white">Battle Cards</h1>
+                <HelpTooltip content="Competitive intelligence cards. ARIA keeps these updated with the latest market data." placement="right" />
+              </div>
               <p className="mt-1 text-slate-400">
                 Competitive intelligence at your fingertips
               </p>

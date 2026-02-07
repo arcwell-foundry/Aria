@@ -8,6 +8,7 @@ import {
   useConnectIntegration,
   useDisconnectIntegration,
 } from "@/hooks/useIntegrations";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 // Integration metadata
 const integrationMetadata: Record<
@@ -546,7 +547,10 @@ export function IntegrationsSettingsPage() {
             transition={{ duration: 0.5 }}
             className="mb-8"
           >
-            <h1 className="text-3xl font-bold text-white mb-2">Integrations</h1>
+            <div className="flex items-center gap-2 mb-2">
+              <h1 className="text-3xl font-bold text-white">Integrations</h1>
+              <HelpTooltip content="Connect your tools so ARIA can access your data and work across platforms." placement="right" />
+            </div>
             <p className="text-slate-400">
               Connect your favorite tools to unlock ARIA's full potential
             </p>

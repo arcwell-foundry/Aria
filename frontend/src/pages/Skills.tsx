@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SkillBrowser, InstalledSkills, SkillAuditLog } from "@/components/skills";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 type SkillTab = "browse" | "installed" | "activity";
 
@@ -34,7 +35,10 @@ export function SkillsPage() {
         <div className="relative max-w-6xl mx-auto px-4 py-8 lg:px-8">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white">Skills</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-bold text-white">Skills</h1>
+              <HelpTooltip content="Extend ARIA's capabilities with specialized skills for your workflows." placement="right" />
+            </div>
             <p className="mt-1 text-slate-400">
               Discover, install, and manage skills that extend ARIA&apos;s capabilities
             </p>

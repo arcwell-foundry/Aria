@@ -19,6 +19,7 @@ import {
   LeadTableRow,
 } from "@/components/leads";
 import { useAddNote, useExportLeads, useLeads } from "@/hooks/useLeads";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 type ViewMode = "card" | "table";
 type SortField = "health" | "last_activity" | "name" | "value";
@@ -161,7 +162,10 @@ export function LeadsPage() {
           {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
             <div>
-              <h1 className="text-3xl font-bold text-white tracking-tight">Lead Memory</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-bold text-white tracking-tight">Lead Memory</h1>
+                <HelpTooltip content="Track and manage your sales leads. ARIA monitors health scores and suggests next actions." placement="right" />
+              </div>
               <p className="mt-1 text-slate-400">
                 Track and manage your sales pursuits with AI-powered insights
               </p>

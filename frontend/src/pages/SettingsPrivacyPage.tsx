@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 export function SettingsPrivacyPage() {
   const { data: dataExport, isLoading: exportLoading } = useDataExport();
@@ -173,7 +174,10 @@ export function SettingsPrivacyPage() {
       {/* Header */}
       <div className="border-b border-[#2A2A2E]">
         <div className="max-w-[640px] mx-auto px-6 py-8">
-          <h1 className="font-display text-[2rem] text-[#E8E6E1]">Privacy Settings</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-[2rem] text-[#E8E6E1]">Privacy Settings</h1>
+            <HelpTooltip content="Control how ARIA uses your data. Export, delete, or adjust consent settings." placement="right" />
+          </div>
           <p className="text-[#8B92A5] mt-2">Manage your data, consent, and privacy preferences</p>
         </div>
       </div>

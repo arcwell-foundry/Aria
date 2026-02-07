@@ -25,6 +25,7 @@ import {
   Building2,
   Crown,
 } from "lucide-react";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 type Role = "user" | "manager" | "admin";
 
@@ -216,7 +217,10 @@ export function AdminTeamPage() {
       {/* Header */}
       <div className="border-b border-[#2A2A2E]">
         <div className="max-w-[960px] mx-auto px-6 py-8">
-          <h1 className="font-display text-[2rem] text-[#E8E6E1]">Team Management</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-[2rem] text-[#E8E6E1]">Team Management</h1>
+            <HelpTooltip content="Invite team members, manage roles, and configure company settings." placement="right" />
+          </div>
           <p className="text-[#8B92A5] mt-2">Manage team members and company settings</p>
         </div>
       </div>

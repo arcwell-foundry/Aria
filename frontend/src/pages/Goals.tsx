@@ -14,6 +14,7 @@ import {
   useStartGoal,
   usePauseGoal,
 } from "@/hooks/useGoals";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const statusFilters: { value: GoalStatus | "all"; label: string }[] = [
   { value: "all", label: "All Goals" },
@@ -79,7 +80,10 @@ export function GoalsPage() {
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
-              <h1 className="text-3xl font-bold text-white">Goals</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-bold text-white">Goals</h1>
+                <HelpTooltip content="Set objectives for ARIA to pursue. She'll track progress and suggest strategies." placement="right" />
+              </div>
               <p className="mt-1 text-slate-400">
                 Manage your AI-powered pursuits and track agent progress
               </p>

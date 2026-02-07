@@ -15,6 +15,7 @@ import {
 } from "@/components/meetingBrief";
 import { useMeetingBrief, useGenerateMeetingBrief } from "@/hooks/useMeetingBrief";
 import type { MeetingBriefContent } from "@/api/meetingBriefs";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 function isBriefContentPopulated(content: MeetingBriefContent | Record<string, never>): content is MeetingBriefContent {
   return "summary" in content && typeof content.summary === "string" && content.summary.length > 0;
@@ -62,6 +63,10 @@ export function MeetingBriefPage() {
     <DashboardLayout>
       <div className="p-4 lg:p-8">
         <div className="max-w-4xl mx-auto">
+          <div className="flex items-center gap-2 mb-4">
+            <h1 className="text-2xl font-bold text-white">Meeting Brief</h1>
+            <HelpTooltip content="Pre-meeting preparation briefs. ARIA researches attendees and suggests talking points." placement="right" />
+          </div>
           {isLoading ? (
             <MeetingBriefSkeleton />
           ) : error ? (

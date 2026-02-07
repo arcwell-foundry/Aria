@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useProfile, useSessions, useUpdateProfile, useChangePassword, useSetup2FA, useVerify2FA, useDisable2FA, useRevokeSession, useDeleteAccount } from "@/hooks/useAccount";
 import { Shield, Key, Smartphone, Monitor, AlertTriangle, Camera, Mail, ChevronDown, ChevronUp, Check, X, Loader2 } from "lucide-react";
 import { EmailPreferencesSection } from "@/components/settings/EmailPreferencesSection";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 export function SettingsAccountPage() {
   const { data: profile, isLoading: profileLoading } = useProfile();
@@ -172,7 +173,10 @@ export function SettingsAccountPage() {
       {/* Header */}
       <div className="border-b border-[#2A2A2E]">
         <div className="max-w-3xl mx-auto px-6 py-8">
-          <h1 className="font-display text-[2rem] text-[#E8E6E1]">Account Settings</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-[2rem] text-[#E8E6E1]">Account Settings</h1>
+            <HelpTooltip content="Manage your profile, security settings, and account preferences." placement="right" />
+          </div>
           <p className="text-[#8B92A5] mt-2">Manage your account and security preferences</p>
         </div>
       </div>

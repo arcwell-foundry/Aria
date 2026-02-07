@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { ChatInput, ChatMessage, StreamingMessage, ConversationSidebar } from "@/components/chat";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { useStreamingMessage, useConversationMessages } from "@/hooks/useChat";
 import type { ChatMessage as ChatMessageType } from "@/api/chat";
 
@@ -168,7 +169,10 @@ export function AriaChatPage() {
               </div>
 
               <div>
-                <h1 className="text-lg font-semibold text-white">ARIA</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-semibold text-white">ARIA</h1>
+                  <HelpTooltip content="Chat directly with ARIA. Ask questions, request analysis, or give instructions." placement="right" />
+                </div>
                 <p className="text-sm text-slate-400">Your AI Department Director</p>
               </div>
             </div>

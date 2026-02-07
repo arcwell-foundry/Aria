@@ -16,6 +16,7 @@ import {
   Users,
   BarChart3,
 } from "lucide-react";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 type SubscriptionStatus = "trial" | "active" | "past_due" | "canceled" | "incomplete";
 
@@ -160,9 +161,12 @@ export function AdminBillingPage() {
       <div className="max-w-5xl mx-auto px-6 py-12">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="font-display text-[2rem] leading-[1.2] mb-2">
-            Billing & Subscription
-          </h1>
+          <div className="flex items-center gap-2 mb-2">
+            <h1 className="font-display text-[2rem] leading-[1.2]">
+              Billing & Subscription
+            </h1>
+            <HelpTooltip content="Manage your subscription, view invoices, and update payment details." placement="right" />
+          </div>
           <p className="text-[#8B92A5] text-[0.9375rem]">
             Manage your ARIA subscription and billing information
           </p>
