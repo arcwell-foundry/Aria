@@ -14,6 +14,7 @@ class IntegrationType(str, Enum):
     OUTLOOK = "outlook"
     SALESFORCE = "salesforce"
     HUBSPOT = "hubspot"
+    SLACK = "slack"  # NEW: For US-938 communication routing
 
 
 class IntegrationStatus(str, Enum):
@@ -117,5 +118,13 @@ INTEGRATION_CONFIGS: dict[IntegrationType, IntegrationConfig] = {
             "crm.objects.companies.read",
             "crm.objects.deals.read",
         ],
+    ),
+    IntegrationType.SLACK: IntegrationConfig(
+        integration_type=IntegrationType.SLACK,
+        display_name="Slack",
+        description="Connect Slack for notifications and quick queries",
+        composio_app_id="slack",
+        icon="slack",
+        scopes=["chat:write", "channels:read", "im:write"],
     ),
 }
