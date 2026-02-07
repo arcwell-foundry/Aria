@@ -1,6 +1,7 @@
 """API route handlers for ARIA."""
 
 from src.api.routes import admin as admin
+from src.api.routes import compliance as compliance
 from src.api.routes import drafts as drafts
 from src.api.routes import leads as leads
 from src.api.routes import notifications as notifications
