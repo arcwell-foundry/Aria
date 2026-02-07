@@ -11,6 +11,7 @@ export { GoalsPage } from "./Goals";
 export { HelpPage } from "./HelpPage";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";
 export { LeadDetailPage } from "./LeadDetail";
+export { LeadGenPage } from "./LeadGenPage";
 export { LeadsPage } from "./Leads";
 export { IntegrationsSettingsPage } from "./IntegrationsSettings";
 export { LoginPage } from "./Login";

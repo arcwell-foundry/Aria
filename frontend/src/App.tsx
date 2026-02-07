@@ -21,6 +21,7 @@ import {
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
   LeadDetailPage,
+  LeadGenPage,
   LeadsPage,
   LoginPage,
   MeetingBriefPage,
@@ -117,6 +118,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <GoalsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/leads"
+        element={
+          <ProtectedRoute>
+            <LeadGenPage />
           </ProtectedRoute>
         }
       />
