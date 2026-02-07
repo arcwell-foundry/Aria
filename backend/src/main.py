@@ -19,6 +19,7 @@ from src.api.routes import (
     briefings,
     chat,
     cognitive_load,
+    compliance,
     debriefs,
     drafts,
     goals,
@@ -102,6 +103,7 @@ app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
