@@ -13,7 +13,6 @@ import {
   Download,
   AlertCircle,
   Loader2,
-  ExternalLink,
   Users,
   BarChart3,
 } from "lucide-react";
@@ -80,13 +79,13 @@ export function AdminBillingPage() {
   const navigate = useNavigate();
   const { data: profile } = useProfile();
 
-  const { data: billing, isLoading: statusLoading } = useBillingStatus();
+  const { data: billing, isLoading: _statusLoading } = useBillingStatus();
   const { data: invoices = [], isLoading: invoicesLoading } = useInvoices();
   const checkoutSession = useCheckoutSession();
   const portalSession = usePortalSession();
 
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
+  const [successMessage, _setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   // Check if user is admin
@@ -108,7 +107,7 @@ export function AdminBillingPage() {
     try {
       const result = await portalSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (error) {
+    } catch (_error) {
       setErrorMessage("Failed to open billing portal. Please try again.");
       setIsRedirecting(false);
     }
@@ -121,7 +120,7 @@ export function AdminBillingPage() {
     try {
       const result = await checkoutSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (error) {
+    } catch (_error) {
       setErrorMessage("Failed to open checkout. Please try again.");
       setIsRedirecting(false);
     }
@@ -134,7 +133,7 @@ export function AdminBillingPage() {
     try {
       const result = await portalSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (error) {
+    } catch (_error) {
       setErrorMessage("Failed to open payment portal. Please try again.");
       setIsRedirecting(false);
     }
@@ -222,7 +221,7 @@ export function AdminBillingPage() {
                   {statusInfo.label}
                 </span>
                 <span className="text-[#8B92A5] text-[0.8125rem]">
-                  ${200_000.toLocaleString()}/year
+                  ${'200,000'}/year
                 </span>
               </div>
             </div>
