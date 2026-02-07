@@ -202,6 +202,15 @@ class TestUpdateUserDetails:
     @pytest.mark.asyncio
     async def test_updates_user_profile_fields(self, profile_service, mock_supabase):
         """PUT /profile/user updates name, title, department, etc."""
+        # Mock SupabaseClient.get_user_by_id for US-922 diff detection
+        old_user_data = {
+            "id": "user-123",
+            "full_name": "John Doe",
+            "title": "Sales Director",
+            "department": "Commercial",
+        }
+        mock_supabase.get_user_by_id = AsyncMock(return_value=old_user_data)
+
         mock_table = MagicMock()
         mock_update = MagicMock()
         mock_eq = MagicMock()
@@ -226,6 +235,7 @@ class TestUpdateUserDetails:
 
         assert result["full_name"] == "Jane Smith"
         assert result["title"] == "SVP Sales"
+        assert result["merge_pending"] is True
         mock_table.update.assert_called_once()
 
     @pytest.mark.asyncio
@@ -258,6 +268,10 @@ class TestUpdateUserDetails:
     @pytest.mark.asyncio
     async def test_update_fires_profile_updated_event(self, profile_service, mock_supabase):
         """Profile update logs a security event for audit trail."""
+        # Mock SupabaseClient.get_user_by_id for US-922 diff detection
+        old_user_data = {"id": "user-123", "full_name": "Old Name"}
+        mock_supabase.get_user_by_id = AsyncMock(return_value=old_user_data)
+
         mock_table = MagicMock()
         mock_update = MagicMock()
         mock_eq = MagicMock()
@@ -291,6 +305,10 @@ class TestUpdateUserDetails:
     @pytest.mark.asyncio
     async def test_rejects_disallowed_fields(self, profile_service, mock_supabase):
         """Cannot update role or id through profile update."""
+        # Mock SupabaseClient.get_user_by_id for US-922 diff detection
+        old_user_data = {"id": "user-123", "full_name": "Old Name"}
+        mock_supabase.get_user_by_id = AsyncMock(return_value=old_user_data)
+
         mock_table = MagicMock()
         mock_update = MagicMock()
         mock_eq = MagicMock()

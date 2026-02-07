@@ -142,20 +142,17 @@ class TestAccountServicePasswordChange:
         mock_user_data.user.email = "test@example.com"
         mock_admin.get_user_by_id.return_value = mock_user_data
 
-        # Mock auth client
-        mock_auth = MagicMock()
-        mock_auth.sign_in_with_password.return_value = MagicMock()
-
+        # Set up mock client with proper auth structure
         account_service._client = MagicMock()
         account_service._client.auth.admin = mock_admin
-        account_service._client.auth = mock_auth
+        account_service._client.auth.sign_in_with_password = MagicMock()
 
         # Mock log_security_event
         account_service.log_security_event = AsyncMock()
 
         await account_service.change_password(user_id, "oldpassword", "newpassword")
 
-        mock_admin.update_user_by_id.assert_called_once()
+        mock_admin.update_user_by_id.assert_called_once_with(user_id, {"password": "newpassword"})
         account_service.log_security_event.assert_called_once_with(
             user_id=user_id,
             event_type=AccountService.EVENT_PASSWORD_CHANGE,
