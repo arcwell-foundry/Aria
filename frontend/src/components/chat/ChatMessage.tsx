@@ -1,4 +1,5 @@
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { FeedbackWidget } from "@/components/FeedbackWidget";
 import type { ChatMessage as ChatMessageType } from "@/api/chat";
 
 interface ChatMessageProps {
@@ -142,6 +143,13 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
             minute: "2-digit",
           })}
         </div>
+
+        {/* Feedback widget for ARIA messages */}
+        {!isUser && !isStreaming && message.content && (
+          <div className="mt-1">
+            <FeedbackWidget messageId={message.id} />
+          </div>
+        )}
       </div>
     </div>
   );
