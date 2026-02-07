@@ -12,6 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from src.api.routes import (
     account,
+    ambient_onboarding,
     admin,
     analytics,
     aria_config,
@@ -107,6 +108,7 @@ setup_security(app)
 
 # Include API routers
 app.include_router(account.router, prefix="/api/v1")
+app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(aria_config.router, prefix="/api/v1")

@@ -11,3 +11,4 @@ from src.api.routes import onboarding as onboarding
 from src.api.routes import predictions as predictions
 from src.api.routes import profile as profile
 from src.api.routes import skills as skills
+from src.api.routes import ambient_onboarding as ambient_onboarding
