@@ -26,6 +26,7 @@ import {
   NotificationsPage,
   OnboardingPage,
   PreferencesSettingsPage,
+  ROIDashboardPage,
   SignupPage,
   DashboardPage,
   GoalsPage,
@@ -163,6 +164,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <SkillsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/roi"
+        element={
+          <ProtectedRoute>
+            <ROIDashboardPage />
           </ProtectedRoute>
         }
       />
