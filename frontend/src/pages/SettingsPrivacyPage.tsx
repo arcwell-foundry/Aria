@@ -413,24 +413,24 @@ export function SettingsPrivacyPage() {
                   <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
                     <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Audit Logs</p>
                     <p className="text-[#8B92A5] text-[0.8125rem]">
-                      Query logs: {(retentionPolicies.audit_query_logs as any)?.retention_days || 90} days
+                      Query logs: {(retentionPolicies.audit_query_logs as { retention_days?: number } | undefined)?.retention_days || 90} days
                     </p>
                     <p className="text-[#8B92A5] text-[0.8125rem]">
-                      Write logs: {(retentionPolicies.audit_write_logs as any)?.retention_days || 180} days
+                      Write logs: {(retentionPolicies.audit_write_logs as { retention_days?: number } | undefined)?.retention_days || 180} days
                     </p>
                   </div>
 
                   <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
                     <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Email Data</p>
                     <p className="text-[#8B92A5] text-[0.8125rem]">
-                      {(retentionPolicies.email_data as any)?.description || "Retained for analysis while account is active"}
+                      {(retentionPolicies.email_data as { description?: string } | undefined)?.description || "Retained for analysis while account is active"}
                     </p>
                   </div>
 
                   <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
                     <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Conversation History</p>
                     <p className="text-[#8B92A5] text-[0.8125rem]">
-                      {(retentionPolicies.conversation_history as any)?.description || "Retained while account is active"}
+                      {(retentionPolicies.conversation_history as { description?: string } | undefined)?.description || "Retained while account is active"}
                     </p>
                   </div>
 

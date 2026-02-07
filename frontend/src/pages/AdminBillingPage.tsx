@@ -79,13 +79,12 @@ export function AdminBillingPage() {
   const navigate = useNavigate();
   const { data: profile } = useProfile();
 
-  const { data: billing, isLoading: _statusLoading } = useBillingStatus();
+  const { data: billing } = useBillingStatus();
   const { data: invoices = [], isLoading: invoicesLoading } = useInvoices();
   const checkoutSession = useCheckoutSession();
   const portalSession = usePortalSession();
 
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [successMessage, _setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   // Check if user is admin
@@ -107,7 +106,7 @@ export function AdminBillingPage() {
     try {
       const result = await portalSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (_error) {
+    } catch {
       setErrorMessage("Failed to open billing portal. Please try again.");
       setIsRedirecting(false);
     }
@@ -120,7 +119,7 @@ export function AdminBillingPage() {
     try {
       const result = await checkoutSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (_error) {
+    } catch {
       setErrorMessage("Failed to open checkout. Please try again.");
       setIsRedirecting(false);
     }
@@ -133,7 +132,7 @@ export function AdminBillingPage() {
     try {
       const result = await portalSession.mutateAsync({});
       window.location.href = result.url;
-    } catch (_error) {
+    } catch {
       setErrorMessage("Failed to open payment portal. Please try again.");
       setIsRedirecting(false);
     }
