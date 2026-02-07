@@ -1,7 +1,8 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FeedbackWidget } from '../FeedbackWidget';
 import * as feedbackApi from '@/api/feedback';
+import type { FeedbackSubmissionResponse } from '@/api/feedback';
 
 // Mock the feedback API
 vi.mock('@/api/feedback', () => ({
@@ -242,12 +243,12 @@ describe('FeedbackWidget', () => {
 
   describe('interaction states', () => {
     it('prevents multiple submissions while submitting', async () => {
-      let resolveSubmit: (value: any) => void;
-      const submitPromise = new Promise((resolve) => {
+      let resolveSubmit: (value: FeedbackSubmissionResponse) => void;
+      const submitPromise = new Promise<FeedbackSubmissionResponse>((resolve) => {
         resolveSubmit = resolve;
       });
 
-      vi.mocked(feedbackApi.submitResponseFeedback).mockReturnValue(submitPromise as any);
+      vi.mocked(feedbackApi.submitResponseFeedback).mockReturnValue(submitPromise);
 
       render(<FeedbackWidget messageId={mockMessageId} />);
 
@@ -272,12 +273,12 @@ describe('FeedbackWidget', () => {
     });
 
     it('shows "Sending..." text while submitting', async () => {
-      let resolveSubmit: (value: any) => void;
-      const submitPromise = new Promise((resolve) => {
+      let resolveSubmit: (value: FeedbackSubmissionResponse) => void;
+      const submitPromise = new Promise<FeedbackSubmissionResponse>((resolve) => {
         resolveSubmit = resolve;
       });
 
-      vi.mocked(feedbackApi.submitResponseFeedback).mockReturnValue(submitPromise as any);
+      vi.mocked(feedbackApi.submitResponseFeedback).mockReturnValue(submitPromise);
 
       render(<FeedbackWidget messageId={mockMessageId} />);
 
@@ -360,14 +361,14 @@ describe('FeedbackWidget', () => {
 
   describe('styling', () => {
     it('thumbs up has correct hover classes', () => {
-      const { container } = render(<FeedbackWidget messageId={mockMessageId} />);
+      render(<FeedbackWidget messageId={mockMessageId} />);
 
       const thumbsUpButton = screen.getByTitle('This was helpful');
       expect(thumbsUpButton).toHaveClass('hover:text-emerald-400', 'hover:bg-slate-800');
     });
 
     it('thumbs down has correct hover classes', () => {
-      const { container } = render(<FeedbackWidget messageId={mockMessageId} />);
+      render(<FeedbackWidget messageId={mockMessageId} />);
 
       const thumbsDownButton = screen.getByTitle('This needs improvement');
       expect(thumbsDownButton).toHaveClass('hover:text-rose-400', 'hover:bg-slate-800');

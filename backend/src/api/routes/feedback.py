@@ -12,7 +12,6 @@ from fastapi import APIRouter, HTTPException, status
 from src.api.deps import CurrentUser
 from src.core.exceptions import DatabaseError
 from src.models.feedback import (
-    FeedbackResponse,
     GeneralFeedbackRequest,
     ResponseFeedbackRequest,
 )

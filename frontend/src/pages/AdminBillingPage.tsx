@@ -85,6 +85,7 @@ export function AdminBillingPage() {
   const portalSession = usePortalSession();
 
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [successMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   // Check if user is admin

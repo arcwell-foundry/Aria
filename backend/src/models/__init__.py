@@ -11,6 +11,13 @@ from src.models.email_draft import (
     EmailRegenerateRequest,
     EmailSendResponse,
 )
+from src.models.feedback import (
+    FeedbackRating,
+    FeedbackResponse,
+    FeedbackType,
+    GeneralFeedbackRequest,
+    ResponseFeedbackRequest,
+)
 from src.models.meeting_brief import (
     AttendeeProfileResponse,
     BriefStatus,
@@ -45,13 +52,6 @@ from src.models.preferences import (
     PreferenceCreate,
     PreferenceResponse,
     PreferenceUpdate,
-)
-from src.models.feedback import (
-    FeedbackRating,
-    FeedbackResponse,
-    FeedbackType,
-    GeneralFeedbackRequest,
-    ResponseFeedbackRequest,
 )
 from src.models.proactive_insight import (
     InsightType,

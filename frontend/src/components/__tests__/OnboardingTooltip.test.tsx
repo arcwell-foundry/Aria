@@ -311,7 +311,7 @@ describe('OnboardingTooltip', () => {
     });
 
     it('dismiss button has focus ring styling', () => {
-      const { container } = render(
+      render(
         <OnboardingTooltip
           title="Title"
           content="Content"
@@ -384,7 +384,7 @@ describe('OnboardingTooltip', () => {
     });
 
     it('dismiss button uses correct colors', () => {
-      const { container } = render(
+      render(
         <OnboardingTooltip
           title="Title"
           content="Content"
