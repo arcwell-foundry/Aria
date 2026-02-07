@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class FeedbackType(str, Enum):
     """Type of general feedback."""
 
+    RESPONSE = "response"
     BUG = "bug"
     FEATURE = "feature"
     OTHER = "other"
