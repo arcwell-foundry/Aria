@@ -22,11 +22,24 @@ from src.core.exceptions import (
     LeadNotFoundError,
     ValidationError,
 )
+from src.core.lead_generation import LeadGenerationService
 from src.memory.lead_memory import (
     LeadMemory,
     LeadMemoryService,
     LeadStatus,
     LifecycleStage,
+)
+from src.models.lead_generation import (
+    DiscoveredLeadResponse,
+    DiscoverLeadsRequest,
+    ICPDefinition,
+    ICPResponse,
+    LeadReviewRequest,
+    LeadScoreBreakdown,
+    OutreachRequest,
+    OutreachResponse,
+    PipelineSummary,
+    ReviewStatus,
 )
 from src.models.lead_memory import (
     ContributionCreate,
@@ -172,6 +185,145 @@ async def list_leads(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
+        ) from e
+
+
+# --- Lead Generation Workflow (US-939) ---
+
+
+@router.post("/icp", response_model=ICPResponse)
+async def save_icp(
+    current_user: CurrentUser,
+    icp: ICPDefinition,
+) -> ICPResponse:
+    """Save or update the user's Ideal Customer Profile.
+
+    Args:
+        current_user: Current authenticated user.
+        icp: ICP definition data.
+
+    Returns:
+        Saved ICP with version and timestamps.
+    """
+    try:
+        service = LeadGenerationService()
+        return await service.save_icp(current_user.id, icp)
+    except Exception as e:
+        logger.error(f"Failed to save ICP: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save ICP",
+        ) from e
+
+
+@router.get("/icp", response_model=ICPResponse | None)
+async def get_icp(current_user: CurrentUser) -> ICPResponse | None:
+    """Get the current user's Ideal Customer Profile.
+
+    Args:
+        current_user: Current authenticated user.
+
+    Returns:
+        Current ICP or None if not defined.
+    """
+    try:
+        service = LeadGenerationService()
+        return await service.get_icp(current_user.id)
+    except Exception as e:
+        logger.error(f"Failed to get ICP: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get ICP",
+        ) from e
+
+
+@router.post("/discovered", response_model=list[DiscoveredLeadResponse])
+async def discover_leads(
+    current_user: CurrentUser,
+    request: DiscoverLeadsRequest,
+) -> list[DiscoveredLeadResponse]:
+    """Trigger Hunter agent to discover leads matching the user's ICP.
+
+    Args:
+        current_user: Current authenticated user.
+        request: Discovery parameters including target count.
+
+    Returns:
+        List of discovered leads with scores.
+    """
+    try:
+        service = LeadGenerationService()
+        icp = await service.get_icp(current_user.id)
+        if not icp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No ICP defined. Create an ICP first.",
+            )
+        return await service.discover_leads(current_user.id, icp.id, request.target_count)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to discover leads: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to discover leads",
+        ) from e
+
+
+@router.get("/discovered", response_model=list[DiscoveredLeadResponse])
+async def list_discovered_leads(
+    current_user: CurrentUser,
+    review_status: str | None = Query(None, description="Filter by review status"),
+) -> list[DiscoveredLeadResponse]:
+    """List discovered leads, optionally filtered by review status.
+
+    Args:
+        current_user: Current authenticated user.
+        review_status: Optional filter by review status.
+
+    Returns:
+        List of discovered leads.
+    """
+    try:
+        status_filter = None
+        if review_status:
+            try:
+                status_filter = ReviewStatus(review_status)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid review status: {review_status}",
+                ) from e
+        service = LeadGenerationService()
+        return await service.list_discovered(current_user.id, status_filter)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list discovered leads: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list discovered leads",
+        ) from e
+
+
+@router.get("/pipeline", response_model=PipelineSummary)
+async def get_pipeline(current_user: CurrentUser) -> PipelineSummary:
+    """Get pipeline funnel view with stage counts and values.
+
+    Args:
+        current_user: Current authenticated user.
+
+    Returns:
+        Pipeline summary with stage breakdown.
+    """
+    try:
+        service = LeadGenerationService()
+        return await service.get_pipeline(current_user.id)
+    except Exception as e:
+        logger.error(f"Failed to get pipeline: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get pipeline",
         ) from e
 
 
@@ -1157,4 +1309,110 @@ async def export_leads(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
+        ) from e
+
+
+# --- Lead Generation Workflow (US-939) - Parametric Routes ---
+
+
+@router.post("/{lead_id}/review", response_model=DiscoveredLeadResponse)
+async def review_lead(
+    lead_id: str,
+    current_user: CurrentUser,
+    request: LeadReviewRequest,
+) -> DiscoveredLeadResponse:
+    """Review a discovered lead: approve, reject, or save for later.
+
+    Args:
+        lead_id: ID of the discovered lead.
+        current_user: Current authenticated user.
+        request: Review action.
+
+    Returns:
+        Updated discovered lead.
+    """
+    try:
+        service = LeadGenerationService()
+        result = await service.review_lead(current_user.id, lead_id, request.action)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Discovered lead not found",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to review lead: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to review lead",
+        ) from e
+
+
+@router.get("/{lead_id}/score-explanation", response_model=LeadScoreBreakdown)
+async def get_score_explanation(
+    lead_id: str,
+    current_user: CurrentUser,
+) -> LeadScoreBreakdown:
+    """Get a detailed score breakdown for a discovered lead.
+
+    Args:
+        lead_id: ID of the discovered lead.
+        current_user: Current authenticated user.
+
+    Returns:
+        Score breakdown with factors and explanations.
+    """
+    try:
+        service = LeadGenerationService()
+        result = await service.get_score_explanation(current_user.id, lead_id)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Discovered lead not found",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get score explanation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get score explanation",
+        ) from e
+
+
+@router.post("/outreach/{lead_id}", response_model=OutreachResponse)
+async def initiate_outreach(
+    lead_id: str,
+    current_user: CurrentUser,
+    request: OutreachRequest,
+) -> OutreachResponse:
+    """Initiate outreach for a lead, creating a draft via Scribe agent.
+
+    Args:
+        lead_id: ID of the lead.
+        current_user: Current authenticated user.
+        request: Outreach content.
+
+    Returns:
+        Outreach draft.
+    """
+    try:
+        service = LeadGenerationService()
+        result = await service.initiate_outreach(current_user.id, lead_id, request)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Lead not found",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to initiate outreach: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initiate outreach",
         ) from e
