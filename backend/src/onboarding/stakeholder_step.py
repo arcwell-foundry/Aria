@@ -214,6 +214,9 @@ class StakeholderStepService:
                     .execute()
                 )
 
+            # Store stakeholders as Semantic Memory facts for downstream consumption
+            await self._store_stakeholder_facts(user_id, stakeholder_models)
+
             # Record episodic memory event
             await self._record_stakeholder_event(
                 user_id=user_id,
@@ -295,6 +298,74 @@ class StakeholderStepService:
         except Exception as e:
             logger.exception("Failed to get onboarding stakeholders")
             raise DatabaseError(f"Failed to get stakeholders: {e}") from e
+
+    async def _store_stakeholder_facts(
+        self,
+        user_id: str,
+        stakeholders: list[OnboardingStakeholder],
+    ) -> None:
+        """Store each stakeholder as a semantic fact in memory_semantic.
+
+        This ensures stakeholders are discoverable by the memory construction
+        pipeline (memory_constructor.py) and by ARIA's relationship graph queries.
+        Each stakeholder produces a fact with user_stated source (confidence 0.95).
+
+        Args:
+            user_id: The user who mapped stakeholders.
+            stakeholders: List of stakeholder models to store.
+        """
+        if not stakeholders:
+            return
+
+        try:
+            client = self._get_supabase_client()
+
+            facts = []
+            for s in stakeholders:
+                # Build a descriptive fact string
+                parts = [f"{s.name}"]
+                if s.title:
+                    parts.append(f"({s.title})")
+                if s.company:
+                    parts.append(f"at {s.company}")
+                role_label = s.relationship_type.value.replace("_", " ")
+                fact_text = f"Key stakeholder: {' '.join(parts)} — role: {role_label}"
+
+                entities: list[dict[str, str]] = [
+                    {"name": s.name, "type": "person"},
+                ]
+                if s.company:
+                    entities.append({"name": s.company, "type": "company"})
+
+                facts.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "user_id": user_id,
+                        "fact": fact_text,
+                        "confidence": 0.95,
+                        "source": "user_stated",
+                        "category": "relationship",
+                        "metadata": {
+                            "onboarding_step": "stakeholder_mapping",
+                            "stakeholder_id": s.id,
+                            "relationship_type": s.relationship_type.value,
+                            "email": s.email,
+                            "entities": entities,
+                        },
+                    }
+                )
+
+            if facts:
+                client.table("memory_semantic").insert(facts).execute()
+
+            logger.info(
+                "Stored stakeholder facts in Semantic Memory",
+                extra={"user_id": user_id, "fact_count": len(facts)},
+            )
+
+        except Exception as e:
+            # Non-critical — don't fail the stakeholder save
+            logger.warning("Failed to store stakeholder facts in Semantic Memory: %s", e)
 
     async def _record_stakeholder_event(
         self,

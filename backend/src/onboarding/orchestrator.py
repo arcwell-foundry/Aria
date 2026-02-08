@@ -406,22 +406,116 @@ class OnboardingOrchestrator:
         self,
         user_id: str,
         step: OnboardingStep,
-        _step_data: dict[str, Any],
+        step_data: dict[str, Any],
     ) -> None:
         """Trigger async background processing for a completed step.
 
-        Each step may kick off enrichment, analysis, or other
-        intelligence-building processes. Concrete implementations
-        come with each step's user story (US-903, US-904, etc.).
+        Dispatches to step-specific memory services so that each step's
+        data flows into the appropriate memory systems (Integration Checklist).
 
         Args:
             user_id: The user's ID.
             step: The completed step.
-            _step_data: Data collected during the step (used by future implementations).
+            step_data: Data collected during the step.
         """
         logger.info(
             "Triggering background processing for step",
             extra={"step": step.value, "user_id": user_id},
+        )
+
+        try:
+            if step == OnboardingStep.USER_PROFILE:
+                await self._process_user_profile(user_id, step_data)
+            elif step == OnboardingStep.INTEGRATION_WIZARD:
+                await self._process_integration_wizard(user_id)
+        except Exception as e:
+            # Non-critical — log and continue so step completion isn't blocked
+            logger.warning(
+                "Background step processing failed",
+                extra={"step": step.value, "user_id": user_id, "error": str(e)},
+            )
+
+    async def _process_user_profile(
+        self,
+        user_id: str,
+        step_data: dict[str, Any],
+    ) -> None:
+        """Store user profile facts in Semantic Memory via ProfileMergeService.
+
+        When the user completes the USER_PROFILE step, their name, title,
+        department, and other profile fields should be stored as semantic
+        facts with user_stated source (confidence 0.95).
+
+        Args:
+            user_id: The user's ID.
+            step_data: Profile data from the step (full_name, title, etc.).
+        """
+        if not step_data:
+            return
+
+        from src.memory.profile_merge import ProfileMergeService
+
+        merge_service = ProfileMergeService()
+        # Treat profile data as new with no prior values (onboarding first-time entry)
+        old_data: dict[str, Any] = {}
+        await merge_service.process_update(user_id, old_data, step_data)
+
+        logger.info(
+            "User profile facts merged into Semantic Memory",
+            extra={"user_id": user_id, "fields": list(step_data.keys())},
+        )
+
+    async def _process_integration_wizard(self, user_id: str) -> None:
+        """Enrich integration_wizard step_data with actual connection flags.
+
+        The IntegrationWizardService stores connections in user_integrations
+        but does not populate step_data. The activation flow reads
+        crm_connected/email_connected from step_data, so we bridge the gap
+        by querying actual integration status and patching step_data.
+
+        Args:
+            user_id: The user's ID.
+        """
+        # Query actual integration connections
+        result = (
+            self._db.table("user_integrations")
+            .select("provider, status")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .execute()
+        )
+
+        connected_providers = [row["provider"] for row in (result.data or [])]
+
+        crm_providers = {"SALESFORCE", "HUBSPOT"}
+        email_providers = {"GMAIL", "OUTLOOK", "google", "microsoft"}
+        calendar_providers = {"GOOGLECALENDAR", "OUTLOOK365CALENDAR"}
+
+        integration_flags: dict[str, Any] = {
+            "crm_connected": bool(crm_providers & set(connected_providers)),
+            "email_connected": bool(email_providers & set(connected_providers)),
+            "calendar_connected": bool(calendar_providers & set(connected_providers)),
+            "slack_connected": "SLACK" in connected_providers,
+            "connected_providers": connected_providers,
+        }
+
+        # Patch the stored step_data so activation.py can read the flags
+        state = await self._get_state(user_id)
+        if state:
+            merged = {**state.step_data}
+            existing_wizard_data = merged.get("integration_wizard", {})
+            if isinstance(existing_wizard_data, dict):
+                merged["integration_wizard"] = {**existing_wizard_data, **integration_flags}
+            else:
+                merged["integration_wizard"] = integration_flags
+
+            self._db.table("onboarding_state").update({"step_data": merged}).eq(
+                "user_id", user_id
+            ).execute()
+
+        logger.info(
+            "Integration wizard step_data enriched with connection flags",
+            extra={"user_id": user_id, "flags": integration_flags},
         )
 
     async def _record_episodic_event(

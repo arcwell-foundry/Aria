@@ -483,19 +483,38 @@ class DocumentIngestionService:
             logger.debug("Entity extraction parse error: %s", e)
             return []
 
-    async def _generate_embedding(self, text: str) -> list[float]:  # noqa: ARG002
-        """Generate embedding vector for a text chunk.
+    async def _generate_embedding(self, text: str) -> list[float]:
+        """Generate embedding vector for a text chunk using OpenAI.
+
+        Uses the text-embedding-3-small model (same as Graphiti) to produce
+        1536-dimensional vectors stored in pgvector for semantic search.
 
         Args:
             text: Text to embed.
 
         Returns:
-            1536-dimensional float vector. Returns zeros if embedding API
-            is not configured.
+            1536-dimensional float vector. Returns zeros if the embedding
+            API is not configured or the call fails.
         """
-        # Placeholder — return zeros until embedding API is configured
-        logger.debug("Embedding generation placeholder — configure embedding API")
-        return [0.0] * 1536
+        try:
+            from openai import AsyncOpenAI
+
+            from src.core.config import get_settings
+
+            api_key = get_settings().OPENAI_API_KEY.get_secret_value()
+            if not api_key:
+                logger.debug("OpenAI API key not configured, returning zero vector")
+                return [0.0] * 1536
+
+            client = AsyncOpenAI(api_key=api_key)
+            response = await client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text[:8000],  # Limit input to stay within token bounds
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.warning("Embedding generation failed, returning zero vector: %s", e)
+            return [0.0] * 1536
 
     async def _score_quality(self, text: str, file_type: str) -> float:
         """Score document source quality.
