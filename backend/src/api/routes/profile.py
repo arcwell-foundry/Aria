@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import ARIAException, NotFoundError
+from src.core.exceptions import ARIAException, NotFoundError, sanitize_error
 from src.services.profile_service import ProfileService
 
 logger = logging.getLogger(__name__)
@@ -102,9 +102,10 @@ async def get_profile(
         service = _get_service()
         return await service.get_full_profile(current_user.id)
     except NotFoundError as e:
+        logger.exception("Profile not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Error fetching profile")
@@ -139,9 +140,10 @@ async def update_user_details(
             data=update_dict,
         )
     except NotFoundError as e:
+        logger.exception("User profile not found for update")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Error updating user details")
@@ -178,9 +180,10 @@ async def update_company_details(
             detail=e.message,
         ) from e
     except NotFoundError as e:
+        logger.exception("Company not found for update")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Error updating company details")
@@ -238,9 +241,10 @@ async def update_preferences(
             data=update_dict,
         )
     except NotFoundError as e:
+        logger.exception("Preferences not found for update")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Error updating preferences")

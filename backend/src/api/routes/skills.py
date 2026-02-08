@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.security.skill_audit import SkillAuditService
 from src.security.trust_levels import SkillTrustLevel
 from src.skills.autonomy import SkillAutonomyService
@@ -225,7 +226,8 @@ async def install_skill(
     try:
         installed = await installer.install(current_user.id, data.skill_id)
     except SkillNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Skill not found: %s", data.skill_id)
+        raise HTTPException(status_code=404, detail=sanitize_error(e)) from e
 
     logger.info(
         "Skill installed",
@@ -282,7 +284,8 @@ async def execute_skill(
             input_data=data.input_data,
         )
     except SkillExecutionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Skill execution failed: %s", data.skill_id)
+        raise HTTPException(status_code=400, detail=sanitize_error(e)) from e
 
     logger.info(
         "Skill executed",

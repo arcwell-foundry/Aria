@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.deps import CurrentUser, get_current_user  # noqa: F401
+from src.core.exceptions import sanitize_error
 from src.models.aria_config import ARIAConfigResponse, ARIAConfigUpdate, PreviewResponse
 from src.services.aria_config_service import ARIAConfigService, get_aria_config_service
 
@@ -54,7 +55,8 @@ async def update_aria_config(
         )
         return config
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        logger.exception("Invalid ARIA config update")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
     except Exception as e:
         logger.exception("Error updating ARIA config")
         raise HTTPException(

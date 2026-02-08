@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.db.supabase import SupabaseClient
 from src.integrations.deep_sync_domain import (
     PushActionType,
@@ -202,7 +203,7 @@ async def trigger_manual_sync(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Sync failed: {str(e)}",
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -369,7 +370,7 @@ async def queue_push_item(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to queue push item: {str(e)}",
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -437,5 +438,5 @@ async def update_sync_config(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update sync configuration: {str(e)}",
+            detail=sanitize_error(e),
         ) from e

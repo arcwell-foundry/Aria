@@ -21,6 +21,7 @@ from src.core.exceptions import (
     LeadMemoryError,
     LeadNotFoundError,
     ValidationError,
+    sanitize_error,
 )
 from src.core.lead_generation import LeadGenerationService
 from src.memory.lead_memory import (
@@ -184,7 +185,7 @@ async def list_leads(
         logger.exception("Failed to list leads")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -384,7 +385,7 @@ async def get_lead_timeline(
         logger.exception("Failed to get lead timeline")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -455,7 +456,7 @@ async def add_event(
         logger.exception("Failed to add event")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -490,7 +491,7 @@ async def get_lead(
         logger.exception("Failed to get lead")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -540,7 +541,7 @@ async def create_lead(
         logger.exception("Failed to create lead")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -610,7 +611,7 @@ async def update_lead(
         logger.exception("Failed to update lead")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -685,7 +686,7 @@ async def add_note(
         logger.exception("Failed to add note")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -771,7 +772,7 @@ async def add_stakeholder(
         logger.exception("Failed to add stakeholder")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -835,7 +836,7 @@ async def list_stakeholders(
         logger.exception("Failed to list stakeholders")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -920,7 +921,7 @@ async def update_stakeholder(
         logger.exception("Failed to update stakeholder")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -968,7 +969,7 @@ async def remove_stakeholder(
         logger.exception("Failed to remove stakeholder")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -1042,7 +1043,7 @@ async def get_insights(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to get insights")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
 
 
 @router.post("/{lead_id}/transition", response_model=LeadMemoryResponse)
@@ -1083,9 +1084,10 @@ async def transition_stage(
         return _lead_to_response(updated_lead)
 
     except InvalidStageTransitionError as e:
+        logger.exception("Invalid stage transition")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except LeadNotFoundError as e:
         raise HTTPException(
@@ -1096,7 +1098,7 @@ async def transition_stage(
         logger.exception("Failed to transition stage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -1152,7 +1154,7 @@ async def add_contributor(
         logger.exception("Failed to add contributor")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -1201,7 +1203,7 @@ async def list_contributors(
         logger.exception("Failed to list contributors")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -1254,7 +1256,7 @@ async def submit_contribution(
         logger.exception("Failed to submit contribution")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 
@@ -1323,7 +1325,7 @@ async def list_contributions(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to list contributions")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
 
 
 @router.post(
@@ -1362,14 +1364,15 @@ async def review_contribution(
         return None
 
     except ValidationError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        logger.exception("Validation error reviewing contribution")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
     except LeadNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found"
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to review contribution")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
 
 
 @router.post("/export")
@@ -1440,7 +1443,7 @@ async def export_leads(
         logger.exception("Failed to export leads")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
 
 

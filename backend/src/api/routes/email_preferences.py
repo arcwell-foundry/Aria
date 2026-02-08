@@ -12,6 +12,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.db.supabase import SupabaseClient
 from src.models.preferences import EmailPreferencesResponse, EmailPreferencesUpdate
 
@@ -315,7 +316,7 @@ async def update_email_preferences(
             extra={"user_id": current_user.id, "error": str(e)},
         )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)
         ) from e
     except Exception as e:
         logger.exception("Error updating email preferences")

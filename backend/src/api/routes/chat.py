@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import NotFoundError, sanitize_error
 from src.db.supabase import get_supabase_client
 from src.services.chat import ChatService
 from src.services.conversations import ConversationService
@@ -365,7 +365,8 @@ async def get_conversation_messages(
             conversation_id=conversation_id,
         )
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Conversation not found for messages")
+        raise HTTPException(status_code=404, detail=sanitize_error(e)) from e
 
     return [
         ConversationMessageResponse(
@@ -408,7 +409,8 @@ async def update_conversation_title(
             title=request.title,
         )
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Conversation not found for title update")
+        raise HTTPException(status_code=404, detail=sanitize_error(e)) from e
 
     return ConversationTitleResponse(
         id=conversation.id,
@@ -448,7 +450,8 @@ async def delete_conversation(
             conversation_id=conversation_id,
         )
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Conversation not found for deletion")
+        raise HTTPException(status_code=404, detail=sanitize_error(e)) from e
 
     logger.info(
         "Conversation deleted via API",

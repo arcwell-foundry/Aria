@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import DatabaseError
+from src.core.exceptions import DatabaseError, sanitize_error
 from src.models.feedback import (
     GeneralFeedbackRequest,
     ResponseFeedbackRequest,
@@ -131,7 +131,7 @@ async def submit_general_feedback(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except DatabaseError as e:
         logger.error(

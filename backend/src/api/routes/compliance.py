@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.deps import AdminUser, CurrentUser
+from src.core.exceptions import sanitize_error
 from src.services.compliance_service import ComplianceError, ComplianceService
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ async def get_data_export(
         logger.exception("Compliance error exporting user data")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error exporting user data")
@@ -210,7 +211,7 @@ async def delete_user_data(
         logger.exception("Compliance error deleting user data")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error deleting user data")
@@ -245,7 +246,7 @@ async def delete_digital_twin(
         logger.exception("Compliance error deleting digital twin")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error deleting digital twin")
@@ -283,7 +284,7 @@ async def get_consent_status(
         logger.exception("Compliance error getting consent status")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error getting consent status")
@@ -321,7 +322,7 @@ async def update_consent(
         logger.exception("Error updating consent - compliance error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Error updating consent")
@@ -361,7 +362,7 @@ async def mark_dont_learn(
         logger.exception("Compliance error marking don't learn")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error marking don't learn")
@@ -402,7 +403,7 @@ async def get_retention_policies(
         logger.exception("Compliance error getting retention policies")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error getting retention policies")
@@ -454,7 +455,7 @@ async def export_company_data(
         logger.exception("Compliance error exporting company data")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=sanitize_error(e),
         ) from e
     except Exception as e:
         logger.exception("Unexpected error exporting company data")

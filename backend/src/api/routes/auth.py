@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.db.supabase import SupabaseClient
 from src.services.account_service import AccountService
@@ -148,10 +149,9 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
         raise
     except Exception as e:
         logger.exception("Error during signup")
-        error_msg = str(e) if str(e) else "Signup failed"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg,
+            detail=sanitize_error(e),
         ) from e
 
 

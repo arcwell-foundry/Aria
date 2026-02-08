@@ -1,6 +1,54 @@
 """Custom exceptions for ARIA backend."""
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Exception type → safe user-facing message mapping
+_SAFE_MESSAGES: dict[str, str] = {
+    "NotFoundError": "The requested resource was not found.",
+    "AuthenticationError": "Authentication failed. Please log in again.",
+    "AuthorizationError": "You do not have permission to perform this action.",
+    "ValidationError": "The provided input is invalid. Please check and try again.",
+    "ConflictError": "A conflict occurred. Please refresh and try again.",
+    "DatabaseError": "A database error occurred. Please try again.",
+    "ExternalServiceError": "An external service is temporarily unavailable.",
+    "GraphitiConnectionError": "A service dependency is temporarily unavailable.",
+    "RateLimitError": "Too many requests. Please try again later.",
+    "BillingError": "Billing service temporarily unavailable.",
+    "SkillNotFoundError": "The requested skill was not found.",
+    "SkillExecutionError": "Skill execution failed. Please try again.",
+    "ComplianceError": "A compliance operation failed. Please try again.",
+    "LeadMemoryError": "An error occurred processing lead data.",
+    "InvalidStageTransitionError": "This stage transition is not allowed.",
+    "ValueError": "The provided value is invalid.",
+}
+
+_DEFAULT_MESSAGE = "An error occurred. Please try again."
+
+
+def sanitize_error(e: Exception) -> str:
+    """Map an exception to a safe, user-facing error message.
+
+    Logs the full exception details server-side but returns only
+    a generic message suitable for HTTP responses. This prevents
+    leaking internal implementation details, stack traces, or
+    database schema information to clients.
+
+    Args:
+        e: The exception to sanitize.
+
+    Returns:
+        A safe, generic error message string.
+    """
+    # Walk the MRO to find the most specific matching type
+    for cls in type(e).__mro__:
+        safe_msg = _SAFE_MESSAGES.get(cls.__name__)
+        if safe_msg:
+            return safe_msg
+
+    return _DEFAULT_MESSAGE
 
 
 class ARIAException(Exception):

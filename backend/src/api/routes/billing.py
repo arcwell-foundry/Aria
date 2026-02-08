@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Header, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import AdminUser
@@ -120,9 +120,12 @@ async def get_billing_status(
             "cancel_at_period_end": False,
             "seats_used": 1,
         }
-    except Exception:
+    except Exception as e:
         logger.exception("Error fetching billing status")
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Billing service temporarily unavailable.",
+        ) from e
 
 
 @router.post(
@@ -165,9 +168,12 @@ async def create_checkout_session(
 
         return {"url": checkout_url}
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error creating checkout session")
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Billing service temporarily unavailable.",
+        ) from e
 
 
 @router.post(
@@ -208,9 +214,12 @@ async def create_portal_session(
 
         return {"url": portal_url}
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error creating portal session")
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Billing service temporarily unavailable.",
+        ) from e
 
 
 @router.get(
@@ -246,9 +255,12 @@ async def get_invoices(
         invoices = await billing_service.get_invoices(company_id, limit)
         return {"invoices": invoices}
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error fetching invoices")
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Billing service temporarily unavailable.",
+        ) from e
 
 
 @router.post(

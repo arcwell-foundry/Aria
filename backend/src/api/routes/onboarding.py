@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.db.supabase import SupabaseClient
 from src.memory.episodic import Episode
 from src.onboarding.company_discovery import CompanyDiscoveryService
@@ -69,7 +70,8 @@ async def complete_step(
     try:
         return await orchestrator.complete_step(current_user.id, step, body.step_data)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Error completing onboarding step %s", step)
+        raise HTTPException(status_code=400, detail=sanitize_error(e)) from e
 
 
 @router.post("/steps/{step}/skip", response_model=OnboardingStateResponse)
@@ -83,7 +85,8 @@ async def skip_step(
     try:
         return await orchestrator.skip_step(current_user.id, step, body.reason)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Error skipping onboarding step %s", step)
+        raise HTTPException(status_code=400, detail=sanitize_error(e)) from e
 
 
 @router.get("/routing")
@@ -830,7 +833,8 @@ async def activate_aria(
             {},
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Error activating ARIA for user %s", current_user.id)
+        raise HTTPException(status_code=400, detail=sanitize_error(e)) from e
 
     # Run personality calibration before agents are spawned (US-919)
     from src.onboarding.personality_calibrator import PersonalityCalibrator

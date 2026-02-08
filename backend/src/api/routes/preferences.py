@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.deps import CurrentUser
+from src.core.exceptions import sanitize_error
 from src.models.preferences import PreferenceResponse, PreferenceUpdate
 from src.services.preference_service import PreferenceService
 
@@ -51,7 +52,7 @@ async def update_preferences(
             "Preferences update failed",
             extra={"user_id": current_user.id, "error": str(e)},
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
     except Exception as e:
         logger.exception("Error updating preferences")
         raise HTTPException(

@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import ARIAException
+from src.core.exceptions import ARIAException, sanitize_error
 from src.models.roi import (
     PeriodValidation,
     ROIMetricsResponse,
@@ -94,7 +94,7 @@ async def get_roi_metrics(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid period: {e}",
+            detail=sanitize_error(e),
         ) from e
     except ARIAException as e:
         logger.exception(
@@ -185,7 +185,7 @@ async def get_roi_trend(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid period: {e}",
+            detail=sanitize_error(e),
         ) from e
     except ARIAException as e:
         logger.exception(
@@ -347,7 +347,7 @@ async def export_roi_report(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid period: {e}",
+            detail=sanitize_error(e),
         ) from e
     except ARIAException as e:
         logger.exception(

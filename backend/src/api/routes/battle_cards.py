@@ -47,7 +47,11 @@ async def _get_user_company_id(user_id: str) -> str:
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail="User profile not found") from None
-        raise
+        logger.exception("Error fetching user company ID")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred. Please try again.",
+        ) from e
 
 
 @router.get("/")
