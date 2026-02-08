@@ -15,6 +15,7 @@ _SAFE_MESSAGES: dict[str, str] = {
     "DatabaseError": "A database error occurred. Please try again.",
     "ExternalServiceError": "An external service is temporarily unavailable.",
     "GraphitiConnectionError": "A service dependency is temporarily unavailable.",
+    "CircuitBreakerOpen": "A service dependency is temporarily unavailable. Please try again in a moment.",
     "RateLimitError": "Too many requests. Please try again later.",
     "BillingError": "Billing service temporarily unavailable.",
     "SkillNotFoundError": "The requested skill was not found.",
