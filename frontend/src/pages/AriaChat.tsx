@@ -58,7 +58,7 @@ export function AriaChatPage() {
 
       cancelStreamRef.current = startStream(
         {
-          content,
+          message: content,
           conversation_id: conversationId || undefined,
         },
         (assistantMessage) => {

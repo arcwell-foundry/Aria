@@ -1,9 +1,12 @@
 """Chat API routes for memory-integrated conversations."""
 
+import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
@@ -88,6 +91,16 @@ class ConversationTitleResponse(BaseModel):
     updated_at: str
 
 
+class ConversationMessageResponse(BaseModel):
+    """A single message in a conversation."""
+
+    id: str
+    conversation_id: str
+    role: str
+    content: str
+    created_at: str
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     current_user: CurrentUser,
@@ -138,6 +151,144 @@ async def chat(
     )
 
 
+@router.post("/stream")
+async def chat_stream(
+    current_user: CurrentUser,
+    request: ChatRequest,
+) -> StreamingResponse:
+    """Stream a chat response as Server-Sent Events.
+
+    Emits SSE events:
+    - {"type": "metadata", "message_id": "...", "conversation_id": "..."}
+    - {"type": "token", "content": "..."}
+    - [DONE]
+    """
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
+
+    service = ChatService()
+
+    async def event_stream():  # noqa: C901
+        total_start = time.perf_counter()
+
+        memory_types = request.memory_types or ["episodic", "semantic"]
+
+        # Get or create working memory
+        working_memory = service._working_memory_manager.get_or_create(
+            conversation_id=conversation_id,
+            user_id=current_user.id,
+        )
+
+        # Ensure conversation record exists
+        await service._ensure_conversation_record(current_user.id, conversation_id)
+
+        # Add user message to working memory
+        working_memory.add_message("user", request.message)
+
+        # Query relevant memories
+        memories = await service._query_relevant_memories(
+            user_id=current_user.id,
+            query=request.message,
+            memory_types=memory_types,
+        )
+
+        # Get conversation context
+        conversation_messages = working_memory.get_context_for_llm()
+
+        # Estimate cognitive load
+        recent_messages = conversation_messages[-5:]
+        load_state = await service._cognitive_monitor.estimate_load(
+            user_id=current_user.id,
+            recent_messages=recent_messages,
+            session_id=conversation_id,
+        )
+
+        # Get proactive insights
+        proactive_insights = await service._get_proactive_insights(
+            user_id=current_user.id,
+            current_message=request.message,
+            conversation_messages=conversation_messages,
+        )
+
+        # Build system prompt
+        system_prompt = service._build_system_prompt(
+            memories, load_state, proactive_insights
+        )
+
+        # Send metadata event
+        metadata = {
+            "type": "metadata",
+            "message_id": message_id,
+            "conversation_id": conversation_id,
+        }
+        yield f"data: {json.dumps(metadata)}\n\n"
+
+        # Stream LLM response
+        full_content = ""
+        try:
+            async for token in service._llm_client.stream_response(
+                messages=conversation_messages,
+                system_prompt=system_prompt,
+            ):
+                full_content += token
+                event = {"type": "token", "content": token}
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception:
+            logger.exception(
+                "Streaming chat failed",
+                extra={
+                    "user_id": current_user.id,
+                    "conversation_id": conversation_id,
+                },
+            )
+            error_event = {"type": "error", "content": "Chat service temporarily unavailable"}
+            yield f"data: {json.dumps(error_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Add assistant response to working memory
+        working_memory.add_message("assistant", full_content)
+
+        # Update conversation metadata
+        await service._update_conversation_metadata(
+            current_user.id, conversation_id, request.message
+        )
+
+        # Extract and store new information (fire and forget)
+        try:
+            await service._extraction_service.extract_and_store(
+                conversation=conversation_messages[-2:],
+                user_id=current_user.id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Information extraction failed during stream",
+                extra={"user_id": current_user.id, "error": str(e)},
+            )
+
+        total_ms = (time.perf_counter() - total_start) * 1000
+        logger.info(
+            "Streaming chat completed",
+            extra={
+                "user_id": current_user.id,
+                "conversation_id": conversation_id,
+                "total_ms": round(total_ms, 2),
+            },
+        )
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
     current_user: CurrentUser,
@@ -185,11 +336,14 @@ async def list_conversations(
     )
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationListResponse)
-async def get_conversation(
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=list[ConversationMessageResponse],
+)
+async def get_conversation_messages(
     current_user: CurrentUser,
     conversation_id: str,
-) -> ConversationListResponse:
+) -> list[ConversationMessageResponse]:
     """Get messages for a specific conversation.
 
     Args:
@@ -213,10 +367,16 @@ async def get_conversation(
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
-    return ConversationListResponse(
-        conversations=[m.to_dict() for m in messages],
-        total=len(messages),
-    )
+    return [
+        ConversationMessageResponse(
+            id=m.id,
+            conversation_id=m.conversation_id,
+            role=m.role,
+            content=m.content,
+            created_at=m.created_at.isoformat(),
+        )
+        for m in messages
+    ]
 
 
 @router.put("/conversations/{conversation_id}/title", response_model=ConversationTitleResponse)

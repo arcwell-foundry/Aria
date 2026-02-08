@@ -9,6 +9,13 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface Citation {
+  id: string;
+  type: string;
+  content: string;
+  confidence: number | null;
+}
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -28,35 +35,33 @@ export interface UpdateConversationTitleRequest {
   title: string;
 }
 
-export interface DeleteConversationResponse {
-  status: string;
-  id: string;
-}
-
 export interface SendMessageRequest {
-  content: string;
+  message: string;
   conversation_id?: string;
 }
 
 export interface SendMessageResponse {
-  message: ChatMessage;
+  message: string;
+  citations: Citation[];
   conversation_id: string;
 }
 
 // API functions
 export async function sendMessage(data: SendMessageRequest): Promise<SendMessageResponse> {
-  const response = await apiClient.post<SendMessageResponse>("/chat/message", data);
+  const response = await apiClient.post<SendMessageResponse>("/chat", data);
   return response.data;
 }
 
 export async function getConversation(conversationId: string): Promise<ChatMessage[]> {
-  const response = await apiClient.get<ChatMessage[]>(`/chat/conversations/${conversationId}/messages`);
+  const response = await apiClient.get<ChatMessage[]>(
+    `/chat/conversations/${conversationId}/messages`
+  );
   return response.data;
 }
 
 export async function listConversations(): Promise<Conversation[]> {
-  const response = await apiClient.get<Conversation[]>("/chat/conversations");
-  return response.data;
+  const response = await apiClient.get<ConversationListResponse>("/chat/conversations");
+  return response.data.conversations;
 }
 
 export async function updateConversationTitle(
@@ -75,10 +80,10 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 }
 
 export async function searchConversations(query: string): Promise<Conversation[]> {
-  const response = await apiClient.get<Conversation[]>("/chat/conversations", {
+  const response = await apiClient.get<ConversationListResponse>("/chat/conversations", {
     params: { search: query },
   });
-  return response.data;
+  return response.data.conversations;
 }
 
 // SSE streaming helper
@@ -93,7 +98,7 @@ export function streamMessage(
 
   const controller = new AbortController();
 
-  fetch(`${baseUrl}/api/v1/chat/message/stream`, {
+  fetch(`${baseUrl}/api/v1/chat/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -146,6 +151,9 @@ export function streamMessage(
               } else if (event.type === "metadata") {
                 messageId = event.message_id;
                 conversationId = event.conversation_id;
+              } else if (event.type === "error") {
+                onError(new Error(event.content));
+                return;
               }
             } catch {
               // Ignore parse errors for incomplete chunks

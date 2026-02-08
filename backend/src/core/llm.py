@@ -1,6 +1,7 @@
 """LLM client module for Claude API interactions."""
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 import anthropic
@@ -81,3 +82,47 @@ class LLMClient:
         )
 
         return text_content
+
+    async def stream_response(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        """Stream a response from Claude token by token.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+            system_prompt: Optional system prompt for context.
+            max_tokens: Maximum tokens in response.
+            temperature: Sampling temperature (0-1).
+
+        Yields:
+            Text chunks as they arrive from the API.
+
+        Raises:
+            anthropic.APIError: If API call fails.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "temperature": temperature,
+        }
+
+        if system_prompt:
+            kwargs["system"] = system_prompt
+
+        logger.debug(
+            "Streaming Claude API response",
+            extra={
+                "model": self._model,
+                "message_count": len(messages),
+                "has_system": system_prompt is not None,
+            },
+        )
+
+        async with self._client.messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                yield text
