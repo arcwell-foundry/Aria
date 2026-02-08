@@ -17,6 +17,9 @@ class GoalType(str, Enum):
     RESEARCH = "research"
     OUTREACH = "outreach"
     ANALYSIS = "analysis"
+    MEETING_PREP = "meeting_prep"
+    COMPETITIVE_INTEL = "competitive_intel"
+    TERRITORY = "territory"
     CUSTOM = "custom"
 
 
@@ -39,6 +42,24 @@ class AgentStatus(str, Enum):
     FAILED = "failed"
 
 
+class GoalHealth(str, Enum):
+    """Health status of a goal."""
+
+    ON_TRACK = "on_track"
+    AT_RISK = "at_risk"
+    BEHIND = "behind"
+    BLOCKED = "blocked"
+
+
+class MilestoneStatus(str, Enum):
+    """Status of a goal milestone."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    SKIPPED = "skipped"
+
+
 class GoalCreate(BaseModel):
     """Request model for creating a new goal."""
 
@@ -56,6 +77,8 @@ class GoalUpdate(BaseModel):
     status: GoalStatus | None = None
     progress: int | None = None
     config: dict[str, Any] | None = None
+    target_date: str | None = None
+    health: GoalHealth | None = None
 
     @field_validator("progress")
     @classmethod
@@ -108,3 +131,59 @@ class AgentExecutionResponse(BaseModel):
     error: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+class MilestoneCreate(BaseModel):
+    """Request model for creating a milestone."""
+
+    title: str
+    description: str | None = None
+    due_date: str | None = None
+
+
+class MilestoneResponse(BaseModel):
+    """Response model for a milestone."""
+
+    id: str
+    goal_id: str
+    title: str
+    description: str | None
+    due_date: datetime | None
+    completed_at: datetime | None
+    status: MilestoneStatus
+    sort_order: int
+    created_at: datetime
+
+
+class CreateWithARIARequest(BaseModel):
+    """Request model for ARIA-collaborative goal creation."""
+
+    title: str
+    description: str | None = None
+
+
+class ARIAGoalSuggestion(BaseModel):
+    """ARIA's suggestions for refining a goal."""
+
+    refined_title: str
+    refined_description: str
+    smart_score: int = Field(ge=0, le=100)
+    sub_tasks: list[dict[str, str]]
+    agent_assignments: list[str]
+    suggested_timeline_days: int
+    reasoning: str
+
+
+class RetrospectiveResponse(BaseModel):
+    """Response model for a goal retrospective."""
+
+    id: str
+    goal_id: str
+    summary: str
+    what_worked: list[str]
+    what_didnt: list[str]
+    time_analysis: dict[str, Any]
+    agent_effectiveness: dict[str, Any]
+    learnings: list[str]
+    created_at: datetime
+    updated_at: datetime
