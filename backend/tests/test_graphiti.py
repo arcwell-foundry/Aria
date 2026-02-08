@@ -159,3 +159,25 @@ async def test_search_delegates_to_graphiti() -> None:
 
     mock_graphiti_instance.search.assert_called_once_with("test query")
     assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_graphiti_circuit_breaker_opens_after_failures() -> None:
+    """Test that repeated Graphiti failures open the circuit breaker."""
+    from src.core.circuit_breaker import CircuitBreakerOpen
+    from src.db.graphiti import _graphiti_circuit_breaker
+
+    # Reset circuit breaker state
+    _graphiti_circuit_breaker.record_success()
+
+    mock_func = AsyncMock(side_effect=Exception("Neo4j down"))
+
+    for _ in range(5):
+        with pytest.raises(Exception, match="Neo4j down"):
+            await _graphiti_circuit_breaker.call_async(mock_func)
+
+    with pytest.raises(CircuitBreakerOpen):
+        _graphiti_circuit_breaker.check()
+
+    # Reset for other tests
+    _graphiti_circuit_breaker.record_success()

@@ -5,12 +5,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from src.core.config import settings
+from src.core.circuit_breaker import CircuitBreaker
 from src.core.exceptions import GraphitiConnectionError
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
 
 logger = logging.getLogger(__name__)
+
+_graphiti_circuit_breaker = CircuitBreaker("graphiti_neo4j")
 
 
 class GraphitiClient:
@@ -148,7 +151,8 @@ class GraphitiClient:
         from graphiti_core.nodes import EpisodeType
 
         client = await cls.get_instance()
-        result = await client.add_episode(
+        result = await _graphiti_circuit_breaker.call_async(
+            client.add_episode,
             name=name,
             episode_body=episode_body,
             source=EpisodeType.text,
@@ -171,5 +175,5 @@ class GraphitiClient:
             GraphitiConnectionError: If client is not initialized.
         """
         client = await cls.get_instance()
-        results = await client.search(query)
+        results = await _graphiti_circuit_breaker.call_async(client.search, query)
         return list(results)
