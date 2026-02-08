@@ -14,6 +14,7 @@ from src.api.routes import (
     account,
     accounts,
     action_queue,
+    activity,
     admin,
     ambient_onboarding,
     analytics,
@@ -120,6 +121,7 @@ setup_security(app)
 app.include_router(account.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")
 app.include_router(action_queue.router, prefix="/api/v1")
+app.include_router(activity.router, prefix="/api/v1")
 app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
