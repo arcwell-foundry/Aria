@@ -87,6 +87,16 @@ async def lifespan(_app: FastAPI) -> Any:
     # US-942: Start the sync scheduler
     scheduler = get_sync_scheduler()
     await scheduler.start()
+    # Generate any missing daily briefings on startup
+    try:
+        import asyncio
+
+        from src.jobs.daily_briefing_job import run_startup_briefing_check
+
+        asyncio.create_task(run_startup_briefing_check())
+        logger.info("Daily briefing startup check scheduled")
+    except Exception:
+        logger.exception("Failed to schedule daily briefing startup check")
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
