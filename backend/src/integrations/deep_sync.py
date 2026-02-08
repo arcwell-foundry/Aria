@@ -22,18 +22,14 @@ from typing import TYPE_CHECKING, Any
 
 # Use TYPE_CHECKING to avoid circular imports during type checking
 if TYPE_CHECKING:
-    from src.db.supabase import SupabaseClient
     from src.integrations.deep_sync_domain import (
         CalendarEvent,
         CRMEntity,
         SyncConfig,
-        SyncDirection,
         SyncResult,
         SyncStatus,
     )
     from src.integrations.domain import IntegrationType
-    from src.integrations.oauth import ComposioOAuthClient
-    from src.memory.lead_memory import LeadMemoryService, TriggerType
 
 logger = logging.getLogger(__name__)
 
@@ -1080,7 +1076,6 @@ class DeepSyncService:
         """
         from src.core.exceptions import CRMSyncError
         from src.integrations.deep_sync_domain import (
-            CalendarEvent,
             SyncDirection,
             SyncStatus,
             SyncResult,
@@ -1248,7 +1243,6 @@ class DeepSyncService:
         Returns:
             Dictionary with processed, succeeded, failed counts and details.
         """
-        from src.integrations.deep_sync_domain import CalendarEvent
         from src.integrations.domain import IntegrationType
 
         processed = 0

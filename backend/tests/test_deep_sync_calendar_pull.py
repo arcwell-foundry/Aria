@@ -8,10 +8,10 @@ These tests verify:
 5. External attendee detection works correctly
 """
 
+import os
+import sys
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
-import sys
-import os
 
 # Add the backend directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -22,7 +22,7 @@ import pytest
 import src.integrations.deep_sync
 from src.integrations.deep_sync_domain import CalendarEvent
 from src.integrations.domain import IntegrationType
-from src.memory.prospective import TaskPriority, TaskStatus, TriggerType
+from src.memory.prospective import TaskPriority
 
 
 @pytest.fixture
