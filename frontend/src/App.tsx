@@ -9,6 +9,7 @@ import { ErrorToaster } from "@/components/ErrorToaster";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import {
+  AccountsPage,
   ActionQueuePage,
   AdminAuditLogPage,
   AdminTeamPage,
@@ -119,6 +120,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <GoalsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/accounts"
+        element={
+          <ProtectedRoute>
+            <AccountsPage />
           </ProtectedRoute>
         }
       />

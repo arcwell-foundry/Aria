@@ -1,3 +1,4 @@
+export { AccountsPage } from "./AccountsPage";
 export { ActionQueuePage } from "./ActionQueue";
 export { AdminAuditLogPage } from "./AdminAuditLogPage";
 export { ARIAConfigPage } from "./ARIAConfigPage";

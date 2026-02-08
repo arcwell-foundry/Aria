@@ -13,11 +13,12 @@ CREATE TABLE IF NOT EXISTS account_plans (
 );
 
 ALTER TABLE account_plans ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_account_plans" ON account_plans;
 CREATE POLICY "own_account_plans" ON account_plans
     FOR ALL TO authenticated USING (user_id = auth.uid());
 
-CREATE INDEX idx_account_plans_user ON account_plans(user_id);
-CREATE INDEX idx_account_plans_lead ON account_plans(lead_memory_id);
+CREATE INDEX IF NOT EXISTS idx_account_plans_user ON account_plans(user_id);
+CREATE INDEX IF NOT EXISTS idx_account_plans_lead ON account_plans(lead_memory_id);
 
 -- user_quotas: quota tracking per user per period
 CREATE TABLE IF NOT EXISTS user_quotas (
@@ -32,7 +33,8 @@ CREATE TABLE IF NOT EXISTS user_quotas (
 );
 
 ALTER TABLE user_quotas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_user_quotas" ON user_quotas;
 CREATE POLICY "own_user_quotas" ON user_quotas
     FOR ALL TO authenticated USING (user_id = auth.uid());
 
-CREATE INDEX idx_user_quotas_user_period ON user_quotas(user_id, period);
+CREATE INDEX IF NOT EXISTS idx_user_quotas_user_period ON user_quotas(user_id, period);
