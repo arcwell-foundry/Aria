@@ -6,6 +6,7 @@ from typing import Any
 
 import anthropic
 
+from src.core.circuit_breaker import CircuitBreaker
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 # Default model - can be overridden per request
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_MAX_TOKENS = 4096
+
+_llm_circuit_breaker = CircuitBreaker("claude_api")
 
 
 class LLMClient:
@@ -71,7 +74,9 @@ class LLMClient:
             },
         )
 
-        response = await self._client.messages.create(**kwargs)
+        response = await _llm_circuit_breaker.call_async(
+            self._client.messages.create, **kwargs
+        )
 
         # Extract text from response
         text_content: str = str(response.content[0].text)
@@ -123,6 +128,12 @@ class LLMClient:
             },
         )
 
-        async with self._client.messages.stream(**kwargs) as stream:
-            async for text in stream.text_stream:
-                yield text
+        _llm_circuit_breaker.check()
+        try:
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for text in stream.text_stream:
+                    yield text
+            _llm_circuit_breaker.record_success()
+        except Exception:
+            _llm_circuit_breaker.record_failure()
+            raise
