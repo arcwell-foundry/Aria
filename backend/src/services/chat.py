@@ -17,6 +17,10 @@ from src.core.llm import LLMClient
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
+from src.memory.conversation import ConversationService
+from src.memory.digital_twin import DigitalTwin
+from src.memory.priming import ConversationContext, ConversationPrimingService
+from src.memory.salience import SalienceService
 from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
@@ -60,6 +64,16 @@ Adapt your tone and style to match this user's preferences:
 
 {examples}"""
 
+WRITING_STYLE_TEMPLATE = """## Writing Style Fingerprint
+
+Match this communication style when composing content for or as this user:
+
+{style_guidelines}"""
+
+PRIMING_CONTEXT_TEMPLATE = """## Conversation Continuity
+
+{priming_context}"""
+
 HIGH_LOAD_INSTRUCTION = """
 IMPORTANT: The user appears to be under high cognitive load right now. Adapt your response:
 - Be extremely concise and direct
@@ -80,9 +94,15 @@ class ChatService:
         self._working_memory_manager = WorkingMemoryManager()
         self._extraction_service = ExtractionService()
         self._personality_calibrator = PersonalityCalibrator()
+        self._digital_twin = DigitalTwin()
         db = get_supabase_client()
         self._cognitive_monitor = CognitiveLoadMonitor(db_client=db)
         self._proactive_service = ProactiveMemoryService(db_client=db)
+        self._priming_service = ConversationPrimingService(
+            conversation_service=ConversationService(db_client=db, llm_client=self._llm_client),
+            salience_service=SalienceService(db_client=db),
+            db_client=db,
+        )
 
     async def _ensure_conversation_record(
         self,
@@ -278,9 +298,20 @@ class ChatService:
         # Load Digital Twin personality calibration for style matching
         personality = await self._get_personality_calibration(user_id)
 
-        # Build system prompt with memory context, personality, load adaptation, and proactive insights
+        # Fetch Digital Twin writing style fingerprint for content generation
+        style_guidelines = await self._get_style_guidelines(user_id)
+
+        # Prime conversation with recent episodes, open threads, and salient facts
+        priming_context = await self._get_priming_context(user_id, message)
+
+        # Build system prompt with all context layers
         system_prompt = self._build_system_prompt(
-            memories, load_state, proactive_insights, personality
+            memories,
+            load_state,
+            proactive_insights,
+            personality,
+            style_guidelines,
+            priming_context,
         )
 
         logger.info(
@@ -294,6 +325,8 @@ class ChatService:
                 "memory_query_ms": memory_ms,
                 "proactive_query_ms": proactive_ms,
                 "cognitive_load_level": load_state.level.value,
+                "has_style_guidelines": style_guidelines is not None,
+                "has_priming_context": priming_context is not None,
             },
         )
 
@@ -409,20 +442,71 @@ class ChatService:
             logger.warning("Failed to load personality calibration: %s", e)
             return None
 
+    async def _get_style_guidelines(
+        self,
+        user_id: str,
+    ) -> str | None:
+        """Fetch Digital Twin writing style fingerprint for content generation.
+
+        Only returns guidelines when a real fingerprint exists (not the
+        generic fallback from get_style_guidelines).
+
+        Args:
+            user_id: User identifier.
+
+        Returns:
+            Style guidelines string if a fingerprint exists, None otherwise.
+        """
+        try:
+            fingerprint = await self._digital_twin.get_fingerprint(user_id)
+            if not fingerprint:
+                return None
+            return await self._digital_twin.get_style_guidelines(user_id)
+        except Exception as e:
+            logger.warning("Failed to load Digital Twin style guidelines: %s", e)
+            return None
+
+    async def _get_priming_context(
+        self,
+        user_id: str,
+        initial_message: str,
+    ) -> ConversationContext | None:
+        """Prime conversation with recent episodes, open threads, and salient facts.
+
+        Args:
+            user_id: User identifier.
+            initial_message: The user's current message for entity relevance.
+
+        Returns:
+            ConversationContext if available, None otherwise.
+        """
+        try:
+            return await self._priming_service.prime_conversation(
+                user_id=user_id,
+                initial_message=initial_message,
+            )
+        except Exception as e:
+            logger.warning("Failed to prime conversation: %s", e)
+            return None
+
     def _build_system_prompt(
         self,
         memories: list[dict[str, Any]],
         load_state: CognitiveLoadState | None = None,
         proactive_insights: list[ProactiveInsight] | None = None,
         personality: PersonalityCalibration | None = None,
+        style_guidelines: str | None = None,
+        priming_context: ConversationContext | None = None,
     ) -> str:
-        """Build system prompt with memory context, personality, load adaptation, and proactive insights.
+        """Build system prompt with all context layers.
 
         Args:
             memories: List of memory dicts to include as context.
             load_state: Optional cognitive load state for response adaptation.
             proactive_insights: Optional list of insights to volunteer.
             personality: Optional personality calibration from Digital Twin.
+            style_guidelines: Optional writing style fingerprint from Digital Twin.
+            priming_context: Optional conversation priming context.
 
         Returns:
             Formatted system prompt string.
@@ -453,6 +537,20 @@ class ChatService:
                 examples=examples_text,
             )
             base_prompt = base_prompt + "\n\n" + personality_context
+
+        # Add Digital Twin writing style fingerprint
+        if style_guidelines:
+            style_context = WRITING_STYLE_TEMPLATE.format(
+                style_guidelines=style_guidelines,
+            )
+            base_prompt = base_prompt + "\n\n" + style_context
+
+        # Add conversation priming context (recent episodes, open threads, salient facts)
+        if priming_context and priming_context.formatted_context:
+            priming_section = PRIMING_CONTEXT_TEMPLATE.format(
+                priming_context=priming_context.formatted_context,
+            )
+            base_prompt = base_prompt + "\n\n" + priming_section
 
         # Add proactive insights if available
         if proactive_insights:
