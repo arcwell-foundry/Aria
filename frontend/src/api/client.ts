@@ -68,6 +68,7 @@ interface RetryableAxiosRequestConfig extends InternalAxiosRequestConfig {
 
 export const apiClient = axios.create({
   baseURL: `${API_BASE_URL}/api/v1`,
+  timeout: 30_000,
   headers: {
     "Content-Type": "application/json",
   },

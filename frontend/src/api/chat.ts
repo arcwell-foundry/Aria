@@ -98,6 +98,9 @@ export function streamMessage(
 
   const controller = new AbortController();
 
+  // 120-second timeout for streaming chat (longer than default 30s)
+  const streamTimeout = setTimeout(() => controller.abort(), 120_000);
+
   fetch(`${baseUrl}/api/v1/chat/stream`, {
     method: "POST",
     headers: {
@@ -133,6 +136,7 @@ export function streamMessage(
           if (line.startsWith("data: ")) {
             const jsonStr = line.slice(6);
             if (jsonStr === "[DONE]") {
+              clearTimeout(streamTimeout);
               onComplete({
                 id: messageId,
                 conversation_id: conversationId,
@@ -152,6 +156,7 @@ export function streamMessage(
                 messageId = event.message_id;
                 conversationId = event.conversation_id;
               } else if (event.type === "error") {
+                clearTimeout(streamTimeout);
                 onError(new Error(event.content));
                 return;
               }
@@ -163,10 +168,14 @@ export function streamMessage(
       }
     })
     .catch((error) => {
+      clearTimeout(streamTimeout);
       if (error.name !== "AbortError") {
         onError(error);
       }
     });
 
-  return () => controller.abort();
+  return () => {
+    clearTimeout(streamTimeout);
+    controller.abort();
+  };
 }
