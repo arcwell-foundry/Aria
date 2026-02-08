@@ -4,8 +4,8 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from src.core.config import settings
 from src.core.circuit_breaker import CircuitBreaker
+from src.core.config import settings
 from src.core.exceptions import GraphitiConnectionError
 
 if TYPE_CHECKING:

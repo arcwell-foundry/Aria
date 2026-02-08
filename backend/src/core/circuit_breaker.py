@@ -100,7 +100,9 @@ class CircuitBreaker:
                     )
                 self._state = CircuitState.OPEN
 
-    async def call_async(self, func: Callable[..., Awaitable[T]], *args: object, **kwargs: object) -> T:
+    async def call_async(
+        self, func: Callable[..., Awaitable[T]], *args: object, **kwargs: object
+    ) -> T:
         """Execute an async function through the circuit breaker.
 
         Args:

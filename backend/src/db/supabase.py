@@ -3,8 +3,8 @@
 import logging
 from typing import Any, cast
 
-from src.core.config import settings
 from src.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+from src.core.config import settings
 from src.core.exceptions import DatabaseError, NotFoundError
 from supabase import Client, create_client
 

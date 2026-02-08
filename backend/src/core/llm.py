@@ -74,9 +74,7 @@ class LLMClient:
             },
         )
 
-        response = await _llm_circuit_breaker.call_async(
-            self._client.messages.create, **kwargs
-        )
+        response = await _llm_circuit_breaker.call_async(self._client.messages.create, **kwargs)
 
         # Extract text from response
         text_content: str = str(response.content[0].text)
