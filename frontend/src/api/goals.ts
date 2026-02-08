@@ -65,6 +65,64 @@ export interface GoalWithProgress extends Goal {
   recent_executions: AgentExecution[];
 }
 
+// US-936: Lifecycle types
+export type GoalHealth = "on_track" | "at_risk" | "behind" | "blocked";
+export type MilestoneStatus = "pending" | "in_progress" | "complete" | "skipped";
+
+export interface Milestone {
+  id: string;
+  goal_id: string;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+  status: MilestoneStatus;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface Retrospective {
+  id: string;
+  goal_id: string;
+  summary: string;
+  what_worked: string[];
+  what_didnt: string[];
+  time_analysis: Record<string, unknown>;
+  agent_effectiveness: Record<string, unknown>;
+  learnings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalDashboard extends Goal {
+  goal_milestones?: Milestone[];
+  milestone_total: number;
+  milestone_complete: number;
+}
+
+export interface GoalDetail extends Goal {
+  milestones: Milestone[];
+  retrospective: Retrospective | null;
+}
+
+export interface ARIAGoalSuggestion {
+  refined_title: string;
+  refined_description: string;
+  smart_score: number;
+  sub_tasks: Array<{ title: string; description: string }>;
+  agent_assignments: string[];
+  suggested_timeline_days: number;
+  reasoning: string;
+}
+
+export interface GoalTemplate {
+  title: string;
+  description: string;
+  category: string;
+  goal_type: GoalType;
+  applicable_roles: string[];
+}
+
 // API functions
 export async function createGoal(data: CreateGoalData): Promise<Goal> {
   const response = await apiClient.post<Goal>("/goals", data);
@@ -112,5 +170,54 @@ export async function completeGoal(goalId: string): Promise<Goal> {
 
 export async function getGoalProgress(goalId: string): Promise<GoalWithProgress> {
   const response = await apiClient.get<GoalWithProgress>(`/goals/${goalId}/progress`);
+  return response.data;
+}
+
+// US-936: Lifecycle API functions
+
+export async function getDashboard(): Promise<GoalDashboard[]> {
+  const response = await apiClient.get<GoalDashboard[]>("/goals/dashboard");
+  return response.data;
+}
+
+export async function createWithARIA(
+  title: string,
+  description?: string
+): Promise<ARIAGoalSuggestion> {
+  const response = await apiClient.post<ARIAGoalSuggestion>(
+    "/goals/create-with-aria",
+    { title, description }
+  );
+  return response.data;
+}
+
+export async function getTemplates(role?: string): Promise<GoalTemplate[]> {
+  const params = role ? `?role=${role}` : "";
+  const response = await apiClient.get<GoalTemplate[]>(`/goals/templates${params}`);
+  return response.data;
+}
+
+export async function getGoalDetail(goalId: string): Promise<GoalDetail> {
+  const response = await apiClient.get<GoalDetail>(`/goals/${goalId}/detail`);
+  return response.data;
+}
+
+export async function addMilestone(
+  goalId: string,
+  data: { title: string; description?: string; due_date?: string }
+): Promise<Milestone> {
+  const response = await apiClient.post<Milestone>(
+    `/goals/${goalId}/milestone`,
+    data
+  );
+  return response.data;
+}
+
+export async function generateRetrospective(
+  goalId: string
+): Promise<Retrospective> {
+  const response = await apiClient.post<Retrospective>(
+    `/goals/${goalId}/retrospective`
+  );
   return response.data;
 }

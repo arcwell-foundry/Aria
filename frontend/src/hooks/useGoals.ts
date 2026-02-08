@@ -8,6 +8,12 @@ import {
   pauseGoal,
   startGoal,
   updateGoal,
+  getDashboard,
+  createWithARIA,
+  getTemplates,
+  getGoalDetail,
+  addMilestone,
+  generateRetrospective,
   type CreateGoalData,
   type GoalStatus,
   type GoalWithProgress,
@@ -22,6 +28,9 @@ export const goalKeys = {
   details: () => [...goalKeys.all, "detail"] as const,
   detail: (id: string) => [...goalKeys.details(), id] as const,
   progress: (id: string) => [...goalKeys.detail(id), "progress"] as const,
+  dashboard: () => [...goalKeys.all, "dashboard"] as const,
+  templates: (role?: string) => [...goalKeys.all, "templates", { role }] as const,
+  goalDetail: (id: string) => [...goalKeys.details(), id, "full"] as const,
 };
 
 // List goals query
@@ -116,6 +125,64 @@ export function usePauseGoal() {
     onSuccess: (updatedGoal) => {
       queryClient.setQueryData(goalKeys.detail(updatedGoal.id), updatedGoal);
       queryClient.invalidateQueries({ queryKey: goalKeys.lists() });
+    },
+  });
+}
+
+// US-936: Lifecycle hooks
+
+export function useGoalDashboard() {
+  return useQuery({
+    queryKey: goalKeys.dashboard(),
+    queryFn: () => getDashboard(),
+  });
+}
+
+export function useGoalTemplates(role?: string) {
+  return useQuery({
+    queryKey: goalKeys.templates(role),
+    queryFn: () => getTemplates(role),
+  });
+}
+
+export function useGoalDetail(goalId: string) {
+  return useQuery({
+    queryKey: goalKeys.goalDetail(goalId),
+    queryFn: () => getGoalDetail(goalId),
+    enabled: !!goalId,
+  });
+}
+
+export function useCreateWithARIA() {
+  return useMutation({
+    mutationFn: ({ title, description }: { title: string; description?: string }) =>
+      createWithARIA(title, description),
+  });
+}
+
+export function useAddMilestone() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      goalId,
+      data,
+    }: {
+      goalId: string;
+      data: { title: string; description?: string; due_date?: string };
+    }) => addMilestone(goalId, data),
+    onSuccess: (_data, { goalId }) => {
+      queryClient.invalidateQueries({ queryKey: goalKeys.goalDetail(goalId) });
+      queryClient.invalidateQueries({ queryKey: goalKeys.dashboard() });
+    },
+  });
+}
+
+export function useGenerateRetrospective() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (goalId: string) => generateRetrospective(goalId),
+    onSuccess: (_data, goalId) => {
+      queryClient.invalidateQueries({ queryKey: goalKeys.goalDetail(goalId) });
     },
   });
 }
