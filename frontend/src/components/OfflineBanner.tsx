@@ -9,7 +9,7 @@ import { X, WifiOff } from "lucide-react";
  *
  * Follows ARIA Design System v1.0:
  * - Fixed position at top (z-50)
- * - Amber color scheme for warnings: bg-amber-500/10, border-amber-500/20
+ * - Amber color scheme for warnings: bg-warning/10, border-warning/20
  * - Lucide icons (WifiOff, X)
  * - Accessible with ARIA labels and keyboard navigation
  */
@@ -54,7 +54,7 @@ export function OfflineBanner() {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-50 bg-amber-500/10 border-b border-amber-500/20 px-4 py-3"
+      className="fixed top-0 left-0 right-0 z-50 bg-warning/10 border-b border-warning/20 px-4 py-3"
       role="status"
       aria-live="polite"
       aria-label="You are currently offline"
@@ -63,7 +63,7 @@ export function OfflineBanner() {
         {/* Icon and message */}
         <div className="flex items-center gap-3">
           <WifiOff
-            className="w-5 h-5 text-amber-600 dark:text-amber-500 flex-shrink-0"
+            className="w-5 h-5 text-amber-600 dark:text-warning flex-shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
@@ -75,7 +75,7 @@ export function OfflineBanner() {
         {/* Dismiss button */}
         <button
           onClick={handleDismiss}
-          className="flex-shrink-0 p-1 rounded-md text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-500"
+          className="flex-shrink-0 p-1 rounded-md text-amber-700 dark:text-amber-300 hover:bg-warning/20 transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-500"
           aria-label="Dismiss offline notification"
         >
           <X className="w-4 h-4" strokeWidth={2} />

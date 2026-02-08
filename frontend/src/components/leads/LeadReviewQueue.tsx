@@ -16,30 +16,30 @@ import { ScoreBreakdown } from "./ScoreBreakdown";
 type FilterTab = "all" | "pending" | "saved";
 
 function scoreColor(score: number): string {
-  if (score >= 70) return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
-  if (score >= 40) return "text-amber-400 bg-amber-500/10 border-amber-500/20";
-  return "text-red-400 bg-red-500/10 border-red-500/20";
+  if (score >= 70) return "text-success bg-success/10 border-success/20";
+  if (score >= 40) return "text-warning bg-warning/10 border-warning/20";
+  return "text-critical bg-critical/10 border-critical/20";
 }
 
 function statusBadge(status: ReviewStatus) {
   switch (status) {
     case "approved":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success border border-success/20">
           <CheckCircle2 className="w-3 h-3" />
           Approved
         </span>
       );
     case "rejected":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-critical/10 text-critical border border-critical/20">
           <XCircle className="w-3 h-3" />
           Rejected
         </span>
       );
     case "saved":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-warning/10 text-warning border border-warning/20">
           <Bookmark className="w-3 h-3" />
           Saved
         </span>
@@ -212,7 +212,7 @@ function LeadCardItem({
           <button
             onClick={() => onAction(lead.id, "approved")}
             disabled={isActioning}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-success hover:brightness-110 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <CheckCircle2 className="w-4 h-4" />
             Approve
@@ -220,7 +220,7 @@ function LeadCardItem({
           <button
             onClick={() => onAction(lead.id, "rejected")}
             disabled={isActioning}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-critical hover:brightness-110 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <XCircle className="w-4 h-4" />
             Reject
@@ -228,7 +228,7 @@ function LeadCardItem({
           <button
             onClick={() => onAction(lead.id, "saved")}
             disabled={isActioning}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-warning hover:brightness-110 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Bookmark className="w-4 h-4" />
             Save
@@ -282,7 +282,7 @@ export function LeadReviewQueue() {
   if (error) {
     return (
       <div className="text-center py-12">
-        <p className="text-red-400">Failed to load leads. Please try again.</p>
+        <p className="text-critical">Failed to load leads. Please try again.</p>
       </div>
     );
   }
@@ -361,7 +361,7 @@ export function LeadReviewQueue() {
             <button
               onClick={handleBatchApprove}
               disabled={reviewMutation.isPending}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-success hover:brightness-110 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
               Approve Selected

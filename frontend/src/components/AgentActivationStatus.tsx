@@ -22,11 +22,11 @@ const AGENT_META: Record<
 
 function StatusIndicator({ status }: { status: string }) {
   if (status === "complete") {
-    return <CheckCircle2 size={16} strokeWidth={1.5} className="text-emerald-400" />;
+    return <CheckCircle2 size={16} strokeWidth={1.5} className="text-success" />;
   }
   if (status === "failed") {
     return (
-      <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
+      <span className="inline-block w-2 h-2 rounded-full bg-critical" />
     );
   }
   // pending or running

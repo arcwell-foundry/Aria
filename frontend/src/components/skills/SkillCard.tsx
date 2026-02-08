@@ -38,7 +38,7 @@ export function SkillCard({
 
           {/* Install button */}
           {isInstalled ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-success bg-success/10 border border-success/20 rounded-lg">
               <svg
                 className="w-3.5 h-3.5"
                 fill="none"
@@ -116,7 +116,7 @@ export function SkillCard({
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <TrustLevelBadge level={skill.trust_level} size="sm" />
           {skill.life_sciences_relevant && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-violet-400 bg-violet-500/15 border border-violet-500/20 rounded-full">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-interactive bg-interactive/15 border border-interactive/20 rounded-full">
               <svg
                 className="w-3 h-3"
                 fill="none"

@@ -26,26 +26,26 @@ const insightConfig: Record<
   objection: {
     label: "Objections",
     icon: AlertTriangle,
-    color: "text-amber-400",
-    bg: "bg-amber-500/20",
+    color: "text-warning",
+    bg: "bg-warning/20",
   },
   buying_signal: {
     label: "Buying Signals",
     icon: TrendingUp,
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/20",
+    color: "text-success",
+    bg: "bg-success/20",
   },
   commitment: {
     label: "Commitments",
     icon: CheckCircle2,
-    color: "text-blue-400",
-    bg: "bg-blue-500/20",
+    color: "text-info",
+    bg: "bg-info/20",
   },
   risk: {
     label: "Risks",
     icon: ShieldAlert,
-    color: "text-red-400",
-    bg: "bg-red-500/20",
+    color: "text-critical",
+    bg: "bg-critical/20",
   },
   opportunity: {
     label: "Opportunities",
@@ -139,7 +139,7 @@ function InsightCard({ insight }: InsightCardProps) {
 
             {/* Addressed badge */}
             {isAddressed && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs rounded-full">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-success/10 text-success text-xs rounded-full">
                 <CheckCircle2 className="w-3 h-3" />
                 Addressed
               </span>

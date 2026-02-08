@@ -19,8 +19,8 @@ interface GoalCardProps {
 
 const healthConfig: Record<GoalHealth, { color: string; label: string }> = {
   on_track: { color: "bg-green-400", label: "On Track" },
-  at_risk: { color: "bg-amber-400", label: "At Risk" },
-  behind: { color: "bg-red-400", label: "Behind" },
+  at_risk: { color: "bg-warning", label: "At Risk" },
+  behind: { color: "bg-critical", label: "Behind" },
   blocked: { color: "bg-slate-400", label: "Blocked" },
 };
 
@@ -95,7 +95,7 @@ export function GoalCard({
               {canPause && onPause && (
                 <button
                   onClick={onPause}
-                  className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
+                  className="p-2 text-slate-400 hover:text-warning hover:bg-warning/10 rounded-lg transition-colors"
                   title="Pause goal"
                 >
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -106,7 +106,7 @@ export function GoalCard({
               {onDelete && (
                 <button
                   onClick={onDelete}
-                  className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                  className="p-2 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-lg transition-colors"
                   title="Delete goal"
                 >
                   <svg
@@ -143,7 +143,7 @@ export function GoalCard({
               return daysLeft > 0 ? (
                 <span className="text-xs text-slate-500">&middot; {daysLeft} days left</span>
               ) : (
-                <span className="text-xs text-red-400">&middot; Overdue</span>
+                <span className="text-xs text-critical">&middot; Overdue</span>
               );
             })()}
           </div>

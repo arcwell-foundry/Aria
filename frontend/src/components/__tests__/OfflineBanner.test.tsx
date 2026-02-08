@@ -121,9 +121,9 @@ describe("OfflineBanner", () => {
         "left-0",
         "right-0",
         "z-50",
-        "bg-amber-500/10",
+        "bg-warning/10",
         "border-b",
-        "border-amber-500/20"
+        "border-warning/20"
       );
     });
   });

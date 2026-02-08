@@ -29,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? (
         <svg
-          className="w-4 h-4 text-emerald-400"
+          className="w-4 h-4 text-success"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

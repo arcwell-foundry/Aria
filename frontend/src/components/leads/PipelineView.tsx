@@ -157,8 +157,8 @@ export function PipelineView() {
       {/* Total pipeline value header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center">
-            <DollarSign className="w-5 h-5 text-emerald-400" />
+          <div className="w-10 h-10 bg-success/10 rounded-lg flex items-center justify-center">
+            <DollarSign className="w-5 h-5 text-success" />
           </div>
           <div>
             <p className="text-sm text-slate-400">Total Pipeline Value</p>

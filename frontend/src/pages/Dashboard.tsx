@@ -84,8 +84,8 @@ export function DashboardPage() {
 
           {/* Historical indicator */}
           {selectedDate && (
-            <div className="mt-4 flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-              <span className="text-amber-400 text-sm">
+            <div className="mt-4 flex items-center gap-2 px-4 py-2 bg-warning/10 border border-warning/30 rounded-lg">
+              <span className="text-warning text-sm">
                 Viewing briefing from{" "}
                 {new Date(selectedDate).toLocaleDateString("en-US", {
                   weekday: "long",
@@ -95,7 +95,7 @@ export function DashboardPage() {
               </span>
               <button
                 onClick={() => setSelectedDate(null)}
-                className="ml-auto text-xs text-amber-400 hover:text-amber-300 underline"
+                className="ml-auto text-xs text-warning hover:text-warning underline"
               >
                 Return to today
               </button>

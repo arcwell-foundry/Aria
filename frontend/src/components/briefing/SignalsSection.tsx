@@ -9,14 +9,14 @@ interface SignalsSectionProps {
 function SignalCard({ signal }: { signal: BriefingSignal }) {
   const typeConfig = {
     company_news: {
-      icon: <Building2 className="w-4 h-4 text-blue-400" />,
-      bg: "bg-blue-500/10",
-      border: "border-blue-500/30",
+      icon: <Building2 className="w-4 h-4 text-info" />,
+      bg: "bg-info/10",
+      border: "border-info/30",
     },
     market_trend: {
-      icon: <TrendingUp className="w-4 h-4 text-emerald-400" />,
-      bg: "bg-emerald-500/10",
-      border: "border-emerald-500/30",
+      icon: <TrendingUp className="w-4 h-4 text-success" />,
+      bg: "bg-success/10",
+      border: "border-success/30",
     },
     competitive_intel: {
       icon: <Swords className="w-4 h-4 text-purple-400" />,
@@ -75,7 +75,7 @@ export function SignalsSection({ signals }: SignalsSectionProps) {
       <div className="space-y-4">
         {company_news.length > 0 && (
           <div>
-            <h4 className="text-xs font-medium text-blue-400 uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-medium text-info uppercase tracking-wider mb-2">
               Company News
             </h4>
             <div className="space-y-2">
@@ -88,7 +88,7 @@ export function SignalsSection({ signals }: SignalsSectionProps) {
 
         {market_trends.length > 0 && (
           <div>
-            <h4 className="text-xs font-medium text-emerald-400 uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-medium text-success uppercase tracking-wider mb-2">
               Market Trends
             </h4>
             <div className="space-y-2">

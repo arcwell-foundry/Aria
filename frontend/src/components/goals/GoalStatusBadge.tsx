@@ -17,7 +17,7 @@ const statusConfig: Record<GoalStatus, { label: string; color: string; pulse?: b
   },
   paused: {
     label: "Paused",
-    color: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+    color: "bg-warning/20 text-warning border-warning/30",
   },
   complete: {
     label: "Complete",
@@ -25,7 +25,7 @@ const statusConfig: Record<GoalStatus, { label: string; color: string; pulse?: b
   },
   failed: {
     label: "Failed",
-    color: "bg-red-500/20 text-red-400 border-red-500/30",
+    color: "bg-critical/20 text-critical border-critical/30",
   },
 };
 

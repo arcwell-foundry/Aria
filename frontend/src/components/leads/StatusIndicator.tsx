@@ -7,9 +7,9 @@ interface StatusIndicatorProps {
 
 export function StatusIndicator({ status, showLabel = true }: StatusIndicatorProps) {
   const statusConfig: Record<LeadStatus, { color: string; label: string }> = {
-    active: { color: "text-emerald-400", label: "Active" },
+    active: { color: "text-success", label: "Active" },
     won: { color: "text-primary-400", label: "Won" },
-    lost: { color: "text-red-400", label: "Lost" },
+    lost: { color: "text-critical", label: "Lost" },
     dormant: { color: "text-slate-500", label: "Dormant" },
   };
 

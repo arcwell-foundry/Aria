@@ -142,23 +142,23 @@ export function DraftDetailModal({
             {draft.status !== "draft" && (
               <div className={`p-4 rounded-xl ${
                 draft.status === "sent"
-                  ? "bg-emerald-500/10 border border-emerald-500/30"
-                  : "bg-red-500/10 border border-red-500/30"
+                  ? "bg-success/10 border border-success/30"
+                  : "bg-critical/10 border border-critical/30"
               }`}>
                 <div className="flex items-center gap-2">
                   {draft.status === "sent" ? (
                     <>
-                      <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-5 h-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
-                      <span className="font-medium text-emerald-400">Email sent successfully</span>
+                      <span className="font-medium text-success">Email sent successfully</span>
                     </>
                   ) : (
                     <>
-                      <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-5 h-5 text-critical" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
-                      <span className="font-medium text-red-400">Failed to send</span>
+                      <span className="font-medium text-critical">Failed to send</span>
                     </>
                   )}
                 </div>
@@ -268,7 +268,7 @@ export function DraftDetailModal({
                   type="button"
                   onClick={handleSendClick}
                   disabled={isLoading}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl transition-all duration-200 shadow-lg shadow-emerald-600/25 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-success hover:brightness-110 text-white rounded-xl transition-all duration-200 shadow-lg shadow-success/25 disabled:opacity-50"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -287,8 +287,8 @@ export function DraftDetailModal({
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowSendConfirm(false)} />
           <div className="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl p-6 max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-start gap-4">
-              <div className="shrink-0 w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="shrink-0 w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
               </div>
@@ -310,7 +310,7 @@ export function DraftDetailModal({
                   <button
                     onClick={handleConfirmSend}
                     disabled={isSending}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors disabled:opacity-50"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-success hover:brightness-110 text-white rounded-xl transition-colors disabled:opacity-50"
                   >
                     {isSending ? (
                       <>

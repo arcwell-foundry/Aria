@@ -11,9 +11,9 @@ interface LeadTableRowProps {
 
 function HealthIndicator({ score }: { score: number }) {
   const getConfig = (score: number) => {
-    if (score >= 70) return { emoji: "🟢", color: "text-emerald-400" };
-    if (score >= 40) return { emoji: "🟡", color: "text-amber-400" };
-    return { emoji: "🔴", color: "text-red-400" };
+    if (score >= 70) return { emoji: "🟢", color: "text-success" };
+    if (score >= 40) return { emoji: "🟡", color: "text-warning" };
+    return { emoji: "🔴", color: "text-critical" };
   };
 
   const { emoji, color } = getConfig(score);
@@ -106,11 +106,11 @@ export function LeadTableRow({ lead, isSelected, onSelect, onAddNote }: LeadTabl
         <span
           className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium capitalize ${
             lead.status === "active"
-              ? "bg-emerald-500/10 text-emerald-400"
+              ? "bg-success/10 text-success"
               : lead.status === "won"
                 ? "bg-primary-500/10 text-primary-400"
                 : lead.status === "lost"
-                  ? "bg-red-500/10 text-red-400"
+                  ? "bg-critical/10 text-critical"
                   : "bg-slate-500/10 text-slate-500"
           }`}
         >

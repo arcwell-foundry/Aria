@@ -153,7 +153,7 @@ export function BattleCardEditModal({
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                    Competitor Name <span className="text-red-400">*</span>
+                    Competitor Name <span className="text-critical">*</span>
                   </label>
                   <input
                     type="text"
@@ -224,7 +224,7 @@ export function BattleCardEditModal({
             {/* Strengths */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-emerald-400">Their Strengths</label>
+                <label className="text-sm font-medium text-success">Their Strengths</label>
                 <button
                   type="button"
                   onClick={addStrength}
@@ -242,14 +242,14 @@ export function BattleCardEditModal({
                       value={strength}
                       onChange={(e) => updateStrength(idx, e.target.value)}
                       placeholder="Enter a strength..."
-                      className="flex-1 px-4 py-2.5 bg-slate-900 border border-emerald-500/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-transparent transition-all"
+                      className="flex-1 px-4 py-2.5 bg-slate-900 border border-success/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-success/50 focus:border-transparent transition-all"
                       disabled={isLoading}
                     />
                     <button
                       type="button"
                       onClick={() => removeStrength(idx)}
                       disabled={isLoading}
-                      className="p-2.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors disabled:opacity-50"
+                      className="p-2.5 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-xl transition-colors disabled:opacity-50"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
@@ -271,7 +271,7 @@ export function BattleCardEditModal({
             {/* Weaknesses */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-amber-400">Their Weaknesses</label>
+                <label className="text-sm font-medium text-warning">Their Weaknesses</label>
                 <button
                   type="button"
                   onClick={addWeakness}
@@ -289,14 +289,14 @@ export function BattleCardEditModal({
                       value={weakness}
                       onChange={(e) => updateWeakness(idx, e.target.value)}
                       placeholder="Enter a weakness..."
-                      className="flex-1 px-4 py-2.5 bg-slate-900 border border-amber-500/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent transition-all"
+                      className="flex-1 px-4 py-2.5 bg-slate-900 border border-warning/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-warning/50 focus:border-transparent transition-all"
                       disabled={isLoading}
                     />
                     <button
                       type="button"
                       onClick={() => removeWeakness(idx)}
                       disabled={isLoading}
-                      className="p-2.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors disabled:opacity-50"
+                      className="p-2.5 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-xl transition-colors disabled:opacity-50"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path

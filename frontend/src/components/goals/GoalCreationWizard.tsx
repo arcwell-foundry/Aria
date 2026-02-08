@@ -74,8 +74,8 @@ function SmartScoreBar({ score }: { score: number }) {
     clampedScore >= 80
       ? "bg-green-500"
       : clampedScore >= 50
-        ? "bg-amber-500"
-        : "bg-red-500";
+        ? "bg-warning"
+        : "bg-critical";
 
   const label =
     clampedScore >= 80
@@ -95,8 +95,8 @@ function SmartScoreBar({ score }: { score: number }) {
               clampedScore >= 80
                 ? "text-green-400"
                 : clampedScore >= 50
-                  ? "text-amber-400"
-                  : "text-red-400"
+                  ? "text-warning"
+                  : "text-critical"
             }
           >
             {label}
@@ -384,7 +384,7 @@ function Step1UserInput({
           htmlFor="wizard-title"
           className="block text-sm font-medium text-slate-300 mb-1.5"
         >
-          Goal Title <span className="text-red-400">*</span>
+          Goal Title <span className="text-critical">*</span>
         </label>
         <input
           ref={titleInputRef}
@@ -524,7 +524,7 @@ function Step2ARIASuggestions({
   if (ariaError) {
     return (
       <div className="px-6 pb-8 pt-4 flex flex-col items-center justify-center min-h-[300px] gap-4">
-        <p className="text-red-400 text-sm">
+        <p className="text-critical text-sm">
           Failed to get ARIA suggestions. Please try again.
         </p>
         <div className="flex gap-3">

@@ -78,13 +78,13 @@ function agentBadgeClasses(agent: string): string {
   const color = AGENT_COLORS[agent as AgentName];
   switch (color) {
     case "emerald":
-      return "bg-emerald-500 text-white";
+      return "bg-success text-white";
     case "blue":
-      return "bg-blue-500 text-white";
+      return "bg-info text-white";
     case "violet":
-      return "bg-violet-500 text-white";
+      return "bg-interactive text-white";
     case "amber":
-      return "bg-amber-500 text-white";
+      return "bg-warning text-white";
     case "rose":
       return "bg-rose-500 text-white";
     case "cyan":
@@ -99,13 +99,13 @@ function agentCardBorderClass(agent: string, isRecent: boolean): string {
   const color = AGENT_COLORS[agent as AgentName];
   switch (color) {
     case "emerald":
-      return "border-emerald-500/50";
+      return "border-success/50";
     case "blue":
-      return "border-blue-500/50";
+      return "border-info/50";
     case "violet":
-      return "border-violet-500/50";
+      return "border-interactive/50";
     case "amber":
-      return "border-amber-500/50";
+      return "border-warning/50";
     case "rose":
       return "border-rose-500/50";
     case "cyan":
@@ -120,13 +120,13 @@ function agentCardGlowClass(agent: string, isRecent: boolean): string {
   const color = AGENT_COLORS[agent as AgentName];
   switch (color) {
     case "emerald":
-      return "shadow-emerald-500/20 shadow-lg";
+      return "shadow-success/20 shadow-lg";
     case "blue":
-      return "shadow-blue-500/20 shadow-lg";
+      return "shadow-info/20 shadow-lg";
     case "violet":
-      return "shadow-violet-500/20 shadow-lg";
+      return "shadow-interactive/20 shadow-lg";
     case "amber":
-      return "shadow-amber-500/20 shadow-lg";
+      return "shadow-warning/20 shadow-lg";
     case "rose":
       return "shadow-rose-500/20 shadow-lg";
     case "cyan":
@@ -139,15 +139,15 @@ function agentCardGlowClass(agent: string, isRecent: boolean): string {
 function typeBadgeClasses(activityType: string): string {
   switch (activityType) {
     case "research_complete":
-      return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+      return "bg-info/20 text-info border-info/30";
     case "email_drafted":
-      return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      return "bg-warning/20 text-warning border-warning/30";
     case "signal_detected":
       return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
     case "goal_progressed":
-      return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+      return "bg-success/20 text-success border-success/30";
     case "agent_activated":
-      return "bg-violet-500/20 text-violet-400 border-violet-500/30";
+      return "bg-interactive/20 text-interactive border-interactive/30";
     case "crm_synced":
       return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
     default:
@@ -156,9 +156,9 @@ function typeBadgeClasses(activityType: string): string {
 }
 
 function confidenceDotColor(confidence: number): string {
-  if (confidence > 0.8) return "bg-emerald-400";
-  if (confidence > 0.5) return "bg-amber-400";
-  return "bg-red-400";
+  if (confidence > 0.8) return "bg-success";
+  if (confidence > 0.5) return "bg-warning";
+  return "bg-critical";
 }
 
 function entityPath(entityType: string, entityId: string): string | null {
@@ -329,7 +329,7 @@ function FilterBar({
           <select
             value={agentFilter}
             onChange={(e) => onAgentChange(e.target.value)}
-            className="appearance-none bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent cursor-pointer"
+            className="appearance-none bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent cursor-pointer"
           >
             <option value="">All Agents</option>
             {AGENTS.map((a) => (
@@ -346,7 +346,7 @@ function FilterBar({
           <select
             value={typeFilter}
             onChange={(e) => onTypeChange(e.target.value)}
-            className="appearance-none bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent cursor-pointer"
+            className="appearance-none bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent cursor-pointer"
           >
             <option value="">All Types</option>
             {ACTIVITY_TYPES.map((t) => (
@@ -363,14 +363,14 @@ function FilterBar({
           type="date"
           value={dateStart}
           onChange={(e) => onDateStartChange(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent [color-scheme:dark]"
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent [color-scheme:dark]"
           placeholder="Start date"
         />
         <input
           type="date"
           value={dateEnd}
           onChange={(e) => onDateEndChange(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent [color-scheme:dark]"
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent [color-scheme:dark]"
           placeholder="End date"
         />
 
@@ -382,7 +382,7 @@ function FilterBar({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search activity..."
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent"
           />
         </div>
       </div>
@@ -504,7 +504,7 @@ function ActivityListItem({
               {(() => {
                 const path = entityPath(item.related_entity_type, item.related_entity_id);
                 const content = (
-                  <span className="inline-flex items-center gap-1 text-violet-400 text-sm hover:text-violet-300 transition-colors">
+                  <span className="inline-flex items-center gap-1 text-interactive text-sm hover:text-interactive transition-colors">
                     <span className="font-medium">
                       {capitalize(item.related_entity_type)}
                     </span>

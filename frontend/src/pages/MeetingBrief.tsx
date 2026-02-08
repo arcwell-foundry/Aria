@@ -93,7 +93,7 @@ export function MeetingBriefPage() {
                   <GeneratingOverlay />
                 ) : brief.status === "failed" ? (
                   <div className="text-center py-12">
-                    <p className="text-red-400 mb-2">Failed to generate brief</p>
+                    <p className="text-critical mb-2">Failed to generate brief</p>
                     {brief.error_message && (
                       <p className="text-sm text-slate-400 mb-4">{brief.error_message}</p>
                     )}

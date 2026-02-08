@@ -10,17 +10,17 @@ interface StakeholdersTabProps {
 // Role configuration
 const roleConfig: Record<StakeholderRole, { label: string; color: string }> = {
   decision_maker: { label: "Decision Maker", color: "text-purple-400 bg-purple-500/10" },
-  influencer: { label: "Influencer", color: "text-blue-400 bg-blue-500/10" },
-  champion: { label: "Champion", color: "text-emerald-400 bg-emerald-500/10" },
-  blocker: { label: "Blocker", color: "text-red-400 bg-red-500/10" },
+  influencer: { label: "Influencer", color: "text-info bg-info/10" },
+  champion: { label: "Champion", color: "text-success bg-success/10" },
+  blocker: { label: "Blocker", color: "text-critical bg-critical/10" },
   user: { label: "User", color: "text-slate-400 bg-slate-500/10" },
 };
 
 // Sentiment configuration
 const sentimentConfig: Record<Sentiment, { label: string; color: string; bg: string }> = {
-  positive: { label: "Positive", color: "bg-emerald-400", bg: "bg-emerald-500/20" },
-  neutral: { label: "Neutral", color: "bg-amber-400", bg: "bg-amber-500/20" },
-  negative: { label: "Negative", color: "bg-red-400", bg: "bg-red-500/20" },
+  positive: { label: "Positive", color: "bg-success", bg: "bg-success/20" },
+  neutral: { label: "Neutral", color: "bg-warning", bg: "bg-warning/20" },
+  negative: { label: "Negative", color: "bg-critical", bg: "bg-critical/20" },
   unknown: { label: "Unknown", color: "bg-slate-400", bg: "bg-slate-500/20" },
 };
 

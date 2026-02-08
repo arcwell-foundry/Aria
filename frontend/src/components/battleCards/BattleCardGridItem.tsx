@@ -78,9 +78,9 @@ export function BattleCardGridItem({
       {/* Strengths/Weaknesses summary */}
       <div className="relative grid grid-cols-2 gap-4 mb-5">
         <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-success/10">
             <svg
-              className="w-4 h-4 text-emerald-400"
+              className="w-4 h-4 text-success"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -94,14 +94,14 @@ export function BattleCardGridItem({
             </svg>
           </div>
           <span className="text-sm text-slate-300">
-            <span className="font-medium text-emerald-400">{card.strengths.length}</span>{" "}
+            <span className="font-medium text-success">{card.strengths.length}</span>{" "}
             strengths
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/10">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-warning/10">
             <svg
-              className="w-4 h-4 text-amber-400"
+              className="w-4 h-4 text-warning"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -115,7 +115,7 @@ export function BattleCardGridItem({
             </svg>
           </div>
           <span className="text-sm text-slate-300">
-            <span className="font-medium text-amber-400">{card.weaknesses.length}</span>{" "}
+            <span className="font-medium text-warning">{card.weaknesses.length}</span>{" "}
             weaknesses
           </span>
         </div>

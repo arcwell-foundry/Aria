@@ -32,14 +32,14 @@ export function RisksOpportunitiesSection({ items }: RisksOpportunitiesSectionPr
             key={i}
             className={`flex items-start gap-3 p-3 rounded-lg border ${
               item.isRisk
-                ? "bg-red-500/10 border-red-500/20"
-                : "bg-emerald-500/10 border-emerald-500/20"
+                ? "bg-critical/10 border-critical/20"
+                : "bg-success/10 border-success/20"
             }`}
           >
             {item.isRisk ? (
-              <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <AlertTriangle className="w-5 h-5 text-critical flex-shrink-0 mt-0.5" />
             ) : (
-              <Lightbulb className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <Lightbulb className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
             )}
             <span className={item.isRisk ? "text-red-200" : "text-emerald-200"}>
               {item.text}

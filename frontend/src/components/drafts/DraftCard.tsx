@@ -18,9 +18,9 @@ const purposeLabels: Record<string, string> = {
 };
 
 const toneLabels: Record<string, { label: string; color: string }> = {
-  formal: { label: "Formal", color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-  friendly: { label: "Friendly", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
-  urgent: { label: "Urgent", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+  formal: { label: "Formal", color: "bg-info/20 text-info border-info/30" },
+  friendly: { label: "Friendly", color: "bg-success/20 text-success border-success/30" },
+  urgent: { label: "Urgent", color: "bg-warning/20 text-warning border-warning/30" },
 };
 
 const statusConfig: Record<string, { label: string; color: string; icon: ReactNode }> = {
@@ -35,7 +35,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: ReactNo
   },
   sent: {
     label: "Sent",
-    color: "bg-emerald-500/20 text-emerald-400",
+    color: "bg-success/20 text-success",
     icon: (
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -44,7 +44,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: ReactNo
   },
   failed: {
     label: "Failed",
-    color: "bg-red-500/20 text-red-400",
+    color: "bg-critical/20 text-critical",
     icon: (
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -117,7 +117,7 @@ export function DraftCard({ draft, onView, onDelete }: DraftCardProps) {
                 e.stopPropagation();
                 onDelete();
               }}
-              className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all duration-200"
+              className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-lg transition-all duration-200"
               title="Delete draft"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

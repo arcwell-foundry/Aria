@@ -27,10 +27,10 @@ interface ActionDetailModalProps {
 
 const agentMeta: Record<string, { icon: typeof Brain; label: string; color: string }> = {
   scout: { icon: Compass, label: "Scout", color: "text-teal-400" },
-  analyst: { icon: Brain, label: "Analyst", color: "text-violet-400" },
+  analyst: { icon: Brain, label: "Analyst", color: "text-interactive" },
   hunter: { icon: Crosshair, label: "Hunter", color: "text-orange-400" },
-  operator: { icon: Settings, label: "Operator", color: "text-blue-400" },
-  scribe: { icon: PenLine, label: "Scribe", color: "text-emerald-400" },
+  operator: { icon: Settings, label: "Operator", color: "text-info" },
+  scribe: { icon: PenLine, label: "Scribe", color: "text-success" },
   strategist: { icon: Shield, label: "Strategist", color: "text-rose-400" },
 };
 
@@ -44,9 +44,9 @@ const typeMeta: Record<string, { icon: typeof Mail; label: string }> = {
 
 const riskColors: Record<string, string> = {
   low: "text-green-400 bg-green-500/10",
-  medium: "text-amber-400 bg-amber-500/10",
+  medium: "text-warning bg-warning/10",
   high: "text-orange-400 bg-orange-500/10",
-  critical: "text-red-400 bg-red-500/10",
+  critical: "text-critical bg-critical/10",
 };
 
 function formatDate(dateString: string): string {
@@ -177,7 +177,7 @@ export function ActionDetailModal({
                 )}
                 {action.completed_at && (
                   <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <Check className="w-3.5 h-3.5 text-blue-400" />
+                    <Check className="w-3.5 h-3.5 text-info" />
                     Completed: {formatDate(action.completed_at)}
                   </div>
                 )}
@@ -200,7 +200,7 @@ export function ActionDetailModal({
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={handleReject}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
+                    className="px-4 py-2 bg-critical hover:brightness-110 text-white text-sm font-medium rounded-lg transition-colors"
                   >
                     Confirm Reject
                   </button>

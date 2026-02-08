@@ -15,9 +15,9 @@ function LeadCard({ lead, variant }: { lead: BriefingLead; variant: "hot" | "att
       bg: "bg-orange-500/10",
     },
     attention: {
-      border: "border-amber-500/30 hover:border-amber-500/50",
-      icon: <AlertTriangle className="w-4 h-4 text-amber-400" />,
-      bg: "bg-amber-500/10",
+      border: "border-warning/30 hover:border-warning/50",
+      icon: <AlertTriangle className="w-4 h-4 text-warning" />,
+      bg: "bg-warning/10",
     },
     active: {
       border: "border-green-500/30 hover:border-green-500/50",
@@ -48,8 +48,8 @@ function LeadCard({ lead, variant }: { lead: BriefingLead; variant: "hot" | "att
                     lead.health_score >= 70
                       ? "bg-green-500"
                       : lead.health_score >= 40
-                        ? "bg-amber-500"
-                        : "bg-red-500"
+                        ? "bg-warning"
+                        : "bg-critical"
                   }`}
                   style={{ width: `${lead.health_score}%` }}
                 />
@@ -106,7 +106,7 @@ export function LeadsSection({ leads }: LeadsSectionProps) {
 
         {needs_attention.length > 0 && (
           <div>
-            <h4 className="text-xs font-medium text-amber-400 uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-medium text-warning uppercase tracking-wider mb-2">
               Needs Attention
             </h4>
             <div className="space-y-2">

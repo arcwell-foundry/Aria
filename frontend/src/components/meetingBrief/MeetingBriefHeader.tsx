@@ -38,9 +38,9 @@ function formatGeneratedTime(isoString: string): string {
 function StatusBadge({ status }: { status: MeetingBriefStatus }) {
   const styles = {
     pending: "bg-slate-600/50 text-slate-300",
-    generating: "bg-amber-500/20 text-amber-400",
+    generating: "bg-warning/20 text-warning",
     completed: "bg-green-500/20 text-green-400",
-    failed: "bg-red-500/20 text-red-400",
+    failed: "bg-critical/20 text-critical",
   };
 
   const labels = {

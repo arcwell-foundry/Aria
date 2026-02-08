@@ -56,11 +56,11 @@ const NotificationIcons: Record<string, React.ReactNode> = {
 };
 
 const TypeColors: Record<string, string> = {
-  briefing_ready: "text-blue-400 bg-blue-400/10",
-  signal_detected: "text-amber-400 bg-amber-400/10",
+  briefing_ready: "text-info bg-info/10",
+  signal_detected: "text-warning bg-warning/10",
   task_due: "text-rose-400 bg-rose-400/10",
-  meeting_brief_ready: "text-emerald-400 bg-emerald-400/10",
-  draft_ready: "text-violet-400 bg-violet-400/10",
+  meeting_brief_ready: "text-success bg-success/10",
+  draft_ready: "text-interactive bg-interactive/10",
 };
 
 export function NotificationsPageContent() {

@@ -19,13 +19,13 @@ const integrationMetadata: Record<
     displayName: "Google Calendar",
     description: "Sync your calendar for intelligent scheduling",
     icon: "calendar",
-    color: "bg-blue-500",
+    color: "bg-info",
   },
   gmail: {
     displayName: "Gmail",
     description: "Analyze communications for insights",
     icon: "mail",
-    color: "bg-red-500",
+    color: "bg-critical",
   },
   outlook: {
     displayName: "Microsoft Outlook",
@@ -52,8 +52,8 @@ function StatusBadge({ status }: { status: IntegrationStatus }) {
   const statusConfig = {
     active: {
       label: "Connected",
-      color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-      dotColor: "bg-emerald-400",
+      color: "bg-success/10 text-success border-success/20",
+      dotColor: "bg-success",
     },
     disconnected: {
       label: "Disconnected",
@@ -62,13 +62,13 @@ function StatusBadge({ status }: { status: IntegrationStatus }) {
     },
     error: {
       label: "Error",
-      color: "bg-red-500/10 text-red-400 border-red-500/20",
-      dotColor: "bg-red-400",
+      color: "bg-critical/10 text-critical border-critical/20",
+      dotColor: "bg-critical",
     },
     pending: {
       label: "Pending",
-      color: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-      dotColor: "bg-amber-400",
+      color: "bg-warning/10 text-warning border-warning/20",
+      dotColor: "bg-warning",
     },
   };
 
@@ -331,11 +331,11 @@ function ErrorBanner({ message, onRetry, onDismiss }: ErrorBannerProps) {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -10 }}
         transition={{ duration: 0.2 }}
-        className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl"
+        className="mb-6 p-4 bg-critical/10 border border-critical/20 rounded-xl"
       >
         <div className="flex items-start gap-3">
           <svg
-            className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0"
+            className="w-5 h-5 text-critical mt-0.5 flex-shrink-0"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -353,13 +353,13 @@ function ErrorBanner({ message, onRetry, onDismiss }: ErrorBannerProps) {
           <div className="flex items-center gap-2">
             <button
               onClick={onRetry}
-              className="px-3 py-1 text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-critical/20 hover:bg-critical/30 text-red-300 rounded-lg transition-colors"
             >
               Retry
             </button>
             <button
               onClick={onDismiss}
-              className="p-1 text-red-400 hover:text-red-300 transition-colors"
+              className="p-1 text-critical hover:text-red-300 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

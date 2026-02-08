@@ -64,7 +64,7 @@ function CreateGoalForm({ onClose, onSubmit, isLoading }: CreateGoalFormProps) {
         {/* Title */}
         <div>
           <label htmlFor="title" className="block text-sm font-medium text-slate-300 mb-1.5">
-            Goal Title <span className="text-red-400">*</span>
+            Goal Title <span className="text-critical">*</span>
           </label>
           <input
             id="title"

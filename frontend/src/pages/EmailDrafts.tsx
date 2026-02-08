@@ -139,8 +139,8 @@ export function EmailDraftsPage() {
 
           {/* Error state */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
-              <p className="text-red-400">Failed to load drafts. Please try again.</p>
+            <div className="bg-critical/10 border border-critical/30 rounded-xl p-4 mb-6">
+              <p className="text-critical">Failed to load drafts. Please try again.</p>
             </div>
           )}
 

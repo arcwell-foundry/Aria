@@ -161,9 +161,9 @@ export function BattleCardDetailModal({
                 {/* Strengths */}
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-success/10">
                       <svg
-                        className="w-4 h-4 text-emerald-400"
+                        className="w-4 h-4 text-success"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -176,7 +176,7 @@ export function BattleCardDetailModal({
                         />
                       </svg>
                     </div>
-                    <h4 className="text-sm font-medium text-emerald-400 uppercase tracking-wide">
+                    <h4 className="text-sm font-medium text-success uppercase tracking-wide">
                       Their Strengths
                     </h4>
                   </div>
@@ -185,9 +185,9 @@ export function BattleCardDetailModal({
                       {card.strengths.map((strength, idx) => (
                         <li
                           key={idx}
-                          className="flex items-start gap-3 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl"
+                          className="flex items-start gap-3 p-3 bg-success/5 border border-success/10 rounded-xl"
                         >
-                          <span className="shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-emerald-400" />
+                          <span className="shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-success" />
                           <span className="text-slate-300">{strength}</span>
                         </li>
                       ))}
@@ -200,9 +200,9 @@ export function BattleCardDetailModal({
                 {/* Weaknesses */}
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/10">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-warning/10">
                       <svg
-                        className="w-4 h-4 text-amber-400"
+                        className="w-4 h-4 text-warning"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -215,7 +215,7 @@ export function BattleCardDetailModal({
                         />
                       </svg>
                     </div>
-                    <h4 className="text-sm font-medium text-amber-400 uppercase tracking-wide">
+                    <h4 className="text-sm font-medium text-warning uppercase tracking-wide">
                       Their Weaknesses
                     </h4>
                   </div>
@@ -224,9 +224,9 @@ export function BattleCardDetailModal({
                       {card.weaknesses.map((weakness, idx) => (
                         <li
                           key={idx}
-                          className="flex items-start gap-3 p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl"
+                          className="flex items-start gap-3 p-3 bg-warning/5 border border-warning/10 rounded-xl"
                         >
-                          <span className="shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-amber-400" />
+                          <span className="shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-warning" />
                           <span className="text-slate-300">{weakness}</span>
                         </li>
                       ))}
@@ -325,11 +325,11 @@ export function BattleCardDetailModal({
                       key={idx}
                       className="rounded-xl border border-slate-700 overflow-hidden"
                     >
-                      <div className="px-4 py-3 bg-red-500/5 border-b border-slate-700">
+                      <div className="px-4 py-3 bg-critical/5 border-b border-slate-700">
                         <div className="flex items-start gap-3">
-                          <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-red-500/20 mt-0.5">
+                          <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-critical/20 mt-0.5">
                             <svg
-                              className="w-3.5 h-3.5 text-red-400"
+                              className="w-3.5 h-3.5 text-critical"
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"
@@ -345,11 +345,11 @@ export function BattleCardDetailModal({
                           <p className="text-red-300 font-medium">"{handler.objection}"</p>
                         </div>
                       </div>
-                      <div className="px-4 py-3 bg-emerald-500/5">
+                      <div className="px-4 py-3 bg-success/5">
                         <div className="flex items-start gap-3">
-                          <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/20 mt-0.5">
+                          <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-success/20 mt-0.5">
                             <svg
-                              className="w-3.5 h-3.5 text-emerald-400"
+                              className="w-3.5 h-3.5 text-success"
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"

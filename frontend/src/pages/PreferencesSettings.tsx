@@ -39,7 +39,7 @@ function SuccessToast({ show, onHide }: { show: boolean; onHide: () => void }) {
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           className="fixed bottom-6 right-6 z-50"
         >
-          <div className="flex items-center gap-2 px-4 py-3 bg-emerald-500/90 backdrop-blur-sm text-white rounded-xl shadow-lg shadow-emerald-500/25">
+          <div className="flex items-center gap-2 px-4 py-3 bg-success/90 backdrop-blur-sm text-white rounded-xl shadow-lg shadow-success/25">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
@@ -74,10 +74,10 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl"
+      className="mb-6 p-4 bg-critical/10 border border-critical/20 rounded-xl"
     >
       <div className="flex items-start gap-3">
-        <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-5 h-5 text-critical mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div className="flex-1">
@@ -85,7 +85,7 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
         </div>
         <button
           onClick={onRetry}
-          className="px-3 py-1 text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors"
+          className="px-3 py-1 text-xs font-medium bg-critical/20 hover:bg-critical/30 text-red-300 rounded-lg transition-colors"
         >
           Retry
         </button>

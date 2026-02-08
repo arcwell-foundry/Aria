@@ -29,10 +29,10 @@ interface ActionCardProps {
 
 const agentConfig: Record<ActionAgent, { icon: typeof Bot; label: string; color: string }> = {
   scout: { icon: Compass, label: "Scout", color: "text-teal-400" },
-  analyst: { icon: Brain, label: "Analyst", color: "text-violet-400" },
+  analyst: { icon: Brain, label: "Analyst", color: "text-interactive" },
   hunter: { icon: Crosshair, label: "Hunter", color: "text-orange-400" },
-  operator: { icon: Settings, label: "Operator", color: "text-blue-400" },
-  scribe: { icon: PenLine, label: "Scribe", color: "text-emerald-400" },
+  operator: { icon: Settings, label: "Operator", color: "text-info" },
+  scribe: { icon: PenLine, label: "Scribe", color: "text-success" },
   strategist: { icon: Shield, label: "Strategist", color: "text-rose-400" },
 };
 
@@ -46,19 +46,19 @@ const actionTypeConfig: Record<string, { icon: typeof Mail; label: string }> = {
 
 const riskConfig: Record<RiskLevel, { bg: string; text: string; label: string }> = {
   low: { bg: "bg-green-500/10", text: "text-green-400", label: "Low" },
-  medium: { bg: "bg-amber-500/10", text: "text-amber-400", label: "Medium" },
+  medium: { bg: "bg-warning/10", text: "text-warning", label: "Medium" },
   high: { bg: "bg-orange-500/10", text: "text-orange-400", label: "High" },
-  critical: { bg: "bg-red-500/10", text: "text-red-400", label: "Critical" },
+  critical: { bg: "bg-critical/10", text: "text-critical", label: "Critical" },
 };
 
 const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
-  pending: { bg: "bg-amber-500/10", text: "text-amber-400", label: "Pending" },
-  approved: { bg: "bg-blue-500/10", text: "text-blue-400", label: "Approved" },
+  pending: { bg: "bg-warning/10", text: "text-warning", label: "Pending" },
+  approved: { bg: "bg-info/10", text: "text-info", label: "Approved" },
   auto_approved: { bg: "bg-teal-500/10", text: "text-teal-400", label: "Auto-Approved" },
-  executing: { bg: "bg-violet-500/10", text: "text-violet-400", label: "Executing" },
+  executing: { bg: "bg-interactive/10", text: "text-interactive", label: "Executing" },
   completed: { bg: "bg-green-500/10", text: "text-green-400", label: "Completed" },
-  rejected: { bg: "bg-red-500/10", text: "text-red-400", label: "Rejected" },
-  failed: { bg: "bg-red-500/10", text: "text-red-400", label: "Failed" },
+  rejected: { bg: "bg-critical/10", text: "text-critical", label: "Rejected" },
+  failed: { bg: "bg-critical/10", text: "text-critical", label: "Failed" },
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -196,7 +196,7 @@ export function ActionCard({
                         e.stopPropagation();
                         onReject(action.id);
                       }}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-lg transition-colors"
                       title="Reject action"
                     >
                       <X className="w-4 h-4" />

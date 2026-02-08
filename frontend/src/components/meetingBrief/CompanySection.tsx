@@ -68,7 +68,7 @@ export function CompanySection({ company }: CompanySectionProps) {
                   key={i}
                   className="flex items-start gap-3 p-3 bg-slate-700/20 border border-slate-600/20 rounded-lg"
                 >
-                  <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-amber-400 rounded-full" />
+                  <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-warning rounded-full" />
                   <span className="text-sm text-slate-300">{news}</span>
                 </li>
               ))}

@@ -104,7 +104,7 @@ export function DraftComposeModal({
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                  Recipient Email <span className="text-red-400">*</span>
+                  Recipient Email <span className="text-critical">*</span>
                 </label>
                 <input
                   type="email"

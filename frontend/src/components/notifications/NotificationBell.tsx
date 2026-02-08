@@ -42,11 +42,11 @@ const NotificationIcons: Record<string, React.ReactNode> = {
 
 // Color classes by type
 const TypeColors: Record<string, string> = {
-  briefing_ready: "text-blue-400",
-  signal_detected: "text-amber-400",
+  briefing_ready: "text-info",
+  signal_detected: "text-warning",
   task_due: "text-rose-400",
-  meeting_brief_ready: "text-emerald-400",
-  draft_ready: "text-violet-400",
+  meeting_brief_ready: "text-success",
+  draft_ready: "text-interactive",
 };
 
 // Time ago formatter

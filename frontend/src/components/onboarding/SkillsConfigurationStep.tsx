@@ -217,7 +217,7 @@ export function SkillsConfigurationStep({
 
       {/* Trust Level Badge */}
       <div className="flex items-center justify-center space-x-2 text-sm">
-        <Zap className="w-4 h-4 text-blue-500" />
+        <Zap className="w-4 h-4 text-info" />
         <span className="text-gray-600">Starting at</span>
         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium">
           COMMUNITY Trust Level
@@ -240,14 +240,14 @@ export function SkillsConfigurationStep({
               onClick={() => toggleSkill(skill.skill_id)}
               className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
                 isSelected
-                  ? "border-blue-500 bg-blue-50"
+                  ? "border-info bg-info/10"
                   : "border-gray-200 hover:border-gray-300"
               }`}
             >
               <div className="flex items-start">
                 <div className="flex-shrink-0 mt-0.5">
                   {isSelected ? (
-                    <CheckCircle2 className="w-5 h-5 text-blue-500" />
+                    <CheckCircle2 className="w-5 h-5 text-info" />
                   ) : (
                     <Circle className="w-5 h-5 text-gray-300" />
                   )}
@@ -265,7 +265,7 @@ export function SkillsConfigurationStep({
       {/* Error Message */}
       {errorMessage && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-600">{errorMessage}</p>
+          <p className="text-sm text-critical">{errorMessage}</p>
         </div>
       )}
 

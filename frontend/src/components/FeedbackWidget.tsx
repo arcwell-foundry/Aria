@@ -61,7 +61,7 @@ export function FeedbackWidget({ messageId, className = "" }: FeedbackWidgetProp
           <button
             onClick={handleThumbsUp}
             disabled={isSubmitting || rating === "down"}
-            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 text-slate-400 hover:text-success hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="This was helpful"
           >
             <ThumbsUp className="w-4 h-4" />
@@ -78,7 +78,7 @@ export function FeedbackWidget({ messageId, className = "" }: FeedbackWidgetProp
       )}
 
       {submitted && rating === "up" && (
-        <span className="text-sm text-emerald-400">Thanks!</span>
+        <span className="text-sm text-success">Thanks!</span>
       )}
 
       {showComment && !submitted && (

@@ -179,13 +179,13 @@ export function ActionQueuePage() {
               label="Pending"
               value={stats.pending}
               icon={<Clock className="w-5 h-5" />}
-              accent="text-amber-400"
+              accent="text-warning"
             />
             <StatCard
               label="Approved"
               value={stats.approved}
               icon={<CheckCircle2 className="w-5 h-5" />}
-              accent="text-blue-400"
+              accent="text-info"
             />
             <StatCard
               label="Completed"
@@ -197,7 +197,7 @@ export function ActionQueuePage() {
               label="Rejected"
               value={stats.rejected}
               icon={<XCircle className="w-5 h-5" />}
-              accent="text-red-400"
+              accent="text-critical"
             />
           </div>
 
@@ -246,8 +246,8 @@ export function ActionQueuePage() {
 
           {/* Error state */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
-              <p className="text-red-400">Failed to load actions. Please try again.</p>
+            <div className="bg-critical/10 border border-critical/30 rounded-xl p-4 mb-6">
+              <p className="text-critical">Failed to load actions. Please try again.</p>
             </div>
           )}
 

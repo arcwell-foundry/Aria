@@ -38,8 +38,8 @@ type GoalDetailExtended = GoalDetail & {
 
 const healthConfig: Record<GoalHealth, { dotColor: string; label: string }> = {
   on_track: { dotColor: "bg-green-400", label: "On Track" },
-  at_risk: { dotColor: "bg-amber-400", label: "At Risk" },
-  behind: { dotColor: "bg-red-400", label: "Behind" },
+  at_risk: { dotColor: "bg-warning", label: "At Risk" },
+  behind: { dotColor: "bg-critical", label: "Behind" },
   blocked: { dotColor: "bg-slate-400", label: "Blocked" },
 };
 
@@ -47,7 +47,7 @@ const agentStatusConfig: Record<AgentStatus, { color: string; label: string }> =
   pending: { color: "bg-slate-500/20 text-slate-400 border-slate-500/30", label: "Pending" },
   running: { color: "bg-green-500/20 text-green-400 border-green-500/30", label: "Running" },
   complete: { color: "bg-primary-500/20 text-primary-400 border-primary-500/30", label: "Complete" },
-  failed: { color: "bg-red-500/20 text-red-400 border-red-500/30", label: "Failed" },
+  failed: { color: "bg-critical/20 text-critical border-critical/30", label: "Failed" },
 };
 
 function getDaysRemaining(targetDate: string): number {
@@ -176,9 +176,9 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
 
             {/* Error state */}
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                <p className="text-sm text-red-400">Failed to load goal details.</p>
+              <div className="flex items-center gap-2 p-3 bg-critical/10 border border-critical/20 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-critical flex-shrink-0" />
+                <p className="text-sm text-critical">Failed to load goal details.</p>
               </div>
             )}
 
@@ -228,7 +228,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                       <button
                         onClick={() => pauseGoal.mutate(goalId)}
                         disabled={pauseGoal.isPending}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-warning bg-warning/10 hover:bg-warning/20 border border-warning/30 rounded-lg transition-colors disabled:opacity-50"
                       >
                         {pauseGoal.isPending ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -311,7 +311,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                           );
                         }
                         return (
-                          <span className="ml-2 inline-flex items-center gap-1 text-xs text-red-400">
+                          <span className="ml-2 inline-flex items-center gap-1 text-xs text-critical">
                             <Clock className="w-3 h-3" />
                             Overdue
                           </span>
@@ -475,7 +475,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                         {/* What didn't work */}
                         {goal.retrospective.what_didnt.length > 0 && (
                           <div>
-                            <h4 className="text-xs font-medium text-red-400 mb-1.5">
+                            <h4 className="text-xs font-medium text-critical mb-1.5">
                               What Didn&apos;t Work
                             </h4>
                             <ul className="space-y-1">
@@ -484,7 +484,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                                   key={i}
                                   className="flex items-start gap-2 text-sm text-slate-400"
                                 >
-                                  <span className="mt-1.5 w-1 h-1 rounded-full bg-red-400 flex-shrink-0" />
+                                  <span className="mt-1.5 w-1 h-1 rounded-full bg-critical flex-shrink-0" />
                                   {item}
                                 </li>
                               ))}
@@ -495,7 +495,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                         {/* Learnings */}
                         {goal.retrospective.learnings.length > 0 && (
                           <div>
-                            <h4 className="text-xs font-medium text-amber-400 mb-1.5">
+                            <h4 className="text-xs font-medium text-warning mb-1.5">
                               Key Learnings
                             </h4>
                             <ul className="space-y-1">
@@ -504,7 +504,7 @@ export function GoalDetailPanel({ goalId, isOpen, onClose }: GoalDetailPanelProp
                                   key={i}
                                   className="flex items-start gap-2 text-sm text-slate-400"
                                 >
-                                  <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-400 flex-shrink-0" />
+                                  <span className="mt-1.5 w-1 h-1 rounded-full bg-warning flex-shrink-0" />
                                   {item}
                                 </li>
                               ))}

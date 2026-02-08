@@ -14,26 +14,26 @@ function HealthBadge({ score }: { score: number }) {
     if (score >= 70) {
       return {
         emoji: "🟢",
-        bg: "bg-emerald-500/10",
-        border: "border-emerald-500/20",
-        text: "text-emerald-400",
+        bg: "bg-success/10",
+        border: "border-success/20",
+        text: "text-success",
         label: "Healthy",
       };
     }
     if (score >= 40) {
       return {
         emoji: "🟡",
-        bg: "bg-amber-500/10",
-        border: "border-amber-500/20",
-        text: "text-amber-400",
+        bg: "bg-warning/10",
+        border: "border-warning/20",
+        text: "text-warning",
         label: "Attention",
       };
     }
     return {
       emoji: "🔴",
-      bg: "bg-red-500/10",
-      border: "border-red-500/20",
-      text: "text-red-400",
+      bg: "bg-critical/10",
+      border: "border-critical/20",
+      text: "text-critical",
       label: "At Risk",
     };
   };
@@ -133,11 +133,11 @@ export function LeadCard({ lead, isSelected, onSelect, onAddNote }: LeadCardProp
               <span
                 className={`text-xs capitalize ${
                   lead.status === "active"
-                    ? "text-emerald-400"
+                    ? "text-success"
                     : lead.status === "won"
                       ? "text-primary-400"
                       : lead.status === "lost"
-                        ? "text-red-400"
+                        ? "text-critical"
                         : "text-slate-500"
                 }`}
               >

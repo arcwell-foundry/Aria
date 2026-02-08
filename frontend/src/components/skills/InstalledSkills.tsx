@@ -78,10 +78,10 @@ function InstalledSkillRow({
               <span
                 className={`inline-flex items-center gap-1 ${
                   successRate >= 80
-                    ? "text-emerald-500"
+                    ? "text-success"
                     : successRate >= 50
-                      ? "text-amber-500"
-                      : "text-red-500"
+                      ? "text-warning"
+                      : "text-critical"
                 }`}
               >
                 <svg
@@ -132,7 +132,7 @@ function InstalledSkillRow({
                   setConfirmUninstall(false);
                 }}
                 disabled={isUninstalling}
-                className="px-3 py-1.5 text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-medium text-critical bg-critical/10 border border-critical/30 hover:bg-critical/20 rounded-lg transition-colors disabled:opacity-50"
               >
                 {isUninstalling ? "Removing..." : "Confirm"}
               </button>
@@ -146,7 +146,7 @@ function InstalledSkillRow({
           ) : (
             <button
               onClick={() => setConfirmUninstall(true)}
-              className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+              className="p-2 text-slate-500 hover:text-critical hover:bg-critical/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
               title="Uninstall skill"
             >
               <svg
@@ -177,8 +177,8 @@ export function InstalledSkills() {
   // Error
   if (error) {
     return (
-      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-        <p className="text-red-400">
+      <div className="bg-critical/10 border border-critical/30 rounded-xl p-4">
+        <p className="text-critical">
           Failed to load installed skills. Please try again.
         </p>
       </div>

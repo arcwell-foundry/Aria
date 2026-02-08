@@ -16,12 +16,12 @@ const trustConfig: Record<
   },
   verified: {
     label: "Verified",
-    color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+    color: "bg-success/20 text-success border-success/30",
     icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
   },
   community: {
     label: "Community",
-    color: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+    color: "bg-warning/20 text-warning border-warning/30",
     icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
   },
   user: {

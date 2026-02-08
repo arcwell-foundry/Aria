@@ -37,11 +37,11 @@ const eventLabels: Record<EventType, string> = {
 
 // Map event types to icon colors
 const eventIconColors: Record<EventType, string> = {
-  email_sent: "text-blue-400",
+  email_sent: "text-info",
   email_received: "text-cyan-400",
   meeting: "text-purple-400",
   call: "text-green-400",
-  note: "text-amber-400",
+  note: "text-warning",
   signal: "text-rose-400",
 };
 

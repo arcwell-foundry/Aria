@@ -47,9 +47,9 @@ function capitalize(s: string): string {
 function statusBadgeClasses(status: string | null): string {
   switch (status) {
     case "success":
-      return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+      return "bg-success/20 text-success border-success/30";
     case "failed":
-      return "bg-red-500/20 text-red-400 border-red-500/30";
+      return "bg-critical/20 text-critical border-critical/30";
     case "pending":
     case "in_progress":
       return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
@@ -164,11 +164,11 @@ function SyncResultDisplay({ result }: { result: SyncResult }) {
         </div>
         <div>
           <span className="text-[#8B92A5]">Succeeded</span>
-          <span className="ml-2 text-emerald-400 font-mono">{result.records_succeeded}</span>
+          <span className="ml-2 text-success font-mono">{result.records_succeeded}</span>
         </div>
         <div>
           <span className="text-[#8B92A5]">Failed</span>
-          <span className="ml-2 text-red-400 font-mono">{result.records_failed}</span>
+          <span className="ml-2 text-critical font-mono">{result.records_failed}</span>
         </div>
         <div>
           <span className="text-[#8B92A5]">Memory entries</span>
@@ -280,11 +280,11 @@ export function DeepSyncPage() {
 
           {/* ---- Error State ---- */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
-              <AlertCircleIcon className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="bg-critical/10 border border-critical/30 rounded-xl p-4 flex items-start gap-3">
+              <AlertCircleIcon className="w-5 h-5 text-critical mt-0.5 flex-shrink-0" />
               <div>
-                <p className="text-red-400 font-medium text-sm">Failed to load sync status</p>
-                <p className="text-red-400/70 text-xs mt-1">
+                <p className="text-critical font-medium text-sm">Failed to load sync status</p>
+                <p className="text-critical/70 text-xs mt-1">
                   {error instanceof Error ? error.message : "An unexpected error occurred. Please try again."}
                 </p>
               </div>
@@ -398,8 +398,8 @@ export function DeepSyncPage() {
                     {/* Sync error */}
                     {triggerSync.isError &&
                       triggerSync.variables === status.integration_type && (
-                        <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                          <p className="text-xs text-red-400">
+                        <div className="mt-3 bg-critical/10 border border-critical/30 rounded-lg p-3">
+                          <p className="text-xs text-critical">
                             Sync failed:{" "}
                             {triggerSync.error instanceof Error
                               ? triggerSync.error.message
@@ -500,7 +500,7 @@ export function DeepSyncPage() {
 
                   {/* Success toast */}
                   {configSaved && (
-                    <div className="flex items-center gap-2 text-sm text-emerald-400">
+                    <div className="flex items-center gap-2 text-sm text-success">
                       <CheckCircleIcon className="w-4 h-4" />
                       Configuration saved
                     </div>
@@ -508,7 +508,7 @@ export function DeepSyncPage() {
 
                   {/* Error message */}
                   {updateConfig.isError && (
-                    <div className="flex items-center gap-2 text-sm text-red-400">
+                    <div className="flex items-center gap-2 text-sm text-critical">
                       <AlertCircleIcon className="w-4 h-4" />
                       {updateConfig.error instanceof Error
                         ? updateConfig.error.message

@@ -364,7 +364,7 @@ describe('FeedbackWidget', () => {
       render(<FeedbackWidget messageId={mockMessageId} />);
 
       const thumbsUpButton = screen.getByTitle('This was helpful');
-      expect(thumbsUpButton).toHaveClass('hover:text-emerald-400', 'hover:bg-slate-800');
+      expect(thumbsUpButton).toHaveClass('hover:text-success', 'hover:bg-slate-800');
     });
 
     it('thumbs down has correct hover classes', () => {

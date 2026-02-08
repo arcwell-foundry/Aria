@@ -27,7 +27,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
           {/* Status indicator */}
           <div
             className={`mt-0.5 flex-shrink-0 w-2 h-2 rounded-full ${
-              entry.success ? "bg-emerald-400" : "bg-red-400"
+              entry.success ? "bg-success" : "bg-critical"
             }`}
           />
 
@@ -49,7 +49,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
 
             {/* Error message */}
             {entry.error && (
-              <p className="mt-1.5 text-xs text-red-400 line-clamp-1">
+              <p className="mt-1.5 text-xs text-critical line-clamp-1">
                 {entry.error}
               </p>
             )}
@@ -60,7 +60,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
                 {entry.security_flags.map((flag) => (
                   <span
                     key={flag}
-                    className="px-1.5 py-0.5 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded"
+                    className="px-1.5 py-0.5 text-xs text-warning bg-warning/10 border border-warning/20 rounded"
                   >
                     {flag}
                   </span>
@@ -94,8 +94,8 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
         <span
           className={`flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded ${
             entry.success
-              ? "text-emerald-400 bg-emerald-500/10"
-              : "text-red-400 bg-red-500/10"
+              ? "text-success bg-success/10"
+              : "text-critical bg-critical/10"
           }`}
         >
           {entry.success ? "Success" : "Failed"}
@@ -111,8 +111,8 @@ export function SkillAuditLog() {
   // Error
   if (error) {
     return (
-      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-        <p className="text-red-400">
+      <div className="bg-critical/10 border border-critical/30 rounded-xl p-4">
+        <p className="text-critical">
           Failed to load audit log. Please try again.
         </p>
       </div>

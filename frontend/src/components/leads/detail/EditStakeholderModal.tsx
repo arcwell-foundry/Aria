@@ -21,9 +21,9 @@ const roleOptions: { value: StakeholderRole; label: string }[] = [
 
 // Sentiment options for toggle buttons
 const sentimentOptions: { value: Sentiment; label: string; color: string; activeColor: string }[] = [
-  { value: "positive", label: "Positive", color: "text-emerald-400", activeColor: "bg-emerald-500/20 border-emerald-500/50 text-emerald-400" },
-  { value: "neutral", label: "Neutral", color: "text-amber-400", activeColor: "bg-amber-500/20 border-amber-500/50 text-amber-400" },
-  { value: "negative", label: "Negative", color: "text-red-400", activeColor: "bg-red-500/20 border-red-500/50 text-red-400" },
+  { value: "positive", label: "Positive", color: "text-success", activeColor: "bg-success/20 border-success/50 text-success" },
+  { value: "neutral", label: "Neutral", color: "text-warning", activeColor: "bg-warning/20 border-warning/50 text-warning" },
+  { value: "negative", label: "Negative", color: "text-critical", activeColor: "bg-critical/20 border-critical/50 text-critical" },
   { value: "unknown", label: "Unknown", color: "text-slate-400", activeColor: "bg-slate-500/20 border-slate-500/50 text-slate-400" },
 ];
 
@@ -92,8 +92,8 @@ export function EditStakeholderModal({
   // Get influence label and color
   const getInfluenceLabel = (value: number): { label: string; color: string } => {
     if (value <= 3) return { label: "Low", color: "text-slate-400" };
-    if (value <= 6) return { label: "Medium", color: "text-amber-400" };
-    return { label: "High", color: "text-emerald-400" };
+    if (value <= 6) return { label: "Medium", color: "text-warning" };
+    return { label: "High", color: "text-success" };
   };
 
   const influenceInfo = getInfluenceLabel(influence);

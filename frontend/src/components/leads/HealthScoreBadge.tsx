@@ -8,30 +8,30 @@ export function HealthScoreBadge({ score, size = "md", showLabel = true }: Healt
   const getHealthConfig = (score: number) => {
     if (score >= 70) {
       return {
-        indicator: "bg-emerald-500",
-        bg: "bg-emerald-500/10",
-        border: "border-emerald-500/20",
-        text: "text-emerald-400",
-        glow: "shadow-emerald-500/20",
+        indicator: "bg-success",
+        bg: "bg-success/10",
+        border: "border-success/20",
+        text: "text-success",
+        glow: "shadow-success/20",
         label: "Healthy",
       };
     }
     if (score >= 40) {
       return {
-        indicator: "bg-amber-500",
-        bg: "bg-amber-500/10",
-        border: "border-amber-500/20",
-        text: "text-amber-400",
-        glow: "shadow-amber-500/20",
+        indicator: "bg-warning",
+        bg: "bg-warning/10",
+        border: "border-warning/20",
+        text: "text-warning",
+        glow: "shadow-warning/20",
         label: "Attention",
       };
     }
     return {
-      indicator: "bg-red-500",
-      bg: "bg-red-500/10",
-      border: "border-red-500/20",
-      text: "text-red-400",
-      glow: "shadow-red-500/20",
+      indicator: "bg-critical",
+      bg: "bg-critical/10",
+      border: "border-critical/20",
+      text: "text-critical",
+      glow: "shadow-critical/20",
       label: "At Risk",
     };
   };

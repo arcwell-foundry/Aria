@@ -21,8 +21,8 @@ const eventTypeOptions: {
   {
     value: "email_sent",
     label: "Email Sent",
-    color: "text-blue-400",
-    activeColor: "bg-blue-500/20 border-blue-500/50 text-blue-400",
+    color: "text-info",
+    activeColor: "bg-info/20 border-info/50 text-info",
   },
   {
     value: "email_received",
@@ -39,8 +39,8 @@ const eventTypeOptions: {
   {
     value: "call",
     label: "Call",
-    color: "text-amber-400",
-    activeColor: "bg-amber-500/20 border-amber-500/50 text-amber-400",
+    color: "text-warning",
+    activeColor: "bg-warning/20 border-warning/50 text-warning",
   },
   {
     value: "note",
@@ -51,8 +51,8 @@ const eventTypeOptions: {
   {
     value: "signal",
     label: "Signal",
-    color: "text-emerald-400",
-    activeColor: "bg-emerald-500/20 border-emerald-500/50 text-emerald-400",
+    color: "text-success",
+    activeColor: "bg-success/20 border-success/50 text-success",
   },
 ];
 
@@ -217,7 +217,7 @@ export function AddEventModal({
           {/* Content textarea (always shown) */}
           <div className="mb-6">
             <label htmlFor="event-content" className="block text-sm font-medium text-slate-300 mb-2">
-              Content <span className="text-red-400">*</span>
+              Content <span className="text-critical">*</span>
             </label>
             <textarea
               id="event-content"

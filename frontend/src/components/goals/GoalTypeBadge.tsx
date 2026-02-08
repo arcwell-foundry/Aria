@@ -8,22 +8,22 @@ interface GoalTypeBadgeProps {
 const typeConfig: Record<GoalType, { label: string; color: string; icon: string }> = {
   lead_gen: {
     label: "Lead Gen",
-    color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+    color: "bg-success/20 text-success border-success/30",
     icon: "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z M15 11a3 3 0 11-6 0 3 3 0 016 0z",
   },
   research: {
     label: "Research",
-    color: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+    color: "bg-info/20 text-info border-info/30",
     icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01",
   },
   outreach: {
     label: "Outreach",
-    color: "bg-violet-500/20 text-violet-400 border-violet-500/30",
+    color: "bg-interactive/20 text-interactive border-interactive/30",
     icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
   },
   analysis: {
     label: "Analysis",
-    color: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+    color: "bg-warning/20 text-warning border-warning/30",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   },
   custom: {

@@ -174,13 +174,13 @@ export function GoalsPage() {
               label="Completed"
               value={stats.completed}
               icon={<CheckCircle2 className="w-5 h-5" />}
-              accent="text-blue-400"
+              accent="text-info"
             />
             <StatCard
               label="At Risk"
               value={stats.atRisk}
               icon={<AlertTriangle className="w-5 h-5" />}
-              accent="text-amber-400"
+              accent="text-warning"
             />
           </div>
 
@@ -232,8 +232,8 @@ export function GoalsPage() {
 
           {/* Error state */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
-              <p className="text-red-400">Failed to load goals. Please try again.</p>
+            <div className="bg-critical/10 border border-critical/30 rounded-xl p-4 mb-6">
+              <p className="text-critical">Failed to load goals. Please try again.</p>
             </div>
           )}
 

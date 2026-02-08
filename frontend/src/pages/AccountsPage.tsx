@@ -145,25 +145,25 @@ function sortAccounts(accounts: AccountListItem[], key: SortKey, dir: SortDir): 
 // ---------------------------------------------------------------------------
 
 function healthColor(score: number): string {
-  if (score >= 70) return "text-emerald-400";
+  if (score >= 70) return "text-success";
   if (score >= 40) return "text-yellow-400";
-  return "text-red-400";
+  return "text-critical";
 }
 
 function healthBarColor(score: number): string {
-  if (score >= 70) return "bg-emerald-500";
+  if (score >= 70) return "bg-success";
   if (score >= 40) return "bg-yellow-500";
-  return "bg-red-500";
+  return "bg-critical";
 }
 
 function stageBadgeColor(stage: string): string {
   switch (stage.toLowerCase()) {
     case "lead":
-      return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+      return "bg-info/20 text-info border-info/30";
     case "opportunity":
-      return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      return "bg-warning/20 text-warning border-warning/30";
     case "account":
-      return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+      return "bg-success/20 text-success border-success/30";
     default:
       return "bg-slate-500/20 text-slate-400 border-slate-500/30";
   }
@@ -172,18 +172,18 @@ function stageBadgeColor(stage: string): string {
 function priorityBadgeColor(priority: "high" | "medium" | "low"): string {
   switch (priority) {
     case "high":
-      return "bg-red-500/20 text-red-400 border-red-500/30";
+      return "bg-critical/20 text-critical border-critical/30";
     case "medium":
       return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
     case "low":
-      return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+      return "bg-success/20 text-success border-success/30";
   }
 }
 
 function quotaBarColor(pct: number): string {
-  if (pct >= 75) return "bg-emerald-500";
+  if (pct >= 75) return "bg-success";
   if (pct >= 50) return "bg-yellow-500";
-  return "bg-red-500";
+  return "bg-critical";
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ function AccountDetailPanel({
             onClick={() => setActiveTab(tab.value)}
             className={`flex-1 py-3 text-sm font-medium text-center transition-colors ${
               activeTab === tab.value
-                ? "text-violet-400 border-b-2 border-violet-500"
+                ? "text-interactive border-b-2 border-interactive"
                 : "text-slate-400 hover:text-white"
             }`}
           >
@@ -279,18 +279,18 @@ function AccountDetailPanel({
                   value={displayStrategy}
                   onChange={(e) => setStrategy(e.target.value)}
                   rows={8}
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm resize-y focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm resize-y focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent"
                   placeholder="Describe your account strategy..."
                 />
                 <button
                   onClick={handleSave}
                   disabled={updatePlan.isPending}
-                  className="px-4 py-2 bg-violet-600 text-white text-sm rounded-lg font-medium hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 bg-interactive text-white text-sm rounded-lg font-medium hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {updatePlan.isPending ? "Saving..." : "Save Strategy"}
                 </button>
                 {updatePlan.isSuccess && (
-                  <p className="text-sm text-emerald-400">Strategy saved.</p>
+                  <p className="text-sm text-success">Strategy saved.</p>
                 )}
               </>
             )}
@@ -487,7 +487,7 @@ export function AccountsPage() {
 
             {/* Weighted Forecast */}
             <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex items-center gap-3">
-              <div className="text-violet-400">
+              <div className="text-interactive">
                 <TrendingUpIcon />
               </div>
               <div>
@@ -507,7 +507,7 @@ export function AccountsPage() {
                 onClick={() => setStageFilter(f.value)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   stageFilter === f.value
-                    ? "bg-violet-600 text-white"
+                    ? "bg-interactive text-white"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
@@ -636,7 +636,7 @@ export function AccountsPage() {
                       ]}
                     />
                     <Bar dataKey="totalValue" fill="#475569" radius={[4, 4, 0, 0]} name="totalValue" />
-                    <Bar dataKey="weightedValue" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="weightedValue" />
+                    <Bar dataKey="weightedValue" fill="var(--interactive)" radius={[4, 4, 0, 0]} name="weightedValue" />
                   </BarChart>
                 </ResponsiveContainer>
                 <p className="mt-4 text-sm text-slate-400 text-center">
@@ -664,7 +664,7 @@ export function AccountsPage() {
                     <div key={q.id} className="bg-slate-800 border border-slate-700 rounded-lg p-4">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-white text-sm font-medium">{q.period}</span>
-                        <span className={`text-sm font-mono ${pct >= 75 ? "text-emerald-400" : pct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
+                        <span className={`text-sm font-mono ${pct >= 75 ? "text-success" : pct >= 50 ? "text-yellow-400" : "text-critical"}`}>
                           {pct}%
                         </span>
                       </div>
@@ -693,7 +693,7 @@ export function AccountsPage() {
                 value={quotaPeriod}
                 onChange={(e) => setQuotaPeriod(e.target.value)}
                 placeholder="Period (e.g. Q1 2026)"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent"
               />
               <input
                 type="number"
@@ -702,12 +702,12 @@ export function AccountsPage() {
                 placeholder="Target value ($)"
                 min="0"
                 step="1000"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-interactive focus:border-transparent"
               />
               <button
                 type="submit"
                 disabled={setQuota.isPending}
-                className="px-5 py-2 bg-violet-600 text-white text-sm rounded-lg font-medium hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                className="px-5 py-2 bg-interactive text-white text-sm rounded-lg font-medium hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
               >
                 {setQuota.isPending ? "Setting..." : "Set Quota"}
               </button>

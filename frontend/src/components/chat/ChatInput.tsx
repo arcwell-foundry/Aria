@@ -77,7 +77,7 @@ export function ChatInput({
           <button
             onClick={handleSubmit}
             disabled={disabled || !content.trim()}
-            className="relative flex-shrink-0 w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-white flex items-center justify-center transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed hover:from-primary-400 hover:to-primary-500 hover:shadow-lg hover:shadow-primary-500/30 active:scale-95"
+            className="relative flex-shrink-0 w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-white flex items-center justify-center transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed hover:from-primary-400 hover:to-primary-500 hover:shadow-lg hover:shadow-primary-500/30"
           >
             {/* Button glow */}
             {content.trim() && !disabled && (

@@ -165,7 +165,7 @@ export function AriaChatPage() {
                     <path d="M7 16h10" />
                   </svg>
                 </div>
-                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900" />
+                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success rounded-full border-2 border-slate-900" />
               </div>
 
               <div>

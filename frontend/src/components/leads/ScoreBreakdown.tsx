@@ -1,15 +1,15 @@
 import type { LeadScoreBreakdown } from "@/api/leadGeneration";
 
 function scoreColor(score: number): string {
-  if (score >= 70) return "text-emerald-400";
-  if (score >= 40) return "text-amber-400";
-  return "text-red-400";
+  if (score >= 70) return "text-success";
+  if (score >= 40) return "text-warning";
+  return "text-critical";
 }
 
 function barColor(score: number): string {
-  if (score >= 70) return "bg-emerald-500";
-  if (score >= 40) return "bg-amber-500";
-  return "bg-red-500";
+  if (score >= 70) return "bg-success";
+  if (score >= 40) return "bg-warning";
+  return "bg-critical";
 }
 
 interface ScoreBreakdownProps {

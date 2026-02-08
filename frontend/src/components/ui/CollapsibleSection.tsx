@@ -12,8 +12,8 @@ interface CollapsibleSectionProps {
 
 const badgeColors = {
   primary: "bg-primary-500/20 text-primary-400",
-  amber: "bg-amber-500/20 text-amber-400",
-  red: "bg-red-500/20 text-red-400",
+  amber: "bg-warning/20 text-warning",
+  red: "bg-critical/20 text-critical",
   green: "bg-green-500/20 text-green-400",
   slate: "bg-slate-600/50 text-slate-400",
 };

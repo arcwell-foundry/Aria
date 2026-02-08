@@ -27,9 +27,9 @@ const eventIcons: Record<EventType, React.ComponentType<{ className?: string }>>
 // Map event types to colors
 const eventColors: Record<EventType, { bg: string; icon: string; line: string }> = {
   email_sent: {
-    bg: "bg-blue-500/20",
-    icon: "text-blue-400",
-    line: "bg-blue-500/30",
+    bg: "bg-info/20",
+    icon: "text-info",
+    line: "bg-info/30",
   },
   email_received: {
     bg: "bg-cyan-500/20",
@@ -47,9 +47,9 @@ const eventColors: Record<EventType, { bg: string; icon: string; line: string }>
     line: "bg-green-500/30",
   },
   note: {
-    bg: "bg-amber-500/20",
-    icon: "text-amber-400",
-    line: "bg-amber-500/30",
+    bg: "bg-warning/20",
+    icon: "text-warning",
+    line: "bg-warning/30",
   },
   signal: {
     bg: "bg-rose-500/20",

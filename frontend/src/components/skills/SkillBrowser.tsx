@@ -83,8 +83,8 @@ export function SkillBrowser() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
-          <p className="text-red-400">
+        <div className="bg-critical/10 border border-critical/30 rounded-xl p-4 mb-6">
+          <p className="text-critical">
             Failed to load skills. Please try again.
           </p>
         </div>

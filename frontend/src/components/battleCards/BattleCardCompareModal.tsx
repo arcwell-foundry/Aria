@@ -94,8 +94,8 @@ export function BattleCardCompareModal({
           <div className="space-y-8">
             {/* Strengths */}
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-medium text-emerald-400 uppercase tracking-wide mb-4">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/20">
+              <h4 className="flex items-center gap-2 text-sm font-medium text-success uppercase tracking-wide mb-4">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-success/20">
                   <svg
                     className="w-3.5 h-3.5"
                     fill="none"
@@ -120,8 +120,8 @@ export function BattleCardCompareModal({
 
             {/* Weaknesses */}
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-medium text-amber-400 uppercase tracking-wide mb-4">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-amber-500/20">
+              <h4 className="flex items-center gap-2 text-sm font-medium text-warning uppercase tracking-wide mb-4">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-warning/20">
                   <svg
                     className="w-3.5 h-3.5"
                     fill="none"
@@ -205,14 +205,14 @@ export function BattleCardCompareModal({
 function CompareList({ items, color }: { items: string[]; color: "emerald" | "amber" }) {
   const colorClasses = {
     emerald: {
-      bg: "bg-emerald-500/5",
-      border: "border-emerald-500/10",
-      dot: "bg-emerald-400",
+      bg: "bg-success/5",
+      border: "border-success/10",
+      dot: "bg-success",
     },
     amber: {
-      bg: "bg-amber-500/5",
-      border: "border-amber-500/10",
-      dot: "bg-amber-400",
+      bg: "bg-warning/5",
+      border: "border-warning/10",
+      dot: "bg-warning",
     },
   };
 

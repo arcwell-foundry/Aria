@@ -253,7 +253,7 @@ export function ConversationSidebar({
                       </button>
                       <button
                         onClick={(e) => handleDelete(conv.id, e)}
-                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-critical hover:bg-critical/10 rounded-lg transition-colors"
                         title="Delete"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

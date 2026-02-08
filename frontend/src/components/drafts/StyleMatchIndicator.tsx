@@ -20,10 +20,10 @@ export function StyleMatchIndicator({ score, size = "md", showLabel = true }: St
 
   // Color based on score
   const getColor = () => {
-    if (percentage >= 80) return { stroke: "stroke-emerald-500", text: "text-emerald-400", bg: "bg-emerald-500/10" };
+    if (percentage >= 80) return { stroke: "stroke-success", text: "text-success", bg: "bg-success/10" };
     if (percentage >= 60) return { stroke: "stroke-primary-500", text: "text-primary-400", bg: "bg-primary-500/10" };
-    if (percentage >= 40) return { stroke: "stroke-amber-500", text: "text-amber-400", bg: "bg-amber-500/10" };
-    return { stroke: "stroke-red-500", text: "text-red-400", bg: "bg-red-500/10" };
+    if (percentage >= 40) return { stroke: "stroke-warning", text: "text-warning", bg: "bg-warning/10" };
+    return { stroke: "stroke-critical", text: "text-critical", bg: "bg-critical/10" };
   };
 
   const colors = getColor();
