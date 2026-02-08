@@ -18,8 +18,6 @@ from src.models.communication import (
     MessagePriority,
 )
 from src.models.notification import NotificationType
-from src.services.email_service import EmailService
-from src.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +242,8 @@ class CommunicationRouter:
         match channel:
             case "in_app":
                 # Use NotificationService for in-app notifications
+                from src.services.notification_service import NotificationService
+
                 notification_type = self._map_priority_to_notification_type(request.priority)
                 notification = await NotificationService.create_notification(
                     user_id=user_id,
@@ -279,6 +279,8 @@ class CommunicationRouter:
                     }
 
                 # Send email
+                from src.services.email_service import EmailService
+
                 email_service = EmailService()
                 title = request.title or "ARIA Notification"
                 # Create simple HTML email

@@ -119,7 +119,7 @@ class TestChannelSending:
         )
 
         with patch(
-            "src.core.communication_router.NotificationService.create_notification",
+            "src.services.notification_service.NotificationService.create_notification",
             new_callable=AsyncMock,
             return_value=MagicMock(id="notif-123"),
         ) as mock_create:
@@ -144,7 +144,7 @@ class TestChannelSending:
         )
 
         with patch(
-            "src.core.communication_router.EmailService",
+            "src.services.email_service.EmailService",
         ) as mock_email_service:
             mock_instance = AsyncMock()
             mock_instance._send_email = AsyncMock(return_value="email-123")

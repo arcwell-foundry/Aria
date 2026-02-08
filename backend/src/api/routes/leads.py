@@ -327,6 +327,138 @@ async def get_pipeline(current_user: CurrentUser) -> PipelineSummary:
         ) from e
 
 
+@router.get("/{lead_id}/timeline", response_model=list[LeadEventResponse])
+async def get_lead_timeline(
+    lead_id: str,
+    current_user: CurrentUser,
+) -> list[LeadEventResponse]:
+    """Get the event timeline for a lead.
+
+    Args:
+        lead_id: The lead ID to get timeline for.
+        current_user: Current authenticated user.
+
+    Returns:
+        List of events for the lead, ordered by time.
+
+    Raises:
+        HTTPException: 404 if lead not found.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_memory_events import LeadEventService
+
+    try:
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        client = SupabaseClient.get_client()
+        event_service = LeadEventService(db_client=client)
+
+        events = await event_service.get_timeline(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        return [
+            LeadEventResponse(
+                id=event.id,
+                lead_memory_id=event.lead_memory_id,
+                event_type=event.event_type,
+                direction=event.direction,
+                subject=event.subject,
+                content=event.content,
+                participants=event.participants,
+                occurred_at=event.occurred_at,
+                source=event.source,
+                created_at=event.created_at,
+            )
+            for event in events
+        ]
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to get lead timeline")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/{lead_id}/events", response_model=LeadEventResponse)
+async def add_event(
+    lead_id: str,
+    event_data: LeadEventCreate,
+    current_user: CurrentUser,
+) -> LeadEventResponse:
+    """Add an event to a lead's timeline.
+
+    Args:
+        lead_id: The lead ID to add event to.
+        event_data: The event data.
+        current_user: Current authenticated user.
+
+    Returns:
+        The created event.
+
+    Raises:
+        HTTPException: 404 if lead not found.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_memory_events import LeadEventService
+
+    try:
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        client = SupabaseClient.get_client()
+        event_service = LeadEventService(db_client=client)
+
+        event_id = await event_service.add_event(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+            event_data=event_data,
+        )
+
+        events = await event_service.get_timeline(
+            user_id=current_user.id,
+            lead_memory_id=lead_id,
+        )
+
+        created_event = next((e for e in events if e.id == event_id), None)
+
+        if created_event is None:
+            raise LeadMemoryError("Failed to retrieve created event")
+
+        return LeadEventResponse(
+            id=created_event.id,
+            lead_memory_id=created_event.lead_memory_id,
+            event_type=created_event.event_type,
+            direction=created_event.direction,
+            subject=created_event.subject,
+            content=created_event.content,
+            participants=created_event.participants,
+            occurred_at=created_event.occurred_at,
+            source=created_event.source,
+            created_at=created_event.created_at,
+        )
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except LeadMemoryError as e:
+        logger.exception("Failed to add event")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
 @router.get("/{lead_id}", response_model=LeadMemoryResponse)
 async def get_lead(
     lead_id: str,

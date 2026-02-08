@@ -212,6 +212,9 @@ class DeepSyncService:
 
             completed_at = datetime.now(UTC)
 
+            # Recalculate readiness scores after sync
+            await self._recalculate_readiness(user_id)
+
             logger.info(
                 "CRM sync completed",
                 extra={
@@ -626,8 +629,8 @@ class DeepSyncService:
     ) -> str | None:
         """Store CRM contact as semantic memory fact.
 
-        Creates a semantic memory entry for the contact with confidence 0.85
-        and source "crm".
+        Uses SemanticMemory service to ensure conflict detection, Neo4j graph
+        enrichment, and proper confidence scoring via the source hierarchy.
 
         Args:
             user_id: The user's ID.
@@ -636,6 +639,8 @@ class DeepSyncService:
         Returns:
             The created memory ID, or None if storage failed.
         """
+        from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
+
         try:
             data = entity.data
             name = ""
@@ -660,50 +665,57 @@ class DeepSyncService:
                 company = props.get("company", "")
                 email = props.get("email", "")
 
-            # Format semantic memory content
-            content_parts = [f"Contact: {name}"]
-            if title:
-                content_parts.append(f"({title})")
-            if company:
-                content_parts.append(f"at {company}")
-            if email:
-                content_parts.append(f"- Email: {email}")
-
-            content = " ".join(content_parts)
-
-            # Insert into semantic memory
-            client = self.supabase.get_client()
-            memory_id = str(uuid.uuid4())
+            # Build semantic facts using subject-predicate-object triples
             now = datetime.now(UTC)
+            memory_id = str(uuid.uuid4())
+            semantic_memory = SemanticMemory()
 
-            response = (
-                client.table("memory_semantic")
-                .insert(
-                    {
-                        "id": memory_id,
-                        "user_id": user_id,
-                        "fact": content,
-                        "confidence": 0.85,
-                        "source": "crm",
-                        "created_at": now.isoformat(),
-                        "metadata": {
-                            "crm_entity_id": entity.external_id,
-                            "crm_entity_type": "contact",
-                            "raw_data": data,
-                        },
-                    }
-                )
-                .execute()
+            # Primary contact fact
+            fact = SemanticFact(
+                id=memory_id,
+                user_id=user_id,
+                subject=name or entity.name,
+                predicate="works_at" if company else "is_contact",
+                object=company or "Unknown Company",
+                confidence=0.85,
+                source=FactSource.CRM_IMPORT,
+                valid_from=now,
             )
+            memory_id = await semantic_memory.add_fact(fact)
 
-            if response.data:
-                logger.info(
-                    "Stored contact in semantic memory",
-                    extra={"user_id": user_id, "memory_id": memory_id, "contact": name},
+            # Store title as separate fact if available
+            if title:
+                title_fact = SemanticFact(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    subject=name or entity.name,
+                    predicate="has_title",
+                    object=title,
+                    confidence=0.85,
+                    source=FactSource.CRM_IMPORT,
+                    valid_from=now,
                 )
-                return memory_id
+                await semantic_memory.add_fact(title_fact)
 
-            return None
+            # Store email as separate fact if available
+            if email:
+                email_fact = SemanticFact(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    subject=name or entity.name,
+                    predicate="has_email",
+                    object=email,
+                    confidence=0.85,
+                    source=FactSource.CRM_IMPORT,
+                    valid_from=now,
+                )
+                await semantic_memory.add_fact(email_fact)
+
+            logger.info(
+                "Stored contact in semantic memory via service",
+                extra={"user_id": user_id, "memory_id": memory_id, "contact": name},
+            )
+            return memory_id
 
         except Exception as e:
             logger.warning(
@@ -847,8 +859,8 @@ class DeepSyncService:
     ) -> str | None:
         """Store CRM activity as episodic memory.
 
-        Creates an episodic memory entry for the activity with
-        parsed timestamp from the CRM data.
+        Uses EpisodicMemory service to ensure proper salience scoring
+        and temporal indexing.
 
         Args:
             user_id: The user's ID.
@@ -859,12 +871,15 @@ class DeepSyncService:
         """
         from datetime import date
 
+        from src.memory.episodic import Episode, EpisodicMemory
+
         try:
             data = entity.data
             subject = ""
             account = ""
             description = ""
             occurred_at = datetime.now(UTC)
+            participants: list[str] = []
 
             # Map Salesforce fields
             if "Subject" in data or "subject" in data:
@@ -884,6 +899,11 @@ class DeepSyncService:
                             ).replace(tzinfo=UTC)
                     except (ValueError, TypeError):
                         pass
+
+                # Extract participants from Salesforce WhoId/WhatId
+                who = data.get("Who", {})
+                if isinstance(who, dict) and who.get("Name"):
+                    participants.append(who["Name"])
             else:  # HubSpot
                 props = data.get("properties", {})
                 subject = entity.name or "CRM Activity"
@@ -901,41 +921,37 @@ class DeepSyncService:
             content = f"CRM Activity: {subject}"
             if account:
                 content += f" with {account}"
+                participants.append(account)
             if description:
-                content += f" - {description[:200]}"  # Limit description length
+                content += f" - {description[:200]}"
 
-            # Insert into episodic memories
-            client = self.supabase.get_client()
+            # Store via EpisodicMemory service
             memory_id = str(uuid.uuid4())
             now = datetime.now(UTC)
+            episodic_memory = EpisodicMemory()
 
-            response = (
-                client.table("episodic_memories")
-                .insert(
-                    {
-                        "id": memory_id,
-                        "user_id": user_id,
-                        "content": content,
-                        "occurred_at": occurred_at.isoformat(),
-                        "created_at": now.isoformat(),
-                        "metadata": {
-                            "crm_entity_id": entity.external_id,
-                            "crm_entity_type": "activity",
-                            "raw_data": data,
-                        },
-                    }
-                )
-                .execute()
+            episode = Episode(
+                id=memory_id,
+                user_id=user_id,
+                event_type="crm_activity",
+                content=content,
+                participants=participants,
+                occurred_at=occurred_at,
+                recorded_at=now,
+                context={
+                    "crm_entity_id": entity.external_id,
+                    "crm_entity_type": "activity",
+                    "source": "crm_sync",
+                },
             )
 
-            if response.data:
-                logger.info(
-                    "Stored activity as episodic memory",
-                    extra={"user_id": user_id, "memory_id": memory_id, "subject": subject},
-                )
-                return memory_id
+            memory_id = await episodic_memory.store_episode(episode)
 
-            return None
+            logger.info(
+                "Stored activity as episodic memory via service",
+                extra={"user_id": user_id, "memory_id": memory_id, "subject": subject},
+            )
+            return memory_id
 
         except Exception as e:
             logger.warning(
@@ -943,6 +959,34 @@ class DeepSyncService:
                 extra={"user_id": user_id, "entity_id": entity.external_id, "error": str(e)},
             )
             return None
+
+    async def _recalculate_readiness(self, user_id: str) -> None:
+        """Recalculate readiness scores after sync completion.
+
+        CRM sync affects corporate_memory, relationship_graph, and integrations
+        domains. Calendar sync affects integrations domain.
+
+        Args:
+            user_id: The user's ID.
+        """
+        try:
+            from src.onboarding.readiness import OnboardingReadinessService
+
+            readiness_service = OnboardingReadinessService()
+            result = await readiness_service.recalculate(user_id)
+            logger.info(
+                "Readiness scores recalculated after sync",
+                extra={
+                    "user_id": user_id,
+                    "overall_readiness": result.overall,
+                },
+            )
+        except Exception as e:
+            # Don't fail the sync if readiness recalculation fails
+            logger.warning(
+                "Failed to recalculate readiness after sync",
+                extra={"user_id": user_id, "error": str(e)},
+            )
 
     async def _update_sync_state(
         self,
@@ -1204,6 +1248,9 @@ class DeepSyncService:
             )
 
             completed_at = datetime.now(UTC)
+
+            # Recalculate readiness scores after sync
+            await self._recalculate_readiness(user_id)
 
             logger.info(
                 "Calendar sync completed",
