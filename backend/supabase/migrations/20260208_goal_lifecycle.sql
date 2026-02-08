@@ -1,6 +1,6 @@
 -- ARIA Goal Lifecycle Migration
 -- Adds milestones, retrospectives, and expanded goal types for
--- the Goal Lifecycle feature (US-942).
+-- the Goal Lifecycle feature (US-936).
 
 -- ============================================================
 -- 1. goal_milestones table
