@@ -68,7 +68,7 @@ class ActionQueueService:
         if approved_at:
             insert_data["approved_at"] = approved_at
 
-        result = self._db.table("aria_actions").insert(insert_data).execute()
+        result = self._db.table("aria_action_queue").insert(insert_data).execute()
 
         action = cast(dict[str, Any], result.data[0])
         logger.info(
@@ -98,7 +98,7 @@ class ActionQueueService:
         """
         now = datetime.now(UTC).isoformat()
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .update(
                 {
                     "status": ActionStatus.APPROVED.value,
@@ -147,7 +147,7 @@ class ActionQueueService:
             update_data["result"] = {"rejection_reason": reason}
 
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .update(update_data)
             .eq("id", action_id)
             .eq("user_id", user_id)
@@ -184,7 +184,7 @@ class ActionQueueService:
         """
         now = datetime.now(UTC).isoformat()
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .update(
                 {
                     "status": ActionStatus.APPROVED.value,
@@ -224,7 +224,7 @@ class ActionQueueService:
         Returns:
             List of action dicts ordered by created_at desc.
         """
-        query = self._db.table("aria_actions").select("*").eq("user_id", user_id)
+        query = self._db.table("aria_action_queue").select("*").eq("user_id", user_id)
 
         if status:
             query = query.eq("status", status)
@@ -253,7 +253,7 @@ class ActionQueueService:
             Action dict, or None if not found.
         """
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .select("*")
             .eq("id", action_id)
             .eq("user_id", user_id)
@@ -291,7 +291,7 @@ class ActionQueueService:
 
         # Mark as executing
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .update({"status": ActionStatus.EXECUTING.value})
             .eq("id", action_id)
             .eq("user_id", user_id)
@@ -308,7 +308,7 @@ class ActionQueueService:
 
         # Mark as completed (agent execution is delegated externally)
         completed_result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .update(
                 {
                     "status": ActionStatus.COMPLETED.value,
@@ -340,7 +340,7 @@ class ActionQueueService:
             Number of pending actions.
         """
         result = (
-            self._db.table("aria_actions")
+            self._db.table("aria_action_queue")
             .select("id", count="exact")
             .eq("user_id", user_id)
             .eq("status", ActionStatus.PENDING.value)
