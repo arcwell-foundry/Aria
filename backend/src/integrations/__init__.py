@@ -3,6 +3,17 @@
 This package contains clients for integrating with third-party APIs and services.
 """
 
+from src.integrations.deep_sync_domain import (
+    CalendarEvent,
+    CRMEntity,
+    PushActionType,
+    PushPriority,
+    PushQueueItem,
+    PushStatus,
+    SyncConfig,
+    SyncDirection,
+    SyncResult as DeepSyncResult,
+)
 from src.integrations.domain import (
     INTEGRATION_CONFIGS,
     Integration,
@@ -26,4 +37,14 @@ __all__ = [
     "IntegrationStatus",
     "IntegrationType",
     "SyncStatus",
+    # Deep sync domain models (US-942)
+    "CalendarEvent",
+    "CRMEntity",
+    "PushActionType",
+    "PushPriority",
+    "PushQueueItem",
+    "PushStatus",
+    "SyncConfig",
+    "SyncDirection",
+    "DeepSyncResult",
 ]
