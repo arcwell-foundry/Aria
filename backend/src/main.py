@@ -12,8 +12,10 @@ from pydantic import ValidationError as PydanticValidationError
 
 from src.api.routes import (
     account,
-    ambient_onboarding,
+    accounts,
+    action_queue,
     admin,
+    ambient_onboarding,
     analytics,
     aria_config,
     auth,
@@ -25,6 +27,7 @@ from src.api.routes import (
     communication,
     compliance,
     debriefs,
+    deep_sync,  # US-942: Deep sync API routes
     drafts,
     email_preferences,
     feedback,
@@ -43,7 +46,6 @@ from src.api.routes import (
     signals,
     skills,
 )
-from src.api.routes import deep_sync  # US-942: Deep sync API routes
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
 
@@ -116,6 +118,8 @@ setup_security(app)
 
 # Include API routers
 app.include_router(account.router, prefix="/api/v1")
+app.include_router(accounts.router, prefix="/api/v1")
+app.include_router(action_queue.router, prefix="/api/v1")
 app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
