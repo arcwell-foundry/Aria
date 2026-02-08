@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from src.integrations.deep_sync_domain import (
         CalendarEvent,
         CRMEntity,
+        PushQueueItem,
         SyncConfig,
         SyncResult,
         SyncStatus,
@@ -192,7 +193,9 @@ class DeepSyncService:
                 integration_type=integration_type,
                 status=sync_status,
                 next_sync_at=next_sync_at,
-                error_message=None if sync_status == SyncStatus.SUCCESS else "Partial sync completed",
+                error_message=None
+                if sync_status == SyncStatus.SUCCESS
+                else "Partial sync completed",
             )
 
             # Log sync operation
@@ -236,6 +239,7 @@ class DeepSyncService:
 
         except Exception as e:
             from src.core.exceptions import CRMSyncError
+
             logger.exception(
                 "CRM sync failed",
                 extra={"user_id": user_id, "integration_type": integration_type.value},
@@ -328,10 +332,12 @@ class DeepSyncService:
                         memory_entries.append(lead_id)
                     else:
                         failed += 1
-                        errors.append({
-                            "entity_id": entity.external_id,
-                            "error": "Failed to create lead memory",
-                        })
+                        errors.append(
+                            {
+                                "entity_id": entity.external_id,
+                                "error": "Failed to create lead memory",
+                            }
+                        )
 
                 except Exception as e:
                     failed += 1
@@ -339,10 +345,12 @@ class DeepSyncService:
                         "Failed to process opportunity",
                         extra={"opportunity": opp_data, "error": str(e)},
                     )
-                    errors.append({
-                        "opportunity": opp_data.get("Id") or opp_data.get("id"),
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "opportunity": opp_data.get("Id") or opp_data.get("id"),
+                            "error": str(e),
+                        }
+                    )
 
         except Exception as e:
             logger.exception("Failed to pull opportunities")
@@ -437,7 +445,9 @@ class DeepSyncService:
             if close_date_str:
                 try:
                     if isinstance(close_date_str, str):
-                        close_date = date.fromisoformat(close_date_str.replace("Z", "").split("T")[0])
+                        close_date = date.fromisoformat(
+                            close_date_str.replace("Z", "").split("T")[0]
+                        )
                     elif isinstance(close_date_str, date):
                         close_date = close_date_str
                 except (ValueError, TypeError):
@@ -542,10 +552,12 @@ class DeepSyncService:
                         memory_entries.append(memory_id)
                     else:
                         failed += 1
-                        errors.append({
-                            "contact_id": contact_data.get("Id") or contact_data.get("id"),
-                            "error": "Failed to store contact in semantic memory",
-                        })
+                        errors.append(
+                            {
+                                "contact_id": contact_data.get("Id") or contact_data.get("id"),
+                                "error": "Failed to store contact in semantic memory",
+                            }
+                        )
 
                 except Exception as e:
                     failed += 1
@@ -553,10 +565,12 @@ class DeepSyncService:
                         "Failed to process contact",
                         extra={"contact": contact_data, "error": str(e)},
                     )
-                    errors.append({
-                        "contact_id": contact_data.get("Id") or contact_data.get("id"),
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "contact_id": contact_data.get("Id") or contact_data.get("id"),
+                            "error": str(e),
+                        }
+                    )
 
         except Exception as e:
             logger.exception("Failed to pull contacts")
@@ -663,19 +677,21 @@ class DeepSyncService:
 
             response = (
                 client.table("memory_semantic")
-                .insert({
-                    "id": memory_id,
-                    "user_id": user_id,
-                    "fact": content,
-                    "confidence": 0.85,
-                    "source": "crm",
-                    "created_at": now.isoformat(),
-                    "metadata": {
-                        "crm_entity_id": entity.external_id,
-                        "crm_entity_type": "contact",
-                        "raw_data": data,
-                    },
-                })
+                .insert(
+                    {
+                        "id": memory_id,
+                        "user_id": user_id,
+                        "fact": content,
+                        "confidence": 0.85,
+                        "source": "crm",
+                        "created_at": now.isoformat(),
+                        "metadata": {
+                            "crm_entity_id": entity.external_id,
+                            "crm_entity_type": "contact",
+                            "raw_data": data,
+                        },
+                    }
+                )
                 .execute()
             )
 
@@ -758,10 +774,12 @@ class DeepSyncService:
                         memory_entries.append(memory_id)
                     else:
                         failed += 1
-                        errors.append({
-                            "activity_id": activity_data.get("Id") or activity_data.get("id"),
-                            "error": "Failed to store activity as episodic memory",
-                        })
+                        errors.append(
+                            {
+                                "activity_id": activity_data.get("Id") or activity_data.get("id"),
+                                "error": "Failed to store activity as episodic memory",
+                            }
+                        )
 
                 except Exception as e:
                     failed += 1
@@ -769,10 +787,12 @@ class DeepSyncService:
                         "Failed to process activity",
                         extra={"activity": activity_data, "error": str(e)},
                     )
-                    errors.append({
-                        "activity_id": activity_data.get("Id") or activity_data.get("id"),
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "activity_id": activity_data.get("Id") or activity_data.get("id"),
+                            "error": str(e),
+                        }
+                    )
 
         except Exception as e:
             logger.exception("Failed to pull activities")
@@ -858,7 +878,9 @@ class DeepSyncService:
                     try:
                         if isinstance(activity_date, str):
                             parsed_date = date.fromisoformat(activity_date.replace("Z", ""))
-                            occurred_at = datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=UTC)
+                            occurred_at = datetime.combine(
+                                parsed_date, datetime.min.time()
+                            ).replace(tzinfo=UTC)
                     except (ValueError, TypeError):
                         pass
             else:  # HubSpot
@@ -888,18 +910,20 @@ class DeepSyncService:
 
             response = (
                 client.table("episodic_memories")
-                .insert({
-                    "id": memory_id,
-                    "user_id": user_id,
-                    "content": content,
-                    "occurred_at": occurred_at.isoformat(),
-                    "created_at": now.isoformat(),
-                    "metadata": {
-                        "crm_entity_id": entity.external_id,
-                        "crm_entity_type": "activity",
-                        "raw_data": data,
-                    },
-                })
+                .insert(
+                    {
+                        "id": memory_id,
+                        "user_id": user_id,
+                        "content": content,
+                        "occurred_at": occurred_at.isoformat(),
+                        "created_at": now.isoformat(),
+                        "metadata": {
+                            "crm_entity_id": entity.external_id,
+                            "crm_entity_type": "activity",
+                            "raw_data": data,
+                        },
+                    }
+                )
                 .execute()
             )
 
@@ -965,9 +989,9 @@ class DeepSyncService:
 
             if existing.data:
                 # Update existing
-                client.table("integration_sync_state").update(data).eq(
-                    "user_id", user_id
-                ).eq("integration_type", integration_type.value).execute()
+                client.table("integration_sync_state").update(data).eq("user_id", user_id).eq(
+                    "integration_type", integration_type.value
+                ).execute()
             else:
                 # Insert new
                 data["id"] = str(uuid.uuid4())
@@ -986,7 +1010,11 @@ class DeepSyncService:
         except Exception as e:
             logger.warning(
                 "Failed to update sync state",
-                extra={"user_id": user_id, "integration_type": integration_type.value, "error": str(e)},
+                extra={
+                    "user_id": user_id,
+                    "integration_type": integration_type.value,
+                    "error": str(e),
+                },
             )
 
     async def _log_sync(
@@ -1049,9 +1077,12 @@ class DeepSyncService:
             # Don't fail the sync if logging fails
             logger.warning(
                 "Failed to log sync operation",
-                extra={"user_id": user_id, "integration_type": integration_type.value, "error": str(e)},
+                extra={
+                    "user_id": user_id,
+                    "integration_type": integration_type.value,
+                    "error": str(e),
+                },
             )
-
 
     async def sync_calendar(
         self,
@@ -1154,7 +1185,9 @@ class DeepSyncService:
                 integration_type=integration_type,
                 status=sync_status,
                 next_sync_at=next_sync_at,
-                error_message=None if sync_status == SyncStatus.SUCCESS else "Partial sync completed",
+                error_message=None
+                if sync_status == SyncStatus.SUCCESS
+                else "Partial sync completed",
             )
 
             # Log sync operation
@@ -1198,6 +1231,7 @@ class DeepSyncService:
 
         except Exception as e:
             from src.core.exceptions import CRMSyncError
+
             logger.exception(
                 "Calendar sync failed",
                 extra={"user_id": user_id, "integration_type": integration_type.value},
@@ -1305,10 +1339,12 @@ class DeepSyncService:
                             research_tasks_created += 1
                         else:
                             failed += 1
-                            errors.append({
-                                "event_id": event.external_id,
-                                "error": "Failed to create research task",
-                            })
+                            errors.append(
+                                {
+                                    "event_id": event.external_id,
+                                    "error": "Failed to create research task",
+                                }
+                            )
 
                     succeeded += 1
 
@@ -1318,10 +1354,12 @@ class DeepSyncService:
                         "Failed to process calendar event",
                         extra={"event": event_data, "error": str(e)},
                     )
-                    errors.append({
-                        "event_id": event_data.get("id") or event_data.get("Id"),
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "event_id": event_data.get("id") or event_data.get("Id"),
+                            "error": str(e),
+                        }
+                    )
 
         except Exception as e:
             logger.exception("Failed to pull calendar events")
@@ -1402,14 +1440,19 @@ class DeepSyncService:
                     attendees.append(email)
 
             description = event_data.get("bodyPreview")
-            location = event_data.get("location", {}).get("displayName") if event_data.get("location") else None
+            location = (
+                event_data.get("location", {}).get("displayName")
+                if event_data.get("location")
+                else None
+            )
 
         # Detect if event is external (has non-company attendees)
         # For now, use simplified @company.com check
-        is_external = any(
-            not attendee.endswith("@company.com")
-            for attendee in attendees
-        ) if attendees else False
+        is_external = (
+            any(not attendee.endswith("@company.com") for attendee in attendees)
+            if attendees
+            else False
+        )
 
         return CalendarEvent(
             external_id=external_id,
@@ -1465,7 +1508,12 @@ class DeepSyncService:
         Returns:
             The created task ID, or None if creation failed.
         """
-        from src.memory.prospective import ProspectiveTask, ProspectiveMemory, TaskPriority, TriggerType
+        from src.memory.prospective import (
+            ProspectiveTask,
+            ProspectiveMemory,
+            TaskPriority,
+            TriggerType,
+        )
 
         try:
             # Format time for display
@@ -1531,6 +1579,425 @@ class DeepSyncService:
                 extra={"user_id": user_id, "event_id": event.external_id, "error": str(e)},
             )
             return None
+
+    async def queue_push_item(self, item: "PushQueueItem") -> str:
+        """Queue a push item for user approval.
+
+        Creates a new push queue item in the database with expiration
+        of 7 days. The item will require user approval before being
+        pushed to the external system (per US-937 action queue).
+
+        Args:
+            item: The PushQueueItem to queue.
+
+        Returns:
+            The queue_id of the created item.
+
+        Raises:
+            Exception: If database insertion fails.
+        """
+        from src.integrations.deep_sync_domain import PushPriority
+
+        try:
+            client = self.supabase.get_client()
+            now = datetime.now(UTC)
+            expires_at = now + timedelta(days=7)
+
+            # Calculate priority_int
+            priority_mapping = {
+                PushPriority.CRITICAL: 4,
+                PushPriority.HIGH: 3,
+                PushPriority.MEDIUM: 2,
+                PushPriority.LOW: 1,
+            }
+            priority_int = priority_mapping.get(item.priority, 2)
+
+            queue_id = str(uuid.uuid4())
+
+            queue_data = {
+                "id": queue_id,
+                "user_id": item.user_id,
+                "integration_type": item.integration_type.value,
+                "action_type": item.action_type.value,
+                "priority": item.priority.value,
+                "priority_int": priority_int,
+                "payload": item.payload,
+                "status": item.status.value,
+                "created_at": now.isoformat(),
+                "expires_at": expires_at.isoformat(),
+            }
+
+            response = client.table("integration_push_queue").insert(queue_data).execute()
+
+            if response.data:
+                logger.info(
+                    "Queued push item for user approval",
+                    extra={
+                        "queue_id": queue_id,
+                        "user_id": item.user_id,
+                        "integration_type": item.integration_type.value,
+                        "action_type": item.action_type.value,
+                        "priority": item.priority.value,
+                    },
+                )
+                return queue_id
+
+            raise Exception("Failed to insert push queue item")
+
+        except Exception as e:
+            logger.error(
+                "Failed to queue push item",
+                extra={
+                    "user_id": item.user_id,
+                    "integration_type": item.integration_type.value,
+                    "action_type": item.action_type.value,
+                    "error": str(e),
+                },
+            )
+            raise
+
+    async def process_approved_push_items(
+        self,
+        user_id: str,
+        integration_type: "IntegrationType",
+    ) -> "SyncResult":
+        """Process approved push items from the queue.
+
+        Fetches all approved items from the push queue and executes them
+        in order of priority (highest first). Marks each item as completed
+        or failed after execution.
+
+        Args:
+            user_id: The user's ID.
+            integration_type: The integration type.
+
+        Returns:
+            SyncResult with metrics about the push sync.
+
+        Raises:
+            Exception: If fetching items or logging fails.
+        """
+        from src.integrations.deep_sync_domain import (
+            PushActionType,
+            PushPriority,
+            PushStatus,
+            SyncDirection,
+            SyncStatus,
+            SyncResult,
+        )
+        from src.integrations.domain import IntegrationType
+
+        started_at = datetime.now(UTC)
+
+        # Get integration connection
+        client = self.supabase.get_client()
+        integration_response = (
+            client.table("user_integrations")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("integration_type", integration_type.value)
+            .maybe_single()
+            .execute()
+        )
+
+        if not integration_response.data:
+            raise Exception(f"No active {integration_type.value} integration found for user")
+
+        integration = integration_response.data
+        connection_id = integration.get("composio_connection_id")
+
+        if not connection_id:
+            raise Exception(f"No connection ID found for {integration_type.value} integration")
+
+        # Fetch approved items ordered by priority
+        items_response = (
+            client.table("integration_push_queue")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("integration_type", integration_type.value)
+            .eq("status", "approved")
+            .order("priority_int", desc=True)
+            .execute()
+        )
+
+        items = items_response.data or []
+
+        total_processed = len(items)
+        total_succeeded = 0
+        total_failed = 0
+        all_errors: dict[str, Any] = {}
+
+        for item in items:
+            try:
+                # Execute the push item
+                await self._execute_push_item(
+                    user_id=user_id,
+                    integration_type=integration_type,
+                    connection_id=connection_id,
+                    item=item,
+                )
+
+                # Mark as completed
+                client.table("integration_push_queue").update(
+                    {
+                        "status": "completed",
+                        "processed_at": datetime.now(UTC).isoformat(),
+                    }
+                ).eq("id", item["id"]).execute()
+
+                total_succeeded += 1
+
+            except Exception as e:
+                total_failed += 1
+                error_msg = str(e)
+                all_errors[item["id"]] = error_msg
+
+                # Mark as failed
+                client.table("integration_push_queue").update(
+                    {
+                        "status": "failed",
+                        "error_message": error_msg,
+                        "processed_at": datetime.now(UTC).isoformat(),
+                    }
+                ).eq("id", item["id"]).execute()
+
+                logger.warning(
+                    "Push item failed",
+                    extra={
+                        "queue_id": item["id"],
+                        "user_id": user_id,
+                        "error": error_msg,
+                    },
+                )
+
+        # Determine sync status
+        if total_failed == 0:
+            sync_status = SyncStatus.SUCCESS
+        elif total_succeeded > 0:
+            sync_status = SyncStatus.PARTIAL
+        else:
+            sync_status = SyncStatus.FAILED
+
+        # Log push sync operation
+        await self._log_sync(
+            user_id=user_id,
+            integration_type=integration_type,
+            sync_type="push",
+            status=sync_status,
+            records_processed=total_processed,
+            records_succeeded=total_succeeded,
+            records_failed=total_failed,
+            error_details=all_errors if sync_status != SyncStatus.SUCCESS else None,
+        )
+
+        completed_at = datetime.now(UTC)
+
+        logger.info(
+            "Push sync completed",
+            extra={
+                "user_id": user_id,
+                "integration_type": integration_type.value,
+                "processed": total_processed,
+                "succeeded": total_succeeded,
+                "failed": total_failed,
+                "status": sync_status.value,
+            },
+        )
+
+        return SyncResult(
+            direction=SyncDirection.PUSH,
+            integration_type=integration_type,
+            status=sync_status,
+            records_processed=total_processed,
+            records_succeeded=total_succeeded,
+            records_failed=total_failed,
+            started_at=started_at,
+            completed_at=completed_at,
+            error_details=all_errors if sync_status != SyncStatus.SUCCESS else None,
+            push_queue_items=total_processed,
+        )
+
+    async def _execute_push_item(
+        self,
+        user_id: str,
+        integration_type: "IntegrationType",
+        connection_id: str,
+        item: dict[str, Any],
+    ) -> None:
+        """Execute a single push item against the external system.
+
+        Routes to the appropriate Composio action based on the
+        action_type and integration_type.
+
+        Args:
+            user_id: The user's ID.
+            integration_type: The integration type.
+            connection_id: The Composio connection ID.
+            item: The push queue item from database.
+
+        Raises:
+            Exception: If execution fails.
+        """
+        from src.integrations.domain import IntegrationType
+
+        action_type = item.get("action_type")
+        payload = item.get("payload", {})
+
+        # Execute based on action_type
+        if action_type == "create_note":
+            await self._execute_create_note(
+                integration_type=integration_type,
+                connection_id=connection_id,
+                payload=payload,
+            )
+        elif action_type == "update_field":
+            await self._execute_update_field(
+                integration_type=integration_type,
+                connection_id=connection_id,
+                payload=payload,
+            )
+        elif action_type == "create_event":
+            await self._execute_create_event(
+                integration_type=integration_type,
+                connection_id=connection_id,
+                payload=payload,
+            )
+        else:
+            raise Exception(f"Unknown action_type: {action_type}")
+
+    async def _execute_create_note(
+        self,
+        integration_type: "IntegrationType",
+        connection_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Execute create_note action for CRM.
+
+        Creates an activity note in Salesforce or HubSpot.
+
+        Args:
+            integration_type: The CRM integration type.
+            connection_id: The Composio connection ID.
+            payload: Contains parentId, title, body.
+
+        Raises:
+            Exception: If execution fails.
+        """
+        from src.integrations.domain import IntegrationType
+
+        if integration_type == IntegrationType.SALESFORCE:
+            action = "salesforce_create_note"
+            params = {
+                "parentId": payload.get("parentId"),
+                "title": payload.get("title"),
+                "body": payload.get("body"),
+            }
+        else:  # HUBSPOT
+            action = "hubspot_create_engagement"
+            params = {
+                "associatedObjectId": payload.get("parentId"),
+                "type": "NOTE",
+                "body": payload.get("body"),
+            }
+
+        result = await self.integration_service.execute_action(
+            connection_id=connection_id,
+            action=action,
+            params=params,
+        )
+
+        if not result.get("data"):
+            raise Exception(f"Failed to create note: {result}")
+
+    async def _execute_update_field(
+        self,
+        integration_type: "IntegrationType",
+        connection_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Execute update_field action for CRM.
+
+        Updates a custom field (e.g., lead score) in Salesforce or HubSpot.
+
+        Args:
+            integration_type: The CRM integration type.
+            connection_id: The Composio connection ID.
+            payload: Contains entityId, field_name, field_value.
+
+        Raises:
+            Exception: If execution fails.
+        """
+        from src.integrations.domain import IntegrationType
+
+        if integration_type == IntegrationType.SALESFORCE:
+            action = "salesforce_update_opportunity"
+            params = {
+                "opportunityId": payload.get("entityId"),
+                "aria_Lead_Score__c": payload.get("field_value"),
+            }
+        else:  # HUBSPOT
+            action = "hubspot_update_deal"
+            params = {
+                "dealId": payload.get("entityId"),
+                "aria_lead_score": payload.get("field_value"),
+            }
+
+        result = await self.integration_service.execute_action(
+            connection_id=connection_id,
+            action=action,
+            params=params,
+        )
+
+        if not result.get("data"):
+            raise Exception(f"Failed to update field: {result}")
+
+    async def _execute_create_event(
+        self,
+        integration_type: "IntegrationType",
+        connection_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Execute create_event action for calendar.
+
+        Creates a calendar event in Google Calendar or Outlook.
+
+        Args:
+            integration_type: The calendar integration type.
+            connection_id: The Composio connection ID.
+            payload: Contains summary, description, start, end, attendees.
+
+        Raises:
+            Exception: If execution fails.
+        """
+        from src.integrations.domain import IntegrationType
+
+        if integration_type == IntegrationType.GOOGLE_CALENDAR:
+            action = "create_event"
+            params = {
+                "summary": payload.get("summary"),
+                "description": payload.get("description"),
+                "start": payload.get("start"),
+                "end": payload.get("end"),
+                "attendees": payload.get("attendees", []),
+            }
+        else:  # OUTLOOK
+            action = "create_calendar_event"
+            params = {
+                "subject": payload.get("summary"),
+                "bodyPreview": payload.get("description"),
+                "start": payload.get("start"),
+                "end": payload.get("end"),
+                "attendees": payload.get("attendees", []),
+            }
+
+        result = await self.integration_service.execute_action(
+            connection_id=connection_id,
+            action=action,
+            params=params,
+        )
+
+        if not result.get("data"):
+            raise Exception(f"Failed to create event: {result}")
 
 
 # Singleton instance
