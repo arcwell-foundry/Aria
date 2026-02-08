@@ -803,7 +803,9 @@ class RateLimitError(ARIAException):
             limit: The rate limit that was exceeded (e.g., "100/hour").
             message: Optional custom error message.
         """
-        error_message = message or f"Rate limit exceeded: {limit}. Try again in {retry_after} seconds."
+        error_message = (
+            message or f"Rate limit exceeded: {limit}. Try again in {retry_after} seconds."
+        )
         super().__init__(
             message=error_message,
             code="RATE_LIMIT_EXCEEDED",
