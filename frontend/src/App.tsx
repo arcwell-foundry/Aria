@@ -19,6 +19,7 @@ import {
   AriaChatPage,
   BattleCardsPage,
   ChangelogPage,
+  DeepSyncPage,
   EmailDraftsPage,
   HelpPage,
   IntegrationsCallbackPage,
@@ -265,6 +266,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <SettingsPrivacyPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/deep-sync"
+        element={
+          <ProtectedRoute>
+            <DeepSyncPage />
           </ProtectedRoute>
         }
       />

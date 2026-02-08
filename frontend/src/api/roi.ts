@@ -142,3 +142,24 @@ export async function getROITrend(period: ROIPeriod = "90d"): Promise<WeeklyTren
   });
   return response.data;
 }
+
+/**
+ * Export ROI report as a CSV file download
+ * @param period - Time period: "7d", "30d", "90d", or "all"
+ */
+export async function exportROIReport(period: ROIPeriod = "30d"): Promise<void> {
+  const response = await apiClient.get("/analytics/roi/export", {
+    params: { period },
+    responseType: "blob",
+  });
+
+  const blob = new Blob([response.data], { type: "text/csv" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", `aria-roi-report-${period}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}

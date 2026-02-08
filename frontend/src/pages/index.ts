@@ -9,6 +9,7 @@ export { AdminBillingPage } from "./AdminBillingPage";
 export { BattleCardsPage } from "./BattleCards";
 export { ChangelogPage } from "./ChangelogPage";
 export { DashboardPage } from "./Dashboard";
+export { DeepSyncPage } from "./DeepSyncPage";
 export { EmailDraftsPage } from "./EmailDrafts";
 export { GoalsPage } from "./Goals";
 export { HelpPage } from "./HelpPage";

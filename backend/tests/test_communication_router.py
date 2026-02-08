@@ -259,6 +259,165 @@ class TestRouteMessage:
             assert any(r.success for r in response.results.values())
 
 
+class TestPushChannel:
+    """Test push notification channel."""
+
+    @pytest.mark.asyncio
+    async def test_send_to_push_channel_not_implemented(self):
+        """Push channel should return not implemented status."""
+        router = CommunicationRouter()
+        request = CommunicationRequest(
+            user_id="user-123",
+            message="Critical alert",
+            priority=MessagePriority.CRITICAL,
+        )
+
+        result = await router._send_to_channel(request.user_id, request.message, "push", request)
+
+        assert result["success"] is False
+        assert "not implemented" in result["error"].lower()
+
+
+class TestEmailEdgeCases:
+    """Test email channel edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_send_to_email_without_user_email(self):
+        """Should fail gracefully when user has no email."""
+        router = CommunicationRouter()
+        request = CommunicationRequest(
+            user_id="user-123",
+            message="Test email",
+            priority=MessagePriority.IMPORTANT,
+            title="Test",
+        )
+
+        with patch.object(router, "_get_user_email", return_value=None):
+            result = await router._send_to_channel(
+                request.user_id, request.message, "email", request
+            )
+
+            assert result["success"] is False
+            assert result["channel"] == "email"
+            assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_send_to_email_with_email_disabled(self):
+        """Should fail when user has email notifications disabled."""
+        router = CommunicationRouter()
+        request = CommunicationRequest(
+            user_id="user-123",
+            message="Test email",
+            priority=MessagePriority.IMPORTANT,
+            title="Test",
+        )
+
+        with (
+            patch.object(router, "_get_user_email", return_value="user@example.com"),
+            patch.object(
+                router,
+                "_get_user_preferences",
+                return_value={
+                    "preferred_channels": ["email"],
+                    "email_enabled": False,
+                    "slack_enabled": False,
+                },
+            ),
+        ):
+            result = await router._send_to_channel(
+                request.user_id, request.message, "email", request
+            )
+
+            assert result["success"] is False
+            assert result["channel"] == "email"
+            assert "disabled" in result["error"].lower()
+
+
+class TestUnknownChannel:
+    """Test unknown channel handling."""
+
+    @pytest.mark.asyncio
+    async def test_send_to_unknown_channel(self):
+        """Unknown channel should return failure with error."""
+        router = CommunicationRouter()
+        request = CommunicationRequest(
+            user_id="user-123",
+            message="Test",
+            priority=MessagePriority.FYI,
+        )
+
+        result = await router._send_to_channel(
+            request.user_id, request.message, "sms", request
+        )
+
+        assert result["success"] is False
+        assert "unknown" in result["error"].lower()
+
+
+class TestBackgroundRouting:
+    """Test background priority routing."""
+
+    @pytest.mark.asyncio
+    async def test_route_background_message_sends_nothing(self):
+        """BACKGROUND message should not send to any channels."""
+        router = CommunicationRouter()
+        request = CommunicationRequest(
+            user_id="user-123",
+            message="Background task completed",
+            priority=MessagePriority.BACKGROUND,
+        )
+
+        with patch.object(
+            router, "_get_user_preferences", return_value={"preferred_channels": ["email"]}
+        ):
+            response = await router.route_message(request)
+
+            assert response.user_id == "user-123"
+            assert response.priority == MessagePriority.BACKGROUND
+            assert len(response.channels_used) == 0
+            assert len(response.results) == 0
+
+
+class TestPriorityMapping:
+    """Test priority to notification type mapping."""
+
+    def test_critical_maps_to_signal_detected(self):
+        """CRITICAL should map to SIGNAL_DETECTED notification type."""
+        from src.models.notification import NotificationType
+
+        router = CommunicationRouter()
+        assert router._map_priority_to_notification_type(MessagePriority.CRITICAL) == (
+            NotificationType.SIGNAL_DETECTED
+        )
+
+    def test_important_maps_to_task_due(self):
+        """IMPORTANT should map to TASK_DUE notification type."""
+        from src.models.notification import NotificationType
+
+        router = CommunicationRouter()
+        assert router._map_priority_to_notification_type(MessagePriority.IMPORTANT) == (
+            NotificationType.TASK_DUE
+        )
+
+    def test_fyi_maps_to_briefing_ready(self):
+        """FYI should map to BRIEFING_READY notification type."""
+        from src.models.notification import NotificationType
+
+        router = CommunicationRouter()
+        assert router._map_priority_to_notification_type(MessagePriority.FYI) == (
+            NotificationType.BRIEFING_READY
+        )
+
+    def test_background_maps_to_briefing_ready(self):
+        """BACKGROUND should map to BRIEFING_READY notification type."""
+        from src.models.notification import NotificationType
+
+        router = CommunicationRouter()
+        assert router._map_priority_to_notification_type(MessagePriority.BACKGROUND) == (
+            NotificationType.BRIEFING_READY
+        )
+
+
 class TestSingleton:
     """Test singleton pattern."""
 

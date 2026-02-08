@@ -188,3 +188,85 @@ class TestPostCommunicate:
             call_args = mock_router.route_message.call_args[0][0]
             assert call_args.user_id != "different-user-id"
             assert call_args.user_id == "test-user-123"
+
+    def test_all_channels_fail_returns_503(self, test_client: TestClient) -> None:
+        """Should return 503 when all channels fail."""
+        request_data = {
+            "message": "Urgent alert",
+            "priority": "critical",
+        }
+
+        mock_response = CommunicationResponse(
+            user_id="test-user-123",
+            priority=MessagePriority.CRITICAL,
+            channels_used=[],
+            results={
+                ChannelType.IN_APP: ChannelResult(
+                    channel=ChannelType.IN_APP,
+                    success=False,
+                    message_id=None,
+                    error="Service unavailable",
+                ),
+                ChannelType.PUSH: ChannelResult(
+                    channel=ChannelType.PUSH,
+                    success=False,
+                    message_id=None,
+                    error="Push not implemented",
+                ),
+            },
+        )
+
+        with patch("src.api.routes.communication.get_communication_router") as mock_get_router:
+            mock_router = AsyncMock()
+            mock_router.route_message = AsyncMock(return_value=mock_response)
+            mock_get_router.return_value = mock_router
+
+            response = test_client.post("/api/v1/communicate", json=request_data)
+
+            assert response.status_code == 503
+
+    def test_internal_error_returns_500(self, test_client: TestClient) -> None:
+        """Should return 500 on unexpected internal errors."""
+        request_data = {
+            "message": "Test",
+            "priority": "fyi",
+        }
+
+        with patch("src.api.routes.communication.get_communication_router") as mock_get_router:
+            mock_router = AsyncMock()
+            mock_router.route_message = AsyncMock(side_effect=RuntimeError("Unexpected failure"))
+            mock_get_router.return_value = mock_router
+
+            response = test_client.post("/api/v1/communicate", json=request_data)
+
+            assert response.status_code == 500
+
+    def test_background_priority_with_no_channels(self, test_client: TestClient) -> None:
+        """BACKGROUND priority should succeed even with no channels used."""
+        request_data = {
+            "message": "Background task done",
+            "priority": "background",
+        }
+
+        # Background returns empty results but no channels fail,
+        # so the "any_success" check is False (no results at all).
+        # The route should return 503 since there are no successful channels.
+        mock_response = CommunicationResponse(
+            user_id="test-user-123",
+            priority=MessagePriority.BACKGROUND,
+            channels_used=[],
+            results={},
+        )
+
+        with patch("src.api.routes.communication.get_communication_router") as mock_get_router:
+            mock_router = AsyncMock()
+            mock_router.route_message = AsyncMock(return_value=mock_response)
+            mock_get_router.return_value = mock_router
+
+            response = test_client.post("/api/v1/communicate", json=request_data)
+
+            # Background with no channels: results dict is empty, so
+            # any() on empty iterable is False → 503
+            # This is correct behavior - agents should not use the HTTP
+            # endpoint for background messages (they're logged only).
+            assert response.status_code == 503

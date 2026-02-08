@@ -35,3 +35,14 @@ export function useQueuePushItem() {
     mutationFn: (item: PushItemRequest) => queuePushItemApi(item),
   });
 }
+
+export function useUpdateSyncConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: { sync_interval_minutes: number; auto_push_enabled: boolean }) =>
+      deepSyncApi.updateConfig(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deepSyncKeys.status() });
+    },
+  });
+}

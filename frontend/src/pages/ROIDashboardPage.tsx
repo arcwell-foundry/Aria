@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { HelpTooltip } from "@/components/HelpTooltip";
-import { useROIMetrics, useROITrend } from "@/hooks/useROI";
+import { useROIMetrics, useROITrend, useExportROIReport } from "@/hooks/useROI";
 import type { TimeSavedBreakdown } from "@/types/roi";
 import {
   XAxis,
@@ -50,6 +50,7 @@ export function ROIDashboardPage() {
 
   const { data: roiData, isLoading, error } = useROIMetrics(selectedPeriod);
   const { data: trendData } = useROITrend(selectedPeriod);
+  const exportReport = useExportROIReport();
 
   return (
     <DashboardLayout>
@@ -282,13 +283,11 @@ export function ROIDashboardPage() {
               {/* Export Button */}
               <div className="flex justify-end">
                 <button
-                  onClick={() => {
-                    // TODO: Implement PDF export
-                    console.log("Export not yet implemented");
-                  }}
-                  className="px-6 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-medium hover:bg-[#4A5D79] transition-colors duration-150"
+                  onClick={() => exportReport.mutate(selectedPeriod)}
+                  disabled={exportReport.isPending}
+                  className="px-6 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-medium hover:bg-[#4A5D79] transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Download Report
+                  {exportReport.isPending ? "Exporting..." : "Download Report"}
                 </button>
               </div>
             </div>

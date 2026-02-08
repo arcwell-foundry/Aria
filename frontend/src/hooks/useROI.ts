@@ -1,5 +1,6 @@
-import { useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import {
+  exportROIReport,
   getROIMetrics,
   getROITrend,
   type ROIMetricsResponse,
@@ -61,4 +62,14 @@ export function useInvalidateROI() {
   return () => {
     queryClient.invalidateQueries({ queryKey: roiKeys.all });
   };
+}
+
+/**
+ * Hook to export the ROI report as a CSV download
+ * @returns Mutation object with mutate function accepting a ROIPeriod
+ */
+export function useExportROIReport() {
+  return useMutation({
+    mutationFn: (period: ROIPeriod) => exportROIReport(period),
+  });
 }
