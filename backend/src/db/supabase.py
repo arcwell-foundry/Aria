@@ -4,10 +4,13 @@ import logging
 from typing import Any, cast
 
 from src.core.config import settings
+from src.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 from src.core.exceptions import DatabaseError, NotFoundError
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
+
+_supabase_circuit_breaker = CircuitBreaker("supabase")
 
 
 class SupabaseClient:
@@ -57,16 +60,21 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             response = (
                 client.table("user_profiles").select("*").eq("id", user_id).single().execute()
             )
             if response.data is None:
                 raise NotFoundError("User", user_id)
+            _supabase_circuit_breaker.record_success()
             return cast(dict[str, Any], response.data)
         except NotFoundError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error fetching user", extra={"user_id": user_id})
             raise DatabaseError(f"Failed to fetch user: {e}") from e
 
@@ -85,14 +93,19 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             response = client.table("companies").select("*").eq("id", company_id).single().execute()
             if response.data is None:
                 raise NotFoundError("Company", company_id)
+            _supabase_circuit_breaker.record_success()
             return cast(dict[str, Any], response.data)
         except NotFoundError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error fetching company", extra={"company_id": company_id})
             raise DatabaseError(f"Failed to fetch company: {e}") from e
 
@@ -111,16 +124,21 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             response = (
                 client.table("user_settings").select("*").eq("user_id", user_id).single().execute()
             )
             if response.data is None:
                 raise NotFoundError("User settings", user_id)
+            _supabase_circuit_breaker.record_success()
             return cast(dict[str, Any], response.data)
         except NotFoundError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error fetching user settings", extra={"user_id": user_id})
             raise DatabaseError(f"Failed to fetch user settings: {e}") from e
 
@@ -147,6 +165,7 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             data: dict[str, Any] = {
                 "id": user_id,
@@ -156,11 +175,15 @@ class SupabaseClient:
             }
             response = client.table("user_profiles").insert(data).execute()
             if response.data and len(response.data) > 0:
+                _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])
             raise DatabaseError("Failed to create user profile")
         except DatabaseError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error creating user profile", extra={"user_id": user_id})
             raise DatabaseError(f"Failed to create user profile: {e}") from e
 
@@ -178,6 +201,7 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             data: dict[str, Any] = {
                 "user_id": user_id,
@@ -186,11 +210,15 @@ class SupabaseClient:
             }
             response = client.table("user_settings").insert(data).execute()
             if response.data and len(response.data) > 0:
+                _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])
             raise DatabaseError("Failed to create user settings")
         except DatabaseError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error creating user settings", extra={"user_id": user_id})
             raise DatabaseError(f"Failed to create user settings: {e}") from e
 
@@ -209,15 +237,20 @@ class SupabaseClient:
             DatabaseError: If database operation fails.
         """
         try:
+            _supabase_circuit_breaker.check()
             client = cls.get_client()
             data: dict[str, Any] = {"name": name, "domain": domain, "settings": {}}
             response = client.table("companies").insert(data).execute()
             if response.data and len(response.data) > 0:
+                _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])
             raise DatabaseError("Failed to create company")
         except DatabaseError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
+            _supabase_circuit_breaker.record_failure()
             logger.exception("Error creating company", extra={"company_name": name})
             raise DatabaseError(f"Failed to create company: {e}") from e
 
