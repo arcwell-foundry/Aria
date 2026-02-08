@@ -156,27 +156,27 @@ function DatabaseIcon({ className = "w-5 h-5" }: { className?: string }) {
 
 function SyncResultDisplay({ result }: { result: SyncResult }) {
   return (
-    <div className="mt-3 bg-[#0F1117] rounded-lg p-3 border border-[#2A2F42]">
+    <div className="mt-3 bg-primary rounded-lg p-3 border border-border">
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div>
-          <span className="text-[#8B92A5]">Processed</span>
-          <span className="ml-2 text-[#E8E6E1] font-mono">{result.records_processed}</span>
+          <span className="text-secondary">Processed</span>
+          <span className="ml-2 text-content font-mono">{result.records_processed}</span>
         </div>
         <div>
-          <span className="text-[#8B92A5]">Succeeded</span>
+          <span className="text-secondary">Succeeded</span>
           <span className="ml-2 text-success font-mono">{result.records_succeeded}</span>
         </div>
         <div>
-          <span className="text-[#8B92A5]">Failed</span>
+          <span className="text-secondary">Failed</span>
           <span className="ml-2 text-critical font-mono">{result.records_failed}</span>
         </div>
         <div>
-          <span className="text-[#8B92A5]">Memory entries</span>
-          <span className="ml-2 text-[#E8E6E1] font-mono">{result.memory_entries_created}</span>
+          <span className="text-secondary">Memory entries</span>
+          <span className="ml-2 text-content font-mono">{result.memory_entries_created}</span>
         </div>
       </div>
       {result.duration_seconds != null && (
-        <p className="text-xs text-[#8B92A5] mt-2">
+        <p className="text-xs text-secondary mt-2">
           Completed in {result.duration_seconds.toFixed(1)}s ({(result.success_rate * 100).toFixed(0)}% success)
         </p>
       )}
@@ -190,19 +190,19 @@ function SyncResultDisplay({ result }: { result: SyncResult }) {
 
 function StatusCardSkeleton() {
   return (
-    <div className="bg-[#161B2E] rounded-xl border border-[#2A2F42] p-6 animate-pulse">
+    <div className="bg-elevated rounded-xl border border-border p-6 animate-pulse">
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-lg bg-[#2A2F42]" />
+        <div className="w-10 h-10 rounded-lg bg-border" />
         <div className="flex-1">
-          <div className="h-4 w-24 bg-[#2A2F42] rounded mb-2" />
-          <div className="h-3 w-16 bg-[#2A2F42] rounded" />
+          <div className="h-4 w-24 bg-border rounded mb-2" />
+          <div className="h-3 w-16 bg-border rounded" />
         </div>
       </div>
       <div className="space-y-3">
-        <div className="h-3 w-full bg-[#2A2F42] rounded" />
-        <div className="h-3 w-2/3 bg-[#2A2F42] rounded" />
+        <div className="h-3 w-full bg-border rounded" />
+        <div className="h-3 w-2/3 bg-border rounded" />
       </div>
-      <div className="h-9 w-full bg-[#2A2F42] rounded-lg mt-4" />
+      <div className="h-9 w-full bg-border rounded-lg mt-4" />
     </div>
   );
 }
@@ -263,16 +263,16 @@ export function DeepSyncPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 lg:p-8 min-h-screen bg-[#0F1117]">
+      <div className="p-4 lg:p-8 min-h-screen bg-primary">
         <div className="max-w-6xl mx-auto space-y-8">
           {/* ---- Header ---- */}
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#161B2E] border border-[#2A2F42]">
-              <SyncIcon className="w-6 h-6 text-[#5B6E8A]" />
+            <div className="p-2 rounded-lg bg-elevated border border-border">
+              <SyncIcon className="w-6 h-6 text-interactive" />
             </div>
             <div>
-              <h1 className="font-display text-3xl text-[#E8E6E1]">Integration Sync</h1>
-              <p className="text-sm text-[#8B92A5] mt-0.5">
+              <h1 className="font-display text-3xl text-content">Integration Sync</h1>
+              <p className="text-sm text-secondary mt-0.5">
                 Monitor and manage data synchronization across your connected integrations
               </p>
             </div>
@@ -302,19 +302,19 @@ export function DeepSyncPage() {
 
           {/* ---- Empty State ---- */}
           {!isLoading && !error && !hasIntegrations && (
-            <div className="bg-[#161B2E] rounded-xl border border-[#2A2F42] p-12 text-center">
-              <div className="inline-flex p-4 rounded-full bg-[#0F1117] border border-[#2A2F42] mb-4">
-                <LinkIcon className="w-8 h-8 text-[#8B92A5]" />
+            <div className="bg-elevated rounded-xl border border-border p-12 text-center">
+              <div className="inline-flex p-4 rounded-full bg-primary border border-border mb-4">
+                <LinkIcon className="w-8 h-8 text-secondary" />
               </div>
-              <h2 className="text-lg font-medium text-[#E8E6E1] mb-2">
+              <h2 className="text-lg font-medium text-content mb-2">
                 No integrations connected
               </h2>
-              <p className="text-sm text-[#8B92A5] mb-6 max-w-md mx-auto">
+              <p className="text-sm text-secondary mb-6 max-w-md mx-auto">
                 Connect your CRM, email, or calendar integrations to start syncing data with ARIA.
               </p>
               <Link
                 to="/settings/integrations"
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#5B6E8A] text-white text-sm font-medium rounded-lg hover:bg-[#4A5D79] transition-colors"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-interactive text-white text-sm font-medium rounded-lg hover:bg-interactive-hover transition-colors"
               >
                 <LinkIcon className="w-4 h-4" />
                 Connect Integrations
@@ -334,16 +334,16 @@ export function DeepSyncPage() {
                 return (
                   <div
                     key={status.integration_type}
-                    className="bg-[#161B2E] rounded-xl border border-[#2A2F42] p-6 flex flex-col"
+                    className="bg-elevated rounded-xl border border-border p-6 flex flex-col"
                   >
                     {/* Card header */}
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-[#0F1117] border border-[#2A2F42]">
-                          <DatabaseIcon className="w-5 h-5 text-[#5B6E8A]" />
+                        <div className="p-2 rounded-lg bg-primary border border-border">
+                          <DatabaseIcon className="w-5 h-5 text-interactive" />
                         </div>
                         <div>
-                          <h3 className="text-[#E8E6E1] font-medium text-sm">
+                          <h3 className="text-content font-medium text-sm">
                             {capitalize(status.integration_type)}
                           </h3>
                           <span
@@ -360,23 +360,23 @@ export function DeepSyncPage() {
                     {/* Sync details */}
                     <div className="space-y-2 mb-4 flex-1">
                       <div className="flex items-center gap-2 text-xs">
-                        <ClockIcon className="w-3.5 h-3.5 text-[#8B92A5]" />
-                        <span className="text-[#8B92A5]">Last sync:</span>
-                        <span className="text-[#E8E6E1]">
+                        <ClockIcon className="w-3.5 h-3.5 text-secondary" />
+                        <span className="text-secondary">Last sync:</span>
+                        <span className="text-content">
                           {relativeTime(status.last_sync_at)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <ClockIcon className="w-3.5 h-3.5 text-[#8B92A5]" />
-                        <span className="text-[#8B92A5]">Next sync:</span>
-                        <span className="text-[#E8E6E1]">
+                        <ClockIcon className="w-3.5 h-3.5 text-secondary" />
+                        <span className="text-secondary">Next sync:</span>
+                        <span className="text-content">
                           {futureTime(status.next_sync_at)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <CheckCircleIcon className="w-3.5 h-3.5 text-[#8B92A5]" />
-                        <span className="text-[#8B92A5]">Total syncs:</span>
-                        <span className="text-[#E8E6E1] font-mono">
+                        <CheckCircleIcon className="w-3.5 h-3.5 text-secondary" />
+                        <span className="text-secondary">Total syncs:</span>
+                        <span className="text-content font-mono">
                           {status.sync_count}
                         </span>
                       </div>
@@ -386,7 +386,7 @@ export function DeepSyncPage() {
                     <button
                       onClick={() => handleTriggerSync(status.integration_type)}
                       disabled={isSyncing}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#5B6E8A] text-white text-sm font-medium rounded-lg hover:bg-[#4A5D79] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-interactive text-white text-sm font-medium rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       <SyncIcon className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
                       {isSyncing ? "Syncing..." : "Sync Now"}
@@ -415,10 +415,10 @@ export function DeepSyncPage() {
 
           {/* ---- Sync Configuration ---- */}
           {!isLoading && hasIntegrations && (
-            <div className="bg-[#161B2E] rounded-xl border border-[#2A2F42] p-6">
+            <div className="bg-elevated rounded-xl border border-border p-6">
               <div className="flex items-center gap-3 mb-6">
-                <SettingsIcon className="w-5 h-5 text-[#5B6E8A]" />
-                <h2 className="text-lg font-medium text-[#E8E6E1]">
+                <SettingsIcon className="w-5 h-5 text-interactive" />
+                <h2 className="text-lg font-medium text-content">
                   Sync Configuration
                 </h2>
               </div>
@@ -426,12 +426,12 @@ export function DeepSyncPage() {
               <form onSubmit={handleSaveConfig} className="space-y-6">
                 {/* Sync interval */}
                 <div>
-                  <label className="block text-sm font-medium text-[#E8E6E1] mb-2">
+                  <label className="block text-sm font-medium text-content mb-2">
                     Sync Interval
                   </label>
-                  <p className="text-xs text-[#8B92A5] mb-3">
+                  <p className="text-xs text-secondary mb-3">
                     How often ARIA automatically pulls data from your integrations.
-                    Current: <span className="text-[#E8E6E1] font-mono">{formatIntervalLabel(syncInterval)}</span>
+                    Current: <span className="text-content font-mono">{formatIntervalLabel(syncInterval)}</span>
                   </p>
                   <input
                     type="range"
@@ -440,7 +440,7 @@ export function DeepSyncPage() {
                     step={1}
                     value={syncInterval}
                     onChange={(e) => setSyncInterval(snapToStop(parseInt(e.target.value, 10)))}
-                    className="w-full h-2 bg-[#2A2F42] rounded-lg appearance-none cursor-pointer accent-[#5B6E8A]"
+                    className="w-full h-2 bg-border rounded-lg appearance-none cursor-pointer accent-interactive"
                   />
                   <div className="flex justify-between mt-2">
                     {INTERVAL_STOPS.map((stop) => (
@@ -450,8 +450,8 @@ export function DeepSyncPage() {
                         onClick={() => setSyncInterval(stop.value)}
                         className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
                           syncInterval === stop.value
-                            ? "text-[#E8E6E1] bg-[#5B6E8A]/30"
-                            : "text-[#8B92A5] hover:text-[#E8E6E1]"
+                            ? "text-content bg-interactive/30"
+                            : "text-secondary hover:text-content"
                         }`}
                       >
                         {stop.label}
@@ -461,15 +461,15 @@ export function DeepSyncPage() {
                 </div>
 
                 {/* Auto-push toggle */}
-                <div className="flex items-center justify-between py-3 border-t border-[#2A2F42]">
+                <div className="flex items-center justify-between py-3 border-t border-border">
                   <div>
                     <label
                       htmlFor="auto-push-toggle"
-                      className="text-sm font-medium text-[#E8E6E1] cursor-pointer"
+                      className="text-sm font-medium text-content cursor-pointer"
                     >
                       Auto-push changes
                     </label>
-                    <p className="text-xs text-[#8B92A5] mt-0.5">
+                    <p className="text-xs text-secondary mt-0.5">
                       Automatically push ARIA updates back to your CRM and integrations
                     </p>
                   </div>
@@ -484,7 +484,7 @@ export function DeepSyncPage() {
                       onChange={(e) => setAutoPushEnabled(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="w-11 h-6 bg-[#2A2F42] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#5B6E8A] rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#5B6E8A]" />
+                    <div className="w-11 h-6 bg-border peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-interactive rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-interactive" />
                   </label>
                 </div>
 
@@ -493,7 +493,7 @@ export function DeepSyncPage() {
                   <button
                     type="submit"
                     disabled={updateConfig.isPending}
-                    className="px-5 py-2.5 bg-[#5B6E8A] text-white text-sm font-medium rounded-lg hover:bg-[#4A5D79] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="px-5 py-2.5 bg-interactive text-white text-sm font-medium rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {updateConfig.isPending ? "Saving..." : "Save Configuration"}
                   </button>

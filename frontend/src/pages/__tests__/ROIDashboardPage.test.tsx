@@ -537,7 +537,7 @@ describe("ROIDashboardPage", () => {
       });
     });
 
-    it("uses correct card styling bg-[#161B2E] border border-[#2A2F42]", async () => {
+    it("uses correct card styling bg-elevated border border-border", async () => {
       mockUseROIMetrics.mockReturnValue({
         data: mockROIData,
         isLoading: false,
@@ -560,7 +560,7 @@ describe("ROIDashboardPage", () => {
       });
     });
 
-    it("uses correct accent color text-[#5B6E8A] for metrics", async () => {
+    it("uses correct accent color text-interactive for metrics", async () => {
       mockUseROIMetrics.mockReturnValue({
         data: mockROIData,
         isLoading: false,
@@ -580,7 +580,7 @@ describe("ROIDashboardPage", () => {
       });
     });
 
-    it("uses correct muted text color text-[#8B92A5] for labels", async () => {
+    it("uses correct muted text color text-secondary for labels", async () => {
       mockUseROIMetrics.mockReturnValue({
         data: mockROIData,
         isLoading: false,

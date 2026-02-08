@@ -118,14 +118,14 @@ export function IntegrationWizardStep({
           transition-all duration-200
           ${
             integration.connected
-              ? "border-[#5A7D60] bg-[#5A7D60]/5"
-              : "border-[#E2E0DC]"
+              ? "border-success bg-success/5"
+              : "border-border"
           }
         `}
       >
         {integration.connected && (
           <div className="absolute top-2 right-2">
-            <div className="flex items-center gap-1.5 bg-[#5A7D60] text-white rounded-full px-2 py-0.5 text-[11px] font-medium">
+            <div className="flex items-center gap-1.5 bg-success text-white rounded-full px-2 py-0.5 text-[11px] font-medium">
               <Check size={10} strokeWidth={2} />
               Connected
             </div>
@@ -138,7 +138,7 @@ export function IntegrationWizardStep({
             className={`
               w-10 h-10 rounded-lg flex items-center justify-center
               font-sans font-bold text-[15px]
-              ${integration.connected ? "bg-[#5A7D60]/10" : "bg-[#F5F5F0]"}
+              ${integration.connected ? "bg-success/10" : "bg-subtle"}
               ${config.color}
             `}
           >
@@ -146,11 +146,11 @@ export function IntegrationWizardStep({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            <span className="font-sans text-[15px] font-medium text-[#1A1D27]">
+            <span className="font-sans text-[15px] font-medium text-content">
               {integration.display_name}
             </span>
             {!integration.connected && (
-              <span className="font-sans text-[13px] text-[#6B7280]">
+              <span className="font-sans text-[13px] text-secondary">
                 Connect your account
               </span>
             )}
@@ -163,7 +163,7 @@ export function IntegrationWizardStep({
               type="button"
               onClick={() => handleDisconnect(integration.name)}
               disabled={isDisconnecting}
-              className="text-[13px] text-[#6B7280] hover:text-[#1A1D27] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#7B8EAA] rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[13px] text-secondary hover:text-content transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-interactive rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isDisconnecting ? "Disconnecting..." : "Disconnect"}
             </button>
@@ -175,11 +175,11 @@ export function IntegrationWizardStep({
               className={`
                 font-sans text-[13px] font-medium px-3 py-1.5 rounded-lg
                 transition-colors duration-150 cursor-pointer
-                focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
                   isConnecting
-                    ? "bg-[#F5F5F0] text-[#6B7280]"
-                    : "bg-[#5B6E8A] text-white hover:bg-[#4A5D79]"
+                    ? "bg-subtle text-secondary"
+                    : "bg-interactive text-white hover:bg-interactive-hover"
                 }
                 disabled:opacity-50 disabled:cursor-not-allowed
               `}
@@ -205,12 +205,12 @@ export function IntegrationWizardStep({
         {/* Category header */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <Icon size={18} strokeWidth={1.5} className="text-[#5B6E8A]" />
-            <span className="font-sans text-[15px] font-medium text-[#1A1D27]">
+            <Icon size={18} strokeWidth={1.5} className="text-interactive" />
+            <span className="font-sans text-[15px] font-medium text-content">
               {CATEGORY_LABELS[category]}
             </span>
           </div>
-          <p className="font-sans text-[13px] text-[#6B7280] ml-7">
+          <p className="font-sans text-[13px] text-secondary ml-7">
             {CATEGORY_DESCRIPTIONS[category]}
           </p>
         </div>
@@ -232,17 +232,17 @@ export function IntegrationWizardStep({
     <div className="flex flex-col gap-8 max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Connect your tools
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           The more ARIA knows, the more she can do.
         </p>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 size={24} strokeWidth={1.5} className="text-[#5B6E8A] animate-spin" />
+          <Loader2 size={24} strokeWidth={1.5} className="text-interactive animate-spin" />
         </div>
       ) : (
         <>
@@ -254,19 +254,19 @@ export function IntegrationWizardStep({
           </div>
 
           {/* ARIA presence */}
-          <div className="flex flex-col gap-2 bg-[#F5F5F0] border border-[#E2E0DC] rounded-xl p-5">
-            <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27] italic">
+          <div className="flex flex-col gap-2 bg-subtle border border-border rounded-xl p-5">
+            <p className="font-sans text-[15px] leading-relaxed text-content italic">
               "Each connection multiplies my effectiveness. CRM + Calendar
               together is where the magic really starts."
             </p>
-            <p className="font-sans text-[13px] text-[#6B7280]">— ARIA</p>
+            <p className="font-sans text-[13px] text-secondary">— ARIA</p>
           </div>
 
           {/* Connected count indicator */}
           {totalConnected > 0 && (
-            <div className="flex items-center gap-2 bg-[#5A7D60]/10 border border-[#5A7D60] rounded-lg px-4 py-2.5">
-              <Check size={16} strokeWidth={1.5} className="text-[#5A7D60]" />
-              <span className="font-sans text-[13px] font-medium text-[#5A7D60]">
+            <div className="flex items-center gap-2 bg-success/10 border border-success rounded-lg px-4 py-2.5">
+              <Check size={16} strokeWidth={1.5} className="text-success" />
+              <span className="font-sans text-[13px] font-medium text-success">
                 {totalConnected} integration{totalConnected > 1 ? "s" : ""} connected
               </span>
             </div>
@@ -277,11 +277,11 @@ export function IntegrationWizardStep({
             <button
               type="button"
               onClick={onComplete}
-              className="bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2"
+              className="bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2"
             >
               Continue
             </button>
-            <p className="font-sans text-[13px] text-[#6B7280] text-center">
+            <p className="font-sans text-[13px] text-secondary text-center">
               You can connect integrations anytime from your profile settings
             </p>
           </div>

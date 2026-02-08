@@ -163,105 +163,105 @@ export function SettingsPrivacyPage() {
 
   if (consentLoading) {
     return (
-      <div className="min-h-screen bg-[#0F1117] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#7B8EAA] animate-spin" />
+      <div className="min-h-screen bg-primary flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-interactive animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1117]">
+    <div className="min-h-screen bg-primary">
       {/* Header */}
-      <div className="border-b border-[#2A2A2E]">
+      <div className="border-b border-border">
         <div className="max-w-[640px] mx-auto px-6 py-8">
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-[2rem] text-[#E8E6E1]">Privacy Settings</h1>
+            <h1 className="font-display text-[2rem] text-content">Privacy Settings</h1>
             <HelpTooltip content="Control how ARIA uses your data. Export, delete, or adjust consent settings." placement="right" />
           </div>
-          <p className="text-[#8B92A5] mt-2">Manage your data, consent, and privacy preferences</p>
+          <p className="text-secondary mt-2">Manage your data, consent, and privacy preferences</p>
         </div>
       </div>
 
       {/* Messages */}
       {successMessage && (
         <div className="max-w-[640px] mx-auto px-6 mt-6">
-          <div className="bg-[#6B8F71]/10 border border-[#6B8F71]/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <Check className="w-5 h-5 text-[#6B8F71]" />
-            <span className="text-[#E8E6E1]">{successMessage}</span>
+          <div className="bg-success/10 border border-success/30 rounded-lg px-4 py-3 flex items-center gap-3">
+            <Check className="w-5 h-5 text-success" />
+            <span className="text-content">{successMessage}</span>
           </div>
         </div>
       )}
       {errorMessage && (
         <div className="max-w-[640px] mx-auto px-6 mt-6">
-          <div className="bg-[#A66B6B]/10 border border-[#A66B6B]/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <X className="w-5 h-5 text-[#A66B6B]" />
-            <span className="text-[#E8E6E1]">{errorMessage}</span>
+          <div className="bg-critical/10 border border-critical/30 rounded-lg px-4 py-3 flex items-center gap-3">
+            <X className="w-5 h-5 text-critical" />
+            <span className="text-content">{errorMessage}</span>
           </div>
         </div>
       )}
 
       <div className="max-w-[640px] mx-auto px-6 py-8 space-y-6">
         {/* Data Export Section */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl overflow-hidden">
+        <div className="bg-elevated border border-border rounded-xl overflow-hidden">
           <button
             onClick={() => setIsExportExpanded(!isExportExpanded)}
-            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-[#1E2235] transition-colors duration-150"
+            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-subtle transition-colors duration-150"
           >
             <div className="flex items-center gap-3">
-              <Download className="w-5 h-5 text-[#7B8EAA]" />
+              <Download className="w-5 h-5 text-interactive" />
               <div>
-                <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">Data Export</h2>
-                <p className="text-[#8B92A5] text-[0.8125rem]">Download all your data (GDPR right to access)</p>
+                <h2 className="text-content font-sans text-[1.125rem] font-medium">Data Export</h2>
+                <p className="text-secondary text-[0.8125rem]">Download all your data (GDPR right to access)</p>
               </div>
             </div>
             {isExportExpanded ? (
-              <ChevronUp className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronUp className="w-5 h-5 text-interactive" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronDown className="w-5 h-5 text-interactive" />
             )}
           </button>
 
           {isExportExpanded && (
-            <div className="px-6 pb-6 pt-2 border-t border-[#2A2A2E]">
-              <p className="text-[#8B92A5] text-[0.875rem] mb-4">
+            <div className="px-6 pb-6 pt-2 border-t border-border">
+              <p className="text-secondary text-[0.875rem] mb-4">
                 Export all your personal data including profile, settings, memory, conversations, and documents.
               </p>
 
               {exportLoading ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-[#7B8EAA] animate-spin" />
+                  <Loader2 className="w-6 h-6 text-interactive animate-spin" />
                 </div>
               ) : dataExport ? (
                 <div className="space-y-4">
-                  <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
-                    <p className="text-[#8B92A5] text-[0.75rem] mb-2">Last export date</p>
-                    <p className="text-[#E8E6E1] text-[0.875rem] font-mono">
+                  <div className="bg-subtle border border-border rounded-lg p-4">
+                    <p className="text-secondary text-[0.75rem] mb-2">Last export date</p>
+                    <p className="text-content text-[0.875rem] font-mono">
                       {new Date(dataExport.export_date).toLocaleString()}
                     </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-3">
-                      <p className="text-[#8B92A5] text-[0.75rem]">Conversations</p>
-                      <p className="text-[#E8E6E1] text-[1rem] font-medium">
+                    <div className="bg-subtle border border-border rounded-lg p-3">
+                      <p className="text-secondary text-[0.75rem]">Conversations</p>
+                      <p className="text-content text-[1rem] font-medium">
                         {dataExport.conversations?.length || 0}
                       </p>
                     </div>
-                    <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-3">
-                      <p className="text-[#8B92A5] text-[0.75rem]">Messages</p>
-                      <p className="text-[#E8E6E1] text-[1rem] font-medium">
+                    <div className="bg-subtle border border-border rounded-lg p-3">
+                      <p className="text-secondary text-[0.75rem]">Messages</p>
+                      <p className="text-content text-[1rem] font-medium">
                         {dataExport.messages?.length || 0}
                       </p>
                     </div>
-                    <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-3">
-                      <p className="text-[#8B92A5] text-[0.75rem]">Documents</p>
-                      <p className="text-[#E8E6E1] text-[1rem] font-medium">
+                    <div className="bg-subtle border border-border rounded-lg p-3">
+                      <p className="text-secondary text-[0.75rem]">Documents</p>
+                      <p className="text-content text-[1rem] font-medium">
                         {dataExport.documents?.length || 0}
                       </p>
                     </div>
-                    <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-3">
-                      <p className="text-[#8B92A5] text-[0.75rem]">Memory entries</p>
-                      <p className="text-[#E8E6E1] text-[1rem] font-medium">
+                    <div className="bg-subtle border border-border rounded-lg p-3">
+                      <p className="text-secondary text-[0.75rem]">Memory entries</p>
+                      <p className="text-content text-[1rem] font-medium">
                         {(dataExport.semantic_memory?.length || 0) + (dataExport.prospective_memory?.length || 0)}
                       </p>
                     </div>
@@ -271,7 +271,7 @@ export function SettingsPrivacyPage() {
                     <button
                       onClick={handleDownloadExport}
                       disabled={refreshDataExport.isPending}
-                      className="flex-1 px-5 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
+                      className="flex-1 px-5 py-2.5 bg-interactive text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
                     >
                       <Download className="w-4 h-4" />
                       Download Export
@@ -279,7 +279,7 @@ export function SettingsPrivacyPage() {
                     <button
                       onClick={handleRefreshExport}
                       disabled={refreshDataExport.isPending}
-                      className="px-5 py-2.5 bg-transparent border border-[#5B6E8A] text-[#5B6E8A] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#5B6E8A]/10 transition-colors duration-150 min-h-[44px] flex items-center justify-center"
+                      className="px-5 py-2.5 bg-transparent border border-interactive text-interactive rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive/10 transition-colors duration-150 min-h-[44px] flex items-center justify-center"
                     >
                       {refreshDataExport.isPending ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -295,12 +295,12 @@ export function SettingsPrivacyPage() {
         </div>
 
         {/* Consent Management Section */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+        <div className="bg-elevated border border-border rounded-xl p-6">
           <div className="flex items-center gap-3 mb-6">
-            <Shield className="w-5 h-5 text-[#7B8EAA]" />
+            <Shield className="w-5 h-5 text-interactive" />
             <div>
-              <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">Data Consent</h2>
-              <p className="text-[#8B92A5] text-[0.8125rem]">Control how ARIA processes your data</p>
+              <h2 className="text-content font-sans text-[1.125rem] font-medium">Data Consent</h2>
+              <p className="text-secondary text-[0.8125rem]">Control how ARIA processes your data</p>
             </div>
           </div>
 
@@ -312,20 +312,20 @@ export function SettingsPrivacyPage() {
               return (
                 <div
                   key={category.key}
-                  className="flex items-start justify-between py-3 px-4 bg-[#1E2235] rounded-lg border border-[#2A2A2E]"
+                  className="flex items-start justify-between py-3 px-4 bg-subtle rounded-lg border border-border"
                 >
                   <div className="flex items-start gap-3 flex-1">
-                    <Icon className="w-5 h-5 text-[#7B8EAA] mt-0.5" />
+                    <Icon className="w-5 h-5 text-interactive mt-0.5" />
                     <div className="flex-1">
-                      <p className="text-[#E8E6E1] text-[0.875rem] font-medium">{category.label}</p>
-                      <p className="text-[#8B92A5] text-[0.75rem] mt-1">{category.description}</p>
+                      <p className="text-content text-[0.875rem] font-medium">{category.label}</p>
+                      <p className="text-secondary text-[0.75rem] mt-1">{category.description}</p>
                     </div>
                   </div>
                   <button
                     onClick={() => handleUpdateConsent(category.key, !isGranted)}
                     disabled={updateConsent.isPending}
                     className={`ml-4 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-150 ${
-                      isGranted ? "bg-[#6B8F71]" : "bg-[#2A2A2E]"
+                      isGranted ? "bg-success" : "bg-border"
                     }`}
                   >
                     <span
@@ -341,34 +341,34 @@ export function SettingsPrivacyPage() {
         </div>
 
         {/* Digital Twin Section */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl overflow-hidden">
+        <div className="bg-elevated border border-border rounded-xl overflow-hidden">
           <button
             onClick={() => setIsDigitalTwinExpanded(!isDigitalTwinExpanded)}
-            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-[#1E2235] transition-colors duration-150"
+            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-subtle transition-colors duration-150"
           >
             <div className="flex items-center gap-3">
-              <Brain className="w-5 h-5 text-[#7B8EAA]" />
+              <Brain className="w-5 h-5 text-interactive" />
               <div>
-                <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">Digital Twin</h2>
-                <p className="text-[#8B92A5] text-[0.8125rem]">Manage your writing style and communication patterns</p>
+                <h2 className="text-content font-sans text-[1.125rem] font-medium">Digital Twin</h2>
+                <p className="text-secondary text-[0.8125rem]">Manage your writing style and communication patterns</p>
               </div>
             </div>
             {isDigitalTwinExpanded ? (
-              <ChevronUp className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronUp className="w-5 h-5 text-interactive" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronDown className="w-5 h-5 text-interactive" />
             )}
           </button>
 
           {isDigitalTwinExpanded && (
-            <div className="px-6 pb-6 pt-2 border-t border-[#2A2A2E]">
-              <p className="text-[#8B92A5] text-[0.875rem] mb-4">
+            <div className="px-6 pb-6 pt-2 border-t border-border">
+              <p className="text-secondary text-[0.875rem] mb-4">
                 Your Digital Twin allows ARIA to calibrate her tone and communication style to match yours. This data is never shared with other users, even within your company.
               </p>
               <button
                 onClick={handleDeleteDigitalTwin}
                 disabled={deleteDigitalTwin.isPending}
-                className="px-5 py-2.5 bg-transparent border border-[#A66B6B] text-[#A66B6B] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#A66B6B]/10 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
+                className="px-5 py-2.5 bg-transparent border border-critical text-critical rounded-lg font-sans text-[0.875rem] font-medium hover:bg-critical/10 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
               >
                 {deleteDigitalTwin.isPending ? (
                   <>
@@ -387,60 +387,60 @@ export function SettingsPrivacyPage() {
         </div>
 
         {/* Retention Policies Section */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl overflow-hidden">
+        <div className="bg-elevated border border-border rounded-xl overflow-hidden">
           <button
             onClick={() => setIsRetentionExpanded(!isRetentionExpanded)}
-            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-[#1E2235] transition-colors duration-150"
+            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-subtle transition-colors duration-150"
           >
             <div className="flex items-center gap-3">
-              <Clock className="w-5 h-5 text-[#7B8EAA]" />
+              <Clock className="w-5 h-5 text-interactive" />
               <div>
-                <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">Data Retention</h2>
-                <p className="text-[#8B92A5] text-[0.8125rem]">How long we keep your data</p>
+                <h2 className="text-content font-sans text-[1.125rem] font-medium">Data Retention</h2>
+                <p className="text-secondary text-[0.8125rem]">How long we keep your data</p>
               </div>
             </div>
             {isRetentionExpanded ? (
-              <ChevronUp className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronUp className="w-5 h-5 text-interactive" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronDown className="w-5 h-5 text-interactive" />
             )}
           </button>
 
           {isRetentionExpanded && (
-            <div className="px-6 pb-6 pt-2 border-t border-[#2A2A2E]">
+            <div className="px-6 pb-6 pt-2 border-t border-border">
               {retentionLoading ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-[#7B8EAA] animate-spin" />
+                  <Loader2 className="w-6 h-6 text-interactive animate-spin" />
                 </div>
               ) : retentionPolicies ? (
                 <div className="space-y-4">
-                  <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
-                    <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Audit Logs</p>
-                    <p className="text-[#8B92A5] text-[0.8125rem]">
+                  <div className="bg-subtle border border-border rounded-lg p-4">
+                    <p className="text-content text-[0.875rem] font-medium mb-1">Audit Logs</p>
+                    <p className="text-secondary text-[0.8125rem]">
                       Query logs: {(retentionPolicies.audit_query_logs as { retention_days?: number } | undefined)?.retention_days || 90} days
                     </p>
-                    <p className="text-[#8B92A5] text-[0.8125rem]">
+                    <p className="text-secondary text-[0.8125rem]">
                       Write logs: {(retentionPolicies.audit_write_logs as { retention_days?: number } | undefined)?.retention_days || 180} days
                     </p>
                   </div>
 
-                  <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
-                    <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Email Data</p>
-                    <p className="text-[#8B92A5] text-[0.8125rem]">
+                  <div className="bg-subtle border border-border rounded-lg p-4">
+                    <p className="text-content text-[0.875rem] font-medium mb-1">Email Data</p>
+                    <p className="text-secondary text-[0.8125rem]">
                       {(retentionPolicies.email_data as { description?: string } | undefined)?.description || "Retained for analysis while account is active"}
                     </p>
                   </div>
 
-                  <div className="bg-[#1E2235] border border-[#2A2A2E] rounded-lg p-4">
-                    <p className="text-[#E8E6E1] text-[0.875rem] font-medium mb-1">Conversation History</p>
-                    <p className="text-[#8B92A5] text-[0.8125rem]">
+                  <div className="bg-subtle border border-border rounded-lg p-4">
+                    <p className="text-content text-[0.875rem] font-medium mb-1">Conversation History</p>
+                    <p className="text-secondary text-[0.8125rem]">
                       {(retentionPolicies.conversation_history as { description?: string } | undefined)?.description || "Retained while account is active"}
                     </p>
                   </div>
 
                   {retentionPolicies.note && (
-                    <div className="bg-[#6B7FA3]/10 border border-[#6B7FA3]/30 rounded-lg p-3">
-                      <p className="text-[#E8E6E1] text-[0.8125rem]">{retentionPolicies.note}</p>
+                    <div className="bg-info/10 border border-info/30 rounded-lg p-3">
+                      <p className="text-content text-[0.8125rem]">{retentionPolicies.note}</p>
                     </div>
                   )}
                 </div>
@@ -450,41 +450,41 @@ export function SettingsPrivacyPage() {
         </div>
 
         {/* Danger Zone */}
-        <div className="bg-[#161B2E] border border-[#A66B6B]/30 rounded-xl overflow-hidden">
+        <div className="bg-elevated border border-critical/30 rounded-xl overflow-hidden">
           <button
             onClick={() => setIsDangerZoneExpanded(!isDangerZoneExpanded)}
-            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-[#1E2235] transition-colors duration-150"
+            className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-subtle transition-colors duration-150"
           >
             <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-[#A66B6B]" />
+              <AlertTriangle className="w-5 h-5 text-critical" />
               <div>
-                <h2 className="text-[#A66B6B] font-sans text-[1.125rem] font-medium">Danger Zone</h2>
-                <p className="text-[#8B92A5] text-[0.8125rem]">Irreversible data deletion</p>
+                <h2 className="text-critical font-sans text-[1.125rem] font-medium">Danger Zone</h2>
+                <p className="text-secondary text-[0.8125rem]">Irreversible data deletion</p>
               </div>
             </div>
             {isDangerZoneExpanded ? (
-              <ChevronUp className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronUp className="w-5 h-5 text-interactive" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-[#7B8EAA]" />
+              <ChevronDown className="w-5 h-5 text-interactive" />
             )}
           </button>
 
           {isDangerZoneExpanded && (
-            <div className="px-6 pb-6 pt-2 border-t border-[#A66B6B]/20">
+            <div className="px-6 pb-6 pt-2 border-t border-critical/20">
               <div className="space-y-4">
-                <p className="text-[#8B92A5] text-[0.875rem]">
+                <p className="text-secondary text-[0.875rem]">
                   Deleting all your data is permanent. This will remove your profile, memories, conversations, documents, and settings. This action cannot be undone.
                 </p>
 
                 <div>
-                  <label className="block text-[#8B92A5] text-[0.8125rem] font-medium mb-1.5">
-                    Type <span className="text-[#E8E6E1] font-mono">DELETE MY DATA</span> to confirm
+                  <label className="block text-secondary text-[0.8125rem] font-medium mb-1.5">
+                    Type <span className="text-content font-mono">DELETE MY DATA</span> to confirm
                   </label>
                   <input
                     type="text"
                     value={deleteConfirmation}
                     onChange={(e) => setDeleteConfirmation(e.target.value)}
-                    className="w-full bg-[#1E2235] border border-[#2A2A2E] rounded-lg px-4 py-3 text-[#E8E6E1] text-[0.9375rem] focus:border-[#A66B6B] focus:ring-1 focus:ring-[#A66B6B] outline-none transition-colors duration-150"
+                    className="w-full bg-subtle border border-border rounded-lg px-4 py-3 text-content text-[0.9375rem] focus:border-critical focus:ring-1 focus:ring-critical outline-none transition-colors duration-150"
                     placeholder="DELETE MY DATA"
                   />
                 </div>
@@ -492,7 +492,7 @@ export function SettingsPrivacyPage() {
                 <button
                   onClick={handleDeleteUserData}
                   disabled={deleteUserData.isPending || deleteConfirmation !== "DELETE MY DATA"}
-                  className="w-full px-5 py-2.5 bg-transparent border border-[#A66B6B] text-[#A66B6B] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#A66B6B]/10 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center"
+                  className="w-full px-5 py-2.5 bg-transparent border border-critical text-critical rounded-lg font-sans text-[0.875rem] font-medium hover:bg-critical/10 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center"
                 >
                   {deleteUserData.isPending ? (
                     <>

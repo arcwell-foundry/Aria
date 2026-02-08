@@ -6,11 +6,11 @@ import type { ReactNode } from 'react';
  * EmptyState - Reusable empty state component with ARIA personality
  *
  * Follows ARIA Design System v1.0:
- * - Dark surface background: bg-[#0F1117]
+ * - Dark surface background: bg-primary
  * - Instrument Serif for title (font-display text-[24px])
  * - Satoshi for description (font-sans text-[15px])
  * - Lucide icons (20x20, stroke 1.5)
- * - Icon container: w-16 h-16 rounded-full bg-[#1E2235]
+ * - Icon container: w-16 h-16 rounded-full bg-subtle
  * - ARIA personality: optimistic, actionable messaging
  */
 
@@ -40,17 +40,17 @@ export function EmptyState({
   return (
     <div className={`flex flex-col items-center justify-center py-16 px-6 text-center ${className}`}>
       {/* Icon Container */}
-      <div className="w-16 h-16 rounded-full bg-[#1E2235] flex items-center justify-center mb-6">
-        <Icon size={20} strokeWidth={1.5} className="text-[#8B92A5]" aria-hidden="true" />
+      <div className="w-16 h-16 rounded-full bg-subtle flex items-center justify-center mb-6">
+        <Icon size={20} strokeWidth={1.5} className="text-secondary" aria-hidden="true" />
       </div>
 
       {/* Title - Instrument Serif */}
-      <h3 className="font-display text-[24px] leading-[1.2] text-[#E8E6E1] mb-3">
+      <h3 className="font-display text-[24px] leading-[1.2] text-content mb-3">
         {title}
       </h3>
 
       {/* Description - Satoshi */}
-      <p className="font-sans text-[15px] leading-[1.6] text-[#8B92A5] max-w-md mb-8">
+      <p className="font-sans text-[15px] leading-[1.6] text-secondary max-w-md mb-8">
         {description}
       </p>
 
@@ -58,7 +58,7 @@ export function EmptyState({
       {onAction && actionLabel && (
         <button
           onClick={onAction}
-          className="inline-flex items-center justify-center gap-2 bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[15px] hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 focus:ring-offset-[#0F1117]"
+          className="inline-flex items-center justify-center gap-2 bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[15px] hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 focus:ring-offset-primary"
         >
           {actionLabel}
         </button>

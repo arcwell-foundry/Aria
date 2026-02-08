@@ -24,22 +24,22 @@ const DOMAIN_CONFIG: Record<string, DomainConfig> = {
   corporate_memory: {
     label: "Company Intelligence",
     icon: Brain,
-    accentClass: "text-[#6B7FA3]",
+    accentClass: "text-info",
   },
   competitive: {
     label: "Competitive Landscape",
     icon: Shield,
-    accentClass: "text-[#B8956A]",
+    accentClass: "text-warning",
   },
   relationship: {
     label: "Relationships & Contacts",
     icon: Users,
-    accentClass: "text-[#6B8F71]",
+    accentClass: "text-success",
   },
   digital_twin: {
     label: "Communication Style",
     icon: Pencil,
-    accentClass: "text-[#8B92A5]",
+    accentClass: "text-secondary",
   },
 };
 
@@ -48,7 +48,7 @@ function getDomainConfig(domain: string): DomainConfig {
     DOMAIN_CONFIG[domain] ?? {
       label: domain,
       icon: Brain,
-      accentClass: "text-[#6B7FA3]",
+      accentClass: "text-info",
     }
   );
 }
@@ -118,8 +118,8 @@ function FactRow({ fact, surface }: FactRowProps) {
       <div
         className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border ${
           isDark
-            ? "bg-[#1E2235] border-[#7B8EAA]"
-            : "bg-white border-[#5B6E8A]"
+            ? "bg-subtle border-interactive"
+            : "bg-white border-interactive"
         }`}
       >
         <input
@@ -129,7 +129,7 @@ function FactRow({ fact, surface }: FactRowProps) {
           onChange={(e) => setCorrectedValue(e.target.value)}
           onKeyDown={handleKeyDown}
           className={`flex-1 bg-transparent text-[15px] font-sans outline-none ${
-            isDark ? "text-[#E8E6E1]" : "text-[#1A1D27]"
+            isDark ? "text-content" : "text-content"
           }`}
           aria-label="Correct this fact"
         />
@@ -138,8 +138,8 @@ function FactRow({ fact, surface }: FactRowProps) {
           disabled={correctMutation.isPending}
           className={`p-1.5 rounded-md transition-colors duration-150 cursor-pointer ${
             isDark
-              ? "hover:bg-[#6B8F71]/20 text-[#6B8F71]"
-              : "hover:bg-[#5A7D60]/10 text-[#5A7D60]"
+              ? "hover:bg-success/20 text-success"
+              : "hover:bg-success/10 text-success"
           }`}
           aria-label="Save correction"
         >
@@ -152,8 +152,8 @@ function FactRow({ fact, surface }: FactRowProps) {
           }}
           className={`p-1.5 rounded-md transition-colors duration-150 cursor-pointer ${
             isDark
-              ? "hover:bg-[#A66B6B]/20 text-[#8B92A5]"
-              : "hover:bg-[#945A5A]/10 text-[#6B7280]"
+              ? "hover:bg-critical/20 text-secondary"
+              : "hover:bg-critical/10 text-secondary"
           }`}
           aria-label="Cancel editing"
         >
@@ -168,8 +168,8 @@ function FactRow({ fact, surface }: FactRowProps) {
       onClick={() => setEditing(true)}
       className={`w-full text-left group flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 cursor-pointer ${
         isDark
-          ? "hover:bg-[#1E2235]/60"
-          : "hover:bg-[#F5F5F0]"
+          ? "hover:bg-subtle/60"
+          : "hover:bg-subtle"
       }`}
       aria-label={`Edit fact: ${fact.fact}`}
     >
@@ -177,7 +177,7 @@ function FactRow({ fact, surface }: FactRowProps) {
       <div className="flex-shrink-0 mt-1.5 w-1 h-4 rounded-full overflow-hidden">
         <div
           className={`w-full rounded-full ${
-            isDark ? "bg-[#7B8EAA]" : "bg-[#5B6E8A]"
+            isDark ? "bg-interactive" : "bg-interactive"
           }`}
           style={{ height: `${Math.max(fact.confidence * 100, 15)}%` }}
           title={tier.label}
@@ -187,7 +187,7 @@ function FactRow({ fact, surface }: FactRowProps) {
       {/* Fact text */}
       <span
         className={`flex-1 text-[15px] font-sans leading-relaxed ${tier.opacity} ${tier.fontWeight} ${
-          isDark ? "text-[#E8E6E1]" : "text-[#1A1D27]"
+          isDark ? "text-content" : "text-content"
         }`}
       >
         {fact.language || fact.fact}
@@ -196,7 +196,7 @@ function FactRow({ fact, surface }: FactRowProps) {
       {/* Source tag */}
       <span
         className={`flex-shrink-0 mt-0.5 text-[11px] font-mono ${
-          isDark ? "text-[#8B92A5]/60" : "text-[#6B7280]/60"
+          isDark ? "text-secondary/60" : "text-secondary/60"
         } opacity-0 group-hover:opacity-100 transition-opacity duration-150`}
       >
         {fact.source}
@@ -224,15 +224,15 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
     <div
       className={`rounded-xl border overflow-hidden ${
         isDark
-          ? "bg-[#161B2E] border-[#2A2F42]"
-          : "bg-white border-[#E2E0DC] shadow-sm"
+          ? "bg-elevated border-border"
+          : "bg-white border-border shadow-sm"
       }`}
     >
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
         className={`w-full flex items-center justify-between px-5 py-4 transition-colors duration-150 cursor-pointer ${
-          isDark ? "hover:bg-[#1E2235]/40" : "hover:bg-[#F5F5F0]/60"
+          isDark ? "hover:bg-subtle/40" : "hover:bg-subtle/60"
         }`}
         aria-expanded={expanded}
       >
@@ -240,7 +240,7 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
           <Icon className={`w-5 h-5 ${config.accentClass}`} strokeWidth={1.5} />
           <h3
             className={`text-[15px] font-sans font-medium ${
-              isDark ? "text-[#E8E6E1]" : "text-[#1A1D27]"
+              isDark ? "text-content" : "text-content"
             }`}
           >
             {config.label}
@@ -248,8 +248,8 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
           <span
             className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${
               isDark
-                ? "bg-[#1E2235] text-[#8B92A5]"
-                : "bg-[#F5F5F0] text-[#6B7280]"
+                ? "bg-subtle text-secondary"
+                : "bg-subtle text-secondary"
             }`}
           >
             {group.facts.length}
@@ -258,7 +258,7 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
         <ChevronDown
           className={`w-4 h-4 transition-transform duration-200 ${
             expanded ? "rotate-180" : ""
-          } ${isDark ? "text-[#8B92A5]" : "text-[#6B7280]"}`}
+          } ${isDark ? "text-secondary" : "text-secondary"}`}
           strokeWidth={1.5}
         />
       </button>
@@ -278,15 +278,15 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
         {/* Domain actions */}
         <div
           className={`flex items-center gap-2 px-5 py-3 border-t ${
-            isDark ? "border-[#2A2F42]" : "border-[#E2E0DC]"
+            isDark ? "border-border" : "border-border"
           }`}
         >
           <button
             onClick={() => onConfirm?.(group.domain)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-sans font-medium transition-colors duration-150 cursor-pointer ${
               isDark
-                ? "text-[#6B8F71] hover:bg-[#6B8F71]/10"
-                : "text-[#5A7D60] hover:bg-[#5A7D60]/10"
+                ? "text-success hover:bg-success/10"
+                : "text-success hover:bg-success/10"
             }`}
           >
             <Check className="w-3.5 h-3.5" strokeWidth={2} />
@@ -296,8 +296,8 @@ function DomainSection({ group, surface, onConfirm, onFlag }: DomainSectionProps
             onClick={() => onFlag?.(group.domain)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-sans font-medium transition-colors duration-150 cursor-pointer ${
               isDark
-                ? "text-[#B8956A] hover:bg-[#B8956A]/10"
-                : "text-[#A6845A] hover:bg-[#A6845A]/10"
+                ? "text-warning hover:bg-warning/10"
+                : "text-warning hover:bg-warning/10"
             }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
@@ -333,19 +333,19 @@ export function MemoryDelta({
       <div
         className={`rounded-xl border px-6 py-8 text-center ${
           isDark
-            ? "bg-[#161B2E] border-[#2A2F42]"
-            : "bg-white border-[#E2E0DC] shadow-sm"
+            ? "bg-elevated border-border"
+            : "bg-white border-border shadow-sm"
         }`}
       >
         <Brain
           className={`w-8 h-8 mx-auto mb-3 ${
-            isDark ? "text-[#8B92A5]/40" : "text-[#6B7280]/40"
+            isDark ? "text-secondary/40" : "text-secondary/40"
           }`}
           strokeWidth={1.5}
         />
         <p
           className={`text-[15px] font-sans ${
-            isDark ? "text-[#8B92A5]" : "text-[#6B7280]"
+            isDark ? "text-secondary" : "text-secondary"
           }`}
         >
           ARIA is building her understanding. New intelligence will appear here.
@@ -359,7 +359,7 @@ export function MemoryDelta({
       {title && (
         <h2
           className={`text-lg font-display ${
-            isDark ? "text-[#E8E6E1]" : "text-[#1A1D27]"
+            isDark ? "text-content" : "text-content"
           }`}
         >
           {title}

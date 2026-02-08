@@ -189,18 +189,18 @@ describe('HelpTooltip', () => {
   });
 
   describe('ARIA Design System compliance', () => {
-    it('uses correct icon color text-[#7B8EAA]', () => {
+    it('uses correct icon color text-interactive', () => {
       render(<HelpTooltip content="Help" />);
 
       const button = screen.getByRole('button');
-      expect(button).toHaveClass('text-[#7B8EAA]');
+      expect(button).toHaveClass('text-interactive');
     });
 
-    it('uses correct hover color text-[#A0A8B8]', () => {
+    it('uses correct hover color text-secondary', () => {
       render(<HelpTooltip content="Help" />);
 
       const button = screen.getByRole('button');
-      expect(button).toHaveClass('hover:text-[#A0A8B8]');
+      expect(button).toHaveClass('hover:text-secondary');
     });
 
     it('tooltip has correct background bg-white', () => {
@@ -213,21 +213,21 @@ describe('HelpTooltip', () => {
       expect(tooltip).toHaveClass('bg-white');
     });
 
-    it('tooltip has correct border border-[#E2E0DC]', () => {
+    it('tooltip has correct border border-border', () => {
       const { container } = render(<HelpTooltip content="Help" />);
 
       const button = screen.getByRole('button');
       fireEvent.mouseEnter(button);
 
       const tooltip = container.querySelector('[role="tooltip"]');
-      expect(tooltip).toHaveClass('border-[#E2E0DC]');
+      expect(tooltip).toHaveClass('border-border');
     });
 
     it('has focus ring styling', () => {
       render(<HelpTooltip content="Help" />);
 
       const button = screen.getByRole('button');
-      expect(button).toHaveClass('focus:ring-2', 'focus:ring-[#7B8EAA]');
+      expect(button).toHaveClass('focus:ring-2', 'focus:ring-interactive');
     });
   });
 });

@@ -45,11 +45,11 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-primary">
       <div className="mx-auto max-w-[960px] px-6 py-12 md:py-16">
         {/* Header */}
         <div className="mb-12">
-          <p className="font-sans text-[13px] font-medium text-[#6B7280] tracking-wide uppercase">
+          <p className="font-sans text-[13px] font-medium text-secondary tracking-wide uppercase">
             Getting started
           </p>
         </div>
@@ -72,12 +72,12 @@ export function OnboardingPage() {
                 {injectedQuestions.map((q, i) => (
                   <div
                     key={i}
-                    className="rounded-xl border border-[#E2E0DC] bg-[#F5F5F0] px-5 py-4"
+                    className="rounded-xl border border-border bg-subtle px-5 py-4"
                   >
-                    <p className="text-[13px] font-medium text-[#6B7280] mb-1">
+                    <p className="text-[13px] font-medium text-secondary mb-1">
                       {q.context}
                     </p>
-                    <p className="text-[15px] text-[#1A1A1A]">{q.question}</p>
+                    <p className="text-[15px] text-content">{q.question}</p>
                   </div>
                 ))}
               </div>
@@ -117,19 +117,19 @@ const SKELETON_WIDTHS = [72, 84, 92, 88, 64, 96, 76, 80];
 
 function OnboardingSkeleton() {
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-primary">
       <div className="mx-auto max-w-[960px] px-6 py-12 md:py-16">
         <div className="mb-12">
-          <div className="h-4 w-28 rounded bg-[#E2E0DC] animate-pulse" />
+          <div className="h-4 w-28 rounded bg-border animate-pulse" />
         </div>
         <div className="flex flex-col md:flex-row gap-12 md:gap-16">
           <aside className="md:w-48 shrink-0">
             <div className="flex flex-col gap-2">
               {SKELETON_WIDTHS.map((w, i) => (
                 <div key={i} className="flex items-center gap-3 px-3 py-2.5">
-                  <div className="w-6 h-6 rounded-full bg-[#E2E0DC] animate-pulse" />
+                  <div className="w-6 h-6 rounded-full bg-border animate-pulse" />
                   <div
-                    className="h-3.5 rounded bg-[#E2E0DC] animate-pulse"
+                    className="h-3.5 rounded bg-border animate-pulse"
                     style={{ width: `${w}px` }}
                   />
                 </div>
@@ -138,10 +138,10 @@ function OnboardingSkeleton() {
           </aside>
           <main className="flex-1 min-w-0">
             <div className="flex flex-col gap-6">
-              <div className="h-10 w-48 rounded bg-[#E2E0DC] animate-pulse" />
-              <div className="h-5 w-80 rounded bg-[#E2E0DC] animate-pulse" />
-              <div className="h-20 w-full rounded-xl bg-[#F5F5F0] animate-pulse" />
-              <div className="h-10 w-28 rounded-lg bg-[#E2E0DC] animate-pulse" />
+              <div className="h-10 w-48 rounded bg-border animate-pulse" />
+              <div className="h-5 w-80 rounded bg-border animate-pulse" />
+              <div className="h-20 w-full rounded-xl bg-subtle animate-pulse" />
+              <div className="h-10 w-28 rounded-lg bg-border animate-pulse" />
             </div>
           </main>
         </div>

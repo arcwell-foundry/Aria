@@ -6,7 +6,7 @@ import { useState } from 'react';
  * OnboardingTooltip - Tooltip for onboarding guidance and tips
  *
  * Follows ARIA Design System v1.0:
- * - White bg, border-[#E2E0DC], rounded-lg, shadow-sm
+ * - White bg, border-border, rounded-lg, shadow-sm
  * - X dismiss button (Lucide X icon)
  * - Arrow element pointing to parent
  * - Placement classes for top/bottom/left/right
@@ -80,7 +80,7 @@ export function OnboardingTooltip({
           role="dialog"
           aria-labelledby="onboarding-tooltip-title"
           aria-describedby="onboarding-tooltip-content"
-          className={`absolute z-50 w-72 bg-white border border-[#E2E0DC] rounded-lg shadow-sm ${positionClasses[placement]}`}
+          className={`absolute z-50 w-72 bg-white border border-border rounded-lg shadow-sm ${positionClasses[placement]}`}
           style={{
             fontFamily: "'Satoshi', sans-serif",
             fontSize: '15px',
@@ -88,10 +88,10 @@ export function OnboardingTooltip({
           }}
         >
           {/* Header with title and dismiss button */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#E2E0DC]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3
               id="onboarding-tooltip-title"
-              className="text-[#1A1A1A] font-semibold text-sm m-0"
+              className="text-content font-semibold text-sm m-0"
             >
               {title}
             </h3>
@@ -99,7 +99,7 @@ export function OnboardingTooltip({
               type="button"
               onClick={handleDismiss}
               aria-label="Dismiss tooltip"
-              className="inline-flex items-center justify-center text-[#7B8EAA] hover:text-[#1A1A1A] transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 focus:ring-offset-white rounded-sm p-0.5"
+              className="inline-flex items-center justify-center text-interactive hover:text-content transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 focus:ring-offset-white rounded-sm p-0.5"
             >
               <X size={16} strokeWidth={1.5} aria-hidden="true" />
             </button>
@@ -108,7 +108,7 @@ export function OnboardingTooltip({
           {/* Content Body */}
           <div
             id="onboarding-tooltip-content"
-            className="px-4 py-3 text-[#1A1A1A]"
+            className="px-4 py-3 text-content"
           >
             {typeof content === 'string' ? (
               <p className="m-0">{content}</p>

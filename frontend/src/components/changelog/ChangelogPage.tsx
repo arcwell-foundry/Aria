@@ -78,7 +78,7 @@ function formatDate(date: string): string {
 
 export function ChangelogPageContent() {
   return (
-    <div className="bg-[#FAFAF9] min-h-screen">
+    <div className="bg-primary min-h-screen">
       <div className="max-w-4xl mx-auto px-6 py-8 lg:px-8 lg:py-12">
         {/* Header */}
         <div className="mb-8">
@@ -98,7 +98,7 @@ export function ChangelogPageContent() {
               {/* Version Header */}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <span className="font-mono text-sm px-3 py-1 rounded bg-[#F5F5F0] text-slate-700 font-medium">
+                  <span className="font-mono text-sm px-3 py-1 rounded bg-subtle text-slate-700 font-medium">
                     {entry.version}
                   </span>
                   {isNewEntry(entry.date) && (

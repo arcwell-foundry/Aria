@@ -43,7 +43,7 @@ export function OnboardingProgress({
                 className={`
                   flex items-center gap-3 rounded-lg px-3 py-2.5
                   transition-colors duration-150
-                  ${isCurrent ? "bg-[#F5F5F0]" : ""}
+                  ${isCurrent ? "bg-subtle" : ""}
                 `}
                 aria-current={isCurrent ? "step" : undefined}
                 aria-label={`${step.label}${isCompleted ? " — completed" : ""}${isSkipped ? " — skipped" : ""}${isCurrent ? " — current step" : ""}`}
@@ -56,10 +56,10 @@ export function OnboardingProgress({
                 <span
                   className={`
                     font-sans text-[13px] leading-snug
-                    ${isCurrent ? "font-medium text-[#1A1D27]" : ""}
-                    ${isCompleted ? "text-[#5A7D60]" : ""}
-                    ${isSkipped ? "text-[#6B7280]" : ""}
-                    ${!isCurrent && !isCompleted && !isSkipped ? "text-[#6B7280]" : ""}
+                    ${isCurrent ? "font-medium text-content" : ""}
+                    ${isCompleted ? "text-success" : ""}
+                    ${isSkipped ? "text-secondary" : ""}
+                    ${!isCurrent && !isCompleted && !isSkipped ? "text-secondary" : ""}
                   `}
                 >
                   {step.label}
@@ -86,10 +86,10 @@ export function OnboardingProgress({
               <div
                 className={`
                   h-1.5 rounded-full transition-all duration-300
-                  ${isCurrent ? "w-8 bg-[#5B6E8A]" : "w-4"}
-                  ${isCompleted ? "bg-[#5A7D60]" : ""}
-                  ${isSkipped ? "bg-[#E2E0DC]" : ""}
-                  ${!isCurrent && !isCompleted && !isSkipped ? "bg-[#E2E0DC]" : ""}
+                  ${isCurrent ? "w-8 bg-interactive" : "w-4"}
+                  ${isCompleted ? "bg-success" : ""}
+                  ${isSkipped ? "bg-border" : ""}
+                  ${!isCurrent && !isCompleted && !isSkipped ? "bg-border" : ""}
                 `}
               />
             </li>
@@ -114,31 +114,31 @@ function StepIndicator({
 
   if (isCompleted) {
     return (
-      <span className={`${baseClasses} bg-[#5A7D60]/10`}>
-        <Check size={14} strokeWidth={2} className="text-[#5A7D60]" />
+      <span className={`${baseClasses} bg-success/10`}>
+        <Check size={14} strokeWidth={2} className="text-success" />
       </span>
     );
   }
 
   if (isSkipped) {
     return (
-      <span className={`${baseClasses} bg-[#E2E0DC]`}>
-        <Minus size={12} strokeWidth={2} className="text-[#6B7280]" />
+      <span className={`${baseClasses} bg-border`}>
+        <Minus size={12} strokeWidth={2} className="text-secondary" />
       </span>
     );
   }
 
   if (isCurrent) {
     return (
-      <span className={`${baseClasses} bg-[#5B6E8A]/10 ring-1 ring-[#5B6E8A]/30`}>
-        <span className="w-2 h-2 rounded-full bg-[#5B6E8A]" />
+      <span className={`${baseClasses} bg-interactive/10 ring-1 ring-interactive/30`}>
+        <span className="w-2 h-2 rounded-full bg-interactive" />
       </span>
     );
   }
 
   return (
-    <span className={`${baseClasses} bg-[#F5F5F0]`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-[#E2E0DC]" />
+    <span className={`${baseClasses} bg-subtle`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-border" />
     </span>
   );
 }

@@ -132,10 +132,10 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
     <div className="flex flex-col gap-8 max-w-md animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Tell ARIA about your company
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           This is ARIA's first step in becoming your team's intelligence layer.
         </p>
       </div>
@@ -143,28 +143,28 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
       {/* Gate Error Panel - shown when company fails life sciences check */}
       {gateError && (
         <div
-          className="rounded-xl bg-[#FAFAF9] border border-[#E2E0DC] px-5 py-4 w-full animate-in fade-in slide-in-from-top-2 duration-300"
+          className="rounded-xl bg-primary border border-border px-5 py-4 w-full animate-in fade-in slide-in-from-top-2 duration-300"
           role="alert"
           aria-live="polite"
         >
           <div className="flex items-start gap-3">
-            <Building2 size={20} strokeWidth={1.5} className="text-[#6B7280] shrink-0 mt-0.5" />
+            <Building2 size={20} strokeWidth={1.5} className="text-secondary shrink-0 mt-0.5" />
             <div className="flex flex-col gap-3">
-              <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27]">
+              <p className="font-sans text-[15px] leading-relaxed text-content">
                 {gateError}
               </p>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setGateError(null)}
-                  className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+                  className="font-sans text-[13px] font-medium text-interactive hover:text-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded px-2 py-1"
                 >
                   Try a different email
                 </button>
-                <span className="text-[#E2E0DC]">•</span>
+                <span className="text-border">•</span>
                 <a
                   href="mailto:support@luminone.ai"
-                  className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+                  className="font-sans text-[13px] font-medium text-interactive hover:text-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded px-2 py-1"
                 >
                   Think this is a mistake? Contact us
                 </a>
@@ -189,7 +189,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="company_name"
-              className="font-sans text-[13px] font-medium text-[#6B7280]"
+              className="font-sans text-[13px] font-medium text-secondary"
             >
               Company Name <span aria-hidden="true">*</span>
               <span className="sr-only">(required)</span>
@@ -209,8 +209,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
                 disabled:opacity-50 disabled:cursor-not-allowed
                 ${
                   errors.company_name
-                    ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
-                    : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                    ? "border-critical focus:border-critical focus:ring-critical"
+                    : "border-border focus:border-interactive focus:ring-interactive"
                 }
               `}
               aria-invalid={errors.company_name ? "true" : "false"}
@@ -221,7 +221,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             {errors.company_name && (
               <p
                 id="company_name-error"
-                className="font-sans text-[13px] text-[#945A5A]"
+                className="font-sans text-[13px] text-critical"
                 role="alert"
                 aria-live="polite"
               >
@@ -234,7 +234,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="website"
-              className="font-sans text-[13px] font-medium text-[#6B7280]"
+              className="font-sans text-[13px] font-medium text-secondary"
             >
               Company Website <span aria-hidden="true">*</span>
               <span className="sr-only">(required)</span>
@@ -254,8 +254,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
                 disabled:opacity-50 disabled:cursor-not-allowed
                 ${
                   errors.website
-                    ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
-                    : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                    ? "border-critical focus:border-critical focus:ring-critical"
+                    : "border-border focus:border-interactive focus:ring-interactive"
                 }
               `}
               aria-invalid={errors.website ? "true" : "false"}
@@ -264,7 +264,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             {errors.website && (
               <p
                 id="website-error"
-                className="font-sans text-[13px] text-[#945A5A]"
+                className="font-sans text-[13px] text-critical"
                 role="alert"
                 aria-live="polite"
               >
@@ -277,7 +277,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="email"
-              className="font-sans text-[13px] font-medium text-[#6B7280]"
+              className="font-sans text-[13px] font-medium text-secondary"
             >
               Corporate Email <span aria-hidden="true">*</span>
               <span className="sr-only">(required)</span>
@@ -299,8 +299,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
                   disabled:opacity-50 disabled:cursor-not-allowed
                   ${
                     errors.email
-                      ? "border-[#945A5A] focus:border-[#945A5A] focus:ring-[#945A5A]"
-                      : "border-[#E2E0DC] focus:border-[#5B6E8A] focus:ring-[#5B6E8A]"
+                      ? "border-critical focus:border-critical focus:ring-critical"
+                      : "border-border focus:border-interactive focus:ring-interactive"
                   }
                 `}
                 aria-invalid={errors.email ? "true" : "false"}
@@ -310,7 +310,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
                 <Loader2
                   size={16}
                   strokeWidth={1.5}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B7280] animate-spin"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary animate-spin"
                   aria-hidden="true"
                 />
               )}
@@ -318,7 +318,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             {errors.email && (
               <p
                 id="email-error"
-                className="font-sans text-[13px] text-[#945A5A]"
+                className="font-sans text-[13px] text-critical"
                 role="alert"
                 aria-live="polite"
               >
@@ -332,11 +332,11 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             type="submit"
             disabled={isSubmitting}
             className={`
-              bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+              bg-interactive text-white rounded-lg px-5 py-2.5
               font-sans font-medium text-[15px]
-              hover:bg-[#4A5D79] active:bg-[#3D5070]
+              hover:bg-interactive-hover active:bg-interactive-hover
               transition-colors duration-150
-              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
               disabled:opacity-50 disabled:cursor-not-allowed
               cursor-pointer flex items-center justify-center gap-2
               min-h-[44px]
@@ -364,11 +364,11 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
             type="button"
             onClick={() => onComplete(formData)}
             className={`
-              bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+              bg-interactive text-white rounded-lg px-5 py-2.5
               font-sans font-medium text-[15px]
-              hover:bg-[#4A5D79] active:bg-[#3D5070]
+              hover:bg-interactive-hover active:bg-interactive-hover
               transition-colors duration-150
-              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
               cursor-pointer flex items-center justify-center gap-2
               min-h-[44px]
             `}
@@ -380,7 +380,7 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
 
       {/* ARIA presence text — only shown before submission */}
       {!isSubmitted && (
-        <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+        <p className="font-sans text-[13px] leading-relaxed text-secondary italic">
           Once you continue, I'll start researching your company in the background —
           you don't need to wait for me.
         </p>

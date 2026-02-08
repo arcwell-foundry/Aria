@@ -208,7 +208,7 @@ function SuccessToast({
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           className="fixed bottom-6 right-6 z-50"
         >
-          <div className="flex items-center gap-2 px-4 py-3 bg-[#5B6E8A]/95 backdrop-blur-sm text-white rounded-xl shadow-lg shadow-[#5B6E8A]/25">
+          <div className="flex items-center gap-2 px-4 py-3 bg-interactive/95 backdrop-blur-sm text-white rounded-xl shadow-lg shadow-interactive/25">
             <svg
               className="w-5 h-5"
               fill="none"
@@ -236,12 +236,12 @@ function ConfigSkeleton() {
       {[1, 2, 3, 4].map((i) => (
         <div
           key={i}
-          className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm"
+          className="bg-white border border-border rounded-xl p-6 shadow-sm"
         >
-          <div className="h-6 bg-[#E2E0DC] rounded w-1/4 mb-4 animate-pulse" />
+          <div className="h-6 bg-border rounded w-1/4 mb-4 animate-pulse" />
           <div className="space-y-3">
-            <div className="h-4 bg-[#E2E0DC] rounded w-2/3 animate-pulse" />
-            <div className="h-10 bg-[#E2E0DC] rounded w-full animate-pulse" />
+            <div className="h-4 bg-border rounded w-2/3 animate-pulse" />
+            <div className="h-10 bg-border rounded w-full animate-pulse" />
           </div>
         </div>
       ))}
@@ -306,12 +306,12 @@ function Section({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeInOut", delay }}
-      className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm"
+      className="bg-white border border-border rounded-xl p-6 shadow-sm"
     >
       <div className="mb-5">
-        <h3 className="text-lg font-semibold text-[#1A1D27]">{title}</h3>
+        <h3 className="text-lg font-semibold text-content">{title}</h3>
         {description && (
-          <p className="text-sm text-[#6B7280] mt-1">{description}</p>
+          <p className="text-sm text-secondary mt-1">{description}</p>
         )}
       </div>
       {children}
@@ -340,7 +340,7 @@ function ToggleSwitch({
       disabled={disabled}
       className={`
         min-h-[44px] flex items-center shrink-0 cursor-pointer
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive focus-visible:ring-offset-2
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}
       `}
     >
@@ -348,7 +348,7 @@ function ToggleSwitch({
         className={`
           relative inline-flex h-7 w-12 min-w-[48px] shrink-0 rounded-full border-2 border-transparent
           transition-colors duration-200 ease-in-out
-          ${enabled ? "bg-[#5B6E8A]" : "bg-[#E2E0DC]"}
+          ${enabled ? "bg-interactive" : "bg-border"}
         `}
       >
         <span
@@ -377,7 +377,7 @@ function SegmentedControl<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div id={id} role="radiogroup" className="inline-flex rounded-lg border border-[#E2E0DC] p-1 bg-[#F5F5F0]">
+    <div id={id} role="radiogroup" className="inline-flex rounded-lg border border-border p-1 bg-subtle">
       {options.map((option) => (
         <button
           key={option.value}
@@ -388,11 +388,11 @@ function SegmentedControl<T extends string>({
           disabled={disabled}
           className={`
             px-4 py-2 rounded-md text-sm font-medium transition-all duration-150 ease-out min-h-[44px]
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive focus-visible:ring-offset-2
             ${
               value === option.value
-                ? "bg-white text-[#1A1D27] shadow-sm border border-[#E2E0DC]"
-                : "text-[#6B7280] hover:text-[#1A1D27]"
+                ? "bg-white text-content shadow-sm border border-border"
+                : "text-secondary hover:text-content"
             }
             ${disabled ? "opacity-50 cursor-not-allowed" : ""}
           `}
@@ -420,7 +420,7 @@ function TagChip({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ duration: 0.15, ease: "easeOut" }}
-      className="inline-flex items-center gap-1.5 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg px-3 py-1 text-sm text-[#1A1D27]"
+      className="inline-flex items-center gap-1.5 bg-subtle border border-border rounded-lg px-3 py-1 text-sm text-content"
     >
       {label}
       <button
@@ -429,7 +429,7 @@ function TagChip({
         disabled={disabled}
         aria-label={`Remove ${label}`}
         className={`
-          -m-2 p-2 rounded hover:bg-[#E2E0DC] transition-colors flex items-center justify-center
+          -m-2 p-2 rounded hover:bg-border transition-colors flex items-center justify-center
           ${disabled ? "opacity-50 cursor-not-allowed" : ""}
         `}
       >
@@ -521,20 +521,20 @@ function TagInput({
           placeholder={placeholder}
           disabled={disabled}
           className="
-            w-full px-4 py-2.5 bg-white border border-[#E2E0DC] rounded-lg text-[#1A1D27]
-            placeholder-[#6B7280] text-sm
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            w-full px-4 py-2.5 bg-white border border-border rounded-lg text-content
+            placeholder-secondary text-sm
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             disabled:opacity-50 transition-all
           "
         />
         {showDropdown && filteredSuggestions.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full bg-white border border-[#E2E0DC] rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          <div className="absolute z-10 mt-1 w-full bg-white border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
             {filteredSuggestions.map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"
                 onClick={() => handleAdd(suggestion)}
-                className="w-full text-left px-4 py-2.5 text-sm text-[#1A1D27] hover:bg-[#F5F5F0] transition-colors min-h-[44px]"
+                className="w-full text-left px-4 py-2.5 text-sm text-content hover:bg-subtle transition-colors min-h-[44px]"
               >
                 {suggestion}
               </button>
@@ -554,7 +554,7 @@ function TagInput({
           ))}
         </AnimatePresence>
         {tags.length === 0 && (
-          <p className="text-sm text-[#6B7280]">None selected</p>
+          <p className="text-sm text-secondary">None selected</p>
         )}
       </div>
     </div>
@@ -783,7 +783,7 @@ export function ARIAConfigPage() {
 
   return (
     <DashboardLayout>
-      <div className="bg-[#FAFAF9] min-h-screen">
+      <div className="bg-primary min-h-screen">
         <div className="max-w-3xl mx-auto px-4 py-8 lg:px-8">
           {/* ── Section 1: Header ──────────────────────────────────── */}
           <motion.div
@@ -792,10 +792,10 @@ export function ARIAConfigPage() {
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="mb-8"
           >
-            <h1 className="text-[32px] font-serif text-[#1A1D27] mb-2">
+            <h1 className="text-[32px] font-serif text-content mb-2">
               Configure ARIA
             </h1>
-            <p className="text-[#6B7280]">
+            <p className="text-secondary">
               Customize ARIA&apos;s role, personality, and communication style
               to match how you work.
             </p>
@@ -806,11 +806,11 @@ export function ARIAConfigPage() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.05 }}
-            className="mb-8 p-4 bg-[#5B6E8A]/5 border border-[#5B6E8A]/20 rounded-xl"
+            className="mb-8 p-4 bg-interactive/5 border border-interactive/20 rounded-xl"
           >
             <div className="flex items-start gap-3">
               <svg
-                className="w-5 h-5 text-[#5B6E8A] mt-0.5 flex-shrink-0"
+                className="w-5 h-5 text-interactive mt-0.5 flex-shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -822,7 +822,7 @@ export function ARIAConfigPage() {
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <p className="text-sm text-[#5B6E8A]">
+              <p className="text-sm text-interactive">
                 Your configuration is saved automatically as you make changes.
               </p>
             </div>
@@ -859,11 +859,11 @@ export function ARIAConfigPage() {
                         disabled={isPending}
                         className={`
                           text-left p-4 rounded-xl border transition-all duration-200 ease-in-out min-h-[44px]
-                          focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
+                          focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive focus-visible:ring-offset-2
                           ${
                             isSelected
-                              ? "border-[#5B6E8A] bg-[#5B6E8A]/5"
-                              : "border-[#E2E0DC] bg-white hover:border-[#5B6E8A]/40"
+                              ? "border-interactive bg-interactive/5"
+                              : "border-border bg-white hover:border-interactive/40"
                           }
                           ${isPending ? "opacity-50 cursor-not-allowed" : ""}
                         `}
@@ -872,14 +872,14 @@ export function ARIAConfigPage() {
                           strokeWidth={1.5}
                           className={`w-6 h-6 mb-2 ${
                             isSelected
-                              ? "text-[#5B6E8A]"
-                              : "text-[#6B7280]"
+                              ? "text-interactive"
+                              : "text-secondary"
                           }`}
                         />
-                        <div className="text-sm font-medium text-[#1A1D27]">
+                        <div className="text-sm font-medium text-content">
                           {card.label}
                         </div>
-                        <div className="text-xs text-[#6B7280] mt-0.5">
+                        <div className="text-xs text-secondary mt-0.5">
                           {card.description}
                         </div>
                       </button>
@@ -898,7 +898,7 @@ export function ARIAConfigPage() {
                     >
                       <label
                         htmlFor="custom-role"
-                        className="block text-sm font-medium text-[#1A1D27] mb-1.5"
+                        className="block text-sm font-medium text-content mb-1.5"
                       >
                         Describe your custom role
                       </label>
@@ -913,9 +913,9 @@ export function ARIAConfigPage() {
                         disabled={isPending}
                         rows={3}
                         className="
-                          w-full px-4 py-2.5 bg-white border border-[#E2E0DC] rounded-lg text-[#1A1D27]
-                          placeholder-[#6B7280] text-sm resize-none
-                          focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                          w-full px-4 py-2.5 bg-white border border-border rounded-lg text-content
+                          placeholder-secondary text-sm resize-none
+                          focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                           disabled:opacity-50 transition-all
                         "
                       />
@@ -936,11 +936,11 @@ export function ARIAConfigPage() {
                       <div className="flex items-center justify-between mb-2">
                         <label
                           htmlFor={`aria-config-${slider.key}`}
-                          className="text-sm font-medium text-[#1A1D27]"
+                          className="text-sm font-medium text-content"
                         >
                           {slider.label}
                         </label>
-                        <span className="font-mono text-[13px] text-[#6B7280]">
+                        <span className="font-mono text-[13px] text-secondary">
                           {personality[slider.key].toFixed(2)}
                         </span>
                       </div>
@@ -960,13 +960,13 @@ export function ARIAConfigPage() {
                         disabled={isPending}
                         className="
                           w-full h-2 rounded-full appearance-none cursor-pointer min-h-[44px]
-                          bg-[#E2E0DC] accent-[#5B6E8A]
+                          bg-border accent-interactive
                           disabled:opacity-50 disabled:cursor-not-allowed
                           [&::-webkit-slider-thumb]:appearance-none
                           [&::-webkit-slider-thumb]:w-[22px]
                           [&::-webkit-slider-thumb]:h-[22px]
                           [&::-webkit-slider-thumb]:rounded-full
-                          [&::-webkit-slider-thumb]:bg-[#5B6E8A]
+                          [&::-webkit-slider-thumb]:bg-interactive
                           [&::-webkit-slider-thumb]:border-2
                           [&::-webkit-slider-thumb]:border-white
                           [&::-webkit-slider-thumb]:shadow-md
@@ -974,7 +974,7 @@ export function ARIAConfigPage() {
                           [&::-moz-range-thumb]:w-[22px]
                           [&::-moz-range-thumb]:h-[22px]
                           [&::-moz-range-thumb]:rounded-full
-                          [&::-moz-range-thumb]:bg-[#5B6E8A]
+                          [&::-moz-range-thumb]:bg-interactive
                           [&::-moz-range-thumb]:border-2
                           [&::-moz-range-thumb]:border-white
                           [&::-moz-range-thumb]:shadow-md
@@ -982,10 +982,10 @@ export function ARIAConfigPage() {
                         "
                       />
                       <div className="flex justify-between mt-1">
-                        <span className="text-xs text-[#6B7280]">
+                        <span className="text-xs text-secondary">
                           {slider.leftLabel}
                         </span>
-                        <span className="text-xs text-[#6B7280]">
+                        <span className="text-xs text-secondary">
                           {slider.rightLabel}
                         </span>
                       </div>
@@ -998,9 +998,9 @@ export function ARIAConfigPage() {
                     disabled={isPending || resetMutation.isPending}
                     className="
                       inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                      text-[#5B6E8A] bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg
-                      hover:bg-[#E2E0DC] transition-colors duration-150 ease-out
-                      focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
+                      text-interactive bg-subtle border border-border rounded-lg
+                      hover:bg-border transition-colors duration-150 ease-out
+                      focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive focus-visible:ring-offset-2
                       disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]
                     "
                   >
@@ -1018,7 +1018,7 @@ export function ARIAConfigPage() {
               >
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-sm font-medium text-[#1A1D27] mb-2">
+                    <label className="block text-sm font-medium text-content mb-2">
                       Therapeutic Areas
                     </label>
                     <TagInput
@@ -1035,7 +1035,7 @@ export function ARIAConfigPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-[#1A1D27] mb-2">
+                    <label className="block text-sm font-medium text-content mb-2">
                       Modalities
                     </label>
                     <TagInput
@@ -1050,7 +1050,7 @@ export function ARIAConfigPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-[#1A1D27] mb-2">
+                    <label className="block text-sm font-medium text-content mb-2">
                       Geographies
                     </label>
                     <TagInput
@@ -1091,7 +1091,7 @@ export function ARIAConfigPage() {
                 <div className="space-y-6">
                   {/* Channel toggles */}
                   <div>
-                    <label className="block text-sm font-medium text-[#1A1D27] mb-3">
+                    <label className="block text-sm font-medium text-content mb-3">
                       Channels
                     </label>
                     <div className="space-y-3">
@@ -1104,7 +1104,7 @@ export function ARIAConfigPage() {
                           >
                             <label
                               htmlFor={channelId}
-                              className="text-sm text-[#1A1D27]"
+                              className="text-sm text-content"
                             >
                               {channel.label}
                             </label>
@@ -1122,13 +1122,13 @@ export function ARIAConfigPage() {
                     </div>
                   </div>
 
-                  <div className="border-t border-[#E2E0DC]" />
+                  <div className="border-t border-border" />
 
                   {/* Notification Frequency */}
                   <div>
                     <label
                       htmlFor="aria-config-notification-frequency"
-                      className="block text-sm font-medium text-[#1A1D27] mb-3"
+                      className="block text-sm font-medium text-content mb-3"
                     >
                       Notification Frequency
                     </label>
@@ -1145,7 +1145,7 @@ export function ARIAConfigPage() {
                   <div>
                     <label
                       htmlFor="aria-config-response-depth"
-                      className="block text-sm font-medium text-[#1A1D27] mb-3"
+                      className="block text-sm font-medium text-content mb-3"
                     >
                       Response Depth
                     </label>
@@ -1158,13 +1158,13 @@ export function ARIAConfigPage() {
                     />
                   </div>
 
-                  <div className="border-t border-[#E2E0DC]" />
+                  <div className="border-t border-border" />
 
                   {/* Briefing Time */}
                   <div className="flex items-center gap-4">
                     <label
                       htmlFor="briefing-time"
-                      className="text-sm font-medium text-[#1A1D27]"
+                      className="text-sm font-medium text-content"
                     >
                       Daily Briefing Time
                     </label>
@@ -1175,8 +1175,8 @@ export function ARIAConfigPage() {
                       onChange={(e) => handleBriefingTime(e.target.value)}
                       disabled={isPending}
                       className="
-                        px-4 py-2.5 bg-white border border-[#E2E0DC] rounded-lg text-[#1A1D27] text-sm
-                        focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                        px-4 py-2.5 bg-white border border-border rounded-lg text-content text-sm
+                        focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                         disabled:opacity-50 transition-all min-h-[44px]
                       "
                     />
@@ -1191,8 +1191,8 @@ export function ARIAConfigPage() {
                 delay={0.3}
               >
                 <div className="space-y-4">
-                  <div className="p-4 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg">
-                    <p className="text-sm text-[#1A1D27] italic font-serif leading-relaxed">
+                  <div className="p-4 bg-subtle border border-border rounded-lg">
+                    <p className="text-sm text-content italic font-serif leading-relaxed">
                       {previewMessage ?? staticPreview}
                     </p>
                   </div>
@@ -1202,9 +1202,9 @@ export function ARIAConfigPage() {
                     disabled={previewMutation.isPending || isPending}
                     className="
                       inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                      text-white bg-[#5B6E8A] rounded-lg
-                      hover:bg-[#4A5D79] transition-colors duration-150 ease-out
-                      focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA] focus-visible:ring-offset-2
+                      text-white bg-interactive rounded-lg
+                      hover:bg-interactive-hover transition-colors duration-150 ease-out
+                      focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive focus-visible:ring-offset-2
                       disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]
                     "
                   >

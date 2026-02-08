@@ -46,9 +46,9 @@ function formatFileSize(bytes: number): string {
 }
 
 function qualityLabel(score: number): { text: string; className: string } {
-  if (score >= 80) return { text: "High value", className: "text-[#5A7D60] bg-[#5A7D60]/10" };
-  if (score >= 50) return { text: "Good", className: "text-[#5B6E8A] bg-[#5B6E8A]/10" };
-  return { text: "Standard", className: "text-[#6B7280] bg-[#6B7280]/10" };
+  if (score >= 80) return { text: "High value", className: "text-success bg-success/10" };
+  if (score >= 50) return { text: "Good", className: "text-interactive bg-interactive/10" };
+  return { text: "Standard", className: "text-secondary bg-secondary/10" };
 }
 
 function fileIcon(fileType: string) {
@@ -58,14 +58,14 @@ function fileIcon(fileType: string) {
     case "pptx":
     case "txt":
     case "md":
-      return <FileText size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />;
+      return <FileText size={20} strokeWidth={1.5} className="text-interactive shrink-0" />;
     case "csv":
     case "xlsx":
-      return <FileSpreadsheet size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />;
+      return <FileSpreadsheet size={20} strokeWidth={1.5} className="text-interactive shrink-0" />;
     case "image":
-      return <Image size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />;
+      return <Image size={20} strokeWidth={1.5} className="text-interactive shrink-0" />;
     default:
-      return <FileText size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />;
+      return <FileText size={20} strokeWidth={1.5} className="text-interactive shrink-0" />;
   }
 }
 
@@ -245,10 +245,10 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
     <div className="flex flex-col gap-8 max-w-lg animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Share your company's knowledge
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           Upload capabilities decks, org charts, product sheets — anything that
           helps ARIA understand your business.
         </p>
@@ -272,11 +272,11 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
           flex flex-col items-center justify-center gap-3
           rounded-xl border-2 border-dashed px-6 py-10
           transition-colors duration-150 cursor-pointer
-          focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+          focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
           ${
             isDragOver
-              ? "border-[#5B6E8A] bg-[#5B6E8A]/5"
-              : "border-[#E2E0DC] bg-[#FAFAF9] hover:border-[#5B6E8A]"
+              ? "border-interactive bg-interactive/5"
+              : "border-border bg-primary hover:border-interactive"
           }
         `}
         aria-label="Upload documents. Drop files here or click to browse."
@@ -285,13 +285,13 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
           size={24}
           strokeWidth={1.5}
           className={`transition-colors duration-150 ${
-            isDragOver ? "text-[#5B6E8A]" : "text-[#6B7280]"
+            isDragOver ? "text-interactive" : "text-secondary"
           }`}
         />
-        <p className="font-sans text-[15px] text-[#1A1D27]">
+        <p className="font-sans text-[15px] text-content">
           Drop files here or click to browse
         </p>
-        <p className="font-sans text-[13px] text-[#6B7280]">
+        <p className="font-sans text-[13px] text-secondary">
           PDF, DOCX, PPTX, TXT, MD, CSV, XLSX, PNG, JPG, WebP — up to 50MB
         </p>
       </div>
@@ -310,7 +310,7 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
       {/* Upload error */}
       {uploadError && (
         <div
-          className="flex items-center gap-2 font-sans text-[13px] text-[#945A5A]"
+          className="flex items-center gap-2 font-sans text-[13px] text-critical"
           role="alert"
           aria-live="polite"
         >
@@ -333,8 +333,8 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
       )}
 
       {/* ARIA presence */}
-      <div className="rounded-xl bg-[#F5F5F0] border border-[#E2E0DC] px-5 py-4">
-        <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+      <div className="rounded-xl bg-subtle border border-border px-5 py-4">
+        <p className="font-sans text-[13px] leading-relaxed text-secondary italic">
           Each document makes me significantly smarter about your business.
           Capabilities decks and product sheets are especially valuable.
         </p>
@@ -346,11 +346,11 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
           type="button"
           onClick={onComplete}
           className="
-            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+            bg-interactive text-white rounded-lg px-5 py-2.5
             font-sans font-medium text-[15px]
-            hover:bg-[#4A5D79] active:bg-[#3D5070]
+            hover:bg-interactive-hover active:bg-interactive-hover
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             cursor-pointer flex items-center justify-center gap-2
             min-h-[44px]
           "
@@ -365,11 +365,11 @@ export function DocumentUploadStep({ onComplete, onSkip }: DocumentUploadStepPro
           type="button"
           onClick={onSkip}
           className="
-            bg-transparent text-[#6B7280] rounded-lg px-4 py-2.5
+            bg-transparent text-secondary rounded-lg px-4 py-2.5
             font-sans text-[13px]
-            hover:bg-[#F5F5F0]
+            hover:bg-subtle
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             cursor-pointer text-center
             min-h-[44px]
           "
@@ -398,36 +398,36 @@ function DocumentRow({ doc, onRemove }: DocumentRowProps) {
   return (
     <div
       role="listitem"
-      className="flex items-center gap-3 rounded-lg bg-white border border-[#E2E0DC] px-4 py-3 transition-colors duration-150"
+      className="flex items-center gap-3 rounded-lg bg-white border border-border px-4 py-3 transition-colors duration-150"
     >
       {/* Icon */}
       {fileIcon(doc.file_type)}
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <p className="font-sans text-[15px] text-[#1A1D27] truncate">
+        <p className="font-sans text-[15px] text-content truncate">
           {doc.filename}
         </p>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[13px] text-[#6B7280]">
+          <span className="font-mono text-[13px] text-secondary">
             {formatFileSize(doc.file_size_bytes)}
           </span>
 
           {isUploading && (
-            <span className="flex items-center gap-1 font-sans text-[13px] text-[#5B6E8A]">
+            <span className="flex items-center gap-1 font-sans text-[13px] text-interactive">
               <Loader2 size={12} strokeWidth={1.5} className="animate-spin" />
               Uploading
             </span>
           )}
 
           {hasError && (
-            <span className="font-sans text-[13px] text-[#945A5A]">
+            <span className="font-sans text-[13px] text-critical">
               {doc._error}
             </span>
           )}
 
           {isProcessing && (
-            <span className="flex items-center gap-1 font-sans text-[13px] text-[#5B6E8A]">
+            <span className="flex items-center gap-1 font-sans text-[13px] text-interactive">
               <Loader2 size={12} strokeWidth={1.5} className="animate-spin" />
               Processing
               <span className="font-mono text-[13px]">
@@ -437,14 +437,14 @@ function DocumentRow({ doc, onRemove }: DocumentRowProps) {
           )}
 
           {isComplete && (
-            <span className="flex items-center gap-1 font-sans text-[13px] text-[#5A7D60]">
+            <span className="flex items-center gap-1 font-sans text-[13px] text-success">
               <CheckCircle2 size={12} strokeWidth={1.5} />
               Complete
             </span>
           )}
 
           {isFailed && (
-            <span className="flex items-center gap-1 font-sans text-[13px] text-[#945A5A]">
+            <span className="flex items-center gap-1 font-sans text-[13px] text-critical">
               <AlertCircle size={12} strokeWidth={1.5} />
               Processing failed
             </span>
@@ -472,9 +472,9 @@ function DocumentRow({ doc, onRemove }: DocumentRowProps) {
         }}
         className="
           shrink-0 rounded p-1.5
-          text-[#6B7280] hover:text-[#945A5A] hover:bg-[#F5F5F0]
+          text-secondary hover:text-critical hover:bg-subtle
           transition-colors duration-150
-          focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+          focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
           cursor-pointer
         "
         aria-label={`Remove ${doc.filename}`}

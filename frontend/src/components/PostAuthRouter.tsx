@@ -13,9 +13,9 @@ export function PostAuthRouter() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FAFAF9]">
+      <div className="min-h-screen flex items-center justify-center bg-primary">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-2 h-2 rounded-full bg-[#5B6E8A] animate-pulse" />
+          <div className="w-2 h-2 rounded-full bg-interactive animate-pulse" />
         </div>
       </div>
     );

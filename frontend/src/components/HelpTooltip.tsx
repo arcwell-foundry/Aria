@@ -7,7 +7,7 @@ import { useState } from 'react';
  *
  * Follows ARIA Design System v1.0:
  * - HelpCircle icon (16px, muted color)
- * - Tooltip with bg-white border-[#E2E0DC]
+ * - Tooltip with bg-white border-border
  * - Satoshi 15px text
  * - Absolute positioning based on placement prop
  * - Accessibility: aria-describedby, aria-label, role="tooltip"
@@ -67,7 +67,7 @@ export function HelpTooltip({
         onClick={handleClick}
         aria-describedby="help-tooltip-content"
         aria-label="Get help"
-        className="inline-flex items-center justify-center text-[#7B8EAA] hover:text-[#A0A8B8] transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 focus:ring-offset-white rounded-sm"
+        className="inline-flex items-center justify-center text-interactive hover:text-secondary transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 focus:ring-offset-white rounded-sm"
       >
         <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
       </button>
@@ -79,14 +79,14 @@ export function HelpTooltip({
           <div
             id="help-tooltip-content"
             role="tooltip"
-            className={`absolute z-50 w-64 bg-white border border-[#E2E0DC] rounded-lg shadow-lg p-3 ${positionClasses[placement]}`}
+            className={`absolute z-50 w-64 bg-white border border-border rounded-lg shadow-lg p-3 ${positionClasses[placement]}`}
             style={{
               fontFamily: "'Satoshi', sans-serif",
               fontSize: '15px',
               lineHeight: '1.6',
             }}
           >
-            <div className="text-[#1A1A1A]">
+            <div className="text-content">
               {typeof content === 'string' ? (
                 <p className="m-0">{content}</p>
               ) : (

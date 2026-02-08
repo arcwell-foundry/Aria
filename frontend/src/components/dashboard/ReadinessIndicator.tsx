@@ -16,12 +16,12 @@ function ReadinessScoreBar({ score, label, color }: ReadinessScoreBarProps) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="font-sans text-[13px] text-[#8B92A5]">{label}</span>
+        <span className="font-sans text-[13px] text-secondary">{label}</span>
         <span className="font-mono text-[13px]" style={{ color }}>
           {Math.round(clampedScore)}%
         </span>
       </div>
-      <div className="h-1.5 w-full bg-[#1E2235] rounded-full overflow-hidden">
+      <div className="h-1.5 w-full bg-subtle rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-300 ease-out"
           style={{
@@ -40,8 +40,8 @@ export function ReadinessIndicator() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#161B2E] border border-[#2A2F42]">
-        <div className="h-4 w-20 bg-[#1E2235] rounded animate-pulse" />
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-elevated border border-border">
+        <div className="h-4 w-20 bg-subtle rounded animate-pulse" />
       </div>
     );
   }
@@ -71,7 +71,7 @@ export function ReadinessIndicator() {
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#161B2E] border border-[#2A2F42] hover:border-[#7B8EAA] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 focus:ring-offset-[#0F1117] min-h-[36px]"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-elevated border border-border hover:border-interactive transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 focus:ring-offset-primary min-h-[36px]"
         aria-expanded={isExpanded}
         aria-label={`ARIA readiness: ${Math.round(readiness.overall)}% — click for details`}
       >
@@ -82,28 +82,28 @@ export function ReadinessIndicator() {
           aria-hidden="true"
         />
         {/* Percentage */}
-        <span className="font-mono text-[13px] text-[#E8E6E1]">
+        <span className="font-mono text-[13px] text-content">
           {Math.round(readiness.overall)}%
         </span>
         {/* Expand/collapse icon */}
         {isExpanded ? (
-          <ChevronUp size={14} strokeWidth={1.5} className="text-[#8B92A5]" aria-hidden="true" />
+          <ChevronUp size={14} strokeWidth={1.5} className="text-secondary" aria-hidden="true" />
         ) : (
-          <ChevronDown size={14} strokeWidth={1.5} className="text-[#8B92A5]" aria-hidden="true" />
+          <ChevronDown size={14} strokeWidth={1.5} className="text-secondary" aria-hidden="true" />
         )}
       </button>
 
       {/* Expanded panel - shows on click */}
       {isExpanded && (
         <div
-          className="absolute top-full right-0 mt-2 w-72 bg-[#161B2E] border border-[#2A2F42] rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          className="absolute top-full right-0 mt-2 w-72 bg-elevated border border-border rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200"
           role="dialog"
           aria-label="Readiness breakdown"
         >
           {/* Header with overall score */}
-          <div className="flex flex-col gap-1 pb-4 border-b border-[#2A2F42]">
+          <div className="flex flex-col gap-1 pb-4 border-b border-border">
             <div className="flex items-center justify-between">
-              <span className="font-display text-[18px] text-[#E8E6E1]">
+              <span className="font-display text-[18px] text-content">
                 ARIA Readiness
               </span>
               <div
@@ -112,7 +112,7 @@ export function ReadinessIndicator() {
                 aria-hidden="true"
               />
             </div>
-            <p className="font-sans text-[13px] text-[#8B92A5]">
+            <p className="font-sans text-[13px] text-secondary">
               {modifierLabel[readiness.confidence_modifier as ConfidenceModifier]}
             </p>
           </div>
@@ -147,8 +147,8 @@ export function ReadinessIndicator() {
           </div>
 
           {/* Footer note */}
-          <div className="pt-4 mt-2 border-t border-[#2A2F42]">
-            <p className="font-sans text-[11px] text-[#8B92A5] leading-relaxed">
+          <div className="pt-4 mt-2 border-t border-border">
+            <p className="font-sans text-[11px] text-secondary leading-relaxed">
               Readiness reflects how well ARIA understands your company, your style, and your goals.
             </p>
           </div>

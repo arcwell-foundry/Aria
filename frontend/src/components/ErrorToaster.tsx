@@ -100,10 +100,10 @@ function Toast({ error, onDismiss }: ToastProps) {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-[#E8E6E1] mb-0.5">
+          <h4 className="text-sm font-semibold text-content mb-0.5">
             {error.title}
           </h4>
-          <p className="text-xs text-[#8B92A5] leading-relaxed">
+          <p className="text-xs text-secondary leading-relaxed">
             {error.description}
           </p>
         </div>
@@ -114,10 +114,10 @@ function Toast({ error, onDismiss }: ToastProps) {
           className="
             flex-shrink-0 flex items-center justify-center
             w-6 h-6 rounded-lg
-            text-[#8B92A5] hover:text-[#E8E6E1]
+            text-secondary hover:text-content
             hover:bg-white/5
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 focus:ring-offset-[#0F1117]
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 focus:ring-offset-primary
           "
           aria-label="Dismiss"
         >

@@ -143,10 +143,10 @@ export function EmailIntegrationStep({
     <div className="flex flex-col gap-8 max-w-md animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Connect your email
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           ARIA learns your communication style, relationships, and priorities from
           your email — with your privacy fully in control.
         </p>
@@ -155,7 +155,7 @@ export function EmailIntegrationStep({
       {/* Provider Selection */}
       {!isConnected && !loadingStatus && (
         <div className="flex flex-col gap-4">
-          <p className="font-sans text-[13px] font-medium text-[#1A1D27]">
+          <p className="font-sans text-[13px] font-medium text-content">
             Choose your email provider
           </p>
           <div className="grid grid-cols-2 gap-4">
@@ -167,20 +167,20 @@ export function EmailIntegrationStep({
               className={`
                 bg-white border rounded-xl p-5 flex flex-col items-center gap-3
                 transition-all duration-200 cursor-pointer focus:outline-none
-                focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
                   connecting === "google"
-                    ? "border-[#5B6E8A] bg-[#F5F5F0]"
-                    : "border-[#E2E0DC] hover:border-[#5B6E8A] hover:shadow-sm"
+                    ? "border-interactive bg-subtle"
+                    : "border-border hover:border-interactive hover:shadow-sm"
                 }
                 disabled:opacity-50 disabled:cursor-not-allowed
               `}
             >
-              <Mail size={24} strokeWidth={1.5} className="text-[#5B6E8A]" />
-              <span className="font-sans text-[15px] font-medium text-[#1A1D27]">
+              <Mail size={24} strokeWidth={1.5} className="text-interactive" />
+              <span className="font-sans text-[15px] font-medium text-content">
                 {connecting === "google" ? "Connecting..." : "Connect"}
               </span>
-              <span className="font-sans text-[13px] text-[#6B7280]">
+              <span className="font-sans text-[13px] text-secondary">
                 Google Workspace
               </span>
             </button>
@@ -193,20 +193,20 @@ export function EmailIntegrationStep({
               className={`
                 bg-white border rounded-xl p-5 flex flex-col items-center gap-3
                 transition-all duration-200 cursor-pointer focus:outline-none
-                focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
                   connecting === "microsoft"
-                    ? "border-[#5B6E8A] bg-[#F5F5F0]"
-                    : "border-[#E2E0DC] hover:border-[#5B6E8A] hover:shadow-sm"
+                    ? "border-interactive bg-subtle"
+                    : "border-border hover:border-interactive hover:shadow-sm"
                 }
                 disabled:opacity-50 disabled:cursor-not-allowed
               `}
             >
-              <Mail size={24} strokeWidth={1.5} className="text-[#5B6E8A]" />
-              <span className="font-sans text-[15px] font-medium text-[#1A1D27]">
+              <Mail size={24} strokeWidth={1.5} className="text-interactive" />
+              <span className="font-sans text-[15px] font-medium text-content">
                 {connecting === "microsoft" ? "Connecting..." : "Connect"}
               </span>
-              <span className="font-sans text-[13px] text-[#6B7280]">
+              <span className="font-sans text-[13px] text-secondary">
                 Microsoft 365
               </span>
             </button>
@@ -217,32 +217,32 @@ export function EmailIntegrationStep({
       {/* Loading State */}
       {loadingStatus && (
         <div className="flex items-center justify-center py-12">
-          <Loader2 size={24} strokeWidth={1.5} className="text-[#5B6E8A] animate-spin" />
+          <Loader2 size={24} strokeWidth={1.5} className="text-interactive animate-spin" />
         </div>
       )}
 
       {/* Privacy Controls - shown after connection */}
       {isConnected && (
         <>
-          <div className="flex items-center gap-2 bg-[#5A7D60]/10 border border-[#5A7D60] rounded-lg px-4 py-2.5">
-            <Check size={16} strokeWidth={1.5} className="text-[#5A7D60]" />
-            <span className="font-sans text-[13px] font-medium text-[#5A7D60]">
+          <div className="flex items-center gap-2 bg-success/10 border border-success rounded-lg px-4 py-2.5">
+            <Check size={16} strokeWidth={1.5} className="text-success" />
+            <span className="font-sans text-[13px] font-medium text-success">
               Connected to {currentProvider === "google" ? "Google Workspace" : "Microsoft 365"}
             </span>
           </div>
 
           {/* Privacy Controls Section */}
           <div className="flex flex-col gap-5">
-            <h2 className="font-sans text-[18px] font-medium text-[#1A1D27]">
+            <h2 className="font-sans text-[18px] font-medium text-content">
               Your privacy controls
             </h2>
 
             {/* Exclusion List */}
             <div className="flex flex-col gap-3">
-              <label className="font-sans text-[13px] font-medium text-[#6B7280]">
+              <label className="font-sans text-[13px] font-medium text-secondary">
                 Exclude senders or domains
               </label>
-              <p className="font-sans text-[13px] text-[#6B7280]">
+              <p className="font-sans text-[13px] text-secondary">
                 We recommend excluding personal email (spouse, doctor, bank)
               </p>
 
@@ -255,7 +255,7 @@ export function EmailIntegrationStep({
                       type: e.target.value as "sender" | "domain" | "category",
                     })
                   }
-                  className="bg-white border border-[#E2E0DC] rounded-lg px-3 py-2.5 text-[15px] font-sans focus:outline-none focus:border-[#5B6E8A] focus:ring-1 focus:ring-[#5B6E8A]"
+                  className="bg-white border border-border rounded-lg px-3 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
                 >
                   <option value="sender">Sender</option>
                   <option value="domain">Domain</option>
@@ -275,12 +275,12 @@ export function EmailIntegrationStep({
                         : "category name"
                   }
                   onKeyPress={(e) => e.key === "Enter" && handleAddExclusion()}
-                  className="flex-1 bg-white border border-[#E2E0DC] rounded-lg px-4 py-2.5 text-[15px] font-sans focus:outline-none focus:border-[#5B6E8A] focus:ring-1 focus:ring-[#5B6E8A]"
+                  className="flex-1 bg-white border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
                 />
                 <button
                   type="button"
                   onClick={handleAddExclusion}
-                  className="bg-[#5B6E8A] text-white rounded-lg px-4 py-2.5 font-sans text-[13px] font-medium hover:bg-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 flex items-center gap-2"
+                  className="bg-interactive text-white rounded-lg px-4 py-2.5 font-sans text-[13px] font-medium hover:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 flex items-center gap-2"
                 >
                   <Plus size={16} />
                   Add
@@ -293,14 +293,14 @@ export function EmailIntegrationStep({
                   {privacyExclusions.map((exclusion, index) => (
                     <span
                       key={index}
-                      className="inline-flex items-center gap-1.5 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg px-3 py-1.5 text-[13px] text-[#1A1D27] font-sans"
+                      className="inline-flex items-center gap-1.5 bg-subtle border border-border rounded-lg px-3 py-1.5 text-[13px] text-content font-sans"
                     >
                       <span className="font-medium">{exclusion.type}:</span>
                       <span>{exclusion.value}</span>
                       <button
                         type="button"
                         onClick={() => handleRemoveExclusion(index)}
-                        className="text-[#6B7280] hover:text-[#1A1D27] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#7B8EAA] rounded p-0.5"
+                        className="text-secondary hover:text-content transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-interactive rounded p-0.5"
                       >
                         <X size={14} strokeWidth={1.5} />
                       </button>
@@ -312,7 +312,7 @@ export function EmailIntegrationStep({
 
             {/* Category Toggles */}
             <div className="flex flex-col gap-3">
-              <label className="font-sans text-[13px] font-medium text-[#6B7280]">
+              <label className="font-sans text-[13px] font-medium text-secondary">
                 Suggested exclusions (auto-detected)
               </label>
 
@@ -324,9 +324,9 @@ export function EmailIntegrationStep({
                 ].map(({ key, label }) => (
                   <label
                     key={key}
-                    className="flex items-center justify-between bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 cursor-pointer hover:border-[#5B6E8A] transition-colors duration-150"
+                    className="flex items-center justify-between bg-white border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150"
                   >
-                    <span className="font-sans text-[15px] text-[#1A1D27]">
+                    <span className="font-sans text-[15px] text-content">
                       {label}
                     </span>
                     <button
@@ -337,11 +337,11 @@ export function EmailIntegrationStep({
                       }}
                       className={`
                         relative w-11 h-6 rounded-full transition-colors duration-200
-                        focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                        focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                         ${
                           categoryToggles[key]
-                            ? "bg-[#5B6E8A]"
-                            : "bg-[#E2E0DC]"
+                            ? "bg-interactive"
+                            : "bg-border"
                         }
                       `}
                     >
@@ -364,7 +364,7 @@ export function EmailIntegrationStep({
 
             {/* Ingestion Scope */}
             <div className="flex flex-col gap-2">
-              <label className="font-sans text-[13px] font-medium text-[#6B7280]">
+              <label className="font-sans text-[13px] font-medium text-secondary">
                 How much email history should ARIA learn from?
               </label>
               <div className="relative">
@@ -373,7 +373,7 @@ export function EmailIntegrationStep({
                   onChange={(e) =>
                     setIngestionScope(Number(e.target.value))
                   }
-                  className="w-full bg-white border border-[#E2E0DC] rounded-lg px-4 py-2.5 text-[15px] font-sans appearance-none focus:outline-none focus:border-[#5B6E8A] focus:ring-1 focus:ring-[#5B6E8A] cursor-pointer"
+                  className="w-full bg-white border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans appearance-none focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive cursor-pointer"
                 >
                   <option value={90}>Last 3 months</option>
                   <option value={180}>Last 6 months</option>
@@ -382,18 +382,18 @@ export function EmailIntegrationStep({
                 <ChevronDown
                   size={16}
                   strokeWidth={1.5}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
                 />
               </div>
             </div>
 
             {/* Attachment Handling */}
-            <label className="flex items-center justify-between bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 cursor-pointer hover:border-[#5B6E8A] transition-colors duration-150">
+            <label className="flex items-center justify-between bg-white border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150">
               <div className="flex flex-col gap-0.5">
-                <span className="font-sans text-[15px] text-[#1A1D27]">
+                <span className="font-sans text-[15px] text-content">
                   Also learn from attachments
                 </span>
-                <span className="font-sans text-[13px] text-[#6B7280]">
+                <span className="font-sans text-[13px] text-secondary">
                   Requires per-attachment approval
                 </span>
               </div>
@@ -405,11 +405,11 @@ export function EmailIntegrationStep({
                 }}
                 className={`
                   relative w-11 h-6 rounded-full transition-colors duration-200
-                  focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                  focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                   ${
                     attachmentIngestion
-                      ? "bg-[#5B6E8A]"
-                      : "bg-[#E2E0DC]"
+                      ? "bg-interactive"
+                      : "bg-border"
                   }
                 `}
               >
@@ -429,10 +429,10 @@ export function EmailIntegrationStep({
           </div>
 
           {/* Trust Statement */}
-          <div className="bg-white border border-[#E2E0DC] rounded-xl p-5">
+          <div className="bg-white border border-border rounded-xl p-5">
             <div className="flex gap-3">
-              <Shield size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />
-              <p className="font-sans text-[13px] leading-relaxed text-[#6B7280]">
+              <Shield size={20} strokeWidth={1.5} className="text-interactive shrink-0" />
+              <p className="font-sans text-[13px] leading-relaxed text-secondary">
                 Your email is encrypted at rest. Content is never shared between
                 users, even within your company. You can disconnect and delete all
                 email data at any time.
@@ -441,13 +441,13 @@ export function EmailIntegrationStep({
           </div>
 
           {/* ARIA Presence */}
-          <div className="flex flex-col gap-2 bg-[#F5F5F0] border border-[#E2E0DC] rounded-xl p-5">
-            <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27] italic">
+          <div className="flex flex-col gap-2 bg-subtle border border-border rounded-xl p-5">
+            <p className="font-sans text-[15px] leading-relaxed text-content italic">
               "Email is where your professional life lives. Even with basic
               access, I'll understand your relationships, priorities, and
               communication patterns."
             </p>
-            <p className="font-sans text-[13px] text-[#6B7280]">— ARIA</p>
+            <p className="font-sans text-[13px] text-secondary">— ARIA</p>
           </div>
         </>
       )}
@@ -459,7 +459,7 @@ export function EmailIntegrationStep({
             type="button"
             onClick={handleComplete}
             disabled={isSaving}
-            className="bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSaving ? (
               <>
@@ -476,7 +476,7 @@ export function EmailIntegrationStep({
           type="button"
           onClick={onSkip}
           disabled={isSaving}
-          className="bg-transparent text-[#6B7280] rounded-lg px-4 py-2 font-sans text-[13px] hover:bg-[#F5F5F0] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-transparent text-secondary rounded-lg px-4 py-2 font-sans text-[13px] hover:bg-subtle transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Skip for now — you can connect email from your profile
         </button>

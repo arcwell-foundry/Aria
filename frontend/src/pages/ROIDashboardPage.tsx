@@ -54,12 +54,12 @@ export function ROIDashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 lg:p-8 min-h-screen bg-[#0F1117]">
+      <div className="p-4 lg:p-8 min-h-screen bg-primary">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-2">
-              <h1 className="font-display text-3xl text-[#E8E6E1]">Your ARIA ROI</h1>
+              <h1 className="font-display text-3xl text-content">Your ARIA ROI</h1>
               <HelpTooltip
                 content="Track the measurable value ARIA delivers: time saved, intelligence discovered, and impact on your pipeline."
                 placement="right"
@@ -67,15 +67,15 @@ export function ROIDashboardPage() {
             </div>
 
             {/* Period Selector */}
-            <div className="flex bg-[#161B2E] rounded-lg p-1 border border-[#2A2F42]">
+            <div className="flex bg-elevated rounded-lg p-1 border border-border">
               {PERIODS.map((period) => (
                 <button
                   key={period.value}
                   onClick={() => setSelectedPeriod(period.value)}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                     selectedPeriod === period.value
-                      ? "bg-[#5B6E8A] text-white"
-                      : "text-[#8B92A5] hover:text-[#E8E6E1]"
+                      ? "bg-interactive text-white"
+                      : "text-secondary hover:text-content"
                   }`}
                 >
                   {period.label}
@@ -87,15 +87,15 @@ export function ROIDashboardPage() {
           {/* Loading State */}
           {isLoading && (
             <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#5B6E8A]"></div>
-              <p className="mt-4 text-[#8B92A5]">Calculating your ROI...</p>
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-interactive"></div>
+              <p className="mt-4 text-secondary">Calculating your ROI...</p>
             </div>
           )}
 
           {/* Error State */}
           {error && (
-            <div className="bg-[#A66B6B]/10 border border-[#A66B6B]/30 rounded-lg p-6 text-center">
-              <p className="text-[#A66B6B]">Unable to load ROI metrics. Please try again later.</p>
+            <div className="bg-critical/10 border border-critical/30 rounded-lg p-6 text-center">
+              <p className="text-critical">Unable to load ROI metrics. Please try again later.</p>
             </div>
           )}
 
@@ -103,15 +103,15 @@ export function ROIDashboardPage() {
           {roiData && (
             <div className="space-y-6">
               {/* Hero Metric - Time Saved */}
-              <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-8">
-                <p className="text-[#8B92A5] text-sm uppercase tracking-wide mb-2">Total Time Saved</p>
+              <div className="bg-elevated border border-border rounded-xl p-8">
+                <p className="text-secondary text-sm uppercase tracking-wide mb-2">Total Time Saved</p>
                 <div className="flex items-baseline gap-2">
-                  <span className="font-mono text-6xl text-[#5B6E8A]">
+                  <span className="font-mono text-6xl text-interactive">
                     {roiData.time_saved.hours}
                   </span>
-                  <span className="text-[#8B92A5] text-xl">hours</span>
+                  <span className="text-secondary text-xl">hours</span>
                 </div>
-                <p className="text-[#8B92A5] mt-2">
+                <p className="text-secondary mt-2">
                   in the {selectedPeriod === "all" ? "lifetime" : `last ${PERIODS.find((p) => p.value === selectedPeriod)?.label.toLowerCase()}`}
                 </p>
               </div>
@@ -119,8 +119,8 @@ export function ROIDashboardPage() {
               {/* Metrics Grid - 2x2 */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Time Saved Breakdown */}
-                <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
-                  <h3 className="font-display text-lg text-[#E8E6E1] mb-4">Time Saved by Activity</h3>
+                <div className="bg-elevated border border-border rounded-xl p-6">
+                  <h3 className="font-display text-lg text-content mb-4">Time Saved by Activity</h3>
                   {roiData.time_saved.hours > 0 ? (
                     <ResponsiveContainer width="100%" height={200}>
                       <PieChart>
@@ -149,35 +149,35 @@ export function ROIDashboardPage() {
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <p className="text-[#8B92A5] text-center py-8">No data yet for this period</p>
+                    <p className="text-secondary text-center py-8">No data yet for this period</p>
                   )}
                 </div>
 
                 {/* Intelligence Delivered */}
-                <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
-                  <h3 className="font-display text-lg text-[#E8E6E1] mb-4">Intelligence Delivered</h3>
+                <div className="bg-elevated border border-border rounded-xl p-6">
+                  <h3 className="font-display text-lg text-content mb-4">Intelligence Delivered</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Facts discovered</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Facts discovered</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.intelligence_delivered.facts_discovered}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Signals detected</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Signals detected</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.intelligence_delivered.signals_detected}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Knowledge gaps filled</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Knowledge gaps filled</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.intelligence_delivered.gaps_filled}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Briefings generated</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Briefings generated</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.intelligence_delivered.briefings_generated}
                       </span>
                     </div>
@@ -185,51 +185,51 @@ export function ROIDashboardPage() {
                 </div>
 
                 {/* Actions Taken */}
-                <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
-                  <h3 className="font-display text-lg text-[#E8E6E1] mb-4">Actions Taken</h3>
+                <div className="bg-elevated border border-border rounded-xl p-6">
+                  <h3 className="font-display text-lg text-content mb-4">Actions Taken</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Total actions</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">{roiData.actions_taken.total}</span>
+                      <span className="text-secondary">Total actions</span>
+                      <span className="font-mono text-content text-xl">{roiData.actions_taken.total}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Auto-approved</span>
-                      <span className="font-mono text-[#6B8F71] text-xl">
+                      <span className="text-secondary">Auto-approved</span>
+                      <span className="font-mono text-success text-xl">
                         {roiData.actions_taken.auto_approved}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">You approved</span>
-                      <span className="font-mono text-[#5B6E8A] text-xl">
+                      <span className="text-secondary">You approved</span>
+                      <span className="font-mono text-interactive text-xl">
                         {roiData.actions_taken.user_approved}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Rejected</span>
-                      <span className="font-mono text-[#A66B6B] text-xl">{roiData.actions_taken.rejected}</span>
+                      <span className="text-secondary">Rejected</span>
+                      <span className="font-mono text-critical text-xl">{roiData.actions_taken.rejected}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Pipeline Impact */}
-                <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
-                  <h3 className="font-display text-lg text-[#E8E6E1] mb-4">Pipeline Impact</h3>
+                <div className="bg-elevated border border-border rounded-xl p-6">
+                  <h3 className="font-display text-lg text-content mb-4">Pipeline Impact</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Leads discovered</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Leads discovered</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.pipeline_impact.leads_discovered}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Meetings prepared</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Meetings prepared</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.pipeline_impact.meetings_prepped}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[#8B92A5]">Follow-ups sent</span>
-                      <span className="font-mono text-[#E8E6E1] text-xl">
+                      <span className="text-secondary">Follow-ups sent</span>
+                      <span className="font-mono text-content text-xl">
                         {roiData.pipeline_impact.follow_ups_sent}
                       </span>
                     </div>
@@ -239,8 +239,8 @@ export function ROIDashboardPage() {
 
               {/* Weekly Trend Line Chart */}
               {trendData && trendData.length > 0 && (
-                <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
-                  <h3 className="font-display text-lg text-[#E8E6E1] mb-4">Weekly Time Saved Trend</h3>
+                <div className="bg-elevated border border-border rounded-xl p-6">
+                  <h3 className="font-display text-lg text-content mb-4">Weekly Time Saved Trend</h3>
                   <ResponsiveContainer width="100%" height={250}>
                     <LineChart data={trendData}>
                       <XAxis
@@ -285,7 +285,7 @@ export function ROIDashboardPage() {
                 <button
                   onClick={() => exportReport.mutate(selectedPeriod)}
                   disabled={exportReport.isPending}
-                  className="px-6 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-medium hover:bg-[#4A5D79] transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="px-6 py-2.5 bg-interactive text-white rounded-lg font-medium hover:bg-interactive-hover transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {exportReport.isPending ? "Exporting..." : "Download Report"}
                 </button>

@@ -30,8 +30,8 @@ function ToggleSwitch({
       onClick={() => !disabled && onChange()}
       className={`
         relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-        transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B8EAA]
-        ${enabled ? "bg-[#5B6E8A]" : "bg-[#2A2A2E]"}
+        transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive
+        ${enabled ? "bg-interactive" : "bg-border"}
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}
       `}
     >
@@ -56,35 +56,35 @@ function EmailPreferenceItem({
   onChange,
 }: EmailPreferenceItemProps) {
   return (
-    <div className="email-preference-item flex items-start justify-between py-4 border-b border-[#2A2A2E] last:border-b-0">
+    <div className="email-preference-item flex items-start justify-between py-4 border-b border-border last:border-b-0">
       <div className="flex items-start gap-3 flex-1">
-        <div className="w-10 h-10 rounded-full bg-[#1E2235] flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-full bg-subtle flex items-center justify-center flex-shrink-0">
           {icon}
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-[#E8E6E1] font-sans text-[0.9375rem] font-medium">
+            <h3 className="text-content font-sans text-[0.9375rem] font-medium">
               {title}
             </h3>
             {disabled && tooltip && (
               <div className="group relative">
                 <button
                   type="button"
-                  className="text-[#7B8EAA] hover:text-[#95A5BD] transition-colors duration-150"
+                  className="text-interactive hover:text-interactive-hover transition-colors duration-150"
                   aria-label={`More information about ${title}`}
                 >
                   <AlertCircle className="w-4 h-4" />
                 </button>
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-[#1E2235] border border-[#2A2A2E] rounded-lg text-[#8B92A5] text-[0.75rem] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-10">
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-subtle border border-border rounded-lg text-secondary text-[0.75rem] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-10">
                   {tooltip}
                   <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-0.5">
-                    <div className="border-4 border-transparent border-t-[#2A2A2E]" />
+                    <div className="border-4 border-transparent border-t-border" />
                   </div>
                 </div>
               </div>
             )}
           </div>
-          <p className="text-[#8B92A5] text-[0.8125rem] mt-0.5">{description}</p>
+          <p className="text-secondary text-[0.8125rem] mt-0.5">{description}</p>
         </div>
       </div>
       <div className="ml-4 flex-shrink-0">
@@ -117,9 +117,9 @@ export function EmailPreferencesSection() {
 
   if (isLoading) {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+      <div className="bg-elevated border border-border rounded-xl p-6">
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 text-[#7B8EAA] animate-spin" data-testid="loading-spinner" />
+          <Loader2 className="w-6 h-6 text-interactive animate-spin" data-testid="loading-spinner" />
         </div>
       </div>
     );
@@ -127,8 +127,8 @@ export function EmailPreferencesSection() {
 
   if (isError || !preferences) {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
-        <div className="flex items-center gap-3 py-8 text-[#A66B6B]">
+      <div className="bg-elevated border border-border rounded-xl p-6">
+        <div className="flex items-center gap-3 py-8 text-critical">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <p className="text-[0.875rem]">
             Failed to load email preferences. Please try again.
@@ -139,16 +139,16 @@ export function EmailPreferencesSection() {
   }
 
   return (
-    <div className="email-preferences-section bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+    <div className="email-preferences-section bg-elevated border border-border rounded-xl p-6">
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-[#1E2235] flex items-center justify-center">
-          <Mail className="w-5 h-5 text-[#7B8EAA]" />
+        <div className="w-10 h-10 rounded-full bg-subtle flex items-center justify-center">
+          <Mail className="w-5 h-5 text-interactive" />
         </div>
         <div>
-          <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">
+          <h2 className="text-content font-sans text-[1.125rem] font-medium">
             Email Notifications
           </h2>
-          <p className="text-[#8B92A5] text-[0.8125rem]">
+          <p className="text-secondary text-[0.8125rem]">
             Manage which emails you receive from ARIA
           </p>
         </div>
@@ -156,7 +156,7 @@ export function EmailPreferencesSection() {
 
       <div className="space-y-1">
         <EmailPreferenceItem
-          icon={<Bell className="w-5 h-5 text-[#7B8EAA]" />}
+          icon={<Bell className="w-5 h-5 text-interactive" />}
           title="Weekly Summary"
           description="Receive a weekly digest of your ARIA activity and insights"
           enabled={preferences.weekly_summary}
@@ -164,7 +164,7 @@ export function EmailPreferencesSection() {
         />
 
         <EmailPreferenceItem
-          icon={<Bell className="w-5 h-5 text-[#7B8EAA]" />}
+          icon={<Bell className="w-5 h-5 text-interactive" />}
           title="Feature Announcements"
           description="Stay updated with new features and improvements"
           enabled={preferences.feature_announcements}
@@ -172,7 +172,7 @@ export function EmailPreferencesSection() {
         />
 
         <EmailPreferenceItem
-          icon={<Shield className="w-5 h-5 text-[#6B8F71]" />}
+          icon={<Shield className="w-5 h-5 text-success" />}
           title="Security Alerts"
           description="Important security notifications about your account"
           enabled={preferences.security_alerts}

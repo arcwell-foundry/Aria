@@ -34,7 +34,7 @@ function StatusIndicator({ status }: { status: string }) {
     <Loader2
       size={16}
       strokeWidth={1.5}
-      className="text-[#7B8EAA] animate-spin"
+      className="text-interactive animate-spin"
       style={{ animationDuration: "3s" }}
     />
   );
@@ -50,9 +50,9 @@ export function AgentActivationStatus() {
   const allComplete = data.status === "complete";
 
   return (
-    <div className="rounded-lg border border-[#2A2A2E] bg-[#161B2E]/80 overflow-hidden">
+    <div className="rounded-lg border border-border bg-elevated/80 overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-[#2A2A2E] flex items-center gap-3">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3">
         <div className="relative">
           <div
             className="w-2 h-2 rounded-full"
@@ -68,7 +68,7 @@ export function AgentActivationStatus() {
           )}
         </div>
         <h3
-          className="text-[#E8E6E1] text-sm tracking-wide"
+          className="text-content text-sm tracking-wide"
           style={{ fontFamily: "'Satoshi', sans-serif", fontWeight: 500 }}
         >
           {allComplete
@@ -78,7 +78,7 @@ export function AgentActivationStatus() {
       </div>
 
       {/* Agent Cards */}
-      <div className="divide-y divide-[#2A2A2E]/60">
+      <div className="divide-y divide-border/60">
         {data.activations.map((activation, i) => {
           const meta = AGENT_META[activation.agent] || {
             label: activation.agent,
@@ -90,7 +90,7 @@ export function AgentActivationStatus() {
           return (
             <div
               key={activation.goal_id}
-              className="px-5 py-3.5 flex items-start gap-3 transition-colors hover:bg-[#1A2036]/50"
+              className="px-5 py-3.5 flex items-start gap-3 transition-colors hover:bg-elevated/50"
               style={{
                 animationDelay: `${i * 120}ms`,
               }}
@@ -111,7 +111,7 @@ export function AgentActivationStatus() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span
-                    className="text-[#E8E6E1] text-sm"
+                    className="text-content text-sm"
                     style={{
                       fontFamily: "'Satoshi', sans-serif",
                       fontWeight: 500,
@@ -120,7 +120,7 @@ export function AgentActivationStatus() {
                     {meta.label}
                   </span>
                   <span
-                    className="text-[10px] px-1.5 py-0.5 rounded-full text-[#7B8EAA] border border-[#2A2A2E]"
+                    className="text-[10px] px-1.5 py-0.5 rounded-full text-interactive border border-border"
                     style={{
                       fontFamily: "'JetBrains Mono', monospace",
                       letterSpacing: "0.05em",
@@ -134,7 +134,7 @@ export function AgentActivationStatus() {
                   </span>
                 </div>
                 <p
-                  className="text-[#7B8EAA] text-xs mt-0.5 leading-relaxed line-clamp-2"
+                  className="text-interactive text-xs mt-0.5 leading-relaxed line-clamp-2"
                   style={{ fontFamily: "'Satoshi', sans-serif" }}
                 >
                   {activation.task}

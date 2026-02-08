@@ -65,19 +65,19 @@ export function OnboardingStepPlaceholder({
     <div className="animate-in flex flex-col items-start gap-8 max-w-lg">
       <div className="flex flex-col gap-3">
         <h1
-          className="text-[32px] leading-[1.2] text-[#1A1D27]"
+          className="text-[32px] leading-[1.2] text-content"
           style={{ fontFamily: "var(--font-display)" }}
         >
           {info.title}
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27]">
+        <p className="font-sans text-[15px] leading-relaxed text-content">
           {info.description}
         </p>
       </div>
 
-      <div className="rounded-xl bg-[#F5F5F0] border border-[#E2E0DC] px-5 py-4 w-full">
+      <div className="rounded-xl bg-subtle border border-border px-5 py-4 w-full">
         <p
-          className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic"
+          className="font-sans text-[13px] leading-relaxed text-secondary italic"
         >
           {info.ariaNote}
         </p>
@@ -88,11 +88,11 @@ export function OnboardingStepPlaceholder({
           onClick={onComplete}
           disabled={isCompleting || isSkipping}
           className="
-            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+            bg-interactive text-white rounded-lg px-5 py-2.5
             font-sans font-medium text-[15px]
-            hover:bg-[#4A5D79] active:bg-[#3D5070]
+            hover:bg-interactive-hover active:bg-interactive-hover
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             disabled:opacity-50 disabled:cursor-not-allowed
             cursor-pointer
           "
@@ -105,11 +105,11 @@ export function OnboardingStepPlaceholder({
             onClick={onSkip}
             disabled={isCompleting || isSkipping}
             className="
-              bg-transparent text-[#6B7280] rounded-lg px-4 py-2.5
+              bg-transparent text-secondary rounded-lg px-4 py-2.5
               font-sans text-[15px]
-              hover:bg-[#F5F5F0]
+              hover:bg-subtle
               transition-colors duration-150
-              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
               disabled:opacity-50 disabled:cursor-not-allowed
               cursor-pointer
             "

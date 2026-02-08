@@ -2,8 +2,8 @@
  * SkeletonLoader - Loading state placeholders following ARIA Design System v1.0
  *
  * Design System Colors:
- * - Skeleton base: bg-[#2A2F42]
- * - Dark surfaces: bg-[#161B2E], border-[#2A2F42]
+ * - Skeleton base: bg-border
+ * - Dark surfaces: bg-elevated, border-border
  * - Animation: animate-pulse (subtle)
  *
  * @example
@@ -21,7 +21,7 @@ export interface SkeletonLoaderProps {
 
 // Base skeleton element with ARIA Design System colors
 const SkeletonBase = ({ className }: { className?: string }) => (
-  <div className={`bg-[#2A2F42] animate-pulse rounded ${className || ''}`} />
+  <div className={`bg-border animate-pulse rounded ${className || ''}`} />
 );
 
 /**
@@ -31,7 +31,7 @@ const SkeletonBase = ({ className }: { className?: string }) => (
 export function CardSkeleton({ className }: { className?: string }) {
   return (
     <div
-      className={`bg-[#161B2E] border border-[#2A2F42] rounded-xl p-5 overflow-hidden ${className || ''}`}
+      className={`bg-elevated border border-border rounded-xl p-5 overflow-hidden ${className || ''}`}
     >
       {/* Header section with icon/avatar and title */}
       <div className="flex items-start gap-4 mb-4">
@@ -54,7 +54,7 @@ export function CardSkeleton({ className }: { className?: string }) {
       </div>
 
       {/* Optional tags section */}
-      <div className="flex gap-2 mt-4 pt-4 border-t border-[#2A2F42]/50">
+      <div className="flex gap-2 mt-4 pt-4 border-t border-border/50">
         <SkeletonBase className="h-5 w-16 rounded-full" />
         <SkeletonBase className="h-5 w-20 rounded-full" />
       </div>
@@ -69,7 +69,7 @@ export function CardSkeleton({ className }: { className?: string }) {
 export function ListSkeleton({ className }: { className?: string }) {
   return (
     <div
-      className={`bg-[#161B2E] border border-[#2A2F42] rounded-xl p-4 ${className || ''}`}
+      className={`bg-elevated border border-border rounded-xl p-4 ${className || ''}`}
     >
       <div className="flex items-center gap-3">
         {/* Avatar */}
@@ -100,7 +100,7 @@ export function TableSkeleton({
   className?: string;
 }) {
   return (
-    <tr className={`border-b border-[#2A2F42]/30 ${className || ''}`}>
+    <tr className={`border-b border-border/30 ${className || ''}`}>
       {/* Checkbox column */}
       <td className="px-4 py-4 w-12">
         <SkeletonBase className="w-5 h-5 rounded" />
@@ -201,18 +201,18 @@ export function LeadsSkeleton({
 }) {
   if (viewMode === "table") {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl overflow-hidden">
+      <div className="bg-elevated border border-border rounded-xl overflow-hidden">
         <table className="w-full">
           <thead>
-            <tr className="bg-[#161B2E]/60 text-left border-b border-[#2A2F42]">
+            <tr className="bg-elevated/60 text-left border-b border-border">
               <th className="w-12 px-4 py-3" />
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Company</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Health</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Stage</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Status</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Value</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Last Activity</th>
-              <th className="px-4 py-3 text-sm font-medium text-[#8B92A5]">Actions</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Company</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Health</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Stage</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Status</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Value</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Last Activity</th>
+              <th className="px-4 py-3 text-sm font-medium text-secondary">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -244,7 +244,7 @@ export function GoalsSkeleton({ count = 6 }: { count?: number }) {
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-5"
+          className="bg-elevated border border-border rounded-xl p-5"
         >
           <div className="flex items-start gap-4">
             {/* Progress ring placeholder */}
@@ -291,7 +291,7 @@ export function BriefingSkeleton() {
       </div>
 
       {/* Executive summary card */}
-      <div className="bg-[#161B2E] border border-[#2A2F42] rounded-xl p-6">
+      <div className="bg-elevated border border-border rounded-xl p-6">
         <TextSkeleton lines={4} />
       </div>
 
@@ -299,10 +299,10 @@ export function BriefingSkeleton() {
       {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
-          className="bg-[#161B2E] border border-[#2A2F42] rounded-xl overflow-hidden"
+          className="bg-elevated border border-border rounded-xl overflow-hidden"
         >
           {/* Section header */}
-          <div className="p-4 flex items-center justify-between border-b border-[#2A2F42]/50">
+          <div className="p-4 flex items-center justify-between border-b border-border/50">
             <div className="flex items-center gap-3">
               <SkeletonBase className="w-5 h-5 rounded" />
               <SkeletonBase className="h-5 w-32 rounded" />

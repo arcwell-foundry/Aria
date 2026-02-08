@@ -36,23 +36,23 @@ const roleConfig: Record<
 > = {
   admin: {
     label: "Admin",
-    bg: "bg-[#6B8F71]/10",
-    text: "text-[#6B8F71]",
-    border: "border-[#6B8F71]/30",
+    bg: "bg-success/10",
+    text: "text-success",
+    border: "border-success/30",
     icon: Crown,
   },
   manager: {
     label: "Manager",
-    bg: "bg-[#8B92A5]/10",
-    text: "text-[#8B92A5]",
-    border: "border-[#8B92A5]/30",
+    bg: "bg-secondary/10",
+    text: "text-secondary",
+    border: "border-secondary/30",
     icon: Shield,
   },
   user: {
     label: "User",
-    bg: "bg-[#7B8EAA]/10",
-    text: "text-[#7B8EAA]",
-    border: "border-[#7B8EAA]/30",
+    bg: "bg-interactive/10",
+    text: "text-interactive",
+    border: "border-interactive/30",
     icon: UserPlus,
   },
 };
@@ -201,57 +201,57 @@ export function AdminTeamPage() {
   };
 
   const StatusDot = ({ active }: { active: boolean }) => (
-    <div className={`w-2 h-2 rounded-full ${active ? "bg-[#6B8F71]" : "bg-[#A66B6B]"}`} />
+    <div className={`w-2 h-2 rounded-full ${active ? "bg-success" : "bg-critical"}`} />
   );
 
   if (teamLoading) {
     return (
-      <div className="min-h-screen bg-[#0F1117] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#7B8EAA] animate-spin" />
+      <div className="min-h-screen bg-primary flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-interactive animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1117]">
+    <div className="min-h-screen bg-primary">
       {/* Header */}
-      <div className="border-b border-[#2A2A2E]">
+      <div className="border-b border-border">
         <div className="max-w-[960px] mx-auto px-6 py-8">
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-[2rem] text-[#E8E6E1]">Team Management</h1>
+            <h1 className="font-display text-[2rem] text-content">Team Management</h1>
             <HelpTooltip content="Invite team members, manage roles, and configure company settings." placement="right" />
           </div>
-          <p className="text-[#8B92A5] mt-2">Manage team members and company settings</p>
+          <p className="text-secondary mt-2">Manage team members and company settings</p>
         </div>
       </div>
 
       {/* Messages */}
       {successMessage && (
         <div className="max-w-[960px] mx-auto px-6 mt-6">
-          <div className="bg-[#6B8F71]/10 border border-[#6B8F71]/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <Check className="w-5 h-5 text-[#6B8F71]" />
-            <span className="text-[#E8E6E1]">{successMessage}</span>
+          <div className="bg-success/10 border border-success/30 rounded-lg px-4 py-3 flex items-center gap-3">
+            <Check className="w-5 h-5 text-success" />
+            <span className="text-content">{successMessage}</span>
           </div>
         </div>
       )}
       {errorMessage && (
         <div className="max-w-[960px] mx-auto px-6 mt-6">
-          <div className="bg-[#A66B6B]/10 border border-[#A66B6B]/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <X className="w-5 h-5 text-[#A66B6B]" />
-            <span className="text-[#E8E6E1]">{errorMessage}</span>
+          <div className="bg-critical/10 border border-critical/30 rounded-lg px-4 py-3 flex items-center gap-3">
+            <X className="w-5 h-5 text-critical" />
+            <span className="text-content">{errorMessage}</span>
           </div>
         </div>
       )}
 
       <div className="max-w-[960px] mx-auto px-6 py-8 space-y-6">
         {/* Company Details */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+        <div className="bg-elevated border border-border rounded-xl p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <Building2 className="w-5 h-5 text-[#7B8EAA]" />
+              <Building2 className="w-5 h-5 text-interactive" />
               <div>
-                <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">Company Details</h2>
-                <p className="text-[#8B92A5] text-[0.8125rem]">Your organization information</p>
+                <h2 className="text-content font-sans text-[1.125rem] font-medium">Company Details</h2>
+                <p className="text-secondary text-[0.8125rem]">Your organization information</p>
               </div>
             </div>
             {isAdmin && !isEditingCompany && (
@@ -260,7 +260,7 @@ export function AdminTeamPage() {
                   setIsEditingCompany(true);
                   setCompanyName(company?.name || "");
                 }}
-                className="text-[#7B8EAA] text-[0.875rem] hover:text-[#95A5BD] transition-colors duration-150"
+                className="text-interactive text-[0.875rem] hover:text-interactive-hover transition-colors duration-150"
               >
                 Edit
               </button>
@@ -273,19 +273,19 @@ export function AdminTeamPage() {
                 type="text"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="flex-1 bg-[#1E2235] border border-[#2A2A2E] rounded-lg px-4 py-2.5 text-[#E8E6E1] text-[0.9375rem] focus:border-[#7B8EAA] focus:ring-1 focus:ring-[#7B8EAA] outline-none transition-colors duration-150"
+                className="flex-1 bg-subtle border border-border rounded-lg px-4 py-2.5 text-content text-[0.9375rem] focus:border-interactive focus:ring-1 focus:ring-interactive outline-none transition-colors duration-150"
                 placeholder="Company name"
               />
               <button
                 onClick={handleUpdateCompany}
                 disabled={updateCompany.isPending}
-                className="px-4 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center"
+                className="px-4 py-2.5 bg-interactive text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center"
               >
                 {updateCompany.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
               </button>
               <button
                 onClick={() => setIsEditingCompany(false)}
-                className="px-4 py-2.5 bg-transparent border border-[#5B6E8A] text-[#5B6E8A] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#5B6E8A]/10 transition-colors duration-150 min-h-[44px]"
+                className="px-4 py-2.5 bg-transparent border border-interactive text-interactive rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive/10 transition-colors duration-150 min-h-[44px]"
               >
                 Cancel
               </button>
@@ -293,13 +293,13 @@ export function AdminTeamPage() {
           ) : (
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2">
-                <span className="text-[#8B92A5] text-[0.875rem]">Company Name</span>
-                <span className="text-[#E8E6E1] text-[0.875rem]">{company?.name || "Not set"}</span>
+                <span className="text-secondary text-[0.875rem]">Company Name</span>
+                <span className="text-content text-[0.875rem]">{company?.name || "Not set"}</span>
               </div>
               {company?.domain && (
                 <div className="flex justify-between items-center py-2">
-                  <span className="text-[#8B92A5] text-[0.875rem]">Domain</span>
-                  <span className="text-[#E8E6E1] text-[0.875rem] font-mono">{company.domain}</span>
+                  <span className="text-secondary text-[0.875rem]">Domain</span>
+                  <span className="text-content text-[0.875rem] font-mono">{company.domain}</span>
                 </div>
               )}
             </div>
@@ -311,7 +311,7 @@ export function AdminTeamPage() {
           <div className="flex justify-end">
             <button
               onClick={() => setShowInviteModal(true)}
-              className="px-5 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 min-h-[44px] flex items-center gap-2"
+              className="px-5 py-2.5 bg-interactive text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 min-h-[44px] flex items-center gap-2"
             >
               <UserPlus className="w-4 h-4" />
               Invite Member
@@ -320,10 +320,10 @@ export function AdminTeamPage() {
         )}
 
         {/* Team Table */}
-        <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-[#2A2A2E]">
-            <h3 className="text-[#E8E6E1] font-sans text-[1rem] font-medium">Team Members</h3>
-            <p className="text-[#8B92A5] text-[0.8125rem] mt-1">
+        <div className="bg-elevated border border-border rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-border">
+            <h3 className="text-content font-sans text-[1rem] font-medium">Team Members</h3>
+            <p className="text-secondary text-[0.8125rem] mt-1">
               {team.length} {team.length === 1 ? "member" : "members"}
             </p>
           </div>
@@ -331,24 +331,24 @@ export function AdminTeamPage() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#2A2A2E]">
-                  <th className="text-left px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                <tr className="border-b border-border">
+                  <th className="text-left px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                     Name
                   </th>
-                  <th className="text-left px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                  <th className="text-left px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                     Email
                   </th>
-                  <th className="text-left px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                  <th className="text-left px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                     Role
                   </th>
-                  <th className="text-left px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                  <th className="text-left px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="text-left px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                  <th className="text-left px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                     Last Active
                   </th>
                   {isAdmin && (
-                    <th className="text-right px-6 py-3 text-[#8B92A5] text-[0.75rem] font-medium uppercase tracking-wider">
+                    <th className="text-right px-6 py-3 text-secondary text-[0.75rem] font-medium uppercase tracking-wider">
                       Actions
                     </th>
                   )}
@@ -358,20 +358,20 @@ export function AdminTeamPage() {
                 {team.map((member) => {
                   const RoleIcon = roleConfig[member.role as Role].icon;
                   return (
-                    <tr key={member.id} className="border-b border-[#2A2A2E] last:border-0 hover:bg-[#1E2235] transition-colors duration-150">
+                    <tr key={member.id} className="border-b border-border last:border-0 hover:bg-subtle transition-colors duration-150">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-[#1E2235] flex items-center justify-center">
-                            <span className="text-[#7B8EAA] text-[0.8125rem] font-medium">
+                          <div className="w-8 h-8 rounded-full bg-subtle flex items-center justify-center">
+                            <span className="text-interactive text-[0.8125rem] font-medium">
                               {member.full_name?.charAt(0).toUpperCase() ||
                                 member.email.charAt(0).toUpperCase()}
                             </span>
                           </div>
-                          <span className="text-[#E8E6E1] text-[0.875rem]">{member.full_name || "Unnamed User"}</span>
+                          <span className="text-content text-[0.875rem]">{member.full_name || "Unnamed User"}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-[#8B92A5] text-[0.8125rem]">{member.email}</span>
+                        <span className="text-secondary text-[0.8125rem]">{member.email}</span>
                       </td>
                       <td className="px-6 py-4">
                         <span
@@ -390,11 +390,11 @@ export function AdminTeamPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <StatusDot active={member.is_active} />
-                          <span className="text-[#8B92A5] text-[0.8125rem]">{member.is_active ? "Active" : "Inactive"}</span>
+                          <span className="text-secondary text-[0.8125rem]">{member.is_active ? "Active" : "Inactive"}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-[#8B92A5] text-[0.8125rem] font-mono">{formatDate(member.last_active)}</span>
+                        <span className="text-secondary text-[0.8125rem] font-mono">{formatDate(member.last_active)}</span>
                       </td>
                       {isAdmin && (
                         <td className="px-6 py-4">
@@ -403,44 +403,44 @@ export function AdminTeamPage() {
                               onClick={() =>
                                 setActiveDropdown(activeDropdown === member.id ? null : member.id)
                               }
-                              className="p-2 hover:bg-[#1E2235] rounded-lg transition-colors duration-150"
+                              className="p-2 hover:bg-subtle rounded-lg transition-colors duration-150"
                             >
-                              <MoreVertical className="w-4 h-4 text-[#7B8EAA]" />
+                              <MoreVertical className="w-4 h-4 text-interactive" />
                             </button>
                             {activeDropdown === member.id && (
                               <>
                                 <div className="fixed inset-0 z-10" onClick={() => setActiveDropdown(null)} />
-                                <div className="absolute right-0 top-full mt-2 w-48 bg-[#161B2E] border border-[#2A2A2E] rounded-lg shadow-lg z-20 py-1">
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-elevated border border-border rounded-lg shadow-lg z-20 py-1">
                                   <button
                                     onClick={() => handleChangeRole(member.id, "admin")}
-                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-[#1E2235] transition-colors duration-150 text-[#E8E6E1]"
+                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-subtle transition-colors duration-150 text-content"
                                   >
                                     Make Admin
                                   </button>
                                   <button
                                     onClick={() => handleChangeRole(member.id, "manager")}
-                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-[#1E2235] transition-colors duration-150 text-[#E8E6E1]"
+                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-subtle transition-colors duration-150 text-content"
                                   >
                                     Make Manager
                                   </button>
                                   <button
                                     onClick={() => handleChangeRole(member.id, "user")}
-                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-[#1E2235] transition-colors duration-150 text-[#E8E6E1]"
+                                    className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-subtle transition-colors duration-150 text-content"
                                   >
                                     Make User
                                   </button>
-                                  <div className="border-t border-[#2A2A2E] my-1" />
+                                  <div className="border-t border-border my-1" />
                                   {member.is_active ? (
                                     <button
                                       onClick={() => handleDeactivate(member.id)}
-                                      className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-[#A66B6B]/10 transition-colors duration-150 text-[#A66B6B]"
+                                      className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-critical/10 transition-colors duration-150 text-critical"
                                     >
                                       Deactivate
                                     </button>
                                   ) : (
                                     <button
                                       onClick={() => handleReactivate(member.id)}
-                                      className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-[#6B8F71]/10 transition-colors duration-150 text-[#6B8F71]"
+                                      className="w-full px-4 py-2 text-left text-[0.8125rem] hover:bg-success/10 transition-colors duration-150 text-success"
                                     >
                                       Reactivate
                                     </button>
@@ -461,12 +461,12 @@ export function AdminTeamPage() {
 
         {/* Pending Invites */}
         {isAdmin && invites.length > 0 && (
-          <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+          <div className="bg-elevated border border-border rounded-xl p-6">
             <div className="flex items-center gap-3 mb-6">
-              <Mail className="w-5 h-5 text-[#7B8EAA]" />
+              <Mail className="w-5 h-5 text-interactive" />
               <div>
-                <h3 className="text-[#E8E6E1] font-sans text-[1rem] font-medium">Pending Invites</h3>
-                <p className="text-[#8B92A5] text-[0.8125rem] mt-1">
+                <h3 className="text-content font-sans text-[1rem] font-medium">Pending Invites</h3>
+                <p className="text-secondary text-[0.8125rem] mt-1">
                   {invites.length} {invites.length === 1 ? "invite" : "invites"} awaiting response
                 </p>
               </div>
@@ -476,11 +476,11 @@ export function AdminTeamPage() {
               {invites.map((invite) => {
                 const RoleIcon = roleConfig[invite.role].icon;
                 return (
-                  <div key={invite.id} className="flex items-center justify-between py-3 px-4 bg-[#1E2235] rounded-lg border border-[#2A2A2E]">
+                  <div key={invite.id} className="flex items-center justify-between py-3 px-4 bg-subtle rounded-lg border border-border">
                     <div className="flex items-center gap-3">
-                      <Mail className="w-4 h-4 text-[#7B8EAA]" />
+                      <Mail className="w-4 h-4 text-interactive" />
                       <div>
-                        <p className="text-[#E8E6E1] text-[0.875rem]">{invite.email}</p>
+                        <p className="text-content text-[0.875rem]">{invite.email}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border ${
@@ -490,7 +490,7 @@ export function AdminTeamPage() {
                             <RoleIcon className="w-3 h-3" />
                             <span className="text-[0.6875rem]">{roleConfig[invite.role].label}</span>
                           </span>
-                          <span className="text-[#8B92A5] text-[0.75rem]">Sent {formatDate(invite.created_at)}</span>
+                          <span className="text-secondary text-[0.75rem]">Sent {formatDate(invite.created_at)}</span>
                         </div>
                       </div>
                     </div>
@@ -498,14 +498,14 @@ export function AdminTeamPage() {
                       <button
                         onClick={() => handleResendInvite(invite.id)}
                         disabled={resendInvite.isPending}
-                        className="px-3 py-1.5 text-[#7B8EAA] text-[0.8125rem] hover:bg-[#1E2235] rounded-lg transition-colors duration-150 min-h-[32px]"
+                        className="px-3 py-1.5 text-interactive text-[0.8125rem] hover:bg-subtle rounded-lg transition-colors duration-150 min-h-[32px]"
                       >
                         Resend
                       </button>
                       <button
                         onClick={() => handleCancelInvite(invite.id)}
                         disabled={cancelInvite.isPending}
-                        className="px-3 py-1.5 text-[#A66B6B] text-[0.8125rem] hover:bg-[#A66B6B]/10 rounded-lg transition-colors duration-150 min-h-[32px]"
+                        className="px-3 py-1.5 text-critical text-[0.8125rem] hover:bg-critical/10 rounded-lg transition-colors duration-150 min-h-[32px]"
                       >
                         Cancel
                       </button>
@@ -522,35 +522,35 @@ export function AdminTeamPage() {
       {showInviteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowInviteModal(false)} />
-          <div className="relative bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
-            <h3 className="font-display text-[1.5rem] text-[#E8E6E1] mb-2">Invite Team Member</h3>
-            <p className="text-[#8B92A5] text-[0.875rem] mb-6">Send an invitation to join your team</p>
+          <div className="relative bg-elevated border border-border rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
+            <h3 className="font-display text-[1.5rem] text-content mb-2">Invite Team Member</h3>
+            <p className="text-secondary text-[0.875rem] mb-6">Send an invitation to join your team</p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-[#8B92A5] text-[0.8125rem] font-medium mb-1.5">Email Address</label>
+                <label className="block text-secondary text-[0.8125rem] font-medium mb-1.5">Email Address</label>
                 <input
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full bg-[#1E2235] border border-[#2A2A2E] rounded-lg px-4 py-3 text-[#E8E6E1] text-[0.9375rem] focus:border-[#7B8EAA] focus:ring-1 focus:ring-[#7B8EAA] outline-none transition-colors duration-150"
+                  className="w-full bg-subtle border border-border rounded-lg px-4 py-3 text-content text-[0.9375rem] focus:border-interactive focus:ring-1 focus:ring-interactive outline-none transition-colors duration-150"
                   placeholder="colleague@company.com"
                 />
               </div>
 
               <div>
-                <label className="block text-[#8B92A5] text-[0.8125rem] font-medium mb-1.5">Role</label>
+                <label className="block text-secondary text-[0.8125rem] font-medium mb-1.5">Role</label>
                 <div className="relative">
                   <select
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value as Role)}
-                    className="w-full bg-[#1E2235] border border-[#2A2A2E] rounded-lg px-4 py-3 text-[#E8E6E1] text-[0.9375rem] focus:border-[#7B8EAA] focus:ring-1 focus:ring-[#7B8EAA] outline-none transition-colors duration-150 appearance-none cursor-pointer"
+                    className="w-full bg-subtle border border-border rounded-lg px-4 py-3 text-content text-[0.9375rem] focus:border-interactive focus:ring-1 focus:ring-interactive outline-none transition-colors duration-150 appearance-none cursor-pointer"
                   >
                     <option value="user">User - Personal + shared access</option>
                     <option value="manager">Manager - Team access, no billing</option>
                     <option value="admin">Admin - Full access</option>
                   </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#7B8EAA] pointer-events-none" />
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-interactive pointer-events-none" />
                 </div>
               </div>
 
@@ -558,7 +558,7 @@ export function AdminTeamPage() {
                 <button
                   onClick={handleInvite}
                   disabled={inviteMember.isPending || !inviteEmail}
-                  className="flex-1 px-5 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
+                  className="flex-1 px-5 py-2.5 bg-interactive text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
                 >
                   {inviteMember.isPending ? (
                     <>
@@ -578,7 +578,7 @@ export function AdminTeamPage() {
                     setInviteEmail("");
                     setInviteRole("user");
                   }}
-                  className="px-5 py-2.5 bg-transparent border border-[#5B6E8A] text-[#5B6E8A] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#5B6E8A]/10 transition-colors duration-150 min-h-[44px]"
+                  className="px-5 py-2.5 bg-transparent border border-interactive text-interactive rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive/10 transition-colors duration-150 min-h-[44px]"
                 >
                   Cancel
                 </button>

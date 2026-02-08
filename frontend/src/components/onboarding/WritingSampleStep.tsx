@@ -184,16 +184,16 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
     <div className="flex flex-col gap-8 max-w-lg animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Teach ARIA your voice
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           Share examples of your writing so ARIA drafts content that sounds like you, not a robot.
         </p>
       </div>
 
       {/* Input method tabs */}
-      <div className="flex gap-1 rounded-lg bg-[#F5F5F0] p-1" role="tablist">
+      <div className="flex gap-1 rounded-lg bg-subtle p-1" role="tablist">
         <button
           type="button"
           role="tab"
@@ -204,11 +204,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             rounded-md px-4 py-2 font-sans text-[13px] font-medium
             transition-colors duration-150 cursor-pointer
             min-h-[44px]
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             ${
               inputMethod === "paste"
-                ? "bg-white text-[#1A1D27] shadow-sm"
-                : "text-[#6B7280] hover:text-[#1A1D27]"
+                ? "bg-white text-content shadow-sm"
+                : "text-secondary hover:text-content"
             }
           `}
         >
@@ -225,11 +225,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             rounded-md px-4 py-2 font-sans text-[13px] font-medium
             transition-colors duration-150 cursor-pointer
             min-h-[44px]
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             ${
               inputMethod === "upload"
-                ? "bg-white text-[#1A1D27] shadow-sm"
-                : "text-[#6B7280] hover:text-[#1A1D27]"
+                ? "bg-white text-content shadow-sm"
+                : "text-secondary hover:text-content"
             }
           `}
         >
@@ -249,10 +249,10 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                 placeholder="Paste a recent email, proposal, or message you wrote..."
                 rows={4}
                 className="
-                  w-full bg-white border border-[#E2E0DC] rounded-lg px-4 py-3
-                  font-sans text-[15px] text-[#1A1D27]
-                  placeholder:text-[#6B7280]/50
-                  focus:border-[#5B6E8A] focus:ring-1 focus:ring-[#5B6E8A]
+                  w-full bg-white border border-border rounded-lg px-4 py-3
+                  font-sans text-[15px] text-content
+                  placeholder:text-secondary/50
+                  focus:border-interactive focus:ring-1 focus:ring-interactive
                   focus:outline-none resize-y
                   transition-colors duration-150
                 "
@@ -264,9 +264,9 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                   onClick={() => removeSample(index)}
                   className="
                     absolute top-2 right-2 p-1.5 rounded
-                    text-[#6B7280] hover:text-[#945A5A] hover:bg-[#F5F5F0]
+                    text-secondary hover:text-critical hover:bg-subtle
                     transition-colors duration-150
-                    focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                    focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                     cursor-pointer
                   "
                   aria-label={`Remove sample ${index + 1}`}
@@ -282,11 +282,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             onClick={addSample}
             className="
               flex items-center gap-2 self-start
-              text-[#5B6E8A] font-sans text-[13px] font-medium
-              hover:text-[#4A5D79]
+              text-interactive font-sans text-[13px] font-medium
+              hover:text-interactive-hover
               transition-colors duration-150
               cursor-pointer rounded px-1 py-1
-              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             "
           >
             <Plus size={16} strokeWidth={1.5} />
@@ -317,19 +317,19 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             onDragOver={(e) => e.preventDefault()}
             className="
               flex flex-col items-center justify-center gap-3
-              rounded-xl border-2 border-dashed border-[#E2E0DC] bg-[#FAFAF9]
+              rounded-xl border-2 border-dashed border-border bg-primary
               px-6 py-10 cursor-pointer
-              hover:border-[#5B6E8A]
+              hover:border-interactive
               transition-colors duration-150
-              focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+              focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             "
             aria-label="Upload files. Drop files here or click to browse."
           >
-            <Upload size={24} strokeWidth={1.5} className="text-[#6B7280]" />
-            <p className="font-sans text-[15px] text-[#1A1D27]">
+            <Upload size={24} strokeWidth={1.5} className="text-secondary" />
+            <p className="font-sans text-[15px] text-content">
               Drop files here or click to browse
             </p>
-            <p className="font-sans text-[13px] text-[#6B7280]">
+            <p className="font-sans text-[13px] text-secondary">
               TXT, MD, DOCX, PDF — up to 10MB
             </p>
           </div>
@@ -357,10 +357,10 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                 <div
                   key={`${file.name}-${index}`}
                   role="listitem"
-                  className="flex items-center gap-3 rounded-lg bg-white border border-[#E2E0DC] px-4 py-3"
+                  className="flex items-center gap-3 rounded-lg bg-white border border-border px-4 py-3"
                 >
-                  <FileText size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0" />
-                  <span className="flex-1 font-sans text-[15px] text-[#1A1D27] truncate">
+                  <FileText size={20} strokeWidth={1.5} className="text-interactive shrink-0" />
+                  <span className="flex-1 font-sans text-[15px] text-content truncate">
                     {file.name}
                   </span>
                   <button
@@ -368,9 +368,9 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                     onClick={() => removeUploadedFile(index)}
                     className="
                       shrink-0 rounded p-1.5
-                      text-[#6B7280] hover:text-[#945A5A] hover:bg-[#F5F5F0]
+                      text-secondary hover:text-critical hover:bg-subtle
                       transition-colors duration-150
-                      focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                      focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                       cursor-pointer
                     "
                     aria-label={`Remove ${file.name}`}
@@ -386,7 +386,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
 
       {/* Error */}
       {error && (
-        <p className="font-sans text-[13px] text-[#945A5A]" role="alert" aria-live="polite">
+        <p className="font-sans text-[13px] text-critical" role="alert" aria-live="polite">
           {error}
         </p>
       )}
@@ -398,12 +398,12 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
           onClick={handleAnalyze}
           disabled={isAnalyzing || sampleCount === 0}
           className="
-            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+            bg-interactive text-white rounded-lg px-5 py-2.5
             font-sans font-medium text-[15px]
-            hover:bg-[#4A5D79] active:bg-[#3D5070]
+            hover:bg-interactive-hover active:bg-interactive-hover
             disabled:opacity-50 disabled:cursor-not-allowed
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             cursor-pointer flex items-center justify-center gap-2
             min-h-[44px]
           "
@@ -421,12 +421,12 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
 
       {/* Style preview card */}
       {fingerprint && (
-        <div className="rounded-xl bg-white border border-[#E2E0DC] p-6 flex flex-col gap-4 animate-in fade-in duration-400">
-          <p className="font-sans text-[15px] font-medium text-[#1A1D27]">
+        <div className="rounded-xl bg-white border border-border p-6 flex flex-col gap-4 animate-in fade-in duration-400">
+          <p className="font-sans text-[15px] font-medium text-content">
             Here&apos;s how I&apos;d describe your style:
           </p>
 
-          <blockquote className="font-display italic text-[18px] leading-[1.4] text-[#1A1D27] border-l-2 border-[#E2E0DC] pl-4">
+          <blockquote className="font-display italic text-[18px] leading-[1.4] text-content border-l-2 border-border pl-4">
             &ldquo;{fingerprint.style_summary}&rdquo;
           </blockquote>
 
@@ -435,7 +435,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             {deriveTraits(fingerprint).map((trait) => (
               <span
                 key={trait}
-                className="rounded-md bg-[#F5F5F0] border border-[#E2E0DC] px-2.5 py-1 font-sans text-[11px] font-medium text-[#5B6E8A]"
+                className="rounded-md bg-subtle border border-border px-2.5 py-1 font-sans text-[11px] font-medium text-interactive"
               >
                 {trait}
               </span>
@@ -443,24 +443,24 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
           </div>
 
           {/* Confidence indicator */}
-          <p className="font-sans text-[13px] text-[#6B7280]">
+          <p className="font-sans text-[13px] text-secondary">
             Based on {sampleCount} sample{sampleCount !== 1 ? "s" : ""} — more samples = more
             accuracy
           </p>
 
           {/* Feedback */}
           <div className="flex items-center gap-3">
-            <span className="font-sans text-[13px] text-[#6B7280]">Sound right?</span>
+            <span className="font-sans text-[13px] text-secondary">Sound right?</span>
             <button
               type="button"
               onClick={() => setFeedback("up")}
               className={`
                 rounded p-1.5 transition-colors duration-150 cursor-pointer
-                focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
                   feedback === "up"
-                    ? "text-[#5A7D60] bg-[#5A7D60]/10"
-                    : "text-[#6B7280] hover:text-[#5A7D60] hover:bg-[#F5F5F0]"
+                    ? "text-success bg-success/10"
+                    : "text-secondary hover:text-success hover:bg-subtle"
                 }
               `}
               aria-label="Yes, this sounds right"
@@ -473,11 +473,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
               onClick={() => setFeedback("down")}
               className={`
                 rounded p-1.5 transition-colors duration-150 cursor-pointer
-                focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+                focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
                   feedback === "down"
-                    ? "text-[#945A5A] bg-[#945A5A]/10"
-                    : "text-[#6B7280] hover:text-[#945A5A] hover:bg-[#F5F5F0]"
+                    ? "text-critical bg-critical/10"
+                    : "text-secondary hover:text-critical hover:bg-subtle"
                 }
               `}
               aria-label="No, this doesn't sound right"
@@ -489,7 +489,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
 
           {/* Re-analyze option if feedback is negative */}
           {feedback === "down" && (
-            <p className="font-sans text-[13px] text-[#6B7280]">
+            <p className="font-sans text-[13px] text-secondary">
               Try adding more samples — different types of writing (emails, proposals, LinkedIn
               posts) give ARIA a more complete picture.
             </p>
@@ -498,8 +498,8 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
       )}
 
       {/* ARIA presence */}
-      <div className="rounded-xl bg-[#F5F5F0] border border-[#E2E0DC] px-5 py-4">
-        <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+      <div className="rounded-xl bg-subtle border border-border px-5 py-4">
+        <p className="font-sans text-[13px] leading-relaxed text-secondary italic">
           The more samples you share, the more I&apos;ll sound like you. Even 3-4 emails give me a
           strong foundation.
         </p>
@@ -511,11 +511,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
           type="button"
           onClick={onComplete}
           className="
-            bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+            bg-interactive text-white rounded-lg px-5 py-2.5
             font-sans font-medium text-[15px]
-            hover:bg-[#4A5D79] active:bg-[#3D5070]
+            hover:bg-interactive-hover active:bg-interactive-hover
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             cursor-pointer flex items-center justify-center gap-2
             min-h-[44px]
           "
@@ -527,11 +527,11 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
           type="button"
           onClick={onSkip}
           className="
-            bg-transparent text-[#6B7280] rounded-lg px-4 py-2.5
+            bg-transparent text-secondary rounded-lg px-4 py-2.5
             font-sans text-[13px]
-            hover:bg-[#F5F5F0]
+            hover:bg-subtle
             transition-colors duration-150
-            focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+            focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             cursor-pointer text-center
             min-h-[44px]
           "

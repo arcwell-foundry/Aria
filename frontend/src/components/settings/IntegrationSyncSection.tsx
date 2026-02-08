@@ -32,15 +32,15 @@ function formatTime(timeStr: string | null): string {
 
 function getStatusIcon(lastSyncStatus: string | null, isSyncing: boolean): React.ReactNode {
   if (isSyncing) {
-    return <Loader2 className="w-4 h-4 text-[#7B8EAA] animate-spin" />;
+    return <Loader2 className="w-4 h-4 text-interactive animate-spin" />;
   }
   if (lastSyncStatus === "success") {
-    return <CheckCircle className="w-4 h-4 text-[#6B8F71]" />;
+    return <CheckCircle className="w-4 h-4 text-success" />;
   }
   if (lastSyncStatus === "failed") {
-    return <AlertCircle className="w-4 h-4 text-[#A66B6B]" />;
+    return <AlertCircle className="w-4 h-4 text-critical" />;
   }
-  return <Clock className="w-4 h-4 text-[#7B8EAA]" />;
+  return <Clock className="w-4 h-4 text-interactive" />;
 }
 
 function getStatusText(lastSyncStatus: string | null, isSyncing: boolean): string {
@@ -61,28 +61,28 @@ function SyncStatusCard({
   isSyncing,
 }: SyncStatusCardProps) {
   return (
-    <div className="flex items-center justify-between py-4 border-b border-[#2A2A2E] last:border-b-0">
+    <div className="flex items-center justify-between py-4 border-b border-border last:border-b-0">
       <div className="flex items-start gap-3 flex-1">
-        <div className="w-10 h-10 rounded-full bg-[#1E2235] flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-full bg-subtle flex items-center justify-center flex-shrink-0">
           {getStatusIcon(lastSyncStatus, isSyncing)}
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-[#E8E6E1] font-sans text-[0.9375rem] font-medium">
+            <h3 className="text-content font-sans text-[0.9375rem] font-medium">
               {displayName}
             </h3>
           </div>
           <div className="flex items-center gap-3 mt-0.5">
-            <p className="text-[#8B92A5] text-[0.8125rem]">
+            <p className="text-secondary text-[0.8125rem]">
               Last synced: {formatTime(lastSyncAt)}
             </p>
             {syncCount > 0 && (
-              <span className="text-[#7B8EAA] text-[0.75rem]">
+              <span className="text-interactive text-[0.75rem]">
                 ({syncCount} {syncCount === 1 ? "sync" : "synces"})
               </span>
             )}
           </div>
-          <p className="text-[#7B8EAA] text-[0.75rem] mt-0.5">
+          <p className="text-interactive text-[0.75rem] mt-0.5">
             {getStatusText(lastSyncStatus, isSyncing)}
           </p>
         </div>
@@ -97,8 +97,8 @@ function SyncStatusCard({
             transition-colors duration-150
             ${
               isSyncing
-                ? "bg-[#2A2A2E] text-[#7B8EAA] cursor-not-allowed"
-                : "bg-[#5B6E8A] text-[#E8E6E1] hover:bg-[#4A5D79]"
+                ? "bg-border text-interactive cursor-not-allowed"
+                : "bg-interactive text-content hover:bg-interactive-hover"
             }
           `}
         >
@@ -134,9 +134,9 @@ export function IntegrationSyncSection() {
 
   if (isLoading) {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+      <div className="bg-elevated border border-border rounded-xl p-6">
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 text-[#7B8EAA] animate-spin" />
+          <Loader2 className="w-6 h-6 text-interactive animate-spin" />
         </div>
       </div>
     );
@@ -144,8 +144,8 @@ export function IntegrationSyncSection() {
 
   if (isError || !syncStatus) {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
-        <div className="flex items-center gap-3 py-8 text-[#A66B6B]">
+      <div className="bg-elevated border border-border rounded-xl p-6">
+        <div className="flex items-center gap-3 py-8 text-critical">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <p className="text-[0.875rem]">
             Failed to load sync status. Please try again.
@@ -157,8 +157,8 @@ export function IntegrationSyncSection() {
 
   if (syncStatus.length === 0) {
     return (
-      <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
-        <div className="flex items-center gap-3 py-8 text-[#7B8EAA]">
+      <div className="bg-elevated border border-border rounded-xl p-6">
+        <div className="flex items-center gap-3 py-8 text-interactive">
           <Clock className="w-5 h-5 flex-shrink-0" />
           <p className="text-[0.875rem]">
             No integrations connected. Connect an integration to see sync status.
@@ -169,16 +169,16 @@ export function IntegrationSyncSection() {
   }
 
   return (
-    <div className="bg-[#161B2E] border border-[#2A2A2E] rounded-xl p-6">
+    <div className="bg-elevated border border-border rounded-xl p-6">
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-[#1E2235] flex items-center justify-center">
-          <RefreshCw className="w-5 h-5 text-[#7B8EAA]" />
+        <div className="w-10 h-10 rounded-full bg-subtle flex items-center justify-center">
+          <RefreshCw className="w-5 h-5 text-interactive" />
         </div>
         <div>
-          <h2 className="text-[#E8E6E1] font-sans text-[1.125rem] font-medium">
+          <h2 className="text-content font-sans text-[1.125rem] font-medium">
             Integration Sync Status
           </h2>
-          <p className="text-[#8B92A5] text-[0.8125rem]">
+          <p className="text-secondary text-[0.8125rem]">
             Manage sync status and manually trigger integrations to sync
           </p>
         </div>

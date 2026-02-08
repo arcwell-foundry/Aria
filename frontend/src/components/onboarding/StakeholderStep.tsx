@@ -133,10 +133,10 @@ export function StakeholderStep({ onComplete }: StakeholderStepProps) {
     <div className="flex flex-col gap-8 max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           Map your key relationships
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           Who are the people that matter most to your work? ARIA will track
           these relationships over time.
         </p>
@@ -145,11 +145,11 @@ export function StakeholderStep({ onComplete }: StakeholderStepProps) {
       {/* Zero stakeholder confirmation */}
       {showZeroConfirm && (
         <div
-          className="rounded-xl bg-[#FAFAF9] border border-[#E2E0DC] px-5 py-4 w-full animate-in fade-in slide-in-from-top-2 duration-300"
+          className="rounded-xl bg-primary border border-border px-5 py-4 w-full animate-in fade-in slide-in-from-top-2 duration-300"
           role="alert"
           aria-live="polite"
         >
-          <p className="font-sans text-[15px] leading-relaxed text-[#1A1D27] mb-4">
+          <p className="font-sans text-[15px] leading-relaxed text-content mb-4">
             No stakeholders to add right now? That&apos;s fine — I&apos;ll build
             your relationship map from email and CRM data.
           </p>
@@ -157,14 +157,14 @@ export function StakeholderStep({ onComplete }: StakeholderStepProps) {
             <button
               type="button"
               onClick={handleCancelZero}
-              className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+              className="font-sans text-[13px] font-medium text-interactive hover:text-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded px-2 py-1"
             >
               Go back
             </button>
             <button
               type="button"
               onClick={handleConfirmZero}
-              className="font-sans text-[13px] font-medium text-[#1A1D27] hover:text-[#5B6E8A] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1"
+              className="font-sans text-[13px] font-medium text-content hover:text-interactive transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded px-2 py-1"
             >
               Continue anyway
             </button>
@@ -191,14 +191,14 @@ export function StakeholderStep({ onComplete }: StakeholderStepProps) {
       <button
         type="button"
         onClick={addStakeholder}
-        className="font-sans text-[13px] font-medium text-[#5B6E8A] hover:text-[#4A5D79] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded px-2 py-1 flex items-center gap-2 w-fit"
+        className="font-sans text-[13px] font-medium text-interactive hover:text-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded px-2 py-1 flex items-center gap-2 w-fit"
       >
         <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
         Add person
       </button>
 
       {/* ARIA presence text */}
-      <p className="font-sans text-[13px] leading-relaxed text-[#6B7280] italic">
+      <p className="font-sans text-[13px] leading-relaxed text-secondary italic">
         Even 3-5 key contacts give me a strong foundation. I&apos;ll discover more
         from your email and CRM later.
       </p>
@@ -209,11 +209,11 @@ export function StakeholderStep({ onComplete }: StakeholderStepProps) {
         onClick={handleContinue}
         disabled={isSaving}
         className={`
-          bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5
+          bg-interactive text-white rounded-lg px-5 py-2.5
           font-sans font-medium text-[15px]
-          hover:bg-[#4A5D79] active:bg-[#3D5070]
+          hover:bg-interactive-hover active:bg-interactive-hover
           transition-colors duration-150
-          focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
+          focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
           disabled:opacity-50 disabled:cursor-not-allowed
           cursor-pointer flex items-center justify-center gap-2
           min-h-[44px] w-fit
@@ -234,13 +234,13 @@ interface StakeholderCardProps {
 
 function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: StakeholderCardProps) {
   return (
-    <div className="bg-white border border-[#E2E0DC] rounded-xl p-5 relative">
+    <div className="bg-white border border-border rounded-xl p-5 relative">
       {/* Remove button */}
       {onRemove && (
         <button
           type="button"
           onClick={onRemove}
-          className="absolute top-4 right-4 text-[#6B7280] hover:text-[#945A5A] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 rounded p-1"
+          className="absolute top-4 right-4 text-secondary hover:text-critical transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 rounded p-1"
           aria-label="Remove this person"
         >
           <X size={18} strokeWidth={1.5} />
@@ -252,7 +252,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`stakeholder-${index}-name`}
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
+            className="font-sans text-[13px] font-medium text-secondary"
           >
             Name <span aria-hidden="true">*</span>
             <span className="sr-only">(required)</span>
@@ -263,7 +263,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.name}
             onChange={(e) => onUpdate(index, "name", e.target.value)}
             placeholder="e.g., Sarah Johnson"
-            className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150"
+            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
             aria-required="true"
           />
         </div>
@@ -273,7 +273,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor={`stakeholder-${index}-title`}
-              className="font-sans text-[13px] font-medium text-[#6B7280]"
+              className="font-sans text-[13px] font-medium text-secondary"
             >
               Title
             </label>
@@ -283,7 +283,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
               value={stakeholder.title}
               onChange={(e) => onUpdate(index, "title", e.target.value)}
               placeholder="e.g., VP of R&D"
-              className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150"
+              className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
             />
           </div>
 
@@ -291,7 +291,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor={`stakeholder-${index}-relationship`}
-              className="font-sans text-[13px] font-medium text-[#6B7280]"
+              className="font-sans text-[13px] font-medium text-secondary"
             >
               Relationship
             </label>
@@ -301,7 +301,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
               onChange={(e) =>
                 onUpdate(index, "relationship_type", e.target.value)
               }
-              className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150 cursor-pointer"
+              className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 cursor-pointer"
             >
               {RELATIONSHIP_TYPES.map((type) => (
                 <option key={type.value} value={type.value}>
@@ -316,7 +316,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`stakeholder-${index}-company`}
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
+            className="font-sans text-[13px] font-medium text-secondary"
           >
             Company
           </label>
@@ -326,7 +326,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.company}
             onChange={(e) => onUpdate(index, "company", e.target.value)}
             placeholder="e.g., Pfizer"
-            className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150"
+            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
           />
         </div>
 
@@ -334,7 +334,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`stakeholder-${index}-email`}
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
+            className="font-sans text-[13px] font-medium text-secondary"
           >
             Email
           </label>
@@ -344,7 +344,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.email}
             onChange={(e) => onUpdate(index, "email", e.target.value)}
             placeholder="e.g., sarah@company.com"
-            className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150"
+            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
           />
         </div>
 
@@ -352,9 +352,9 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`stakeholder-${index}-notes`}
-            className="font-sans text-[13px] font-medium text-[#6B7280]"
+            className="font-sans text-[13px] font-medium text-secondary"
           >
-            Notes <span className="text-[#9CA3AF] font-normal">(optional)</span>
+            Notes <span className="text-secondary font-normal">(optional)</span>
           </label>
           <textarea
             id={`stakeholder-${index}-notes`}
@@ -362,7 +362,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             onChange={(e) => onUpdate(index, "notes", e.target.value)}
             placeholder="Any context about this relationship..."
             rows={2}
-            className="bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] transition-colors duration-150 resize-none"
+            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 resize-none"
           />
         </div>
       </div>

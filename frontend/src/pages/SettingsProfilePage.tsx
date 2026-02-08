@@ -87,9 +87,9 @@ function fileTypeIcon(type: string): string {
 function qualityBadge(score: number | null) {
   if (score === null) return null;
   const pct = Math.round(score * 100);
-  let color = "text-[#945A5A] bg-[#945A5A]/8 border-[#945A5A]/20";
-  if (pct >= 80) color = "text-[#5A7D60] bg-[#5A7D60]/8 border-[#5A7D60]/20";
-  else if (pct >= 50) color = "text-[#A6845A] bg-[#A6845A]/8 border-[#A6845A]/20";
+  let color = "text-critical bg-critical/8 border-critical/20";
+  if (pct >= 80) color = "text-success bg-success/8 border-success/20";
+  else if (pct >= 50) color = "text-warning bg-warning/8 border-warning/20";
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded border text-[0.6875rem] font-mono font-medium ${color}`}
@@ -101,14 +101,14 @@ function qualityBadge(score: number | null) {
 
 // --- Shared styles ---
 const inputCls =
-  "w-full bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[0.9375rem] font-sans text-[#1A1D27] placeholder-[#6B7280]/60 focus:border-[#5B6E8A] focus:ring-1 focus:ring-[#5B6E8A] outline-none transition-colors duration-150";
-const labelCls = "block text-[#6B7280] text-[0.8125rem] font-sans font-medium mb-1.5";
+  "w-full bg-white border border-border rounded-lg px-4 py-3 text-[0.9375rem] font-sans text-content placeholder-secondary/60 focus:border-interactive focus:ring-1 focus:ring-interactive outline-none transition-colors duration-150";
+const labelCls = "block text-secondary text-[0.8125rem] font-sans font-medium mb-1.5";
 const primaryBtnCls =
-  "px-5 py-2.5 bg-[#5B6E8A] text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center cursor-pointer";
+  "px-5 py-2.5 bg-interactive text-white rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center cursor-pointer";
 const secondaryBtnCls =
-  "px-5 py-2.5 bg-transparent border border-[#5B6E8A] text-[#5B6E8A] rounded-lg font-sans text-[0.875rem] font-medium hover:bg-[#5B6E8A]/10 transition-colors duration-150 min-h-[44px] cursor-pointer";
+  "px-5 py-2.5 bg-transparent border border-interactive text-interactive rounded-lg font-sans text-[0.875rem] font-medium hover:bg-interactive/10 transition-colors duration-150 min-h-[44px] cursor-pointer";
 const tagCls =
-  "inline-flex items-center gap-1.5 px-3 py-1 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg text-[0.8125rem] text-[#1A1D27] font-sans";
+  "inline-flex items-center gap-1.5 px-3 py-1 bg-subtle border border-border rounded-lg text-[0.8125rem] text-content font-sans";
 
 // --- Wrapper component: fetches data, then renders form with key-based reset ---
 
@@ -118,8 +118,8 @@ export function SettingsProfilePage() {
 
   if (profileLoading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#5B6E8A] animate-spin" />
+      <div className="min-h-screen bg-primary flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-interactive animate-spin" />
       </div>
     );
   }
@@ -280,12 +280,12 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
   };
 
   return (
-    <div className="min-h-screen bg-[#FAFAF9]">
+    <div className="min-h-screen bg-primary">
       <div className="flex">
         {/* Left Settings Sidebar */}
-        <aside className="hidden lg:block w-60 min-h-screen border-r border-[#E2E0DC] bg-[#F5F5F0] shrink-0">
+        <aside className="hidden lg:block w-60 min-h-screen border-r border-border bg-subtle shrink-0">
           <div className="px-6 pt-8 pb-6">
-            <h2 className="font-display text-[1.5rem] text-[#1A1D27]">Settings</h2>
+            <h2 className="font-display text-[1.5rem] text-content">Settings</h2>
           </div>
           <nav className="px-3 space-y-0.5">
             {settingsNav.map((item) => {
@@ -297,8 +297,8 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                   to={item.href}
                   className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-[0.875rem] font-sans transition-colors duration-150 ${
                     active
-                      ? "bg-white text-[#1A1D27] font-medium shadow-sm border border-[#E2E0DC]"
-                      : "text-[#6B7280] hover:text-[#1A1D27] hover:bg-white/60"
+                      ? "bg-white text-content font-medium shadow-sm border border-border"
+                      : "text-secondary hover:text-content hover:bg-white/60"
                   }`}
                 >
                   <Icon className="w-[18px] h-[18px] stroke-[1.5]" />
@@ -312,10 +312,10 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
         {/* Main content */}
         <div className="flex-1 min-w-0">
           {/* Header */}
-          <div className="border-b border-[#E2E0DC]">
+          <div className="border-b border-border">
             <div className="max-w-3xl mx-auto px-6 lg:px-8 pt-8 pb-6">
               <div className="flex items-center gap-2">
-                <h1 className="font-display text-[2rem] text-[#1A1D27] leading-tight">
+                <h1 className="font-display text-[2rem] text-content leading-tight">
                   Profile
                 </h1>
                 <HelpTooltip
@@ -323,7 +323,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                   placement="right"
                 />
               </div>
-              <p className="text-[#6B7280] text-[0.9375rem] mt-2 font-sans">
+              <p className="text-secondary text-[0.9375rem] mt-2 font-sans">
                 Your information helps ARIA personalize her intelligence for you.
               </p>
             </div>
@@ -340,8 +340,8 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                       onClick={() => setActiveTab(tab.id)}
                       className={`flex items-center gap-2 px-4 py-3 text-[0.875rem] font-sans font-medium border-b-2 transition-colors duration-150 cursor-pointer ${
                         active
-                          ? "border-[#5B6E8A] text-[#1A1D27]"
-                          : "border-transparent text-[#6B7280] hover:text-[#1A1D27] hover:border-[#E2E0DC]"
+                          ? "border-interactive text-content"
+                          : "border-transparent text-secondary hover:text-content hover:border-border"
                       }`}
                     >
                       <Icon className="w-4 h-4 stroke-[1.5]" />
@@ -359,8 +359,8 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
             {activeTab === "personal" && (
               <div className="space-y-8">
                 {/* Basic info */}
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
-                  <h3 className="font-display text-[1.25rem] text-[#1A1D27] mb-6">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
+                  <h3 className="font-display text-[1.25rem] text-content mb-6">
                     Basic Information
                   </h3>
                   <div className="space-y-4">
@@ -424,8 +424,8 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                 </section>
 
                 {/* Communication preferences */}
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
-                  <h3 className="font-display text-[1.25rem] text-[#1A1D27] mb-6">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
+                  <h3 className="font-display text-[1.25rem] text-content mb-6">
                     Communication Preferences
                   </h3>
                   <div className="space-y-4">
@@ -477,11 +477,11 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                 </section>
 
                 {/* Competitors */}
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
-                  <h3 className="font-display text-[1.25rem] text-[#1A1D27] mb-1">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
+                  <h3 className="font-display text-[1.25rem] text-content mb-1">
                     Competitors to Track
                   </h3>
-                  <p className="text-[#6B7280] text-[0.8125rem] font-sans mb-4">
+                  <p className="text-secondary text-[0.8125rem] font-sans mb-4">
                     ARIA will monitor these companies for competitive intelligence.
                   </p>
                   <div className="flex flex-wrap gap-2 mb-3">
@@ -490,7 +490,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                         {comp}
                         <button
                           onClick={() => removeTag(i, competitors, setCompetitors)}
-                          className="text-[#6B7280] hover:text-[#945A5A] transition-colors cursor-pointer"
+                          className="text-secondary hover:text-critical transition-colors cursor-pointer"
                           aria-label={`Remove ${comp}`}
                         >
                           <X className="w-3.5 h-3.5" />
@@ -528,22 +528,22 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                 </section>
 
                 {/* Default tone */}
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
-                  <h3 className="font-display text-[1.25rem] text-[#1A1D27] mb-1">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
+                  <h3 className="font-display text-[1.25rem] text-content mb-1">
                     Default Tone
                   </h3>
-                  <p className="text-[#6B7280] text-[0.8125rem] font-sans mb-4">
+                  <p className="text-secondary text-[0.8125rem] font-sans mb-4">
                     How ARIA should communicate with you by default.
                   </p>
-                  <div className="flex rounded-lg border border-[#E2E0DC] overflow-hidden">
+                  <div className="flex rounded-lg border border-border overflow-hidden">
                     {(["formal", "friendly", "urgent"] as const).map((tone) => (
                       <button
                         key={tone}
                         onClick={() => setDefaultTone(tone)}
                         className={`flex-1 py-3 px-4 text-[0.875rem] font-sans font-medium transition-colors duration-150 cursor-pointer ${
                           defaultTone === tone
-                            ? "bg-[#5B6E8A] text-white"
-                            : "bg-white text-[#6B7280] hover:bg-[#F5F5F0]"
+                            ? "bg-interactive text-white"
+                            : "bg-white text-secondary hover:bg-subtle"
                         }`}
                       >
                         {tone === "formal"
@@ -557,11 +557,11 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                 </section>
 
                 {/* Privacy exclusions */}
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
-                  <h3 className="font-display text-[1.25rem] text-[#1A1D27] mb-1">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
+                  <h3 className="font-display text-[1.25rem] text-content mb-1">
                     Privacy Exclusions
                   </h3>
-                  <p className="text-[#6B7280] text-[0.8125rem] font-sans mb-4">
+                  <p className="text-secondary text-[0.8125rem] font-sans mb-4">
                     Domains or senders ARIA should never process from your email.
                   </p>
                   <div className="flex flex-wrap gap-2 mb-3">
@@ -572,7 +572,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                           onClick={() =>
                             removeTag(i, privacyExclusions, setPrivacyExclusions)
                           }
-                          className="text-[#6B7280] hover:text-[#945A5A] transition-colors cursor-pointer"
+                          className="text-secondary hover:text-critical transition-colors cursor-pointer"
                           aria-label={`Remove ${ex}`}
                         >
                           <X className="w-3.5 h-3.5" />
@@ -634,13 +634,13 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
             {/* ==================== TAB 2: Company ==================== */}
             {activeTab === "company" && (
               <div className="space-y-8">
-                <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
+                <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-display text-[1.25rem] text-[#1A1D27]">
+                    <h3 className="font-display text-[1.25rem] text-content">
                       Company Information
                     </h3>
                     {!isAdmin && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F5F5F0] border border-[#E2E0DC] rounded text-[0.6875rem] font-sans font-medium text-[#6B7280]">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-subtle border border-border rounded text-[0.6875rem] font-sans font-medium text-secondary">
                         <Lock className="w-3 h-3" />
                         Admin only
                       </span>
@@ -650,13 +650,13 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                   {/* Classification badge */}
                   {profile?.company?.classification && (
                     <div className="mb-6 flex items-center gap-3 flex-wrap">
-                      <span className="inline-flex items-center px-3 py-1.5 bg-[#5B6E8A]/8 border border-[#5B6E8A]/20 rounded-lg text-[0.8125rem] font-mono font-medium text-[#5B6E8A]">
+                      <span className="inline-flex items-center px-3 py-1.5 bg-interactive/8 border border-interactive/20 rounded-lg text-[0.8125rem] font-mono font-medium text-interactive">
                         {profile.company.classification}
                       </span>
                       {profile.company.last_enriched_at && (
-                        <span className="text-[#6B7280] text-[0.75rem] font-sans">
+                        <span className="text-secondary text-[0.75rem] font-sans">
                           Last enriched:{" "}
-                          <span className="font-mono text-[#1A1D27]">
+                          <span className="font-mono text-content">
                             {formatDate(profile.company.last_enriched_at)}
                           </span>
                         </span>
@@ -758,7 +758,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                                 onClick={() =>
                                   removeTag(i, companyProducts, setCompanyProducts)
                                 }
-                                className="text-[#6B7280] hover:text-[#945A5A] transition-colors cursor-pointer"
+                                className="text-secondary hover:text-critical transition-colors cursor-pointer"
                                 aria-label={`Remove ${p}`}
                               >
                                 <X className="w-3.5 h-3.5" />
@@ -828,16 +828,16 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
               <div className="space-y-8">
                 {docsLoading ? (
                   <div className="flex justify-center py-16">
-                    <Loader2 className="w-6 h-6 text-[#5B6E8A] animate-spin" />
+                    <Loader2 className="w-6 h-6 text-interactive animate-spin" />
                   </div>
                 ) : (
                   <>
                     {/* Company Documents */}
-                    <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
+                    <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-2">
-                          <Building2 className="w-5 h-5 text-[#5B6E8A] stroke-[1.5]" />
-                          <h3 className="font-display text-[1.25rem] text-[#1A1D27]">
+                          <Building2 className="w-5 h-5 text-interactive stroke-[1.5]" />
+                          <h3 className="font-display text-[1.25rem] text-content">
                             Company Documents
                           </h3>
                         </div>
@@ -850,26 +850,26 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                       </div>
 
                       {(documents?.company_documents?.length ?? 0) === 0 ? (
-                        <p className="text-[#6B7280] text-[0.875rem] text-center py-8 font-sans">
+                        <p className="text-secondary text-[0.875rem] text-center py-8 font-sans">
                           No company documents uploaded yet. Upload pitch decks, data sheets,
                           or competitive materials.
                         </p>
                       ) : (
-                        <div className="divide-y divide-[#E2E0DC]">
+                        <div className="divide-y divide-border">
                           {documents?.company_documents.map((doc) => (
                             <div
                               key={doc.id}
                               className="flex items-center justify-between py-3"
                             >
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="inline-flex items-center justify-center w-9 h-9 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg text-[0.6875rem] font-mono font-medium text-[#5B6E8A] shrink-0">
+                                <span className="inline-flex items-center justify-center w-9 h-9 bg-subtle border border-border rounded-lg text-[0.6875rem] font-mono font-medium text-interactive shrink-0">
                                   {fileTypeIcon(doc.file_type)}
                                 </span>
                                 <div className="min-w-0">
-                                  <p className="text-[#1A1D27] text-[0.875rem] font-sans font-medium truncate">
+                                  <p className="text-content text-[0.875rem] font-sans font-medium truncate">
                                     {doc.name}
                                   </p>
-                                  <p className="text-[#6B7280] text-[0.75rem] font-mono">
+                                  <p className="text-secondary text-[0.75rem] font-mono">
                                     {formatDate(doc.created_at)} &middot;{" "}
                                     {formatFileSize(doc.file_size)}
                                   </p>
@@ -879,7 +879,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                                 {qualityBadge(doc.quality_score)}
                                 {doc.uploaded_by === user?.id && (
                                   <button
-                                    className="p-1.5 text-[#6B7280] hover:text-[#945A5A] rounded-lg hover:bg-[#945A5A]/8 transition-colors cursor-pointer"
+                                    className="p-1.5 text-secondary hover:text-critical rounded-lg hover:bg-critical/8 transition-colors cursor-pointer"
                                     aria-label={`Delete ${doc.name}`}
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -893,11 +893,11 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                     </section>
 
                     {/* User Documents */}
-                    <section className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm">
+                    <section className="bg-white border border-border rounded-xl p-6 shadow-sm">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-2">
-                          <User className="w-5 h-5 text-[#5B6E8A] stroke-[1.5]" />
-                          <h3 className="font-display text-[1.25rem] text-[#1A1D27]">
+                          <User className="w-5 h-5 text-interactive stroke-[1.5]" />
+                          <h3 className="font-display text-[1.25rem] text-content">
                             My Writing Samples
                           </h3>
                         </div>
@@ -910,26 +910,26 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                       </div>
 
                       {(documents?.user_documents?.length ?? 0) === 0 ? (
-                        <p className="text-[#6B7280] text-[0.875rem] text-center py-8 font-sans">
+                        <p className="text-secondary text-[0.875rem] text-center py-8 font-sans">
                           No writing samples yet. Upload emails, reports, or presentations so
                           ARIA can learn your voice.
                         </p>
                       ) : (
-                        <div className="divide-y divide-[#E2E0DC]">
+                        <div className="divide-y divide-border">
                           {documents?.user_documents.map((doc) => (
                             <div
                               key={doc.id}
                               className="flex items-center justify-between py-3"
                             >
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="inline-flex items-center justify-center w-9 h-9 bg-[#F5F5F0] border border-[#E2E0DC] rounded-lg text-[0.6875rem] font-mono font-medium text-[#5B6E8A] shrink-0">
+                                <span className="inline-flex items-center justify-center w-9 h-9 bg-subtle border border-border rounded-lg text-[0.6875rem] font-mono font-medium text-interactive shrink-0">
                                   {fileTypeIcon(doc.file_type)}
                                 </span>
                                 <div className="min-w-0">
-                                  <p className="text-[#1A1D27] text-[0.875rem] font-sans font-medium truncate">
+                                  <p className="text-content text-[0.875rem] font-sans font-medium truncate">
                                     {doc.name}
                                   </p>
-                                  <p className="text-[#6B7280] text-[0.75rem] font-mono">
+                                  <p className="text-secondary text-[0.75rem] font-mono">
                                     {formatDate(doc.created_at)} &middot;{" "}
                                     {formatFileSize(doc.file_size)}
                                   </p>
@@ -938,7 +938,7 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                               <div className="flex items-center gap-3 shrink-0 ml-4">
                                 {qualityBadge(doc.quality_score)}
                                 <button
-                                  className="p-1.5 text-[#6B7280] hover:text-[#945A5A] rounded-lg hover:bg-[#945A5A]/8 transition-colors cursor-pointer"
+                                  className="p-1.5 text-secondary hover:text-critical rounded-lg hover:bg-critical/8 transition-colors cursor-pointer"
                                   aria-label={`Delete ${doc.name}`}
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -989,39 +989,39 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                   return (
                     <div
                       key={cat.category}
-                      className="bg-white border border-[#E2E0DC] rounded-xl p-6 shadow-sm"
+                      className="bg-white border border-border rounded-xl p-6 shadow-sm"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex items-start gap-4">
-                          <div className="w-10 h-10 rounded-lg bg-[#F5F5F0] border border-[#E2E0DC] flex items-center justify-center shrink-0">
-                            <Icon className="w-5 h-5 text-[#5B6E8A] stroke-[1.5]" />
+                          <div className="w-10 h-10 rounded-lg bg-subtle border border-border flex items-center justify-center shrink-0">
+                            <Icon className="w-5 h-5 text-interactive stroke-[1.5]" />
                           </div>
                           <div>
                             <div className="flex items-center gap-2 mb-0.5">
-                              <h3 className="text-[#1A1D27] text-[0.9375rem] font-sans font-medium">
+                              <h3 className="text-content text-[0.9375rem] font-sans font-medium">
                                 {cat.category}
                               </h3>
                               {connected ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#5A7D60]/8 border border-[#5A7D60]/20 rounded text-[0.6875rem] font-sans font-medium text-[#5A7D60]">
-                                  <span className="w-1.5 h-1.5 bg-[#5A7D60] rounded-full" />
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-success/8 border border-success/20 rounded text-[0.6875rem] font-sans font-medium text-success">
+                                  <span className="w-1.5 h-1.5 bg-success rounded-full" />
                                   Connected
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center px-2 py-0.5 bg-[#F5F5F0] border border-[#E2E0DC] rounded text-[0.6875rem] font-sans font-medium text-[#6B7280]">
+                                <span className="inline-flex items-center px-2 py-0.5 bg-subtle border border-border rounded text-[0.6875rem] font-sans font-medium text-secondary">
                                   Disconnected
                                 </span>
                               )}
                             </div>
                             {connected && integration?.provider && (
-                              <p className="text-[#1A1D27] text-[0.8125rem] font-sans mb-0.5">
+                              <p className="text-content text-[0.8125rem] font-sans mb-0.5">
                                 {integration.provider}
                               </p>
                             )}
-                            <p className="text-[#6B7280] text-[0.8125rem] font-sans">
+                            <p className="text-secondary text-[0.8125rem] font-sans">
                               {cat.description}
                             </p>
                             {connected && integration?.last_sync_at && (
-                              <p className="text-[#6B7280] text-[0.75rem] font-mono mt-1">
+                              <p className="text-secondary text-[0.75rem] font-mono mt-1">
                                 Last synced: {formatDate(integration.last_sync_at)}
                               </p>
                             )}
@@ -1032,11 +1032,11 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
                             <>
                               <Link
                                 to="/settings/integrations"
-                                className="text-[#5B6E8A] text-[0.8125rem] font-sans font-medium hover:text-[#4A5D79] transition-colors"
+                                className="text-interactive text-[0.8125rem] font-sans font-medium hover:text-interactive-hover transition-colors"
                               >
                                 Manage
                               </Link>
-                              <button className="px-4 py-2 text-[#945A5A] text-[0.8125rem] font-sans font-medium hover:bg-[#945A5A]/8 rounded-lg transition-colors min-h-[36px] cursor-pointer">
+                              <button className="px-4 py-2 text-critical text-[0.8125rem] font-sans font-medium hover:bg-critical/8 rounded-lg transition-colors min-h-[36px] cursor-pointer">
                                 Disconnect
                               </button>
                             </>
@@ -1062,21 +1062,21 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
       {/* US-922: Memory Delta panel — shows what ARIA learned after profile save */}
       {showDelta && memoryDeltas && memoryDeltas.length > 0 && (
         <div className="fixed inset-0 z-40 bg-black/20 flex items-end justify-center sm:items-center">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[#E2E0DC] w-full max-w-lg max-h-[80vh] overflow-y-auto">
-            <div className="px-6 pt-6 pb-4 border-b border-[#E2E0DC]">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-border w-full max-w-lg max-h-[80vh] overflow-y-auto">
+            <div className="px-6 pt-6 pb-4 border-b border-border">
               <div className="flex items-center justify-between">
-                <h3 className="font-display text-[1.25rem] text-[#1A1D27]">
+                <h3 className="font-display text-[1.25rem] text-content">
                   ARIA updated her knowledge
                 </h3>
                 <button
                   onClick={() => setShowDelta(false)}
-                  className="p-1.5 text-[#6B7280] hover:text-[#1A1D27] rounded-lg hover:bg-[#F5F5F0] transition-colors cursor-pointer"
+                  className="p-1.5 text-secondary hover:text-content rounded-lg hover:bg-subtle transition-colors cursor-pointer"
                   aria-label="Close"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-[#6B7280] text-[0.8125rem] font-sans mt-1">
+              <p className="text-secondary text-[0.8125rem] font-sans mt-1">
                 Review what changed and correct anything that looks off.
               </p>
             </div>
@@ -1114,8 +1114,8 @@ function ProfilePageInner({ profile, documents, docsLoading }: ProfilePageInnerP
           <div
             className={`flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg border ${
               toast.type === "success"
-                ? "bg-white border-[#5A7D60]/30 text-[#5A7D60]"
-                : "bg-white border-[#945A5A]/30 text-[#945A5A]"
+                ? "bg-white border-success/30 text-success"
+                : "bg-white border-critical/30 text-critical"
             }`}
           >
             {toast.type === "success" ? (

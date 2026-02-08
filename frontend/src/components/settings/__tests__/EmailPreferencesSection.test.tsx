@@ -165,7 +165,7 @@ describe("EmailPreferencesSection", () => {
   });
 
   describe("ARIA Design System compliance", () => {
-    it("uses correct dark theme background bg-[#161B2E]", async () => {
+    it("uses correct dark theme background bg-elevated", async () => {
       mockUseEmailPreferences.mockReturnValue({
         data: {
           weekly_summary: true,
@@ -186,11 +186,11 @@ describe("EmailPreferencesSection", () => {
 
       await waitFor(() => {
         const section = container.querySelector(".email-preferences-section");
-        expect(section).toHaveClass("bg-[#161B2E]");
+        expect(section).toHaveClass("bg-elevated");
       });
     });
 
-    it("uses correct accent color text-[#5B6E8A]", async () => {
+    it("uses correct accent color text-interactive", async () => {
       mockUseEmailPreferences.mockReturnValue({
         data: {
           weekly_summary: true,
@@ -211,7 +211,7 @@ describe("EmailPreferencesSection", () => {
 
       await waitFor(() => {
         // Check that headings have the correct text color by using attribute selector
-        const headings = container.querySelectorAll('[class*="text-[#E8E6E1]"]');
+        const headings = container.querySelectorAll('[class*="text-content"]');
         expect(headings.length).toBeGreaterThan(0);
       });
     });

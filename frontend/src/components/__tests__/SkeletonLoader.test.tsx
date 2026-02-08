@@ -62,7 +62,7 @@ describe('SkeletonLoader', () => {
       const { container } = render(<CardSkeleton />);
       const card = container.querySelector('.bg-\\[\\#161B2E\\]');
       expect(card).toBeInTheDocument();
-      expect(card).toHaveClass('border', 'border-[#2A2F42]', 'rounded-xl');
+      expect(card).toHaveClass('border', 'border-border', 'rounded-xl');
     });
 
     it('has header section with avatar placeholder', () => {
@@ -103,7 +103,7 @@ describe('SkeletonLoader', () => {
       const { container } = render(<ListSkeleton />);
       const item = container.querySelector('.bg-\\[\\#161B2E\\]');
       expect(item).toBeInTheDocument();
-      expect(item).toHaveClass('border', 'border-[#2A2F42]', 'rounded-xl');
+      expect(item).toHaveClass('border', 'border-border', 'rounded-xl');
     });
 
     it('has avatar placeholder', () => {
@@ -407,19 +407,19 @@ describe('SkeletonLoader', () => {
   });
 
   describe('ARIA Design System Compliance', () => {
-    it('uses correct skeleton color bg-[#2A2F42]', () => {
+    it('uses correct skeleton color bg-border', () => {
       render(<CardSkeleton />);
       const skeleton = document.querySelector('.bg-\\[\\#2A2F42\\]');
       expect(skeleton).toBeInTheDocument();
     });
 
-    it('uses correct surface background bg-[#161B2E]', () => {
+    it('uses correct surface background bg-elevated', () => {
       render(<CardSkeleton />);
       const surface = document.querySelector('.bg-\\[\\#161B2E\\]');
       expect(surface).toBeInTheDocument();
     });
 
-    it('uses correct border color border-[#2A2F42]', () => {
+    it('uses correct border color border-border', () => {
       render(<CardSkeleton />);
       const border = document.querySelector('.border-\\[\\#2A2F42\\]');
       expect(border).toBeInTheDocument();

@@ -182,10 +182,10 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
     <div className="flex flex-col gap-8 max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-[#1A1D27] font-display">
+        <h1 className="text-[32px] leading-[1.2] text-content font-display">
           What should ARIA focus on first?
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-[#6B7280]">
+        <p className="font-sans text-[15px] leading-relaxed text-secondary">
           Set your first goal and ARIA will start working on it immediately.
         </p>
       </div>
@@ -193,8 +193,8 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
       {/* Loading State */}
       {isLoading && (
         <div className="flex flex-col items-center justify-center gap-4 py-12">
-          <Loader2 size={32} strokeWidth={1.5} className="text-[#5B6E8A] animate-spin" />
-          <p className="font-sans text-[13px] text-[#6B7280]">
+          <Loader2 size={32} strokeWidth={1.5} className="text-interactive animate-spin" />
+          <p className="font-sans text-[13px] text-secondary">
             I'm analyzing what we've learned to suggest the best goals for you...
           </p>
         </div>
@@ -204,14 +204,14 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
       {!isLoading && !selectedGoal && (
         <div className="flex flex-col gap-6">
           {/* Mode Tabs */}
-          <div className="flex items-center gap-2 border-b border-[#E2E0DC]">
+          <div className="flex items-center gap-2 border-b border-border">
             <button
               type="button"
               onClick={() => setInputMode("suggested")}
               className={`font-sans text-[13px] font-medium px-4 py-2 border-b-2 transition-colors duration-150 ${
                 inputMode === "suggested"
-                  ? "text-[#5B6E8A] border-[#5B6E8A]"
-                  : "text-[#6B7280] border-transparent hover:text-[#1A1D27]"
+                  ? "text-interactive border-interactive"
+                  : "text-secondary border-transparent hover:text-content"
               }`}
             >
               Suggested for You
@@ -221,8 +221,8 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
               onClick={() => setInputMode("templates")}
               className={`font-sans text-[13px] font-medium px-4 py-2 border-b-2 transition-colors duration-150 ${
                 inputMode === "templates"
-                  ? "text-[#5B6E8A] border-[#5B6E8A]"
-                  : "text-[#6B7280] border-transparent hover:text-[#1A1D27]"
+                  ? "text-interactive border-interactive"
+                  : "text-secondary border-transparent hover:text-content"
               }`}
             >
               Goal Templates
@@ -232,8 +232,8 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
               onClick={() => setInputMode("freeform")}
               className={`font-sans text-[13px] font-medium px-4 py-2 border-b-2 transition-colors duration-150 ${
                 inputMode === "freeform"
-                  ? "text-[#5B6E8A] border-[#5B6E8A]"
-                  : "text-[#6B7280] border-transparent hover:text-[#1A1D27]"
+                  ? "text-interactive border-interactive"
+                  : "text-secondary border-transparent hover:text-content"
               }`}
             >
               Describe Your Own
@@ -249,29 +249,29 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                     key={index}
                     type="button"
                     onClick={() => handleSelectSuggestion(suggestion)}
-                    className="bg-white border border-[#E2E0DC] rounded-xl p-5 text-left hover:border-[#5B6E8A] hover:shadow-sm transition-all duration-200 group"
+                    className="bg-white border border-border rounded-xl p-5 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
                   >
                     <div className="flex items-start gap-3">
-                      <Target size={20} strokeWidth={1.5} className="text-[#5B6E8A] shrink-0 mt-0.5" />
+                      <Target size={20} strokeWidth={1.5} className="text-interactive shrink-0 mt-0.5" />
                       <div className="flex flex-col gap-2 flex-1">
-                        <h3 className="font-sans text-[15px] font-medium text-[#1A1D27] group-hover:text-[#5B6E8A] transition-colors">
+                        <h3 className="font-sans text-[15px] font-medium text-content group-hover:text-interactive transition-colors">
                           {suggestion.title}
                         </h3>
-                        <p className="font-sans text-[13px] text-[#6B7280] leading-relaxed">
+                        <p className="font-sans text-[13px] text-secondary leading-relaxed">
                           {suggestion.description}
                         </p>
-                        <p className="font-sans text-[13px] text-[#5B6E8A] italic">
+                        <p className="font-sans text-[13px] text-interactive italic">
                           "{suggestion.reason}"
                         </p>
                       </div>
-                      <ArrowRight size={16} strokeWidth={1.5} className="text-[#E2E0DC] group-hover:text-[#5B6E8A] transition-colors shrink-0 mt-2" />
+                      <ArrowRight size={16} strokeWidth={1.5} className="text-border group-hover:text-interactive transition-colors shrink-0 mt-2" />
                     </div>
                   </button>
                 ))
               ) : (
-                <div className="bg-white border border-[#E2E0DC] rounded-xl p-6 text-center">
-                  <Sparkles size={24} strokeWidth={1.5} className="text-[#6B7280] mx-auto mb-3" />
-                  <p className="font-sans text-[13px] text-[#6B7280]">
+                <div className="bg-white border border-border rounded-xl p-6 text-center">
+                  <Sparkles size={24} strokeWidth={1.5} className="text-secondary mx-auto mb-3" />
+                  <p className="font-sans text-[13px] text-secondary">
                     Complete more onboarding steps to get personalized suggestions,
                     or choose from templates or describe your own goal.
                   </p>
@@ -285,7 +285,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
             <div className="flex flex-col gap-6">
               {Object.entries(suggestions.templates).map(([category, templates]) => (
                 <div key={category} className="flex flex-col gap-3">
-                  <h3 className="font-sans text-[13px] font-medium text-[#1A1D27] capitalize">
+                  <h3 className="font-sans text-[13px] font-medium text-content capitalize">
                     {category.replace(/_/g, " ")}
                   </h3>
                   <div className="grid grid-cols-2 gap-3">
@@ -294,13 +294,13 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                         key={index}
                         type="button"
                         onClick={() => handleSelectTemplate(template)}
-                        className="bg-white border border-[#E2E0DC] rounded-lg p-4 text-left hover:border-[#5B6E8A] hover:shadow-sm transition-all duration-200 group"
+                        className="bg-white border border-border rounded-lg p-4 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
                       >
                         <div className="flex flex-col gap-1">
-                          <h4 className="font-sans text-[13px] font-medium text-[#1A1D27] group-hover:text-[#5B6E8A] transition-colors">
+                          <h4 className="font-sans text-[13px] font-medium text-content group-hover:text-interactive transition-colors">
                             {template.title}
                           </h4>
-                          <p className="font-sans text-[11px] text-[#6B7280] line-clamp-2">
+                          <p className="font-sans text-[11px] text-secondary line-clamp-2">
                             {template.description}
                           </p>
                         </div>
@@ -315,10 +315,10 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
           {/* Free-form Input */}
           {inputMode === "freeform" && (
             <div className="flex flex-col gap-4">
-              <div className="bg-white border border-[#E2E0DC] rounded-xl p-5">
+              <div className="bg-white border border-border rounded-xl p-5">
                 <label
                   htmlFor="goal-input"
-                  className="font-sans text-[13px] font-medium text-[#6B7280] mb-2 block"
+                  className="font-sans text-[13px] font-medium text-secondary mb-2 block"
                 >
                   Describe your goal in your own words
                 </label>
@@ -328,13 +328,13 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                   onChange={(e) => setFreeformInput(e.target.value)}
                   placeholder="e.g., 'Help me prepare for the Pfizer meeting on Friday' or 'I need to build pipeline in the Northeast territory this quarter'"
                   rows={3}
-                  className="w-full bg-white border border-[#E2E0DC] rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-[#5B6E8A] focus:ring-[#5B6E8A] resize-none"
+                  className="w-full bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive resize-none"
                 />
                 <button
                   type="button"
                   onClick={handleFreeformSubmit}
                   disabled={!freeformInput.trim() || isValidating}
-                  className="mt-4 bg-[#5B6E8A] text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[13px] hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 min-h-[44px]"
+                  className="mt-4 bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[13px] hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 min-h-[44px]"
                 >
                   {isValidating ? (
                     <>
@@ -351,8 +351,8 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
               {validationResult && (
                 <div className={`rounded-xl border p-5 ${
                   validationResult.is_smart
-                    ? "bg-[#FAFAF9] border-[#5A7D60]"
-                    : "bg-[#FAFAF9] border-[#B8956A]"
+                    ? "bg-primary border-success"
+                    : "bg-primary border-warning"
                 }`}>
                   <h4 className="font-sans text-[13px] font-medium mb-3">
                     {validationResult.is_smart
@@ -362,18 +362,18 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
 
                   {!validationResult.is_smart && validationResult.refined_version && (
                     <div className="flex flex-col gap-3 mb-3">
-                      <p className="font-sans text-[13px] text-[#6B7280]">
+                      <p className="font-sans text-[13px] text-secondary">
                         Based on what you said, here's a more specific version:
                       </p>
-                      <div className="bg-white border border-[#E2E0DC] rounded-lg p-3">
-                        <p className="font-sans text-[13px] text-[#1A1D27]">
+                      <div className="bg-white border border-border rounded-lg p-3">
+                        <p className="font-sans text-[13px] text-content">
                           {validationResult.refined_version}
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={handleUseRefinedVersion}
-                        className="text-[#5B6E8A] font-sans text-[13px] font-medium hover:text-[#4A5D79] transition-colors cursor-pointer"
+                        className="text-interactive font-sans text-[13px] font-medium hover:text-interactive-hover transition-colors cursor-pointer"
                       >
                         Use this version →
                       </button>
@@ -383,7 +383,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                   {validationResult.feedback.length > 0 && (
                     <ul className="flex flex-col gap-1">
                       {validationResult.feedback.map((item, index) => (
-                        <li key={index} className="font-sans text-[13px] text-[#6B7280]">
+                        <li key={index} className="font-sans text-[13px] text-secondary">
                           • {item}
                         </li>
                       ))}
@@ -399,15 +399,15 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
       {/* Goal Preview */}
       {selectedGoal && (
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="bg-white border border-[#E2E0DC] rounded-xl p-6">
+          <div className="bg-white border border-border rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-sans text-[18px] font-medium text-[#1A1D27]">
+              <h3 className="font-sans text-[18px] font-medium text-content">
                 Goal Preview
               </h3>
               <button
                 type="button"
                 onClick={handleEditGoal}
-                className="font-sans text-[13px] text-[#5B6E8A] hover:text-[#4A5D79] transition-colors cursor-pointer"
+                className="font-sans text-[13px] text-interactive hover:text-interactive-hover transition-colors cursor-pointer"
               >
                 Edit
               </button>
@@ -415,27 +415,27 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
 
             <div className="flex flex-col gap-4">
               <div>
-                <label className="font-sans text-[11px] font-medium text-[#6B7280] uppercase tracking-wide">
+                <label className="font-sans text-[11px] font-medium text-secondary uppercase tracking-wide">
                   Title
                 </label>
-                <p className="font-sans text-[15px] text-[#1A1D27] mt-1">
+                <p className="font-sans text-[15px] text-content mt-1">
                   {selectedGoal.title}
                 </p>
               </div>
 
               {selectedGoal.description && (
                 <div>
-                  <label className="font-sans text-[11px] font-medium text-[#6B7280] uppercase tracking-wide">
+                  <label className="font-sans text-[11px] font-medium text-secondary uppercase tracking-wide">
                     Description
                   </label>
-                  <p className="font-sans text-[13px] text-[#6B7280] mt-1 leading-relaxed">
+                  <p className="font-sans text-[13px] text-secondary mt-1 leading-relaxed">
                     {selectedGoal.description}
                   </p>
                 </div>
               )}
 
-              <div className="pt-4 border-t border-[#E2E0DC]">
-                <p className="font-sans text-[13px] text-[#6B7280]">
+              <div className="pt-4 border-t border-border">
+                <p className="font-sans text-[13px] text-secondary">
                   <span className="font-medium">ARIA will assign:</span>{" "}
                   {getAssignedAgents(selectedGoal.goal_type).join(", ")} to work on this
                 </p>
@@ -444,8 +444,8 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
           </div>
 
           {/* ARIA Presence */}
-          <div className="flex flex-col gap-2 bg-[#FAFAF9] border border-[#E2E0DC] rounded-xl p-5">
-            <p className="font-sans text-[13px] text-[#1A1D27]">
+          <div className="flex flex-col gap-2 bg-primary border border-border rounded-xl p-5">
+            <p className="font-sans text-[13px] text-content">
               This goal shapes my first 24 hours. I'll have results in your morning briefing.
             </p>
           </div>
@@ -455,7 +455,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
             type="button"
             onClick={handleActivate}
             disabled={isCreating}
-            className="bg-[#5B6E8A] text-white rounded-xl px-6 py-4 font-sans font-medium text-[15px] hover:bg-[#4A5D79] active:bg-[#3D5070] transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-3 min-h-[56px] shadow-sm"
+            className="bg-interactive text-white rounded-xl px-6 py-4 font-sans font-medium text-[15px] hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-3 min-h-[56px] shadow-sm"
           >
             {isCreating ? (
               <>

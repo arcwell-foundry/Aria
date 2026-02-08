@@ -321,7 +321,7 @@ describe('OnboardingTooltip', () => {
       );
 
       const dismissButton = screen.getByRole('button', { name: 'Dismiss tooltip' });
-      expect(dismissButton).toHaveClass('focus:ring-2', 'focus:ring-[#7B8EAA]');
+      expect(dismissButton).toHaveClass('focus:ring-2', 'focus:ring-interactive');
     });
   });
 
@@ -340,7 +340,7 @@ describe('OnboardingTooltip', () => {
       expect(tooltip).toHaveClass('bg-white');
     });
 
-    it('uses correct border border-[#E2E0DC]', () => {
+    it('uses correct border border-border', () => {
       const { container } = render(
         <OnboardingTooltip
           title="Title"
@@ -351,7 +351,7 @@ describe('OnboardingTooltip', () => {
       );
 
       const tooltip = container.querySelector('[role="dialog"]');
-      expect(tooltip).toHaveClass('border-[#E2E0DC]');
+      expect(tooltip).toHaveClass('border-border');
     });
 
     it('uses correct shadow shadow-sm', () => {
@@ -380,7 +380,7 @@ describe('OnboardingTooltip', () => {
 
       const header = container.querySelector('.border-b');
       expect(header).toBeInTheDocument();
-      expect(header).toHaveClass('border-[#E2E0DC]');
+      expect(header).toHaveClass('border-border');
     });
 
     it('dismiss button uses correct colors', () => {
@@ -394,7 +394,7 @@ describe('OnboardingTooltip', () => {
       );
 
       const dismissButton = screen.getByRole('button', { name: 'Dismiss tooltip' });
-      expect(dismissButton).toHaveClass('text-[#7B8EAA]', 'hover:text-[#1A1A1A]');
+      expect(dismissButton).toHaveClass('text-interactive', 'hover:text-content');
     });
 
     it('uses Satoshi font family', () => {

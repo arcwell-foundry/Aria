@@ -224,7 +224,7 @@ export function HelpPageContent() {
   })).filter((category) => category.articles.length > 0 || searchQuery === "");
 
   return (
-    <div className="bg-[#FAFAF9] min-h-screen">
+    <div className="bg-primary min-h-screen">
       <div className="max-w-4xl mx-auto px-6 py-8 lg:px-8 lg:py-12">
         {/* Header */}
         <div className="mb-8">
