@@ -171,7 +171,7 @@ async def chat_stream(
     async def event_stream():  # noqa: C901
         total_start = time.perf_counter()
 
-        memory_types = request.memory_types or ["episodic", "semantic"]
+        memory_types = request.memory_types or ["episodic", "semantic", "procedural", "prospective"]
 
         # Get or create working memory
         working_memory = service._working_memory_manager.get_or_create(
@@ -210,9 +210,12 @@ async def chat_stream(
             conversation_messages=conversation_messages,
         )
 
+        # Load Digital Twin personality calibration
+        personality = await service._get_personality_calibration(current_user.id)
+
         # Build system prompt
         system_prompt = service._build_system_prompt(
-            memories, load_state, proactive_insights
+            memories, load_state, proactive_insights, personality
         )
 
         # Send metadata event

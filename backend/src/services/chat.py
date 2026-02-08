@@ -20,6 +20,7 @@ from src.intelligence.proactive_memory import ProactiveMemoryService
 from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
+from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
 from src.services.extraction import ExtractionService
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,14 @@ The following insights may be worth volunteering to the user if relevant:
 
 You may naturally mention these in your response when appropriate, without explicitly stating where the information came from."""
 
+PERSONALITY_CONTEXT_TEMPLATE = """## Communication Style Calibration
+
+Adapt your tone and style to match this user's preferences:
+
+{tone_guidance}
+
+{examples}"""
+
 HIGH_LOAD_INSTRUCTION = """
 IMPORTANT: The user appears to be under high cognitive load right now. Adapt your response:
 - Be extremely concise and direct
@@ -70,6 +79,7 @@ class ChatService:
         self._llm_client = LLMClient()
         self._working_memory_manager = WorkingMemoryManager()
         self._extraction_service = ExtractionService()
+        self._personality_calibrator = PersonalityCalibrator()
         db = get_supabase_client()
         self._cognitive_monitor = CognitiveLoadMonitor(db_client=db)
         self._proactive_service = ProactiveMemoryService(db_client=db)
@@ -222,7 +232,7 @@ class ChatService:
         total_start = time.perf_counter()
 
         if memory_types is None:
-            memory_types = ["episodic", "semantic"]
+            memory_types = ["episodic", "semantic", "procedural", "prospective"]
 
         # Get or create working memory for this conversation
         working_memory = self._working_memory_manager.get_or_create(
@@ -265,8 +275,13 @@ class ChatService:
         )
         proactive_ms = (time.perf_counter() - proactive_start) * 1000
 
-        # Build system prompt with memory context, load adaptation, and proactive insights
-        system_prompt = self._build_system_prompt(memories, load_state, proactive_insights)
+        # Load Digital Twin personality calibration for style matching
+        personality = await self._get_personality_calibration(user_id)
+
+        # Build system prompt with memory context, personality, load adaptation, and proactive insights
+        system_prompt = self._build_system_prompt(
+            memories, load_state, proactive_insights, personality
+        )
 
         logger.info(
             "Processing chat message",
@@ -376,18 +391,38 @@ class ChatService:
             logger.warning("Failed to get proactive insights: %s", e)
             return []
 
+    async def _get_personality_calibration(
+        self,
+        user_id: str,
+    ) -> PersonalityCalibration | None:
+        """Load Digital Twin personality calibration for tone matching.
+
+        Args:
+            user_id: User identifier.
+
+        Returns:
+            PersonalityCalibration if available, None otherwise.
+        """
+        try:
+            return await self._personality_calibrator.get_calibration(user_id)
+        except Exception as e:
+            logger.warning("Failed to load personality calibration: %s", e)
+            return None
+
     def _build_system_prompt(
         self,
         memories: list[dict[str, Any]],
         load_state: CognitiveLoadState | None = None,
         proactive_insights: list[ProactiveInsight] | None = None,
+        personality: PersonalityCalibration | None = None,
     ) -> str:
-        """Build system prompt with memory context, load adaptation, and proactive insights.
+        """Build system prompt with memory context, personality, load adaptation, and proactive insights.
 
         Args:
             memories: List of memory dicts to include as context.
             load_state: Optional cognitive load state for response adaptation.
             proactive_insights: Optional list of insights to volunteer.
+            personality: Optional personality calibration from Digital Twin.
 
         Returns:
             Formatted system prompt string.
@@ -405,6 +440,19 @@ class ChatService:
             memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
 
         base_prompt = ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
+
+        # Add personality calibration from Digital Twin
+        if personality and personality.tone_guidance:
+            examples_text = ""
+            if personality.example_adjustments:
+                examples_text = "Examples:\n" + "\n".join(
+                    f"- {ex}" for ex in personality.example_adjustments
+                )
+            personality_context = PERSONALITY_CONTEXT_TEMPLATE.format(
+                tone_guidance=personality.tone_guidance,
+                examples=examples_text,
+            )
+            base_prompt = base_prompt + "\n\n" + personality_context
 
         # Add proactive insights if available
         if proactive_insights:
