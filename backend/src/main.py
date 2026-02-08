@@ -43,6 +43,7 @@ from src.api.routes import (
     signals,
     skills,
 )
+from src.api.routes import deep_sync  # US-942: Deep sync API routes
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
 
@@ -76,12 +77,18 @@ def get_cors_origins() -> list[str]:
 async def lifespan(_app: FastAPI) -> Any:
     """Application lifespan handler for startup and shutdown events."""
     from src.db.graphiti import GraphitiClient
+    from src.integrations.sync_scheduler import get_sync_scheduler  # US-942: Sync scheduler
 
     # Startup
     logger.info("Starting ARIA API...")
+    # US-942: Start the sync scheduler
+    scheduler = get_sync_scheduler()
+    await scheduler.start()
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
+    # US-942: Stop the sync scheduler
+    await scheduler.stop()
     if GraphitiClient.is_initialized():
         await GraphitiClient.close()
         logger.info("Graphiti connection closed")
@@ -139,6 +146,9 @@ app.include_router(profile.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
+
+# US-942: Deep sync routes
+app.include_router(deep_sync.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])
