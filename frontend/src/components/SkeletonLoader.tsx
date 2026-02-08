@@ -345,6 +345,48 @@ export function ContactsListSkeleton({ count = 8 }: { count?: number }) {
 }
 
 /**
+ * ConversationSkeleton - For chat page loading state
+ * Renders alternating left/right message bubbles matching ChatMessage layout
+ */
+export function ConversationSkeleton() {
+  const bubbles = [
+    { isUser: false, lines: 3, width: "w-3/4" },
+    { isUser: true, lines: 1, width: "w-2/5" },
+    { isUser: false, lines: 2, width: "w-3/5" },
+    { isUser: true, lines: 2, width: "w-1/2" },
+    { isUser: false, lines: 4, width: "w-3/4" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {bubbles.map((bubble, i) => (
+        <div
+          key={i}
+          className={`flex gap-4 ${bubble.isUser ? "flex-row-reverse" : "flex-row"}`}
+        >
+          {/* Avatar */}
+          <SkeletonBase className="w-10 h-10 rounded-full flex-shrink-0" />
+
+          {/* Message bubble */}
+          <div
+            className={`bg-elevated border border-border rounded-2xl px-5 py-4 space-y-2 ${bubble.width}`}
+          >
+            {Array.from({ length: bubble.lines }).map((_, j) => (
+              <SkeletonBase
+                key={j}
+                className={`h-4 ${
+                  j === bubble.lines - 1 && bubble.lines > 1 ? "w-2/3" : "w-full"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * TextSkeleton - Available as a named export for direct use
  * Useful for paragraph placeholders, descriptions, etc.
  */

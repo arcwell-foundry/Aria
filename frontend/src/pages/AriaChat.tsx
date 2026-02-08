@@ -4,6 +4,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { ChatInput, ChatMessage, StreamingMessage, ConversationSidebar } from "@/components/chat";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { useStreamingMessage, useConversationMessages } from "@/hooks/useChat";
+import { ConversationSkeleton } from "@/components/SkeletonLoader";
 import type { ChatMessage as ChatMessageType } from "@/api/chat";
 
 export function AriaChatPage() {
@@ -16,7 +17,7 @@ export function AriaChatPage() {
   const [searchParams] = useSearchParams();
 
   const { isStreaming, streamedContent, startStream, reset } = useStreamingMessage();
-  const { data: conversationMessages } = useConversationMessages(conversationId);
+  const { data: conversationMessages, isLoading: isLoadingMessages } = useConversationMessages(conversationId);
 
   // Auto-scroll to bottom when messages change
   const scrollToBottom = useCallback(() => {
@@ -203,8 +204,13 @@ export function AriaChatPage() {
         {/* Messages area */}
         <div className="relative flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 lg:px-8 py-6 space-y-6">
+            {/* Loading skeleton for conversation messages */}
+            {isLoadingMessages && conversationId && (
+              <ConversationSkeleton />
+            )}
+
             {/* Empty state */}
-            {messages.length === 0 && !isStreaming && (
+            {messages.length === 0 && !isStreaming && !isLoadingMessages && (
               <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
                 {/* Large ARIA icon */}
                 <div className="relative mb-6">
