@@ -6,6 +6,7 @@ back to external systems.
 
 Key features:
 - CRM Pull: Import opportunities, contacts, and activities from Salesforce/HubSpot
+- Calendar Pull: Import calendar events and create pre-meeting research tasks
 - Memory Integration: Store CRM data in Lead Memory, Semantic Memory, and Episodic Memory
 - Sync State Tracking: Track sync status and schedule recurring syncs
 - Error Handling: Graceful error handling with detailed logging
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.db.supabase import SupabaseClient
     from src.integrations.deep_sync_domain import (
+        CalendarEvent,
         CRMEntity,
         SyncConfig,
         SyncDirection,
@@ -1053,6 +1055,488 @@ class DeepSyncService:
                 "Failed to log sync operation",
                 extra={"user_id": user_id, "integration_type": integration_type.value, "error": str(e)},
             )
+
+
+    async def sync_calendar(
+        self,
+        user_id: str,
+        integration_type: "IntegrationType",
+    ) -> "SyncResult":
+        """Sync calendar events to ARIA memory systems.
+
+        Main entry point for calendar pull sync. Fetches events from
+        Google Calendar or Outlook and creates prospective memory
+        entries for external meetings (pre-meeting research tasks).
+
+        Args:
+            user_id: The user's ID.
+            integration_type: The integration type (GOOGLE_CALENDAR or OUTLOOK).
+
+        Returns:
+            SyncResult with metrics and status.
+
+        Raises:
+            CRMSyncError: If sync validation or execution fails.
+        """
+        from src.core.exceptions import CRMSyncError
+        from src.integrations.deep_sync_domain import (
+            CalendarEvent,
+            SyncDirection,
+            SyncStatus,
+            SyncResult,
+        )
+        from src.integrations.domain import IntegrationType
+
+        started_at = datetime.now(UTC)
+
+        # Validate integration type
+        if integration_type not in (IntegrationType.GOOGLE_CALENDAR, IntegrationType.OUTLOOK):
+            raise CRMSyncError(
+                message=f"Unsupported integration type for calendar sync: {integration_type.value}",
+                provider=integration_type.value,
+            )
+
+        # Get integration connection
+        client = self.supabase.get_client()
+        integration_response = (
+            client.table("user_integrations")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("integration_type", integration_type.value)
+            .maybe_single()
+            .execute()
+        )
+
+        if not integration_response.data:
+            raise CRMSyncError(
+                message=f"No active {integration_type.value} integration found for user",
+                provider=integration_type.value,
+            )
+
+        integration = integration_response.data
+        connection_id = integration.get("composio_connection_id")
+
+        if not connection_id:
+            raise CRMSyncError(
+                message=f"No connection ID found for {integration_type.value} integration",
+                provider=integration_type.value,
+            )
+
+        # Initialize sync result
+        total_processed = 0
+        total_succeeded = 0
+        total_failed = 0
+        all_errors: dict[str, Any] = {}
+
+        try:
+            # Pull calendar events
+            logger.info(
+                "Pulling calendar events",
+                extra={"user_id": user_id, "integration_type": integration_type.value},
+            )
+            event_result = await self._pull_calendar_events(
+                user_id=user_id,
+                integration_type=integration_type,
+                connection_id=connection_id,
+            )
+            total_processed += event_result["processed"]
+            total_succeeded += event_result["succeeded"]
+            total_failed += event_result["failed"]
+            all_errors["events"] = event_result["errors"]
+
+            # Determine sync status
+            if total_failed == 0:
+                sync_status = SyncStatus.SUCCESS
+            elif total_succeeded > 0:
+                sync_status = SyncStatus.PARTIAL
+            else:
+                sync_status = SyncStatus.FAILED
+
+            # Update sync state
+            next_sync_at = datetime.now(UTC) + timedelta(minutes=self.config.sync_interval_minutes)
+            await self._update_sync_state(
+                user_id=user_id,
+                integration_type=integration_type,
+                status=sync_status,
+                next_sync_at=next_sync_at,
+                error_message=None if sync_status == SyncStatus.SUCCESS else "Partial sync completed",
+            )
+
+            # Log sync operation
+            await self._log_sync(
+                user_id=user_id,
+                integration_type=integration_type,
+                sync_type="pull",
+                status=sync_status,
+                records_processed=total_processed,
+                records_succeeded=total_succeeded,
+                records_failed=total_failed,
+                error_details=all_errors if sync_status != SyncStatus.SUCCESS else None,
+            )
+
+            completed_at = datetime.now(UTC)
+
+            logger.info(
+                "Calendar sync completed",
+                extra={
+                    "user_id": user_id,
+                    "integration_type": integration_type.value,
+                    "processed": total_processed,
+                    "succeeded": total_succeeded,
+                    "failed": total_failed,
+                    "status": sync_status.value,
+                },
+            )
+
+            return SyncResult(
+                direction=SyncDirection.PULL,
+                integration_type=integration_type,
+                status=sync_status,
+                records_processed=total_processed,
+                records_succeeded=total_succeeded,
+                records_failed=total_failed,
+                started_at=started_at,
+                completed_at=completed_at,
+                error_details=all_errors if sync_status != SyncStatus.SUCCESS else None,
+                memory_entries_created=event_result.get("research_tasks", 0),
+            )
+
+        except Exception as e:
+            from src.core.exceptions import CRMSyncError
+            logger.exception(
+                "Calendar sync failed",
+                extra={"user_id": user_id, "integration_type": integration_type.value},
+            )
+            await self._update_sync_state(
+                user_id=user_id,
+                integration_type=integration_type,
+                status=SyncStatus.FAILED,
+                next_sync_at=None,
+                error_message=str(e),
+            )
+            await self._log_sync(
+                user_id=user_id,
+                integration_type=integration_type,
+                sync_type="pull",
+                status=SyncStatus.FAILED,
+                records_processed=total_processed,
+                records_succeeded=total_succeeded,
+                records_failed=total_failed,
+                error_details={"error": str(e)},
+            )
+            raise CRMSyncError(
+                message=f"Calendar sync failed: {e}",
+                provider=integration_type.value,
+            ) from e
+
+    async def _pull_calendar_events(
+        self,
+        user_id: str,
+        integration_type: "IntegrationType",
+        connection_id: str,
+    ) -> dict[str, Any]:
+        """Pull calendar events from external provider.
+
+        Fetches events for the next 7 days and creates prospective memory
+        entries for external meetings (pre-meeting research tasks).
+
+        Args:
+            user_id: The user's ID.
+            integration_type: The calendar integration type.
+            connection_id: The Composio connection ID.
+
+        Returns:
+            Dictionary with processed, succeeded, failed counts and details.
+        """
+        from src.integrations.deep_sync_domain import CalendarEvent
+        from src.integrations.domain import IntegrationType
+
+        processed = 0
+        succeeded = 0
+        failed = 0
+        research_tasks_created = 0
+        errors: list[dict[str, Any]] = []
+
+        try:
+            # Calculate time range: now to 7 days from now
+            now = datetime.now(UTC)
+            time_max = now + timedelta(days=7)
+
+            # Format time strings for API
+            time_min_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            time_max_str = time_max.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Determine the action and params based on integration type
+            if integration_type == IntegrationType.GOOGLE_CALENDAR:
+                action = "list_events"
+                params = {
+                    "timeMin": time_min_str,
+                    "timeMax": time_max_str,
+                }
+            else:  # OUTLOOK
+                action = "list_calendar_events"
+                params = {
+                    "startDateTime": time_min_str,
+                    "endDateTime": time_max_str,
+                }
+
+            # Execute Composio action
+            result = await self.integration_service.execute_action(
+                connection_id=connection_id,
+                action=action,
+                params=params,
+            )
+
+            # Extract events from response
+            events = result.get("data", [])
+            if not isinstance(events, list):
+                events = []
+
+            for event_data in events:
+                processed += 1
+                try:
+                    # Parse calendar event
+                    event = self._parse_calendar_event(
+                        event_data=event_data,
+                        integration_type=integration_type,
+                    )
+
+                    # Create research task for external meetings
+                    if event.is_external:
+                        task_id = await self._create_meeting_research_task(
+                            user_id=user_id,
+                            event=event,
+                        )
+                        if task_id:
+                            research_tasks_created += 1
+                        else:
+                            failed += 1
+                            errors.append({
+                                "event_id": event.external_id,
+                                "error": "Failed to create research task",
+                            })
+
+                    succeeded += 1
+
+                except Exception as e:
+                    failed += 1
+                    logger.warning(
+                        "Failed to process calendar event",
+                        extra={"event": event_data, "error": str(e)},
+                    )
+                    errors.append({
+                        "event_id": event_data.get("id") or event_data.get("Id"),
+                        "error": str(e),
+                    })
+
+        except Exception as e:
+            logger.exception("Failed to pull calendar events")
+            errors.append({"error": f"Failed to fetch events: {e}"})
+
+        return {
+            "processed": processed,
+            "succeeded": succeeded,
+            "failed": failed,
+            "research_tasks": research_tasks_created,
+            "errors": errors,
+        }
+
+    def _parse_calendar_event(
+        self,
+        event_data: dict[str, Any],
+        integration_type: "IntegrationType",
+    ) -> "CalendarEvent":
+        """Parse calendar event data from external provider.
+
+        Parses event data from Google Calendar or Outlook format into
+        a CalendarEvent domain model.
+
+        Args:
+            event_data: Raw event data from calendar provider.
+            integration_type: The calendar integration type.
+
+        Returns:
+            CalendarEvent representation of the event.
+        """
+        from src.integrations.deep_sync_domain import CalendarEvent
+        from src.integrations.domain import IntegrationType
+
+        if integration_type == IntegrationType.GOOGLE_CALENDAR:
+            external_id = event_data.get("id", "")
+            title = event_data.get("summary", "No Title")
+
+            # Parse start/end times
+            start_obj = event_data.get("start", {})
+            end_obj = event_data.get("end", {})
+
+            start_str = start_obj.get("dateTime") or start_obj.get("date", "")
+            end_str = end_obj.get("dateTime") or end_obj.get("date", "")
+
+            # Parse datetime strings, handling Z suffix
+            start_time = self._parse_datetime_string(start_str)
+            end_time = self._parse_datetime_string(end_str)
+
+            # Extract attendees
+            attendees_data = event_data.get("attendees", [])
+            attendees = []
+            for attendee in attendees_data:
+                email = attendee.get("email", "")
+                if email:
+                    attendees.append(email)
+
+            description = event_data.get("description")
+            location = event_data.get("location")
+
+        else:  # OUTLOOK
+            external_id = event_data.get("id", "")
+            title = event_data.get("subject", "No Title")
+
+            # Parse start/end times
+            start_str = event_data.get("start", {}).get("dateTime", "")
+            end_str = event_data.get("end", {}).get("dateTime", "")
+
+            start_time = self._parse_datetime_string(start_str)
+            end_time = self._parse_datetime_string(end_str)
+
+            # Extract attendees
+            attendees_data = event_data.get("attendees", [])
+            attendees = []
+            for attendee in attendees_data:
+                email_data = attendee.get("emailAddress", {})
+                email = email_data.get("address", "") if email_data else ""
+                if email:
+                    attendees.append(email)
+
+            description = event_data.get("bodyPreview")
+            location = event_data.get("location", {}).get("displayName") if event_data.get("location") else None
+
+        # Detect if event is external (has non-company attendees)
+        # For now, use simplified @company.com check
+        is_external = any(
+            not attendee.endswith("@company.com")
+            for attendee in attendees
+        ) if attendees else False
+
+        return CalendarEvent(
+            external_id=external_id,
+            title=title,
+            start_time=start_time,
+            end_time=end_time,
+            attendees=attendees,
+            description=description,
+            location=location,
+            is_external=is_external,
+            data=event_data,
+        )
+
+    def _parse_datetime_string(self, datetime_str: str) -> datetime:
+        """Parse datetime string from calendar API.
+
+        Handles ISO format strings with optional Z suffix.
+
+        Args:
+            datetime_str: The datetime string to parse.
+
+        Returns:
+            Parsed datetime with UTC timezone.
+        """
+        try:
+            # Remove Z suffix if present and parse
+            clean_str = datetime_str.replace("Z", "").replace("+00:00", "")
+            parsed = datetime.fromisoformat(clean_str)
+            # Ensure UTC timezone
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            else:
+                parsed = parsed.astimezone(UTC)
+            return parsed
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse datetime string: {datetime_str}, error: {e}")
+            return datetime.now(UTC)
+
+    async def _create_meeting_research_task(
+        self,
+        user_id: str,
+        event: "CalendarEvent",
+    ) -> str | None:
+        """Create a prospective memory task for meeting research.
+
+        Creates a pre-meeting research task triggered 24 hours before
+        the external meeting.
+
+        Args:
+            user_id: The user's ID.
+            event: The calendar event to create a task for.
+
+        Returns:
+            The created task ID, or None if creation failed.
+        """
+        from src.memory.prospective import ProspectiveTask, ProspectiveMemory, TaskPriority, TriggerType
+
+        try:
+            # Format time for display
+            time_str = event.start_time.strftime("%Y-%m-%d %H:%M")
+            attendees_str = ", ".join(event.attendees[:5])  # Limit to 5 attendees
+            if len(event.attendees) > 5:
+                attendees_str += f" and {len(event.attendees) - 5} others"
+
+            # Create task content
+            task = f"Prepare meeting brief for: {event.title}"
+            description = (
+                f"Prepare meeting brief for: {event.title}\n"
+                f"When: {time_str}\n"
+                f"Attendees: {attendees_str}"
+            )
+            if event.description:
+                description += f"\n\nDescription: {event.description[:200]}"
+            if event.location:
+                description += f"\n\nLocation: {event.location}"
+
+            # Calculate trigger time (24 hours before meeting)
+            trigger_at = event.start_time - timedelta(hours=24)
+
+            # Determine priority (medium for external, low for internal)
+            priority = TaskPriority.MEDIUM if event.is_external else TaskPriority.LOW
+
+            # Create prospective task
+            prospective_task = ProspectiveTask(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                task=task,
+                description=description,
+                trigger_type=TriggerType.TIME,
+                trigger_config={"due_at": trigger_at.isoformat()},
+                status="pending",  # type: ignore
+                priority=priority,  # type: ignore
+                related_goal_id=None,
+                related_lead_id=None,
+                completed_at=None,
+                created_at=datetime.now(UTC),
+            )
+
+            # Store task
+            prospective_memory = ProspectiveMemory()
+            task_id = await prospective_memory.create_task(prospective_task)
+
+            logger.info(
+                "Created meeting research task",
+                extra={
+                    "user_id": user_id,
+                    "task_id": task_id,
+                    "event_id": event.external_id,
+                    "event_title": event.title,
+                    "trigger_at": trigger_at.isoformat(),
+                },
+            )
+
+            return task_id
+
+        except Exception as e:
+            logger.warning(
+                "Failed to create meeting research task",
+                extra={"user_id": user_id, "event_id": event.external_id, "error": str(e)},
+            )
+            return None
 
 
 # Singleton instance

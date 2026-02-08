@@ -4,12 +4,15 @@ This service handles:
 - Creating and querying goals
 - Managing goal lifecycle (start, pause, complete)
 - Tracking goal progress and agent executions
+- Dashboard views, milestones, retrospectives, and ARIA collaboration
 """
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.models.goal import GoalCreate, GoalStatus, GoalUpdate
 
@@ -346,4 +349,407 @@ class GoalService:
         return {
             **goal,
             "recent_executions": executions,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle methods (US-936)                                          #
+    # ------------------------------------------------------------------ #
+
+    async def get_dashboard(self, user_id: str) -> list[dict[str, Any]]:
+        """Get dashboard view of goals with milestone counts.
+
+        Queries goals with joined goal_agents and goal_milestones, computes
+        milestone_total and milestone_complete per goal.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            List of goal dicts ordered by created_at desc, each with
+            milestone_total and milestone_complete keys.
+        """
+        result = (
+            self._db.table("goals")
+            .select("*, goal_agents(*), goal_milestones(*)")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        goals = cast(list[dict[str, Any]], result.data)
+
+        for goal in goals:
+            milestones = goal.get("goal_milestones") or []
+            goal["milestone_total"] = len(milestones)
+            goal["milestone_complete"] = sum(1 for m in milestones if m.get("status") == "complete")
+
+        logger.info(
+            "Dashboard retrieved",
+            extra={"user_id": user_id, "goal_count": len(goals)},
+        )
+        return goals
+
+    async def create_with_aria(
+        self,
+        user_id: str,
+        title: str,
+        description: str | None,
+    ) -> dict[str, Any]:
+        """Create a goal collaboratively with ARIA using LLM refinement.
+
+        Sends the user's goal idea to Claude for SMART refinement and returns
+        suggestions including refined title/description, sub-tasks, agent
+        assignments, and a suggested timeline.
+
+        Args:
+            user_id: The user's ID.
+            title: Raw goal title from user.
+            description: Optional raw goal description.
+
+        Returns:
+            Dict with ARIA's SMART refinement suggestions.
+        """
+        prompt = (
+            "You are ARIA, an AI sales assistant. A user wants to create a goal.\n\n"
+            f"Title: {title}\n"
+            f"Description: {description or 'N/A'}\n\n"
+            "Refine this into a SMART goal and respond with ONLY a JSON object:\n"
+            "{\n"
+            '  "refined_title": "...",\n'
+            '  "refined_description": "...",\n'
+            '  "smart_score": 0-100,\n'
+            '  "sub_tasks": [{"title": "...", "description": "..."}],\n'
+            '  "agent_assignments": ["hunter"|"analyst"|"strategist"|"scribe"'
+            '|"operator"|"scout"],\n'
+            '  "suggested_timeline_days": N,\n'
+            '  "reasoning": "..."\n'
+            "}"
+        )
+
+        llm = LLMClient()
+        try:
+            raw = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.4,
+            )
+            suggestion = json.loads(raw)
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.warning("ARIA goal refinement parse failed: %s", exc)
+            suggestion = {
+                "refined_title": title,
+                "refined_description": description or "",
+                "smart_score": 50,
+                "sub_tasks": [],
+                "agent_assignments": ["analyst"],
+                "suggested_timeline_days": 14,
+                "reasoning": "Unable to refine automatically; defaults applied.",
+            }
+
+        logger.info(
+            "ARIA goal collaboration completed",
+            extra={"user_id": user_id, "smart_score": suggestion.get("smart_score")},
+        )
+        return cast(dict[str, Any], suggestion)
+
+    async def get_templates(
+        self,
+        role: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get goal templates, optionally filtered by role.
+
+        Uses FirstGoalService.TEMPLATES as the canonical source and flattens
+        them into a list.
+
+        Args:
+            role: Optional role to filter templates by.
+
+        Returns:
+            List of template dicts.
+        """
+        from src.onboarding.first_goal import FirstGoalService
+
+        svc = FirstGoalService.__new__(FirstGoalService)
+        all_templates: list[dict[str, Any]] = []
+
+        for templates in svc.TEMPLATES.values():
+            for tpl in templates:
+                if role and not any(role.lower() in r.lower() for r in tpl.applicable_roles):
+                    continue
+                all_templates.append(tpl.model_dump())
+
+        logger.info(
+            "Templates retrieved",
+            extra={"role": role, "count": len(all_templates)},
+        )
+        return all_templates
+
+    async def add_milestone(
+        self,
+        user_id: str,
+        goal_id: str,
+        title: str,
+        description: str | None = None,
+        due_date: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Add a milestone to a goal.
+
+        Verifies goal ownership, determines sort_order, then inserts into
+        the goal_milestones table.
+
+        Args:
+            user_id: The user's ID.
+            goal_id: The goal ID.
+            title: Milestone title.
+            description: Optional milestone description.
+            due_date: Optional due date (ISO string).
+
+        Returns:
+            Created milestone dict, or None if goal not found.
+        """
+        goal = await self.get_goal(user_id, goal_id)
+        if not goal:
+            return None
+
+        # Determine next sort_order
+        existing = (
+            self._db.table("goal_milestones")
+            .select("sort_order")
+            .eq("goal_id", goal_id)
+            .order("sort_order", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        max_order: int = 0
+        if existing.data:
+            row = cast(dict[str, Any], existing.data[0])
+            max_order = int(row.get("sort_order", 0))
+
+        insert_data: dict[str, Any] = {
+            "goal_id": goal_id,
+            "title": title,
+            "description": description,
+            "status": "pending",
+            "sort_order": max_order + 1,
+        }
+        if due_date:
+            insert_data["due_date"] = due_date
+
+        result = self._db.table("goal_milestones").insert(insert_data).execute()
+
+        milestone = cast(dict[str, Any], result.data[0])
+        logger.info(
+            "Milestone added",
+            extra={"goal_id": goal_id, "milestone_id": milestone["id"]},
+        )
+        return milestone
+
+    async def complete_milestone(
+        self,
+        user_id: str,
+        goal_id: str,
+        milestone_id: str,
+    ) -> dict[str, Any] | None:
+        """Mark a milestone as complete.
+
+        Verifies goal ownership before updating the milestone status.
+
+        Args:
+            user_id: The user's ID.
+            goal_id: The goal ID.
+            milestone_id: The milestone ID.
+
+        Returns:
+            Updated milestone dict, or None if goal not found.
+        """
+        goal = await self.get_goal(user_id, goal_id)
+        if not goal:
+            return None
+
+        now = datetime.now(UTC).isoformat()
+        result = (
+            self._db.table("goal_milestones")
+            .update({"status": "complete", "completed_at": now})
+            .eq("id", milestone_id)
+            .eq("goal_id", goal_id)
+            .execute()
+        )
+
+        if result.data:
+            logger.info(
+                "Milestone completed",
+                extra={
+                    "goal_id": goal_id,
+                    "milestone_id": milestone_id,
+                },
+            )
+            return cast(dict[str, Any], result.data[0])
+
+        logger.warning(
+            "Milestone not found for completion",
+            extra={"milestone_id": milestone_id},
+        )
+        return None
+
+    async def generate_retrospective(
+        self,
+        user_id: str,
+        goal_id: str,
+    ) -> dict[str, Any] | None:
+        """Generate an AI-powered retrospective for a goal.
+
+        Gathers goal data, milestones, and agent executions, then asks the
+        LLM to produce a structured retrospective which is upserted into
+        the goal_retrospectives table.
+
+        Args:
+            user_id: The user's ID.
+            goal_id: The goal ID.
+
+        Returns:
+            Retrospective dict, or None if goal not found.
+        """
+        goal = await self.get_goal(user_id, goal_id)
+        if not goal:
+            return None
+
+        # Gather milestones
+        ms_result = (
+            self._db.table("goal_milestones")
+            .select("*")
+            .eq("goal_id", goal_id)
+            .order("sort_order")
+            .execute()
+        )
+        milestones = cast(list[dict[str, Any]], ms_result.data)
+
+        # Gather agent executions
+        agents = goal.get("goal_agents") or []
+        executions: list[dict[str, Any]] = []
+        for agent in agents:
+            exec_result = (
+                self._db.table("agent_executions")
+                .select("*")
+                .eq("goal_agent_id", agent["id"])
+                .order("started_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+            executions.extend(cast(list[dict[str, Any]], exec_result.data))
+
+        prompt = (
+            "You are ARIA. Analyze this goal and produce a retrospective.\n\n"
+            f"Goal: {json.dumps(goal, default=str)}\n"
+            f"Milestones: {json.dumps(milestones, default=str)}\n"
+            f"Executions: {json.dumps(executions, default=str)}\n\n"
+            "Respond with ONLY a JSON object:\n"
+            "{\n"
+            '  "summary": "...",\n'
+            '  "what_worked": ["..."],\n'
+            '  "what_didnt": ["..."],\n'
+            '  "time_analysis": {"total_days": N, "active_days": N},\n'
+            '  "agent_effectiveness": {"agent_type": {"tasks": N, "success_rate": 0.0}},\n'
+            '  "learnings": ["..."]\n'
+            "}"
+        )
+
+        llm = LLMClient()
+        try:
+            raw = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.3,
+            )
+            retro_data = json.loads(raw)
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.warning("Retrospective parse failed: %s", exc)
+            retro_data = {
+                "summary": "Retrospective generation failed.",
+                "what_worked": [],
+                "what_didnt": [],
+                "time_analysis": {},
+                "agent_effectiveness": {},
+                "learnings": [],
+            }
+
+        now = datetime.now(UTC).isoformat()
+        upsert_payload: dict[str, Any] = {
+            "goal_id": goal_id,
+            "summary": retro_data.get("summary", ""),
+            "what_worked": retro_data.get("what_worked", []),
+            "what_didnt": retro_data.get("what_didnt", []),
+            "time_analysis": retro_data.get("time_analysis", {}),
+            "agent_effectiveness": retro_data.get("agent_effectiveness", {}),
+            "learnings": retro_data.get("learnings", []),
+            "updated_at": now,
+        }
+
+        result = (
+            self._db.table("goal_retrospectives")
+            .upsert(upsert_payload, on_conflict="goal_id")
+            .execute()
+        )
+
+        retro = cast(dict[str, Any], result.data[0])
+        logger.info(
+            "Retrospective generated",
+            extra={"goal_id": goal_id, "retro_id": retro.get("id")},
+        )
+        return retro
+
+    async def get_goal_detail(
+        self,
+        user_id: str,
+        goal_id: str,
+    ) -> dict[str, Any] | None:
+        """Get full goal detail including milestones and retrospective.
+
+        Args:
+            user_id: The user's ID.
+            goal_id: The goal ID.
+
+        Returns:
+            Goal dict with milestones and retrospective keys,
+            or None if goal not found.
+        """
+        goal = await self.get_goal(user_id, goal_id)
+        if not goal:
+            return None
+
+        # Get milestones ordered by sort_order
+        ms_result = (
+            self._db.table("goal_milestones")
+            .select("*")
+            .eq("goal_id", goal_id)
+            .order("sort_order")
+            .execute()
+        )
+        milestones = cast(list[dict[str, Any]], ms_result.data)
+
+        # Get retrospective (may not exist)
+        retro_result = (
+            self._db.table("goal_retrospectives")
+            .select("*")
+            .eq("goal_id", goal_id)
+            .maybe_single()
+            .execute()
+        )
+        retrospective: dict[str, Any] | None = None
+        if retro_result is not None:
+            retrospective = cast(dict[str, Any] | None, retro_result.data)
+
+        logger.info(
+            "Goal detail retrieved",
+            extra={
+                "goal_id": goal_id,
+                "milestone_count": len(milestones),
+                "has_retro": retrospective is not None,
+            },
+        )
+
+        return {
+            **goal,
+            "milestones": milestones,
+            "retrospective": retrospective,
         }
