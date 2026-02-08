@@ -82,8 +82,8 @@ class DeepSyncService:
         from src.core.exceptions import CRMSyncError
         from src.integrations.deep_sync_domain import (
             SyncDirection,
-            SyncStatus,
             SyncResult,
+            SyncStatus,
         )
         from src.integrations.domain import IntegrationType
 
@@ -414,6 +414,7 @@ class DeepSyncService:
             The created lead ID, or None if creation failed.
         """
         from datetime import date
+
         from src.core.exceptions import LeadMemoryError
         from src.memory.lead_memory import TriggerType
 
@@ -891,10 +892,10 @@ class DeepSyncService:
 
                 timestamp = props.get("hs_timestamp")
                 if timestamp:
-                    try:
+                    from contextlib import suppress
+
+                    with suppress(ValueError, TypeError):
                         occurred_at = datetime.fromtimestamp(int(timestamp) / 1000, tz=UTC)
-                    except (ValueError, TypeError):
-                        pass
 
             # Format episodic memory content
             content = f"CRM Activity: {subject}"
@@ -1108,8 +1109,8 @@ class DeepSyncService:
         from src.core.exceptions import CRMSyncError
         from src.integrations.deep_sync_domain import (
             SyncDirection,
-            SyncStatus,
             SyncResult,
+            SyncStatus,
         )
         from src.integrations.domain import IntegrationType
 
@@ -1482,10 +1483,7 @@ class DeepSyncService:
             clean_str = datetime_str.replace("Z", "").replace("+00:00", "")
             parsed = datetime.fromisoformat(clean_str)
             # Ensure UTC timezone
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=UTC)
-            else:
-                parsed = parsed.astimezone(UTC)
+            parsed = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
             return parsed
         except (ValueError, TypeError) as e:
             logger.warning(f"Failed to parse datetime string: {datetime_str}, error: {e}")
@@ -1509,8 +1507,8 @@ class DeepSyncService:
             The created task ID, or None if creation failed.
         """
         from src.memory.prospective import (
-            ProspectiveTask,
             ProspectiveMemory,
+            ProspectiveTask,
             TaskPriority,
             TriggerType,
         )
@@ -1678,14 +1676,10 @@ class DeepSyncService:
             Exception: If fetching items or logging fails.
         """
         from src.integrations.deep_sync_domain import (
-            PushActionType,
-            PushPriority,
-            PushStatus,
             SyncDirection,
-            SyncStatus,
             SyncResult,
+            SyncStatus,
         )
-        from src.integrations.domain import IntegrationType
 
         started_at = datetime.now(UTC)
 
@@ -1731,7 +1725,6 @@ class DeepSyncService:
             try:
                 # Execute the push item
                 await self._execute_push_item(
-                    user_id=user_id,
                     integration_type=integration_type,
                     connection_id=connection_id,
                     item=item,
@@ -1819,7 +1812,6 @@ class DeepSyncService:
 
     async def _execute_push_item(
         self,
-        user_id: str,
         integration_type: "IntegrationType",
         connection_id: str,
         item: dict[str, Any],
@@ -1830,7 +1822,6 @@ class DeepSyncService:
         action_type and integration_type.
 
         Args:
-            user_id: The user's ID.
             integration_type: The integration type.
             connection_id: The Composio connection ID.
             item: The push queue item from database.
@@ -1838,8 +1829,6 @@ class DeepSyncService:
         Raises:
             Exception: If execution fails.
         """
-        from src.integrations.domain import IntegrationType
-
         action_type = item.get("action_type")
         payload = item.get("payload", {})
 

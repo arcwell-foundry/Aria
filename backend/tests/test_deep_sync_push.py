@@ -14,7 +14,7 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 # Add the backend directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -27,7 +27,6 @@ from src.integrations.deep_sync_domain import (
     PushActionType,
     PushPriority,
     PushQueueItem,
-    PushStatus,
 )
 from src.integrations.domain import IntegrationType
 
@@ -623,7 +622,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.SALESFORCE,
             connection_id="conn-123",
             item=item,
@@ -658,7 +656,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.HUBSPOT,
             connection_id="conn-456",
             item=item,
@@ -692,7 +689,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.SALESFORCE,
             connection_id="conn-123",
             item=item,
@@ -725,7 +721,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.HUBSPOT,
             connection_id="conn-456",
             item=item,
@@ -764,7 +759,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.GOOGLE_CALENDAR,
             connection_id="conn-789",
             item=item,
@@ -806,7 +800,6 @@ class TestExecutePushItem:
         }
 
         await deep_sync_service._execute_push_item(
-            user_id="user-123",
             integration_type=IntegrationType.OUTLOOK,
             connection_id="conn-outlook",
             item=item,
@@ -840,7 +833,6 @@ class TestExecutePushItem:
 
         with pytest.raises(Exception) as exc_info:
             await deep_sync_service._execute_push_item(
-                user_id="user-123",
                 integration_type=IntegrationType.SALESFORCE,
                 connection_id="conn-123",
                 item=item,
@@ -870,7 +862,6 @@ class TestExecutePushItem:
 
         with pytest.raises(Exception) as exc_info:
             await deep_sync_service._execute_push_item(
-                user_id="user-123",
                 integration_type=IntegrationType.SALESFORCE,
                 connection_id="conn-123",
                 item=item,
