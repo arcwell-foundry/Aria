@@ -1,16 +1,28 @@
-import type { Goal } from "@/api/goals";
+import type { Goal, GoalHealth } from "@/api/goals";
 import { GoalStatusBadge } from "./GoalStatusBadge";
 import { GoalTypeBadge } from "./GoalTypeBadge";
 import { ProgressRing } from "./ProgressRing";
 
 interface GoalCardProps {
-  goal: Goal;
+  goal: Goal & {
+    milestone_total?: number;
+    milestone_complete?: number;
+    health?: GoalHealth;
+    target_date?: string;
+  };
   onClick?: () => void;
   onStart?: () => void;
   onPause?: () => void;
   onDelete?: () => void;
   isLoading?: boolean;
 }
+
+const healthConfig: Record<GoalHealth, { color: string; label: string }> = {
+  on_track: { color: "bg-green-400", label: "On Track" },
+  at_risk: { color: "bg-amber-400", label: "At Risk" },
+  behind: { color: "bg-red-400", label: "Behind" },
+  blocked: { color: "bg-slate-400", label: "Blocked" },
+};
 
 export function GoalCard({
   goal,
@@ -26,6 +38,13 @@ export function GoalCard({
       day: "numeric",
       year: "numeric",
     });
+  };
+
+  const getDaysRemaining = (targetDate: string): number => {
+    const now = new Date();
+    const target = new Date(targetDate);
+    const diffMs = target.getTime() - now.getTime();
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
 
   const canStart = goal.status === "draft" || goal.status === "paused";
@@ -112,8 +131,39 @@ export function GoalCard({
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <GoalTypeBadge type={goal.goal_type} size="sm" />
             <GoalStatusBadge status={goal.status} size="sm" />
+            {goal.health && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${healthConfig[goal.health].color}`} />
+                <span className="text-xs text-slate-400">{healthConfig[goal.health].label}</span>
+              </span>
+            )}
             <span className="text-xs text-slate-500">Created {formatDate(goal.created_at)}</span>
+            {goal.target_date && (() => {
+              const daysLeft = getDaysRemaining(goal.target_date);
+              return daysLeft > 0 ? (
+                <span className="text-xs text-slate-500">&middot; {daysLeft} days left</span>
+              ) : (
+                <span className="text-xs text-red-400">&middot; Overdue</span>
+              );
+            })()}
           </div>
+
+          {/* Milestone progress bar */}
+          {goal.milestone_total != null && goal.milestone_total > 0 && (
+            <div className="mt-3">
+              <div className="bg-slate-700 h-1 rounded-full">
+                <div
+                  className="h-1 rounded-full bg-primary-500"
+                  style={{
+                    width: `${((goal.milestone_complete ?? 0) / goal.milestone_total) * 100}%`,
+                  }}
+                />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                {goal.milestone_complete ?? 0} of {goal.milestone_total} milestones
+              </p>
+            </div>
+          )}
 
           {/* Agent count if available */}
           {goal.goal_agents && goal.goal_agents.length > 0 && (
