@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import {
   AccountsPage,
   ActionQueuePage,
+  ActivityFeedPage,
   AdminAuditLogPage,
   AdminTeamPage,
   AdminBillingPage,
@@ -136,6 +137,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <ActionQueuePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/activity"
+        element={
+          <ProtectedRoute>
+            <ActivityFeedPage />
           </ProtectedRoute>
         }
       />

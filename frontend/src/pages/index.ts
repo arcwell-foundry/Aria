@@ -1,5 +1,6 @@
 export { AccountsPage } from "./AccountsPage";
 export { ActionQueuePage } from "./ActionQueue";
+export { ActivityFeedPage } from "./ActivityFeedPage";
 export { AdminAuditLogPage } from "./AdminAuditLogPage";
 export { ARIAConfigPage } from "./ARIAConfigPage";
 export { AriaChatPage } from "./AriaChat";
