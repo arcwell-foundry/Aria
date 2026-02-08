@@ -13,7 +13,13 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.models.goal import GoalCreate, GoalStatus, GoalUpdate
+from src.models.goal import (
+    CreateWithARIARequest,
+    GoalCreate,
+    GoalStatus,
+    GoalUpdate,
+    MilestoneCreate,
+)
 from src.services.goal_service import GoalService
 
 logger = logging.getLogger(__name__)
@@ -32,7 +38,9 @@ def _get_service() -> GoalService:
 class DeleteResponse(BaseModel):
     """Response model for delete operations."""
 
-    status: str = Field(..., min_length=1, max_length=50, description="Status of deletion operation")
+    status: str = Field(
+        ..., min_length=1, max_length=50, description="Status of deletion operation"
+    )
 
 
 # Goal Endpoints
@@ -82,6 +90,49 @@ async def list_goals(
     )
 
     return goals
+
+
+# Goal Lifecycle Endpoints — Static routes (must precede /{goal_id})
+
+
+@router.get("/dashboard")
+async def get_dashboard(current_user: CurrentUser) -> list[dict[str, Any]]:
+    """Get dashboard view of goals with milestone counts and health.
+
+    Returns all goals for the user with computed milestone_total and
+    milestone_complete counts for dashboard rendering.
+    """
+    service = _get_service()
+    return await service.get_dashboard(current_user.id)
+
+
+@router.post("/create-with-aria")
+async def create_with_aria(
+    data: CreateWithARIARequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Create a goal collaboratively with ARIA.
+
+    Sends the user's goal idea to ARIA for SMART refinement and returns
+    suggestions including refined title, description, sub-tasks, and
+    agent assignments.
+    """
+    service = _get_service()
+    return await service.create_with_aria(current_user.id, data.title, data.description)
+
+
+@router.get("/templates")
+async def get_templates(
+    current_user: CurrentUser,  # noqa: ARG001
+    role: str | None = Query(None, description="Filter templates by role"),
+) -> list[dict[str, Any]]:
+    """Get goal templates, optionally filtered by role.
+
+    Returns a list of pre-built goal templates that users can use as
+    starting points. Use ?role=sales to filter by role.
+    """
+    service = _get_service()
+    return await service.get_templates(role)
 
 
 @router.get("/{goal_id}")
@@ -292,3 +343,66 @@ async def update_progress(
     )
 
     return goal
+
+
+# Goal Detail, Milestone & Retrospective Endpoints
+
+
+@router.get("/{goal_id}/detail")
+async def get_goal_detail(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get full goal detail with milestones and retrospective.
+
+    Returns comprehensive goal information including all milestones
+    ordered by sort_order and the associated retrospective (if any).
+    """
+    service = _get_service()
+    detail = await service.get_goal_detail(current_user.id, goal_id)
+    if detail is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return detail
+
+
+@router.post("/{goal_id}/milestone")
+async def add_milestone(
+    goal_id: str,
+    data: MilestoneCreate,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Add a milestone to a goal.
+
+    Creates a new milestone for the specified goal with automatic
+    sort_order calculation based on existing milestones.
+    """
+    service = _get_service()
+    milestone = await service.add_milestone(
+        current_user.id, goal_id, data.title, data.description, data.due_date
+    )
+    if milestone is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return milestone
+
+
+@router.post("/{goal_id}/retrospective")
+async def generate_retrospective(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Generate an AI-powered retrospective for a goal.
+
+    Uses ARIA to analyze the goal's milestones and agent executions,
+    producing a structured retrospective with learnings and analysis.
+    """
+    service = _get_service()
+    retro = await service.generate_retrospective(current_user.id, goal_id)
+    if retro is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return retro

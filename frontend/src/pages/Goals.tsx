@@ -1,58 +1,105 @@
-import { useState } from "react";
-import type { Goal, GoalStatus, GoalType } from "@/api/goals";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Goal, GoalDashboard, GoalHealth, GoalStatus } from "@/api/goals";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import {
-  CreateGoalModal,
   DeleteGoalModal,
   EmptyGoals,
   GoalCard,
+  GoalCreationWizard,
+  GoalDetailPanel,
 } from "@/components/goals";
 import {
-  useGoals,
-  useCreateGoal,
+  useGoalDashboard,
   useDeleteGoal,
   useStartGoal,
   usePauseGoal,
+  goalKeys,
 } from "@/hooks/useGoals";
 import { HelpTooltip } from "@/components/HelpTooltip";
+import {
+  Plus,
+  LayoutGrid,
+  List,
+  Target,
+  TrendingUp,
+  CheckCircle2,
+  AlertTriangle,
+} from "lucide-react";
+
+// ---------- Constants ----------
 
 const statusFilters: { value: GoalStatus | "all"; label: string }[] = [
-  { value: "all", label: "All Goals" },
-  { value: "draft", label: "Draft" },
+  { value: "all", label: "All" },
   { value: "active", label: "Active" },
+  { value: "draft", label: "Draft" },
   { value: "paused", label: "Paused" },
   { value: "complete", label: "Complete" },
   { value: "failed", label: "Failed" },
 ];
 
-export function GoalsPage() {
-  const [statusFilter, setStatusFilter] = useState<GoalStatus | "all">("all");
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [goalToDelete, setGoalToDelete] = useState<Goal | null>(null);
+type ViewMode = "grid" | "list";
 
-  // Queries
-  const { data: goals, isLoading, error } = useGoals(
-    statusFilter === "all" ? undefined : statusFilter
+// ---------- Summary Stat Card ----------
+
+interface StatCardProps {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  accent?: string;
+}
+
+function StatCard({ label, value, icon, accent = "text-slate-400" }: StatCardProps) {
+  return (
+    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex items-center gap-3">
+      <div className={`${accent}`}>{icon}</div>
+      <div>
+        <p className="text-2xl font-semibold text-white">{value}</p>
+        <p className="text-sm text-slate-400">{label}</p>
+      </div>
+    </div>
   );
+}
+
+// ---------- GoalsPage ----------
+
+export function GoalsPage() {
+  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<GoalStatus | "all">("all");
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [goalToDelete, setGoalToDelete] = useState<Goal | null>(null);
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+
+  // Queries — use dashboard hook for enriched data
+  const { data: dashboardGoals, isLoading, error } = useGoalDashboard();
 
   // Mutations
-  const createGoal = useCreateGoal();
   const deleteGoal = useDeleteGoal();
   const startGoal = useStartGoal();
   const pauseGoal = usePauseGoal();
 
-  const handleCreateGoal = (data: {
-    title: string;
-    description?: string;
-    goal_type: GoalType;
-  }) => {
-    createGoal.mutate(data, {
-      onSuccess: () => {
-        setIsCreateModalOpen(false);
-      },
-    });
-  };
+  // Derived: filter goals by status tab
+  const filteredGoals = useMemo(() => {
+    if (!dashboardGoals) return [];
+    if (statusFilter === "all") return dashboardGoals;
+    return dashboardGoals.filter((g) => g.status === statusFilter);
+  }, [dashboardGoals, statusFilter]);
 
+  // Derived: summary stats
+  const stats = useMemo(() => {
+    const goals = dashboardGoals ?? [];
+    const total = goals.length;
+    const active = goals.filter((g) => g.status === "active").length;
+    const completed = goals.filter((g) => g.status === "complete").length;
+    // Count goals with at_risk health if the field is present
+    const atRisk = goals.filter(
+      (g) => (g as GoalDashboard & { health?: GoalHealth }).health === "at_risk"
+    ).length;
+    return { total, active, completed, atRisk };
+  }, [dashboardGoals]);
+
+  // Handlers
   const handleDeleteGoal = () => {
     if (!goalToDelete) return;
     deleteGoal.mutate(goalToDelete.id, {
@@ -70,6 +117,14 @@ export function GoalsPage() {
     pauseGoal.mutate(goalId);
   };
 
+  const handleGoalCreated = () => {
+    queryClient.invalidateQueries({ queryKey: goalKeys.dashboard() });
+  };
+
+  const handleCardClick = (goalId: string) => {
+    setSelectedGoalId(goalId);
+  };
+
   return (
     <DashboardLayout>
       <div className="relative">
@@ -81,8 +136,11 @@ export function GoalsPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-3xl font-bold text-white">Goals</h1>
-                <HelpTooltip content="Set objectives for ARIA to pursue. She'll track progress and suggest strategies." placement="right" />
+                <h1 className="text-3xl font-display text-white">Goals</h1>
+                <HelpTooltip
+                  content="Set objectives for ARIA to pursue. She'll track progress and suggest strategies."
+                  placement="right"
+                />
               </div>
               <p className="mt-1 text-slate-400">
                 Manage your AI-powered pursuits and track agent progress
@@ -90,36 +148,86 @@ export function GoalsPage() {
             </div>
 
             <button
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => setIsWizardOpen(true)}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg transition-colors shadow-lg shadow-primary-600/25"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
+              <Plus className="w-5 h-5" />
               New Goal
             </button>
           </div>
 
-          {/* Filters */}
-          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-            {statusFilters.map((filter) => (
+          {/* Summary stats row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <StatCard
+              label="Total Goals"
+              value={stats.total}
+              icon={<Target className="w-5 h-5" />}
+              accent="text-primary-400"
+            />
+            <StatCard
+              label="Active"
+              value={stats.active}
+              icon={<TrendingUp className="w-5 h-5" />}
+              accent="text-green-400"
+            />
+            <StatCard
+              label="Completed"
+              value={stats.completed}
+              icon={<CheckCircle2 className="w-5 h-5" />}
+              accent="text-blue-400"
+            />
+            <StatCard
+              label="At Risk"
+              value={stats.atRisk}
+              icon={<AlertTriangle className="w-5 h-5" />}
+              accent="text-amber-400"
+            />
+          </div>
+
+          {/* Filter tabs + view toggle row */}
+          <div className="flex items-center justify-between gap-4 mb-6">
+            {/* Filter tabs */}
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {statusFilters.map((filter) => (
+                <button
+                  key={filter.value}
+                  onClick={() => setStatusFilter(filter.value)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                    statusFilter === filter.value
+                      ? "bg-primary-600/20 text-primary-400 border border-primary-500/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            {/* View toggle */}
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
-                key={filter.value}
-                onClick={() => setStatusFilter(filter.value)}
-                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
-                  statusFilter === filter.value
-                    ? "bg-primary-600/20 text-primary-400 border border-primary-500/30"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                onClick={() => setViewMode("grid")}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === "grid"
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
                 }`}
+                title="Grid view"
               >
-                {filter.label}
+                <LayoutGrid className="w-4 h-4" />
               </button>
-            ))}
+              <button
+                onClick={() => setViewMode("list")}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === "list"
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                }`}
+                title="List view"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Error state */}
@@ -154,14 +262,20 @@ export function GoalsPage() {
           )}
 
           {/* Empty state */}
-          {!isLoading && goals && goals.length === 0 && (
-            <EmptyGoals onCreateClick={() => setIsCreateModalOpen(true)} />
+          {!isLoading && filteredGoals.length === 0 && !error && (
+            <EmptyGoals onCreateClick={() => setIsWizardOpen(true)} />
           )}
 
           {/* Goals grid */}
-          {!isLoading && goals && goals.length > 0 && (
-            <div className="grid gap-4 md:grid-cols-2">
-              {goals.map((goal, index) => (
+          {!isLoading && filteredGoals.length > 0 && (
+            <div
+              className={
+                viewMode === "grid"
+                  ? "grid gap-4 md:grid-cols-2"
+                  : "flex flex-col gap-3"
+              }
+            >
+              {filteredGoals.map((goal, index) => (
                 <div
                   key={goal.id}
                   className="animate-in fade-in slide-in-from-bottom-4"
@@ -169,12 +283,11 @@ export function GoalsPage() {
                 >
                   <GoalCard
                     goal={goal}
+                    onClick={() => handleCardClick(goal.id)}
                     onStart={() => handleStartGoal(goal.id)}
                     onPause={() => handlePauseGoal(goal.id)}
                     onDelete={() => setGoalToDelete(goal)}
-                    isLoading={
-                      startGoal.isPending || pauseGoal.isPending
-                    }
+                    isLoading={startGoal.isPending || pauseGoal.isPending}
                   />
                 </div>
               ))}
@@ -182,14 +295,14 @@ export function GoalsPage() {
           )}
         </div>
 
-        {/* Modals */}
-        <CreateGoalModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          onSubmit={handleCreateGoal}
-          isLoading={createGoal.isPending}
+        {/* GoalCreationWizard modal */}
+        <GoalCreationWizard
+          isOpen={isWizardOpen}
+          onClose={() => setIsWizardOpen(false)}
+          onGoalCreated={handleGoalCreated}
         />
 
+        {/* DeleteGoalModal */}
         <DeleteGoalModal
           goal={goalToDelete}
           isOpen={goalToDelete !== null}
@@ -197,6 +310,15 @@ export function GoalsPage() {
           onConfirm={handleDeleteGoal}
           isLoading={deleteGoal.isPending}
         />
+
+        {/* GoalDetailPanel slide-out */}
+        {selectedGoalId && (
+          <GoalDetailPanel
+            goalId={selectedGoalId}
+            isOpen={selectedGoalId !== null}
+            onClose={() => setSelectedGoalId(null)}
+          />
+        )}
       </div>
     </DashboardLayout>
   );
