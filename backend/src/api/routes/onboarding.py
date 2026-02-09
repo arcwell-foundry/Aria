@@ -105,7 +105,7 @@ async def get_routing(
 class EmailValidationRequest(BaseModel):
     """Request body for email validation."""
 
-    email: EmailStr
+    email: str
 
 
 class CompanyDiscoveryRequest(BaseModel):
@@ -129,6 +129,8 @@ async def validate_email(
 
     Returns validation result with reason if rejected.
     """
+    if not body.email or "@" not in body.email:
+        return {"valid": False, "reason": "Please enter a valid email address"}
     service = _get_company_service()
     return await service.validate_email_domain(body.email)
 

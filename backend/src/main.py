@@ -114,7 +114,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Configuration
+# Security headers middleware (US-932) — added first so it's innermost
+setup_security(app)
+
+# CORS Configuration — added last so it's outermost (handles preflight first)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
@@ -122,10 +125,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# Security headers middleware (US-932)
-setup_security(app)
 
 # Include API routers
 app.include_router(account.router, prefix="/api/v1")
