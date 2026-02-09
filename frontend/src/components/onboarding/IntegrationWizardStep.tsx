@@ -19,13 +19,75 @@ interface IntegrationWizardStepProps {
   onComplete: () => void;
 }
 
-// Provider display configuration
-const PROVIDER_CONFIG = {
-  SALESFORCE: { icon: "SF", color: "text-[#00A1E0]" },
-  HUBSPOT: { icon: "H", color: "text-[#FF7A59]" },
-  GOOGLECALENDAR: { icon: "G", color: "text-[#4285F4]" },
-  OUTLOOK365CALENDAR: { icon: "O", color: "text-[#0078D4]" },
-  SLACK: { icon: "S", color: "text-[#4A154B]" },
+// Inline SVG logos at 32x32
+function SalesforceLogo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13.3 6.7c1.2-1.3 2.9-2 4.7-2 2.3 0 4.3 1.2 5.5 3 1-.5 2.1-.7 3.2-.7 4.1 0 7.3 3.3 7.3 7.3 0 4.1-3.3 7.3-7.3 7.3-.5 0-1.1-.1-1.6-.2-1 1.7-2.9 2.9-5 2.9-1 0-1.9-.2-2.7-.7-1.1 2-3.2 3.4-5.7 3.4-2.8 0-5.2-1.8-6.1-4.3-.5.1-1 .2-1.5.2C1.8 22.9 0 20.2 0 17c0-2.4 1.3-4.5 3.2-5.7-.2-.7-.3-1.4-.3-2.1C2.9 5.1 6.1 2 10 2c1.3 0 2.4.3 3.3 1 0 0 0 3.7 0 3.7z" fill="#00A1E0"/>
+    </svg>
+  );
+}
+
+function HubSpotLogo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M23.5 13.2V9.6c1-.5 1.7-1.5 1.7-2.7V6.8c0-1.7-1.4-3-3-3h-.1c-1.7 0-3 1.4-3 3v.1c0 1.2.7 2.2 1.7 2.7v3.6c-1.5.3-2.8 1-3.9 1.9l-10.3-8c.1-.3.2-.7.2-1.1 0-1.8-1.5-3.2-3.2-3.2C2 5.8.5 7.2.5 9s1.5 3.2 3.2 3.2c.6 0 1.2-.2 1.7-.5l10.1 7.9c-1 1.2-1.6 2.8-1.6 4.5 0 3.9 3.1 7 7 7s7-3.1 7-7c0-3.5-2.6-6.4-6.4-6.9zm-2.6 10.7c-2.1 0-3.8-1.7-3.8-3.8s1.7-3.8 3.8-3.8 3.8 1.7 3.8 3.8-1.7 3.8-3.8 3.8z" fill="#FF7A59"/>
+    </svg>
+  );
+}
+
+function GoogleCalendarLogo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4" y="6" width="24" height="22" rx="2" fill="#FFFFFF"/>
+      <rect x="4" y="6" width="24" height="6" rx="2" fill="#4285F4"/>
+      <rect x="9" y="4" width="2" height="4" rx="1" fill="#4285F4"/>
+      <rect x="21" y="4" width="2" height="4" rx="1" fill="#4285F4"/>
+      <rect x="8" y="15" width="4" height="3" rx="0.5" fill="#EA4335"/>
+      <rect x="14" y="15" width="4" height="3" rx="0.5" fill="#FBBC04"/>
+      <rect x="20" y="15" width="4" height="3" rx="0.5" fill="#34A853"/>
+      <rect x="8" y="21" width="4" height="3" rx="0.5" fill="#4285F4"/>
+      <rect x="14" y="21" width="4" height="3" rx="0.5" fill="#34A853"/>
+      <rect x="20" y="21" width="4" height="3" rx="0.5" fill="#EA4335"/>
+    </svg>
+  );
+}
+
+function OutlookLogo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M19 4v8.5l8-4.5V6c0-1.1-.9-2-2-2h-6z" fill="#0364B8"/>
+      <path d="M19 12.5L27 8v14c0 1.1-.9 2-2 2H19V12.5z" fill="#0078D4"/>
+      <path d="M19 24h6c1.1 0 2-.9 2-2v-2l-8 4z" fill="#1490DF"/>
+      <path d="M3 8c0-1.1.9-2 2-2h12v20H5c-1.1 0-2-.9-2-2V8z" fill="#0078D4"/>
+      <ellipse cx="11" cy="16" rx="4.5" ry="5" fill="#FFFFFF" fillOpacity="0.9"/>
+      <ellipse cx="11" cy="16" rx="3" ry="3.5" stroke="#0078D4" strokeWidth="1.5" fill="none"/>
+    </svg>
+  );
+}
+
+function SlackLogo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7.5 18.5c0 1.4-1.1 2.5-2.5 2.5S2.5 19.9 2.5 18.5 3.6 16 5 16h2.5v2.5z" fill="#E01E5A"/>
+      <path d="M8.8 18.5c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5v6.2c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5v-6.2z" fill="#E01E5A"/>
+      <path d="M11.3 7.5C9.9 7.5 8.8 6.4 8.8 5s1.1-2.5 2.5-2.5 2.5 1.1 2.5 2.5v2.5h-2.5z" fill="#36C5F0"/>
+      <path d="M11.3 8.8c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H5c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5h6.3z" fill="#36C5F0"/>
+      <path d="M22.3 11.3c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5h-2.5v-2.5z" fill="#2EB67D"/>
+      <path d="M21 11.3c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V5c0-1.4 1.1-2.5 2.5-2.5S21 3.6 21 5v6.3z" fill="#2EB67D"/>
+      <path d="M18.5 22.3c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5-2.5-1.1-2.5-2.5v-2.5h2.5z" fill="#ECB22E"/>
+      <path d="M18.5 21c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5h6.2c1.4 0 2.5 1.1 2.5 2.5S26.1 21 24.7 21h-6.2z" fill="#ECB22E"/>
+    </svg>
+  );
+}
+
+// Map provider names to their logo components
+const PROVIDER_LOGOS: Record<string, () => JSX.Element> = {
+  SALESFORCE: SalesforceLogo,
+  HUBSPOT: HubSpotLogo,
+  GOOGLECALENDAR: GoogleCalendarLogo,
+  OUTLOOK365CALENDAR: OutlookLogo,
+  SLACK: SlackLogo,
 };
 
 const CATEGORY_ICONS = {
@@ -92,11 +154,9 @@ export function IntegrationWizardStep({
         return;
       }
       if (response.status === "pending" && response.auth_url) {
-        // Store context for the callback page
         sessionStorage.setItem("pending_integration", appName);
         sessionStorage.setItem("pending_connection_id", response.connection_id);
         sessionStorage.setItem("pending_integration_origin", "onboarding");
-        // Redirect to OAuth flow
         window.location.href = response.auth_url;
       }
     } catch (error) {
@@ -119,7 +179,7 @@ export function IntegrationWizardStep({
   };
 
   const renderProviderCard = (integration: IntegrationStatus) => {
-    const config = PROVIDER_CONFIG[integration.name];
+    const LogoComponent = PROVIDER_LOGOS[integration.name];
     const isConnecting = connecting === integration.name;
     const isDisconnecting = disconnecting === integration.name;
 
@@ -127,18 +187,18 @@ export function IntegrationWizardStep({
       <div
         key={integration.name}
         className={`
-          relative bg-white border rounded-xl p-4 flex items-center justify-between
-          transition-all duration-200
+          relative bg-[#161B2E] border rounded-xl p-4 flex items-center justify-between
+          transition-all duration-[250ms]
           ${
             integration.connected
-              ? "border-success bg-success/5"
-              : "border-border"
+              ? "border-[#6B8F71]"
+              : "border-[#2A2F42] hover:border-[#7B8EAA] hover:shadow-lg"
           }
         `}
       >
         {integration.connected && (
           <div className="absolute top-2 right-2">
-            <div className="flex items-center gap-1.5 bg-success text-white rounded-full px-2 py-0.5 text-[11px] font-medium">
+            <div className="flex items-center gap-1.5 bg-[#6B8F71]/20 text-[#6B8F71] rounded-full px-2 py-0.5 text-[11px] font-medium font-sans">
               <Check size={10} strokeWidth={2} />
               Connected
             </div>
@@ -146,24 +206,16 @@ export function IntegrationWizardStep({
         )}
 
         <div className="flex items-center gap-3">
-          {/* Logo placeholder */}
-          <div
-            className={`
-              w-10 h-10 rounded-lg flex items-center justify-center
-              font-sans font-bold text-[15px]
-              ${integration.connected ? "bg-success/10" : "bg-subtle"}
-              ${config.color}
-            `}
-          >
-            {config.icon}
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[#1E2235]">
+            {LogoComponent ? <LogoComponent /> : null}
           </div>
 
           <div className="flex flex-col gap-0.5">
-            <span className="font-sans text-[15px] font-medium text-content">
+            <span className="font-sans text-[15px] font-medium text-[#E8E6E1]">
               {integration.display_name}
             </span>
             {!integration.connected && (
-              <span className="font-sans text-[13px] text-secondary">
+              <span className="font-sans text-[13px] text-[#8B92A5]">
                 Connect your account
               </span>
             )}
@@ -176,7 +228,7 @@ export function IntegrationWizardStep({
               type="button"
               onClick={() => handleDisconnect(integration.name)}
               disabled={isDisconnecting}
-              className="text-[13px] text-secondary hover:text-content transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-interactive rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[13px] font-sans bg-transparent border border-[#2A2F42] text-[#8B92A5] rounded-lg px-3 py-1.5 hover:border-[#A66B6B] hover:text-[#A66B6B] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isDisconnecting ? "Disconnecting..." : "Disconnect"}
             </button>
@@ -188,11 +240,11 @@ export function IntegrationWizardStep({
               className={`
                 font-sans text-[13px] font-medium px-3 py-1.5 rounded-lg
                 transition-colors duration-150 cursor-pointer
-                focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
+                focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2
                 ${
                   isConnecting
-                    ? "bg-subtle text-secondary"
-                    : "bg-interactive text-white hover:bg-interactive-hover"
+                    ? "bg-[#1E2235] text-[#8B92A5]"
+                    : "bg-[#7B8EAA] text-white hover:bg-[#95A5BD]"
                 }
                 disabled:opacity-50 disabled:cursor-not-allowed
               `}
@@ -215,20 +267,18 @@ export function IntegrationWizardStep({
 
     return (
       <div className="flex flex-col gap-4">
-        {/* Category header */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <Icon size={18} strokeWidth={1.5} className="text-interactive" />
-            <span className="font-sans text-[15px] font-medium text-content">
+            <Icon size={18} strokeWidth={1.5} className="text-[#7B8EAA]" />
+            <span className="font-display text-[18px] text-[#E8E6E1]">
               {CATEGORY_LABELS[category]}
             </span>
           </div>
-          <p className="font-sans text-[13px] text-secondary ml-7">
+          <p className="font-sans text-[13px] text-[#8B92A5] ml-7">
             {CATEGORY_DESCRIPTIONS[category]}
           </p>
         </div>
 
-        {/* Provider cards */}
         <div className="grid grid-cols-2 gap-3">
           {integrations.map((integration) => renderProviderCard(integration))}
         </div>
@@ -245,17 +295,17 @@ export function IntegrationWizardStep({
     <div className="flex flex-col gap-8 max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-400">
       {/* Header */}
       <div className="flex flex-col gap-3">
-        <h1 className="text-[32px] leading-[1.2] text-content font-display">
+        <h1 className="text-[32px] leading-[1.2] text-[#E8E6E1] font-display">
           Connect your tools
         </h1>
-        <p className="font-sans text-[15px] leading-relaxed text-secondary">
+        <p className="font-sans text-[15px] leading-relaxed text-[#8B92A5]">
           The more ARIA knows, the more she can do.
         </p>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 size={24} strokeWidth={1.5} className="text-interactive animate-spin" />
+          <Loader2 size={24} strokeWidth={1.5} className="text-[#7B8EAA] animate-spin" />
         </div>
       ) : (
         <>
@@ -268,33 +318,33 @@ export function IntegrationWizardStep({
 
           {/* Error banner */}
           {errorMessage && (
-            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
-              <AlertTriangle size={18} strokeWidth={1.5} className="text-red-600 mt-0.5 shrink-0" />
+            <div className="flex items-start gap-3 bg-[#A66B6B]/10 border border-[#A66B6B]/30 rounded-xl p-4">
+              <AlertTriangle size={18} strokeWidth={1.5} className="text-[#A66B6B] mt-0.5 shrink-0" />
               <div className="flex flex-col gap-1">
-                <span className="font-sans text-[14px] font-medium text-red-800">
+                <span className="font-sans text-[14px] font-medium text-[#A66B6B]">
                   Connection failed
                 </span>
-                <p className="font-sans text-[13px] text-red-700 leading-relaxed">
+                <p className="font-sans text-[13px] text-[#A66B6B]/80 leading-relaxed">
                   {errorMessage}
                 </p>
               </div>
             </div>
           )}
 
-          {/* ARIA presence */}
-          <div className="flex flex-col gap-2 bg-subtle border border-border rounded-xl p-5">
-            <p className="font-sans text-[15px] leading-relaxed text-content italic">
+          {/* ARIA quote */}
+          <div className="flex flex-col gap-2 bg-[#161B2E] border border-[#2A2F42] rounded-xl p-5">
+            <p className="font-display text-[15px] leading-relaxed text-[#E8E6E1] italic">
               "Each connection multiplies my effectiveness. CRM + Calendar
               together is where the magic really starts."
             </p>
-            <p className="font-sans text-[13px] text-secondary">— ARIA</p>
+            <p className="font-sans text-[13px] text-[#8B92A5]">— ARIA</p>
           </div>
 
           {/* Connected count indicator */}
           {totalConnected > 0 && (
-            <div className="flex items-center gap-2 bg-success/10 border border-success rounded-lg px-4 py-2.5">
-              <Check size={16} strokeWidth={1.5} className="text-success" />
-              <span className="font-sans text-[13px] font-medium text-success">
+            <div className="flex items-center gap-2 bg-[#6B8F71]/10 border border-[#6B8F71]/30 rounded-lg px-4 py-2.5">
+              <Check size={16} strokeWidth={1.5} className="text-[#6B8F71]" />
+              <span className="font-sans text-[13px] font-medium text-[#6B8F71]">
                 {totalConnected} integration{totalConnected > 1 ? "s" : ""} connected
               </span>
             </div>
@@ -305,11 +355,11 @@ export function IntegrationWizardStep({
             <button
               type="button"
               onClick={onComplete}
-              className="bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2"
+              className="bg-[#7B8EAA] text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-[#95A5BD] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2"
             >
               Continue
             </button>
-            <p className="font-sans text-[13px] text-secondary text-center">
+            <p className="font-sans text-[13px] text-[#8B92A5] text-center">
               You can connect integrations anytime from your profile settings
             </p>
           </div>
