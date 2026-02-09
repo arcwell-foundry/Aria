@@ -45,6 +45,9 @@ class ComposioOAuthClient:
         Raises:
             ValueError: If no auth config exists for this toolkit.
         """
+        # Normalise to lowercase — Composio toolkit slugs are always lowercase
+        toolkit_slug = toolkit_slug.lower()
+
         # DEBUG: log incoming slug
         print(f"[DEBUG oauth] _resolve_auth_config_id called with toolkit_slug={toolkit_slug!r}")
 

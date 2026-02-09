@@ -180,7 +180,7 @@ export function IntegrationWizardStep({
             <button
               type="button"
               onClick={() => handleConnect(integration.name)}
-              disabled={isConnecting !== null}
+              disabled={connecting !== null}
               className={`
                 font-sans text-[13px] font-medium px-3 py-1.5 rounded-lg
                 transition-colors duration-150 cursor-pointer

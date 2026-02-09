@@ -60,29 +60,29 @@ class IntegrationWizardService:
         "SALESFORCE": {
             "display_name": "Salesforce",
             "category": "crm",
-            "composio_type": "SALESFORCE",
+            "composio_type": "salesforce",
         },
         "HUBSPOT": {
             "display_name": "HubSpot",
             "category": "crm",
-            "composio_type": "HUBSPOT",
+            "composio_type": "hubspot",
         },
         # Calendar
         "GOOGLECALENDAR": {
             "display_name": "Google Calendar",
             "category": "calendar",
-            "composio_type": "GOOGLECALENDAR",
+            "composio_type": "googlecalendar",
         },
         "OUTLOOK365CALENDAR": {
             "display_name": "Outlook Calendar",
             "category": "calendar",
-            "composio_type": "OUTLOOK365CALENDAR",
+            "composio_type": "outlook",
         },
         # Messaging
         "SLACK": {
             "display_name": "Slack",
             "category": "messaging",
-            "composio_type": "SLACK",
+            "composio_type": "slack",
         },
     }
 
