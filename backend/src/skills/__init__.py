@@ -36,6 +36,7 @@ from src.skills.installer import InstalledSkill, SkillInstaller, SkillNotFoundEr
 from src.skills.orchestrator import (
     ExecutionPlan,
     ExecutionStep,
+    PlanResult,
     SkillOrchestrator,
     WorkingMemoryEntry,
 )
@@ -72,5 +73,6 @@ __all__ = [
     "SkillOrchestrator",
     "ExecutionPlan",
     "ExecutionStep",
+    "PlanResult",
     "WorkingMemoryEntry",
 ]

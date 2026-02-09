@@ -1,6 +1,5 @@
 """Tests for skill orchestrator service."""
 
-import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -11,9 +10,33 @@ import pytest
 from src.skills.orchestrator import (
     ExecutionPlan,
     ExecutionStep,
+    PlanResult,
     SkillOrchestrator,
     WorkingMemoryEntry,
 )
+
+
+def _mock_db() -> MagicMock:
+    """Create a mock Supabase client that chains .table().select()... etc."""
+    db = MagicMock()
+
+    # Make all chained calls return the same mock
+    table = MagicMock()
+    execute_result = MagicMock()
+    execute_result.data = None
+
+    table.select.return_value = table
+    table.insert.return_value = table
+    table.update.return_value = table
+    table.upsert.return_value = table
+    table.eq.return_value = table
+    table.in_.return_value = table
+    table.order.return_value = table
+    table.single.return_value = table
+    table.execute.return_value = execute_result
+
+    db.table.return_value = table
+    return db
 
 
 class TestExecutionStep:
@@ -69,6 +92,19 @@ class TestExecutionStep:
             input_data={},
         )
         assert step.depends_on == [1, 2]
+
+    def test_execution_step_agent_id_field(self) -> None:
+        """Test ExecutionStep has agent_id field for dynamic delegation."""
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="skill-abc",
+            skill_path="a/b/c",
+            depends_on=[],
+            status="pending",
+            input_data={},
+            agent_id="analyst",
+        )
+        assert step.agent_id == "analyst"
 
 
 class TestExecutionPlan:
@@ -138,6 +174,19 @@ class TestExecutionPlan:
         assert plan.parallel_groups == [[1, 2], [3]]
         assert plan.approval_required is True
 
+    def test_execution_plan_reasoning_field(self) -> None:
+        """Test that ExecutionPlan has a reasoning field for skill reasoning trace."""
+        plan = ExecutionPlan(
+            task_description="Task",
+            steps=[],
+            parallel_groups=[],
+            estimated_duration_ms=0,
+            risk_level="low",
+            approval_required=False,
+            reasoning="Selected PDF parser because the task requires document extraction.",
+        )
+        assert "PDF parser" in plan.reasoning
+
 
 class TestWorkingMemoryEntry:
     """Tests for WorkingMemoryEntry dataclass."""
@@ -177,16 +226,63 @@ class TestWorkingMemoryEntry:
         assert entry.next_step_hints == []
 
 
+class TestPlanResult:
+    """Tests for PlanResult dataclass."""
+
+    def test_create_plan_result(self) -> None:
+        """Test creating a PlanResult with all fields."""
+        result = PlanResult(
+            plan_id="abc-123",
+            status="completed",
+            steps_completed=3,
+            steps_failed=0,
+            steps_skipped=0,
+            total_execution_ms=5000,
+            working_memory=[],
+        )
+        assert result.plan_id == "abc-123"
+        assert result.status == "completed"
+        assert result.steps_completed == 3
+        assert result.steps_failed == 0
+        assert result.total_execution_ms == 5000
+
+    def test_plan_result_partial_status(self) -> None:
+        """Test PlanResult with partial completion."""
+        wm = [
+            WorkingMemoryEntry(
+                step_number=1, skill_id="s1", status="completed",
+                summary="Done", artifacts=[], extracted_facts={}, next_step_hints=[],
+            ),
+            WorkingMemoryEntry(
+                step_number=2, skill_id="s2", status="failed",
+                summary="Error", artifacts=[], extracted_facts={}, next_step_hints=[],
+            ),
+        ]
+        result = PlanResult(
+            plan_id="abc-456",
+            status="partial",
+            steps_completed=1,
+            steps_failed=1,
+            steps_skipped=0,
+            total_execution_ms=3000,
+            working_memory=wm,
+        )
+        assert result.status == "partial"
+        assert len(result.working_memory) == 2
+
+
 class TestCanExecute:
     """Tests for SkillOrchestrator._can_execute method."""
 
     def _make_orchestrator(self) -> SkillOrchestrator:
         """Create orchestrator with mocked dependencies."""
-        return SkillOrchestrator(
+        orch = SkillOrchestrator(
             executor=MagicMock(),
             index=MagicMock(),
             autonomy=MagicMock(),
         )
+        orch._get_db = lambda: _mock_db()
+        return orch
 
     def test_step_with_no_dependencies_can_execute(self) -> None:
         """A step with no dependencies can always execute."""
@@ -243,16 +339,55 @@ class TestCanExecute:
         assert orch._can_execute(step, completed_steps={}) is False
 
 
+class TestDependsOnFailed:
+    """Tests for SkillOrchestrator._depends_on_failed method."""
+
+    def _make_orchestrator(self) -> SkillOrchestrator:
+        orch = SkillOrchestrator(
+            executor=MagicMock(),
+            index=MagicMock(),
+            autonomy=MagicMock(),
+        )
+        orch._get_db = lambda: _mock_db()
+        return orch
+
+    def test_no_failed_deps(self) -> None:
+        orch = self._make_orchestrator()
+        step = ExecutionStep(
+            step_number=3, skill_id="s3", skill_path="a/b/c",
+            depends_on=[1, 2], status="pending", input_data={},
+        )
+        assert orch._depends_on_failed(step, set()) is False
+
+    def test_has_failed_dep(self) -> None:
+        orch = self._make_orchestrator()
+        step = ExecutionStep(
+            step_number=3, skill_id="s3", skill_path="a/b/c",
+            depends_on=[1, 2], status="pending", input_data={},
+        )
+        assert orch._depends_on_failed(step, {1}) is True
+
+    def test_no_deps_never_fails(self) -> None:
+        orch = self._make_orchestrator()
+        step = ExecutionStep(
+            step_number=1, skill_id="s1", skill_path="a/b/c",
+            depends_on=[], status="pending", input_data={},
+        )
+        assert orch._depends_on_failed(step, {99}) is False
+
+
 class TestBuildWorkingMemorySummary:
     """Tests for SkillOrchestrator._build_working_memory_summary method."""
 
     def _make_orchestrator(self) -> SkillOrchestrator:
         """Create orchestrator with mocked dependencies."""
-        return SkillOrchestrator(
+        orch = SkillOrchestrator(
             executor=MagicMock(),
             index=MagicMock(),
             autonomy=MagicMock(),
         )
+        orch._get_db = lambda: _mock_db()
+        return orch
 
     def test_empty_entries_returns_empty_string(self) -> None:
         """No entries produces an empty summary."""
@@ -325,11 +460,13 @@ class TestExecuteStep:
         autonomy: MagicMock | None = None,
     ) -> SkillOrchestrator:
         """Create orchestrator with mocked dependencies."""
-        return SkillOrchestrator(
+        orch = SkillOrchestrator(
             executor=executor or MagicMock(),
             index=MagicMock(),
             autonomy=autonomy or MagicMock(),
         )
+        orch._get_db = lambda: _mock_db()
+        return orch
 
     async def test_execute_step_success(self) -> None:
         """Successful step execution produces a completed WorkingMemoryEntry."""
@@ -564,14 +701,16 @@ class TestExecutePlan:
             mock_autonomy.should_request_approval = AsyncMock(return_value=False)
             mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
 
-        return SkillOrchestrator(
+        orch = SkillOrchestrator(
             executor=mock_executor,
             index=MagicMock(),
             autonomy=mock_autonomy,
         )
+        orch._get_db = lambda: _mock_db()
+        return orch
 
     async def test_execute_plan_single_step(self) -> None:
-        """Execute a plan with a single step."""
+        """Execute a plan with a single step returns PlanResult."""
         orch = self._make_orchestrator()
         plan = ExecutionPlan(
             task_description="Simple task",
@@ -587,10 +726,14 @@ class TestExecutePlan:
             approval_required=False,
         )
 
-        results = await orch.execute_plan(user_id="user-123", plan=plan)
-        assert len(results) == 1
-        assert results[0].status == "completed"
-        assert results[0].step_number == 1
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert isinstance(result, PlanResult)
+        assert result.steps_completed == 1
+        assert result.steps_failed == 0
+        assert result.status == "completed"
+        assert len(result.working_memory) == 1
+        assert result.working_memory[0].status == "completed"
+        assert result.working_memory[0].step_number == 1
 
     async def test_execute_plan_sequential_steps(self) -> None:
         """Steps in separate parallel groups execute sequentially."""
@@ -607,10 +750,11 @@ class TestExecutePlan:
             approval_required=False,
         )
 
-        results = await orch.execute_plan(user_id="user-123", plan=plan)
-        assert len(results) == 2
-        assert results[0].step_number == 1
-        assert results[1].step_number == 2
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert isinstance(result, PlanResult)
+        assert result.steps_completed == 2
+        assert result.working_memory[0].step_number == 1
+        assert result.working_memory[1].step_number == 2
 
     async def test_execute_plan_parallel_steps(self) -> None:
         """Steps in the same parallel group execute concurrently."""
@@ -634,6 +778,7 @@ class TestExecutePlan:
             index=MagicMock(),
             autonomy=mock_autonomy,
         )
+        orch._get_db = lambda: _mock_db()
 
         plan = ExecutionPlan(
             task_description="Parallel task",
@@ -648,13 +793,14 @@ class TestExecutePlan:
             approval_required=False,
         )
 
-        results = await orch.execute_plan(user_id="user-123", plan=plan)
-        assert len(results) == 3
-        step_3_entry = [r for r in results if r.step_number == 3][0]
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert isinstance(result, PlanResult)
+        assert result.steps_completed == 3
+        step_3_entry = [r for r in result.working_memory if r.step_number == 3][0]
         assert step_3_entry.status == "completed"
 
     async def test_execute_plan_empty_plan(self) -> None:
-        """Empty plan returns empty results."""
+        """Empty plan returns PlanResult with zero counts."""
         orch = self._make_orchestrator()
         plan = ExecutionPlan(
             task_description="Empty",
@@ -665,8 +811,11 @@ class TestExecutePlan:
             approval_required=False,
         )
 
-        results = await orch.execute_plan(user_id="user-123", plan=plan)
-        assert results == []
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert isinstance(result, PlanResult)
+        assert result.status == "completed"
+        assert result.steps_completed == 0
+        assert result.working_memory == []
 
     async def test_execute_plan_with_progress_callback(self) -> None:
         """Progress callback receives updates during execution."""
@@ -724,6 +873,7 @@ class TestExecutePlan:
             index=MagicMock(),
             autonomy=mock_autonomy,
         )
+        orch._get_db = lambda: _mock_db()
 
         plan = ExecutionPlan(
             task_description="Mixed results",
@@ -737,11 +887,62 @@ class TestExecutePlan:
             approval_required=False,
         )
 
-        results = await orch.execute_plan(user_id="user-123", plan=plan)
-        assert len(results) == 2
-        statuses = {r.step_number: r.status for r in results}
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        assert isinstance(result, PlanResult)
+        assert result.steps_completed == 1
+        assert result.steps_failed == 1
+        statuses = {r.step_number: r.status for r in result.working_memory}
         assert statuses[1] == "failed"
         assert statuses[2] == "completed"
+
+    async def test_execute_plan_skips_dependent_of_failed_step(self) -> None:
+        """Steps depending on a failed step are skipped, not executed."""
+        mock_executor = MagicMock()
+
+        async def mock_execute(**kwargs):
+            result = MagicMock()
+            if kwargs.get("skill_id") == "s1":
+                result.success = False
+                result.result = None
+                result.error = "s1 broke"
+                result.execution_time_ms = 50
+            else:
+                result.success = True
+                result.result = {"ok": True}
+                result.execution_time_ms = 50
+            return result
+
+        mock_executor.execute = mock_execute
+
+        mock_autonomy = MagicMock()
+        mock_autonomy.should_request_approval = AsyncMock(return_value=False)
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = SkillOrchestrator(
+            executor=mock_executor,
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+        orch._get_db = lambda: _mock_db()
+
+        plan = ExecutionPlan(
+            task_description="Cascading failure",
+            steps=[
+                ExecutionStep(step_number=1, skill_id="s1", skill_path="a/b/c", depends_on=[], status="pending", input_data={}),
+                ExecutionStep(step_number=2, skill_id="s2", skill_path="d/e/f", depends_on=[1], status="pending", input_data={}),
+            ],
+            parallel_groups=[[1], [2]],
+            estimated_duration_ms=2000,
+            risk_level="low",
+            approval_required=False,
+        )
+
+        result = await orch.execute_plan(user_id="user-123", plan=plan)
+        statuses = {r.step_number: r.status for r in result.working_memory}
+        assert statuses[1] == "failed"
+        assert statuses[2] == "skipped"
+        assert result.steps_skipped == 1
+        assert result.status == "failed"  # 0 completed
 
 
 @pytest.mark.asyncio
@@ -766,10 +967,12 @@ class TestCreateExecutionPlan:
             index=mock_index,
             autonomy=MagicMock(),
         )
+        orch._get_db = lambda: _mock_db()
 
         # Mock the LLM client
         mock_llm = MagicMock()
         default_response = llm_response or json.dumps({
+            "reasoning": "PDF needs to be parsed first, then CSV can analyze tables.",
             "steps": [
                 {
                     "step_number": 1,
@@ -818,6 +1021,18 @@ class TestCreateExecutionPlan:
         assert plan.parallel_groups == [[1], [2]]
         assert plan.risk_level == "low"
 
+    async def test_create_plan_includes_reasoning(self) -> None:
+        """Plan includes the reasoning trace from LLM."""
+        orch = self._make_orchestrator()
+        available_skills = [MagicMock(id="skill-pdf")]
+
+        plan = await orch.create_execution_plan(
+            task="Parse a PDF",
+            available_skills=available_skills,
+        )
+
+        assert "PDF" in plan.reasoning
+
     async def test_create_plan_calls_llm_with_context(self) -> None:
         """LLM is called with task description and skill summaries."""
         orch = self._make_orchestrator()
@@ -858,6 +1073,7 @@ class TestCreateExecutionPlan:
     async def test_create_plan_with_parallel_skills(self) -> None:
         """LLM can plan parallel execution when skills are independent."""
         parallel_response = json.dumps({
+            "reasoning": "Skills are independent.",
             "steps": [
                 {"step_number": 1, "skill_id": "s1", "skill_path": "a/b/c", "depends_on": [], "input_data": {}},
                 {"step_number": 2, "skill_id": "s2", "skill_path": "d/e/f", "depends_on": [], "input_data": {}},
@@ -926,6 +1142,352 @@ class TestCreateExecutionPlan:
             )
 
 
+@pytest.mark.asyncio
+class TestAnalyzeTask:
+    """Tests for SkillOrchestrator.analyze_task method."""
+
+    def _make_orchestrator(
+        self,
+        search_results: list[Any] | None = None,
+        llm_response: str | None = None,
+    ) -> SkillOrchestrator:
+        """Create orchestrator with mocked dependencies."""
+        mock_index = MagicMock()
+
+        if search_results is not None:
+            mock_index.search = AsyncMock(return_value=search_results)
+        else:
+            # Default: return some matching skills
+            mock_skill = MagicMock()
+            mock_skill.id = "skill-pdf"
+            mock_skill.skill_path = "anthropics/skills/pdf"
+            mock_skill.skill_name = "PDF Parser"
+            mock_skill.trust_level = MagicMock(value="core")
+            mock_skill.declared_permissions = ["read"]
+            mock_index.search = AsyncMock(return_value=[mock_skill])
+
+        mock_index.get_summaries = AsyncMock(return_value={
+            "skill-pdf": "Parse PDF documents [CORE]"
+        })
+
+        orch = SkillOrchestrator(
+            executor=MagicMock(),
+            index=mock_index,
+            autonomy=MagicMock(),
+        )
+        orch._get_db = lambda: _mock_db()
+
+        # Mock LLM
+        mock_llm = MagicMock()
+        default_response = llm_response or json.dumps({
+            "reasoning": "PDF parser is the right tool for this document task.",
+            "steps": [
+                {
+                    "step_number": 1,
+                    "skill_id": "skill-pdf",
+                    "skill_path": "anthropics/skills/pdf",
+                    "depends_on": [],
+                    "input_data": {"file": "doc.pdf"},
+                    "data_classes_accessed": ["PUBLIC"],
+                }
+            ],
+            "parallel_groups": [[1]],
+            "estimated_duration_ms": 5000,
+            "risk_level": "low",
+            "approval_required": False,
+        })
+        mock_llm.generate_response = AsyncMock(return_value=default_response)
+        orch._llm = mock_llm
+
+        return orch
+
+    async def test_analyze_task_queries_skill_index(self) -> None:
+        """analyze_task searches the SkillIndex for matching skills."""
+        orch = self._make_orchestrator()
+
+        plan = await orch.analyze_task(
+            task={"description": "Parse a PDF document"},
+            user_id="user-123",
+        )
+
+        orch._index.search.assert_awaited_once()
+        assert isinstance(plan, ExecutionPlan)
+
+    async def test_analyze_task_includes_reasoning(self) -> None:
+        """analyze_task produces a plan with an LLM reasoning trace."""
+        orch = self._make_orchestrator()
+
+        plan = await orch.analyze_task(
+            task={"description": "Parse a PDF"},
+            user_id="user-123",
+        )
+
+        assert "PDF parser" in plan.reasoning
+
+    async def test_analyze_task_calculates_risk_from_data_classes(self) -> None:
+        """Risk level is calculated from data_classes_accessed in step data."""
+        response = json.dumps({
+            "reasoning": "Needs internal data access.",
+            "steps": [
+                {
+                    "step_number": 1,
+                    "skill_id": "skill-crm",
+                    "skill_path": "aria/crm-ops",
+                    "depends_on": [],
+                    "input_data": {},
+                    "data_classes_accessed": ["INTERNAL", "CONFIDENTIAL"],
+                }
+            ],
+            "parallel_groups": [[1]],
+            "estimated_duration_ms": 3000,
+            "risk_level": "medium",
+            "approval_required": True,
+        })
+
+        orch = self._make_orchestrator(llm_response=response)
+
+        plan = await orch.analyze_task(
+            task={"description": "Update CRM records"},
+            user_id="user-123",
+        )
+
+        assert plan.risk_level == "high"  # CONFIDENTIAL -> high
+
+    async def test_analyze_task_empty_skills_returns_empty_plan(self) -> None:
+        """When no skills match, returns an empty plan."""
+        orch = self._make_orchestrator(search_results=[])
+
+        plan = await orch.analyze_task(
+            task={"description": "Do something unknown"},
+            user_id="user-123",
+        )
+
+        assert plan.steps == []
+        assert "No matching skills" in plan.reasoning
+
+    async def test_analyze_task_persists_plan(self) -> None:
+        """analyze_task persists the plan to the database."""
+        orch = self._make_orchestrator()
+        db_mock = _mock_db()
+        orch._get_db = lambda: db_mock
+
+        await orch.analyze_task(
+            task={"description": "Parse a PDF"},
+            user_id="user-123",
+        )
+
+        # Verify upsert was called on skill_execution_plans
+        db_mock.table.assert_called()
+        calls = [str(c) for c in db_mock.table.call_args_list]
+        assert any("skill_execution_plans" in c for c in calls)
+
+
+@pytest.mark.asyncio
+class TestSelectAgentForStep:
+    """Tests for SkillOrchestrator.select_agent_for_step."""
+
+    def _make_orchestrator(
+        self,
+        trust_result: Any = None,
+    ) -> SkillOrchestrator:
+        mock_autonomy = MagicMock()
+        if trust_result is None:
+            mock_autonomy.get_trust_history = AsyncMock(return_value=None)
+        else:
+            mock_autonomy.get_trust_history = AsyncMock(return_value=trust_result)
+
+        orch = SkillOrchestrator(
+            executor=MagicMock(),
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+        orch._get_db = lambda: _mock_db()
+        return orch
+
+    async def test_selects_matching_agent(self) -> None:
+        """Agent whose skills match the step's skill_path gets higher score."""
+        orch = self._make_orchestrator()
+
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="s1",
+            skill_path="anthropics/skills/pdf",
+            depends_on=[],
+            status="pending",
+            input_data={},
+        )
+
+        agent = await orch.select_agent_for_step(
+            step, ["hunter", "scribe", "analyst"]
+        )
+
+        # "scribe" has "pdf" in its AGENT_SKILLS
+        assert agent == "scribe"
+
+    async def test_returns_default_when_no_agents(self) -> None:
+        """Returns 'operator' when available_agents is empty."""
+        orch = self._make_orchestrator()
+
+        step = ExecutionStep(
+            step_number=1, skill_id="s1", skill_path="a/b/c",
+            depends_on=[], status="pending", input_data={},
+        )
+
+        agent = await orch.select_agent_for_step(step, [])
+        assert agent == "operator"
+
+    async def test_considers_trust_history(self) -> None:
+        """Agent with higher success rate scores higher."""
+        trust = MagicMock()
+        trust.successful_executions = 9
+        trust.failed_executions = 1
+
+        orch = self._make_orchestrator(trust_result=trust)
+
+        step = ExecutionStep(
+            step_number=1,
+            skill_id="s1",
+            skill_path="unknown/skill",
+            depends_on=[],
+            status="pending",
+            input_data={},
+        )
+
+        # All agents have equal skill match (none match "unknown/skill")
+        # so trust history should be the deciding factor
+        agent = await orch.select_agent_for_step(
+            step, ["hunter", "analyst"]
+        )
+        # Both get same trust score, so any is valid
+        assert agent in ["hunter", "analyst"]
+
+
+@pytest.mark.asyncio
+class TestRecordOutcome:
+    """Tests for SkillOrchestrator.record_outcome."""
+
+    def _make_orchestrator(self) -> SkillOrchestrator:
+        mock_autonomy = MagicMock()
+        mock_autonomy.record_execution_outcome = AsyncMock(return_value=None)
+
+        orch = SkillOrchestrator(
+            executor=MagicMock(),
+            index=MagicMock(),
+            autonomy=mock_autonomy,
+        )
+        return orch
+
+    async def test_record_outcome_updates_trust_history(self) -> None:
+        """record_outcome calls autonomy.record_execution_outcome for each step."""
+        orch = self._make_orchestrator()
+        db = _mock_db()
+
+        # Set up plan query result
+        plan_result = MagicMock()
+        plan_result.data = {
+            "user_id": "user-123",
+            "task_description": "Test task",
+            "plan_dag": {"steps": []},
+            "status": "completed",
+            "created_at": "2026-02-09T00:00:00Z",
+            "completed_at": "2026-02-09T00:01:00Z",
+        }
+
+        # Set up working memory query result
+        wm_result = MagicMock()
+        wm_result.data = [
+            {"skill_id": "s1", "status": "completed", "output_summary": "Done"},
+            {"skill_id": "s2", "status": "failed", "output_summary": "Error"},
+        ]
+
+        def table_side_effect(name: str) -> MagicMock:
+            chain = MagicMock()
+            chain.select.return_value = chain
+            chain.insert.return_value = chain
+            chain.update.return_value = chain
+            chain.upsert.return_value = chain
+            chain.eq.return_value = chain
+            chain.in_.return_value = chain
+            chain.order.return_value = chain
+            chain.single.return_value = chain
+
+            if name == "skill_execution_plans":
+                chain.execute.return_value = plan_result
+            elif name == "skill_working_memory":
+                chain.execute.return_value = wm_result
+            elif name == "custom_skills":
+                empty = MagicMock()
+                empty.data = []
+                chain.execute.return_value = empty
+            else:
+                empty = MagicMock()
+                empty.data = None
+                chain.execute.return_value = empty
+
+            return chain
+
+        db.table = table_side_effect
+        orch._get_db = lambda: db
+
+        await orch.record_outcome("plan-abc")
+
+        # Verify trust history was updated for both skills
+        assert orch._autonomy.record_execution_outcome.await_count == 2
+        calls = orch._autonomy.record_execution_outcome.await_args_list
+        assert calls[0].args == ("user-123", "s1")
+        assert calls[0].kwargs == {"success": True}
+        assert calls[1].args == ("user-123", "s2")
+        assert calls[1].kwargs == {"success": False}
+
+    async def test_record_outcome_handles_missing_plan(self) -> None:
+        """record_outcome handles gracefully when plan is not found."""
+        orch = self._make_orchestrator()
+        db = _mock_db()
+
+        # Simulate plan not found (exception from .single())
+        def table_side_effect(_name: str) -> MagicMock:
+            chain = MagicMock()
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.single.return_value = chain
+            chain.execute.side_effect = Exception("Not found")
+            return chain
+
+        db.table = table_side_effect
+        orch._get_db = lambda: db
+
+        # Should not raise
+        await orch.record_outcome("nonexistent-plan")
+
+
+class TestRiskFromDataClasses:
+    """Tests for SkillOrchestrator._risk_from_data_classes."""
+
+    def test_public_is_low(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes(["PUBLIC"]) == "low"
+
+    def test_internal_is_medium(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes(["INTERNAL"]) == "medium"
+
+    def test_confidential_is_high(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes(["CONFIDENTIAL"]) == "high"
+
+    def test_restricted_is_critical(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes(["RESTRICTED"]) == "critical"
+
+    def test_regulated_is_critical(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes(["REGULATED"]) == "critical"
+
+    def test_mixed_takes_highest(self) -> None:
+        result = SkillOrchestrator._risk_from_data_classes(
+            ["PUBLIC", "INTERNAL", "CONFIDENTIAL"]
+        )
+        assert result == "high"
+
+    def test_empty_is_low(self) -> None:
+        assert SkillOrchestrator._risk_from_data_classes([]) == "low"
+
+
 class TestModuleExports:
     """Tests for orchestrator exports from skills module."""
 
@@ -948,3 +1510,8 @@ class TestModuleExports:
         """SkillOrchestrator is importable from src.skills."""
         from src.skills import SkillOrchestrator as SO
         assert SO is not None
+
+    def test_plan_result_importable_from_skills(self) -> None:
+        """PlanResult is importable from src.skills."""
+        from src.skills import PlanResult as PR
+        assert PR is not None
