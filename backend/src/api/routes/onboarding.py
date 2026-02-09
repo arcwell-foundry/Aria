@@ -1073,8 +1073,7 @@ def _get_cross_user_service() -> "CrossUserAccelerationService":
     """Get cross-user acceleration service instance."""
     from src.onboarding.cross_user import CrossUserAccelerationService
 
-    db = SupabaseClient.get_client()
-    return CrossUserAccelerationService(db=db)
+    return CrossUserAccelerationService()
 
 
 @router.get(
@@ -1127,12 +1126,16 @@ async def get_cross_user_acceleration(
             facts=facts,
         )
 
-    except Exception as e:
-        logger.exception(f"Error checking cross-user acceleration for domain {domain}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to check company domain",
-        ) from e
+    except Exception:
+        logger.exception(f"Error checking cross-user acceleration for domain {domain}")
+        return CrossUserAccelerationResponse(
+            exists=False,
+            company_id=None,
+            company_name=None,
+            richness_score=0,
+            recommendation="new_company",
+            facts=[],
+        )
 
 
 @router.post(
