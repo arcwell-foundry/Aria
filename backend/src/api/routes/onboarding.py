@@ -936,6 +936,15 @@ async def activate_aria(
     constructor = MemoryConstructionOrchestrator()
     asyncio.create_task(constructor.run_construction(current_user.id))
 
+    # Sprint 2: Run post-activation pipeline (goal execution → first conversation → first briefing)
+    # This runs as a background task so the user sees a loading state while ARIA works
+    from src.onboarding.activation import OnboardingCompletionOrchestrator
+
+    activation_orchestrator = OnboardingCompletionOrchestrator()
+    asyncio.create_task(
+        activation_orchestrator.run_post_activation_pipeline(current_user.id)
+    )
+
     return {"status": "activated", "redirect": "/dashboard"}
 
 

@@ -8,11 +8,15 @@ Each activation:
 - Runs at LOW priority (yields to user-initiated tasks)
 - Results appear in first daily briefing
 - Is tracked in episodic memory
+
+Sprint 2 additions:
+- run_post_activation_pipeline: Execute goals → first conversation → first briefing
 """
 
+import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
@@ -517,3 +521,244 @@ class OnboardingCompletionOrchestrator:
                 "Failed to record activation episodic event",
                 extra={"user_id": user_id, "error": str(e)},
             )
+
+    async def run_post_activation_pipeline(self, user_id: str) -> dict[str, Any]:
+        """Run the full post-activation pipeline: execute goals → first conversation → first briefing.
+
+        This is the Sprint 2 fix for the "empty dashboard" problem.
+        Called as a background task after activation creates goals.
+
+        The flow:
+        1. Execute all activation goals (agent analyses via LLM)
+        2. Generate first conversation (intelligence-demonstrating message)
+        3. Generate first briefing (dashboard content)
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Dict with pipeline execution results.
+        """
+        logger.info(
+            "Starting post-activation pipeline",
+            extra={"user_id": user_id},
+        )
+
+        pipeline_result: dict[str, Any] = {
+            "user_id": user_id,
+            "goal_execution": None,
+            "first_conversation": None,
+            "first_briefing": None,
+        }
+
+        # Step 1: Execute activation goals
+        try:
+            from src.services.goal_execution import GoalExecutionService
+
+            executor = GoalExecutionService()
+            execution_results = await executor.execute_activation_goals(user_id)
+            pipeline_result["goal_execution"] = {
+                "total": len(execution_results),
+                "succeeded": sum(1 for r in execution_results if r.get("status") == "complete"),
+            }
+            logger.info(
+                "Activation goals executed",
+                extra={
+                    "user_id": user_id,
+                    "total": len(execution_results),
+                    "succeeded": pipeline_result["goal_execution"]["succeeded"],
+                },
+            )
+        except Exception as e:
+            logger.error(
+                "Goal execution failed in pipeline",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            pipeline_result["goal_execution"] = {"error": str(e)}
+
+        # Step 2: Generate first conversation
+        try:
+            from src.onboarding.first_conversation import FirstConversationGenerator
+
+            generator = FirstConversationGenerator()
+            first_msg = await generator.generate(user_id)
+            pipeline_result["first_conversation"] = {
+                "facts_referenced": first_msg.facts_referenced,
+                "confidence_level": first_msg.confidence_level,
+            }
+            logger.info(
+                "First conversation generated",
+                extra={
+                    "user_id": user_id,
+                    "facts_referenced": first_msg.facts_referenced,
+                },
+            )
+        except Exception as e:
+            logger.error(
+                "First conversation generation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            pipeline_result["first_conversation"] = {"error": str(e)}
+
+        # Step 3: Generate first briefing
+        try:
+            await self._generate_first_briefing(user_id)
+            pipeline_result["first_briefing"] = {"generated": True}
+            logger.info(
+                "First briefing generated",
+                extra={"user_id": user_id},
+            )
+        except Exception as e:
+            logger.error(
+                "First briefing generation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            pipeline_result["first_briefing"] = {"error": str(e)}
+
+        logger.info(
+            "Post-activation pipeline complete",
+            extra={"user_id": user_id, "result": pipeline_result},
+        )
+
+        return pipeline_result
+
+    async def _generate_first_briefing(self, user_id: str) -> dict[str, Any]:
+        """Generate the first daily briefing from onboarding + agent execution data.
+
+        Assembles: enrichment facts summary, first goal + agent assignments,
+        agent execution results, readiness score summary.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Briefing content dict stored in daily_briefings table.
+        """
+        # Gather briefing ingredients
+        # 1. Enrichment facts
+        facts_result = (
+            self._db.table("memory_semantic")
+            .select("fact, confidence, source")
+            .eq("user_id", user_id)
+            .order("confidence", desc=True)
+            .limit(10)
+            .execute()
+        )
+        top_facts = facts_result.data or []
+
+        # 2. Goals and agent results
+        goals_result = (
+            self._db.table("goals")
+            .select("title, status, config")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        goals = goals_result.data or []
+
+        # 3. Recent agent execution outputs
+        executions_result = (
+            self._db.table("agent_executions")
+            .select("output, goal_agent_id, completed_at")
+            .order("completed_at", desc=True)
+            .limit(6)
+            .execute()
+        )
+        # Filter to this user's executions via goal_agents → goals
+        recent_executions = executions_result.data or []
+
+        # 4. Readiness scores
+        state_result = (
+            self._db.table("onboarding_state")
+            .select("readiness_scores")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        readiness = (state_result.data or {}).get("readiness_scores", {})
+
+        # 5. User profile
+        profile_result = (
+            self._db.table("user_profiles")
+            .select("full_name, title")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        profile = profile_result.data or {}
+
+        # Build briefing summary via LLM
+        facts_text = "\n".join(
+            f"- {f.get('fact', '')} ({f.get('confidence', 0):.0%})" for f in top_facts[:8]
+        )
+        goals_text = "\n".join(
+            f"- {g.get('title', '')} [{g.get('status', 'draft')}]" for g in goals[:6]
+        )
+
+        # Extract key findings from agent executions
+        agent_findings: list[str] = []
+        for ex in recent_executions[:4]:
+            output = ex.get("output", {})
+            if isinstance(output, dict):
+                summary = output.get("summary", "")
+                if summary:
+                    agent_findings.append(summary)
+
+        findings_text = "\n".join(f"- {f}" for f in agent_findings) or "Analyses in progress"
+
+        prompt = (
+            f"Generate a first daily briefing for {profile.get('full_name', 'the user')} "
+            f"({profile.get('title', 'Sales Professional')}).\n\n"
+            f"Top company intelligence:\n{facts_text or 'Still gathering...'}\n\n"
+            f"Active goals:\n{goals_text or 'Being set up...'}\n\n"
+            f"Agent findings:\n{findings_text}\n\n"
+            f"Readiness: {json.dumps(readiness)}\n\n"
+            "Write a warm, confident 3-4 sentence morning briefing that:\n"
+            "1. Welcomes them to ARIA\n"
+            "2. Highlights the most interesting finding\n"
+            "3. Mentions what agents are working on\n"
+            "4. Suggests a concrete next step\n"
+            "Sound like an impressive colleague, not a chatbot. Be concise."
+        )
+
+        try:
+            summary = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You are ARIA, an AI Department Director for life sciences commercial teams.",
+                max_tokens=300,
+                temperature=0.7,
+            )
+        except Exception:
+            summary = (
+                f"Welcome to ARIA, {profile.get('full_name', '')}! "
+                f"I've completed my initial analysis with {len(top_facts)} key findings "
+                f"about your company, and {len(goals)} strategic goals are now active. "
+                "Check the activity feed to see what I've been working on."
+            )
+
+        # Build content structure matching BriefingService format
+        content: dict[str, Any] = {
+            "summary": summary.strip(),
+            "calendar": {"meeting_count": 0, "key_meetings": []},
+            "leads": {"hot_leads": [], "needs_attention": [], "recently_active": []},
+            "signals": {"company_news": [], "market_trends": [], "competitive_intel": []},
+            "tasks": {"overdue": [], "due_today": []},
+            "agent_highlights": agent_findings,
+            "readiness": readiness,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "is_first_briefing": True,
+        }
+
+        # Store briefing
+        today = date.today()
+        self._db.table("daily_briefings").upsert(
+            {
+                "user_id": user_id,
+                "briefing_date": today.isoformat(),
+                "content": content,
+                "generated_at": datetime.now(UTC).isoformat(),
+            }
+        ).execute()
+
+        return content
