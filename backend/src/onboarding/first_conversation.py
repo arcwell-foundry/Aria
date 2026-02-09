@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,19 @@ class FirstConversationGenerator:
 
         # 5. Record episodic memory event
         await self._record_episodic_event(user_id, message)
+
+        # Audit log entry
+        await log_memory_operation(
+            user_id=user_id,
+            operation=MemoryOperation.CREATE,
+            memory_type=MemoryType.EPISODIC,
+            metadata={
+                "action": "first_conversation_delivered",
+                "facts_referenced": message.facts_referenced,
+                "confidence_level": message.confidence_level,
+            },
+            suppress_errors=True,
+        )
 
         logger.info(
             "First conversation generated",

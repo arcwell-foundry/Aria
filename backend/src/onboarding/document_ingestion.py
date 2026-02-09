@@ -236,6 +236,9 @@ class DocumentIngestionService:
             await self._update_progress(doc_id, 80, "processing")
             quality_score = await self._score_quality(text, file_type)
 
+            # Step 4b: Seed extracted entities to Graphiti knowledge graph
+            await self._seed_entities_to_graph(total_entities, company_id, user_id, doc_id)
+
             # Step 5: Knowledge extraction → Corporate Memory
             await self._update_progress(doc_id, 90, "processing")
             await self._extract_knowledge(text, company_id, user_id, doc_id)
@@ -616,6 +619,86 @@ class DocumentIngestionService:
                 "processing_status": status,
             }
         ).eq("id", doc_id).execute()
+
+    async def _seed_entities_to_graph(
+        self,
+        entities: list[dict[str, str]],
+        company_id: str,
+        user_id: str,
+        doc_id: str,
+    ) -> None:
+        """Seed extracted entities into Graphiti knowledge graph as episodes.
+
+        Creates graph nodes/edges for entities found in documents so they're
+        queryable via the knowledge graph, not just stored as JSON in chunks.
+
+        Args:
+            entities: List of entity dicts with 'name' and 'type' keys.
+            company_id: Company UUID.
+            user_id: User UUID.
+            doc_id: Document UUID.
+        """
+        if not entities:
+            return
+
+        try:
+            from src.memory.episodic import Episode, EpisodicMemory
+
+            memory = EpisodicMemory()
+            now = datetime.now(UTC)
+
+            # Deduplicate by entity name
+            seen: set[str] = set()
+            unique_entities: list[dict[str, str]] = []
+            for entity in entities:
+                name = entity.get("name", "")
+                if name and name not in seen:
+                    seen.add(name)
+                    unique_entities.append(entity)
+
+            if not unique_entities:
+                return
+
+            # Build entity summary for graph seeding
+            entity_summary = ", ".join(
+                f"{e.get('name', '')} ({e.get('type', 'unknown')})"
+                for e in unique_entities[:20]
+            )
+
+            episode = Episode(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                event_type="document_entity_extraction",
+                content=(
+                    f"Extracted {len(unique_entities)} entities from document: "
+                    f"{entity_summary}"
+                ),
+                participants=[e.get("name", "") for e in unique_entities[:20]],
+                occurred_at=now,
+                recorded_at=now,
+                context={
+                    "document_id": doc_id,
+                    "company_id": company_id,
+                    "entity_count": len(unique_entities),
+                    "entities": [
+                        {"name": e.get("name", ""), "type": e.get("type", "")}
+                        for e in unique_entities[:50]
+                    ],
+                },
+            )
+            await memory.store_episode(episode)
+
+            logger.info(
+                "Seeded %d entities to knowledge graph",
+                len(unique_entities),
+                extra={"document_id": doc_id, "entity_count": len(unique_entities)},
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to seed entities to knowledge graph: %s",
+                e,
+                extra={"document_id": doc_id},
+            )
 
     async def _update_readiness(self, user_id: str, quality_score: float) -> None:
         """Update corporate_memory readiness based on document quality.

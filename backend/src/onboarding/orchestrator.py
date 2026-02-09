@@ -460,6 +460,15 @@ class OnboardingOrchestrator:
         old_data: dict[str, Any] = {}
         await merge_service.process_update(user_id, old_data, step_data)
 
+        # Update readiness score for digital_twin (profile data contributes to identity)
+        try:
+            await self.update_readiness_scores(user_id, {"digital_twin": 10.0})
+        except Exception as e:
+            logger.warning(
+                "Failed to update readiness after profile merge",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
         logger.info(
             "User profile facts merged into Semantic Memory",
             extra={"user_id": user_id, "fields": list(step_data.keys())},

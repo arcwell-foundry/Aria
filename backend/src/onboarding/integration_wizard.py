@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from src.db.supabase import SupabaseClient
 from src.integrations.oauth import get_oauth_client
+from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,38 @@ class IntegrationWizardService:
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        # Create prospective memory entries for unconnected integrations (knowledge gaps)
+        try:
+            missing_categories: list[str] = []
+            if not any(i["connected"] for i in status["crm"]):
+                missing_categories.append("CRM")
+            if not any(i["connected"] for i in status["calendar"]):
+                missing_categories.append("Calendar")
+            if not any(i["connected"] for i in status["messaging"]):
+                missing_categories.append("Slack")
+
+            if missing_categories:
+                for category in missing_categories:
+                    self._db.table("prospective_memories").insert(
+                        {
+                            "user_id": user_id,
+                            "task": f"Connect {category} integration for richer intelligence",
+                            "due_date": None,
+                            "status": "pending",
+                            "metadata": {
+                                "type": "integration_gap",
+                                "category": category.lower(),
+                                "priority": "medium",
+                                "source": "onboarding_integration_wizard",
+                            },
+                        }
+                    ).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to create integration gap entries",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
         # Record in episodic memory
         try:
             from src.memory.episodic import Episode, EpisodicMemory
@@ -373,6 +406,19 @@ class IntegrationWizardService:
                 "Episodic record failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
+
+        # Audit log entry
+        await log_memory_operation(
+            user_id=user_id,
+            operation=MemoryOperation.CREATE,
+            memory_type=MemoryType.PROCEDURAL,
+            metadata={
+                "action": "integration_preferences_saved",
+                "connected_count": connected_count,
+                "slack_channels": preferences.slack_channels,
+            },
+            suppress_errors=True,
+        )
 
         logger.info(
             "Integration preferences saved",
