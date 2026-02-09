@@ -122,11 +122,11 @@ class IntegrationWizardService:
         connected_integrations: dict[str, dict[str, Any]] = {}
         if result.data:
             for row in result.data:
-                app_name = row.get("app_name")
-                if app_name:
-                    connected_integrations[app_name] = {
+                integration_type = row.get("integration_type")
+                if integration_type:
+                    connected_integrations[integration_type] = {
                         "connected_at": row.get("created_at"),
-                        "connection_id": row.get("connection_id"),
+                        "connection_id": row.get("composio_connection_id"),
                     }
 
         # Build status for all integrations
@@ -138,15 +138,16 @@ class IntegrationWizardService:
 
         for app_name, config in self.INTEGRATIONS.items():
             category = config["category"]
-            connected = app_name in connected_integrations
+            composio_type = config["composio_type"]
+            connected = composio_type in connected_integrations
 
             status = IntegrationStatus(
                 name=app_name,
                 display_name=config["display_name"],
                 category=category,
                 connected=connected,
-                connected_at=connected_integrations.get(app_name, {}).get("connected_at") if connected else None,
-                connection_id=connected_integrations.get(app_name, {}).get("connection_id") if connected else None,
+                connected_at=connected_integrations.get(composio_type, {}).get("connected_at") if connected else None,
+                connection_id=connected_integrations.get(composio_type, {}).get("connection_id") if connected else None,
             )
             status_by_category[category].append(status)
 
@@ -174,10 +175,7 @@ class IntegrationWizardService:
             {"auth_url": str, "connection_id": str, "status": "pending"}
             or {"status": "error", "message": str} on failure.
         """
-        print(f"[DEBUG connect] connect_integration called: user_id={user_id!r}, app_name={app_name!r}")
-
         if app_name not in self.INTEGRATIONS:
-            print(f"[DEBUG connect] app_name={app_name!r} NOT in INTEGRATIONS keys={list(self.INTEGRATIONS.keys())}")
             logger.warning(
                 "Invalid integration name",
                 extra={"app_name": app_name, "user_id": user_id},
@@ -190,8 +188,7 @@ class IntegrationWizardService:
         try:
             oauth_client = get_oauth_client()
             integration_type = self.INTEGRATIONS[app_name]["composio_type"]
-            redirect_uri = f"{self._get_base_url()}/integrations/callback"
-            print(f"[DEBUG connect] integration_type={integration_type!r}, redirect_uri={redirect_uri!r}")
+            redirect_uri = f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)
             auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
@@ -199,7 +196,6 @@ class IntegrationWizardService:
                 integration_type=integration_type,
                 redirect_uri=redirect_uri,
             )
-            print(f"[DEBUG connect] Got auth_url={auth_url!r}, connection_id={connection_id!r}")
 
             logger.info(
                 "OAuth initiated for integration",
@@ -214,7 +210,6 @@ class IntegrationWizardService:
 
         except ValueError as e:
             # Auth config not found — actionable error for the user
-            print(f"[DEBUG connect] ValueError: {e}")
             logger.warning(
                 "OAuth auth config missing",
                 extra={"user_id": user_id, "app_name": app_name, "error": str(e)},
@@ -226,9 +221,6 @@ class IntegrationWizardService:
             }
 
         except Exception as e:
-            print(f"[DEBUG connect] Exception: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
             logger.warning(
                 "OAuth initiation failed",
                 extra={"user_id": user_id, "app_name": app_name, "error": str(e)},
@@ -260,11 +252,12 @@ class IntegrationWizardService:
 
         try:
             # Get the connection record
+            integration_type = self.INTEGRATIONS[app_name]["composio_type"]
             result = (
                 self._db.table("user_integrations")
-                .select("connection_id")
+                .select("composio_connection_id")
                 .eq("user_id", user_id)
-                .eq("app_name", app_name)
+                .eq("integration_type", integration_type)
                 .maybe_single()
                 .execute()
             )
@@ -275,7 +268,7 @@ class IntegrationWizardService:
                     "message": "Integration not connected",
                 }
 
-            connection_id = result.data.get("connection_id")
+            connection_id = result.data.get("composio_connection_id")
 
             # Disconnect via Composio if we have a connection_id
             if connection_id:
@@ -296,7 +289,7 @@ class IntegrationWizardService:
                 self._db.table("user_integrations")
                 .delete()
                 .eq("user_id", user_id)
-                .eq("app_name", app_name)
+                .eq("integration_type", integration_type)
                 .execute()
             )
 

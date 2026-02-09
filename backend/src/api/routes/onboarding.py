@@ -536,6 +536,13 @@ async def email_bootstrap_status(
 # Integration Wizard endpoints (US-909)
 
 
+class RecordConnectionRequest(BaseModel):
+    """Request body for recording a completed OAuth connection."""
+
+    integration_type: str  # "salesforce", "hubspot", "googlecalendar", "outlook", "slack", "gmail"
+    connection_id: str  # Composio connected_account_id
+
+
 class IntegrationConnectRequest(BaseModel):
     """Request body for initiating integration OAuth."""
 
@@ -593,6 +600,76 @@ async def connect_integration(
     """
     service = _get_integration_wizard_service()
     return await service.connect_integration(current_user.id, body.app_name)
+
+
+@router.post("/integrations/record-connection")
+async def record_integration_connection(
+    body: RecordConnectionRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Record a completed OAuth connection after callback.
+
+    Called by the frontend callback page after Composio OAuth completes.
+    Composio handles the token exchange internally — we just need to
+    record the connection in our user_integrations table.
+
+    Args:
+        body: Request with integration_type and connection_id from Composio.
+        current_user: Authenticated user.
+
+    Returns:
+        Dict with status and integration_type.
+    """
+    from src.integrations.domain import IntegrationType
+    from src.integrations.service import IntegrationService
+
+    # Map Composio app names / composio_type values to IntegrationType enum
+    type_map: dict[str, IntegrationType] = {
+        "salesforce": IntegrationType.SALESFORCE,
+        "hubspot": IntegrationType.HUBSPOT,
+        "googlecalendar": IntegrationType.GOOGLE_CALENDAR,
+        "google_calendar": IntegrationType.GOOGLE_CALENDAR,
+        "outlook": IntegrationType.OUTLOOK,
+        "slack": IntegrationType.SLACK,
+        "gmail": IntegrationType.GMAIL,
+    }
+
+    integration_type = type_map.get(body.integration_type.lower())
+    if not integration_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown integration type: {body.integration_type}",
+        )
+
+    try:
+        service = IntegrationService()
+        await service.create_integration(
+            user_id=current_user.id,
+            integration_type=integration_type,
+            composio_connection_id=body.connection_id,
+        )
+    except Exception as e:
+        # Handle duplicate key (already connected) gracefully
+        error_str = str(e)
+        if "duplicate key" in error_str or "unique constraint" in error_str.lower():
+            logger.info(
+                "Integration already recorded",
+                extra={
+                    "user_id": current_user.id,
+                    "integration_type": integration_type.value,
+                },
+            )
+        else:
+            logger.exception("Failed to record integration connection")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to record integration connection",
+            ) from e
+
+    return {
+        "status": "connected",
+        "integration_type": integration_type.value,
+    }
 
 
 @router.post("/integrations/disconnect")

@@ -92,6 +92,10 @@ export function IntegrationWizardStep({
         return;
       }
       if (response.status === "pending" && response.auth_url) {
+        // Store context for the callback page
+        sessionStorage.setItem("pending_integration", appName);
+        sessionStorage.setItem("pending_connection_id", response.connection_id);
+        sessionStorage.setItem("pending_integration_origin", "onboarding");
         // Redirect to OAuth flow
         window.location.href = response.auth_url;
       }

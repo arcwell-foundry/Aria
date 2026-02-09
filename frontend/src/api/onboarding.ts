@@ -464,6 +464,28 @@ export async function installRecommendedSkills(
   return response.data;
 }
 
+// Record integration connection (OAuth callback)
+
+export interface RecordConnectionRequest {
+  integration_type: string;
+  connection_id: string;
+}
+
+export interface RecordConnectionResponse {
+  status: string;
+  integration_type: string;
+}
+
+export async function recordIntegrationConnection(
+  request: RecordConnectionRequest
+): Promise<RecordConnectionResponse> {
+  const response = await apiClient.post<RecordConnectionResponse>(
+    "/onboarding/integrations/record-connection",
+    request
+  );
+  return response.data;
+}
+
 // Personality Calibration endpoints (US-919)
 
 export interface PersonalityCalibrationResponse {

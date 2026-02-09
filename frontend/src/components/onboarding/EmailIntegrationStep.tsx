@@ -65,6 +65,11 @@ export function EmailIntegrationStep({
     try {
       const response = await connectEmail(provider);
       if (response.status === "pending" && response.auth_url) {
+        // Map provider to integration type for the callback page
+        const typeMap: Record<string, string> = { google: "gmail", microsoft: "outlook" };
+        sessionStorage.setItem("pending_integration", typeMap[provider] || provider);
+        sessionStorage.setItem("pending_connection_id", response.connection_id);
+        sessionStorage.setItem("pending_integration_origin", "onboarding");
         // Redirect to OAuth flow
         window.location.href = response.auth_url;
       }

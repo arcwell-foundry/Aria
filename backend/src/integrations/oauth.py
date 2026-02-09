@@ -48,33 +48,20 @@ class ComposioOAuthClient:
         # Normalise to lowercase — Composio toolkit slugs are always lowercase
         toolkit_slug = toolkit_slug.lower()
 
-        # DEBUG: log incoming slug
-        print(f"[DEBUG oauth] _resolve_auth_config_id called with toolkit_slug={toolkit_slug!r}")
-
         # Check cache first
         if toolkit_slug in self._auth_config_cache:
-            print(f"[DEBUG oauth] Cache hit for {toolkit_slug!r} → {self._auth_config_cache[toolkit_slug]!r}")
+            logger.debug("Auth config cache hit for %s", toolkit_slug)
             return self._auth_config_cache[toolkit_slug]
 
         def _list_configs() -> Any:
-            print(f"[DEBUG oauth] Calling auth_configs.list(toolkit_slug={toolkit_slug!r})")
-            resp = self._client.client.auth_configs.list(
+            return self._client.client.auth_configs.list(
                 toolkit_slug=toolkit_slug,
             )
-            print(f"[DEBUG oauth] auth_configs.list response: items={getattr(resp, 'items', 'NO_ITEMS_ATTR')}")
-            if hasattr(resp, 'items'):
-                for i, item in enumerate(resp.items):
-                    print(f"[DEBUG oauth]   item[{i}]: id={getattr(item, 'id', '?')}, type={type(item)}")
-            return resp
 
-        try:
-            result = await asyncio.to_thread(_list_configs)
-        except Exception as e:
-            print(f"[DEBUG oauth] auth_configs.list EXCEPTION: {type(e).__name__}: {e}")
-            raise
+        result = await asyncio.to_thread(_list_configs)
 
         if not result.items:
-            print(f"[DEBUG oauth] No auth configs found for {toolkit_slug!r} — raising ValueError")
+            logger.debug("No auth configs found for %s", toolkit_slug)
             raise ValueError(
                 f"No auth config found for '{toolkit_slug}'. "
                 f"Create one at https://app.composio.dev → Auth Configs → "
@@ -83,7 +70,7 @@ class ComposioOAuthClient:
 
         auth_config_id: str = result.items[0].id
         self._auth_config_cache[toolkit_slug] = auth_config_id
-        print(f"[DEBUG oauth] Resolved {toolkit_slug!r} → auth_config_id={auth_config_id!r}")
+        logger.debug("Resolved %s → auth_config_id=%s", toolkit_slug, auth_config_id)
         return auth_config_id
 
     async def generate_auth_url(
@@ -135,25 +122,14 @@ class ComposioOAuthClient:
         """
         auth_config_id = await self._resolve_auth_config_id(integration_type)
 
-        print(f"[DEBUG oauth] generate_auth_url_with_connection_id: user_id={user_id!r}, integration_type={integration_type!r}, redirect_uri={redirect_uri!r}, auth_config_id={auth_config_id!r}")
-
         def _create_link() -> Any:
-            print(f"[DEBUG oauth] Calling link.create(auth_config_id={auth_config_id!r}, user_id={user_id!r}, callback_url={redirect_uri!r})")
-            resp = self._client.client.link.create(
+            return self._client.client.link.create(
                 auth_config_id=auth_config_id,
                 user_id=user_id,
                 callback_url=redirect_uri,
             )
-            print(f"[DEBUG oauth] link.create response: {resp}")
-            print(f"[DEBUG oauth]   redirect_url={getattr(resp, 'redirect_url', 'MISSING')}")
-            print(f"[DEBUG oauth]   connected_account_id={getattr(resp, 'connected_account_id', 'MISSING')}")
-            return resp
 
-        try:
-            result = await asyncio.to_thread(_create_link)
-        except Exception as e:
-            print(f"[DEBUG oauth] link.create EXCEPTION: {type(e).__name__}: {e}")
-            raise
+        result = await asyncio.to_thread(_create_link)
 
         redirect_url: str = result.redirect_url
         connection_id: str = result.connected_account_id
