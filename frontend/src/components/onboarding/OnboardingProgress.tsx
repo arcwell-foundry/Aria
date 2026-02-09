@@ -57,7 +57,7 @@ export function OnboardingProgress({
                 className={`
                   font-sans text-[13px] leading-snug
                   ${isActive ? "font-medium text-content" : ""}
-                  ${isCompleted && !isActive ? "text-success" : ""}
+                  ${isCompleted && !isActive ? "text-secondary" : ""}
                   ${isSkipped && !isActive ? "text-secondary" : ""}
                   ${!isActive && !isCompleted && !isSkipped ? "text-secondary" : ""}
                 `}

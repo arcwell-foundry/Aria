@@ -87,7 +87,7 @@ export function OnboardingPage() {
       <div className="mx-auto max-w-[960px] px-6 py-12 md:py-16">
         {/* Header */}
         <div className="mb-12">
-          <p className="font-sans text-[13px] font-medium text-secondary tracking-wide uppercase">
+          <p className="font-sans text-xs font-medium text-secondary tracking-widest uppercase">
             Getting started
           </p>
         </div>
