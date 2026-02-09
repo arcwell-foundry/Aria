@@ -114,19 +114,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS origins — hardcoded to avoid config resolution issues
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+logger.info("CORS allowed origins: %s", CORS_ORIGINS)
+
 # Security headers middleware (US-932) — added first so it's innermost
 setup_security(app)
 
 # CORS Configuration — added last so it's outermost (handles preflight first)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -294,13 +298,13 @@ async def pydantic_validation_handler(
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle unhandled exceptions globally.
 
-    Args:
-        request: The incoming request.
-        exc: The unhandled exception.
-
-    Returns:
-        JSON error response.
+    Returns a JSON response with CORS headers so the browser doesn't
+    mask the real error as a CORS failure.
     """
+    import traceback
+
+    traceback.print_exc()
+
     request_id = str(uuid.uuid4())
     logger.exception(
         "Unhandled exception occurred",
@@ -310,7 +314,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "path": request.url.path,
         },
     )
-    return JSONResponse(
+
+    # Build response with explicit CORS headers so the browser
+    # can read the error instead of reporting a CORS failure.
+    origin = request.headers.get("origin", "")
+    response = JSONResponse(
         status_code=500,
         content={
             "detail": "An internal server error occurred",
@@ -318,6 +326,10 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "request_id": request_id,
         },
     )
+    if origin in CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 
 # Rate limit exception handler
