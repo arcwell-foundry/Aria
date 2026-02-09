@@ -273,6 +273,35 @@ class DocumentIngestionService:
                 user_id, doc_id, len(chunks), unique_entity_count, quality_score
             )
 
+            # Record activity for feed
+            try:
+                from src.services.activity_service import ActivityService
+
+                # Fetch filename from document record
+                doc_result = (
+                    self._db.table("company_documents")
+                    .select("filename")
+                    .eq("id", doc_id)
+                    .maybe_single()
+                    .execute()
+                )
+                filename = (doc_result.data or {}).get("filename", "document")
+
+                await ActivityService().record(
+                    user_id=user_id,
+                    agent="analyst",
+                    activity_type="document_processed",
+                    title=f"Processed {filename}",
+                    description=(
+                        f"ARIA processed {filename} — extracted key entities and facts"
+                    ),
+                    confidence=0.8,
+                    related_entity_type="document",
+                    related_entity_id=doc_id,
+                )
+            except Exception as e:
+                logger.warning("Failed to record document activity: %s", e)
+
         except Exception:
             logger.exception(
                 "Document processing failed",

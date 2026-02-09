@@ -78,26 +78,70 @@ class OnboardingCompletionOrchestrator:
         user_goal = onboarding_data.get("first_goal", {})
         goal_type = user_goal.get("goal_type")
 
+        # Fetch user role for priority adjustment
+        user_role = ""
+        try:
+            profile_result = (
+                self._db.table("user_profiles")
+                .select("role")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile_result.data:
+                user_role = (profile_result.data.get("role") or "").lower()
+        except Exception:
+            pass
+
+        # Role-based agent priority mapping
+        role_priority_agents: dict[str, list[str]] = {
+            "sales": ["hunter", "analyst"],
+            "business development": ["hunter", "analyst"],
+            "executive": ["strategist", "scout"],
+            "marketing": ["scout", "scribe"],
+            "operations": ["operator", "analyst"],
+            "clinical": ["analyst", "scout"],
+            "regulatory": ["analyst", "scout"],
+            "medical affairs": ["analyst", "scribe"],
+        }
+        priority_agents = role_priority_agents.get(user_role, [])
+
         # Scout: Monitor competitors and industry
         activations["scout"] = await self._activate_scout(
-            user_id, company_id, company_domain, onboarding_data
+            user_id, company_id, company_domain, onboarding_data,
+            priority="medium" if "scout" in priority_agents else "low",
         )
 
         # Analyst: Research top accounts
-        activations["analyst"] = await self._activate_analyst(user_id, onboarding_data)
+        activations["analyst"] = await self._activate_analyst(
+            user_id, onboarding_data,
+            priority="medium" if "analyst" in priority_agents else "low",
+        )
 
         # Hunter: Only if lead_gen goal set
         if goal_type == "lead_gen":
-            activations["hunter"] = await self._activate_hunter(user_id, onboarding_data)
+            activations["hunter"] = await self._activate_hunter(
+                user_id, onboarding_data,
+                priority="medium" if "hunter" in priority_agents else "low",
+            )
 
         # Operator: Scan CRM for data quality
-        activations["operator"] = await self._activate_operator(user_id, onboarding_data)
+        activations["operator"] = await self._activate_operator(
+            user_id, onboarding_data,
+            priority="medium" if "operator" in priority_agents else "low",
+        )
 
         # Scribe: Pre-draft follow-ups for stale conversations
-        activations["scribe"] = await self._activate_scribe(user_id, onboarding_data)
+        activations["scribe"] = await self._activate_scribe(
+            user_id, onboarding_data,
+            priority="medium" if "scribe" in priority_agents else "low",
+        )
 
         # Strategist: Build go-to-market and account strategy
-        activations["strategist"] = await self._activate_strategist(user_id, onboarding_data)
+        activations["strategist"] = await self._activate_strategist(
+            user_id, onboarding_data,
+            priority="medium" if "strategist" in priority_agents else "low",
+        )
 
         # Pre-install recommended skills based on company type + role (US-918)
         try:
@@ -144,6 +188,29 @@ class OnboardingCompletionOrchestrator:
             },
         )
 
+        # Record activity for feed
+        try:
+            from src.services.activity_service import ActivityService
+
+            activated_agents = [
+                k for k, v in activations.items()
+                if v is not None and k != "skills_installed"
+            ]
+            await ActivityService().record(
+                user_id=user_id,
+                agent=None,
+                activity_type="agents_activated",
+                title="ARIA started working on your goals",
+                description=(
+                    f"ARIA activated {len(activated_agents)} agents: "
+                    f"{', '.join(activated_agents)}. "
+                    "Results will appear in your daily briefing."
+                ),
+                confidence=0.9,
+            )
+        except Exception as e:
+            logger.warning("Failed to record activation activity: %s", e)
+
         return {
             "user_id": user_id,
             "activated_at": datetime.now(UTC).isoformat(),
@@ -156,6 +223,7 @@ class OnboardingCompletionOrchestrator:
         company_id: str | None,
         company_domain: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Scout agent for competitive intelligence monitoring.
 
@@ -188,7 +256,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "scout",
                     "agent_type": "scout",
-                    "priority": "low",  # Yield to user tasks
+                    "priority": priority,
                     "entities": entities,
                     "signal_types": ["news", "regulatory", "competitor_activity"],
                     "company_id": company_id,
@@ -216,6 +284,7 @@ class OnboardingCompletionOrchestrator:
         self,
         user_id: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Analyst agent for account research.
 
@@ -250,7 +319,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "analyst",
                     "agent_type": "analyst",
-                    "priority": "low",
+                    "priority": priority,
                     "top_n_accounts": 3,
                     "briefing_horizon_hours": 48,
                     "source": "onboarding_activation",
@@ -277,6 +346,7 @@ class OnboardingCompletionOrchestrator:
         self,
         user_id: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Hunter agent for lead generation.
 
@@ -303,7 +373,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "hunter",
                     "agent_type": "hunter",
-                    "priority": "low",
+                    "priority": priority,
                     "icp_refinement": True,
                     "initial_prospects": 10,
                     "source": "onboarding_activation",
@@ -330,6 +400,7 @@ class OnboardingCompletionOrchestrator:
         self,
         user_id: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Operator agent for CRM data quality.
 
@@ -363,7 +434,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "operator",
                     "agent_type": "operator",
-                    "priority": "low",
+                    "priority": priority,
                     "check_stale_opportunities": True,
                     "check_missing_fields": True,
                     "produce_health_snapshot": True,
@@ -391,6 +462,7 @@ class OnboardingCompletionOrchestrator:
         self,
         user_id: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Scribe agent for follow-up drafts.
 
@@ -425,7 +497,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "scribe",
                     "agent_type": "scribe",
-                    "priority": "low",
+                    "priority": priority,
                     "stale_threshold_days": 7,
                     "max_drafts": 5,
                     "use_digital_twin_style": True,
@@ -453,6 +525,7 @@ class OnboardingCompletionOrchestrator:
         self,
         user_id: str,
         onboarding_data: dict[str, Any],
+        priority: str = "low",
     ) -> dict[str, Any] | None:
         """Activate Strategist agent for go-to-market strategy.
 
@@ -479,7 +552,7 @@ class OnboardingCompletionOrchestrator:
                 config={
                     "agent": "strategist",
                     "agent_type": "strategist",
-                    "priority": "low",
+                    "priority": priority,
                     "company_type": enrichment_data.get("company_type"),
                     "user_goal_type": user_goal.get("goal_type"),
                     "source": "onboarding_activation",

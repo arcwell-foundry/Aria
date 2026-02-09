@@ -237,38 +237,42 @@ class GoalService:
         logger.warning("Goal not found for pause", extra={"goal_id": goal_id})
         return None
 
-    async def complete_goal(self, user_id: str, goal_id: str) -> dict[str, Any] | None:
-        """Mark goal as complete.
+    async def complete_goal(
+        self,
+        user_id: str,
+        goal_id: str,
+    ) -> dict[str, Any] | None:
+        """Complete a goal: update status, generate retrospective, update readiness."""
+        goal = await self.get_goal(user_id, goal_id)
+        if not goal:
+            return None
 
-        Args:
-            user_id: The user's ID.
-            goal_id: The goal ID.
-
-        Returns:
-            Updated goal dict, or None if not found.
-        """
         now = datetime.now(UTC).isoformat()
-        result = (
-            self._db.table("goals")
-            .update(
-                {
-                    "status": GoalStatus.COMPLETE.value,
-                    "progress": 100,
-                    "completed_at": now,
-                    "updated_at": now,
-                }
-            )
-            .eq("id", goal_id)
-            .eq("user_id", user_id)
-            .execute()
+        self._db.table("goals").update({
+            "status": "complete",
+            "progress": 100,
+            "completed_at": now,
+            "updated_at": now,
+        }).eq("id", goal_id).eq("user_id", user_id).execute()
+
+        # Generate retrospective
+        retro = await self.generate_retrospective(user_id, goal_id)
+
+        # Update readiness — goal_clarity domain
+        try:
+            from src.onboarding.orchestrator import OnboardingOrchestrator
+
+            orch = OnboardingOrchestrator()
+            await orch.update_readiness_scores(user_id, {"goal_clarity": 10.0})
+        except Exception as e:
+            logger.warning("Failed to update readiness on goal completion: %s", e)
+
+        logger.info(
+            "Goal completed",
+            extra={"goal_id": goal_id, "user_id": user_id},
         )
 
-        if result.data:
-            logger.info("Goal completed", extra={"goal_id": goal_id})
-            return cast(dict[str, Any], result.data[0])
-
-        logger.warning("Goal not found for complete", extra={"goal_id": goal_id})
-        return None
+        return {**goal, "status": "complete", "retrospective": retro}
 
     async def update_progress(
         self,
@@ -584,6 +588,18 @@ class GoalService:
                     "milestone_id": milestone_id,
                 },
             )
+
+            # Check if all milestones done → auto-complete goal
+            all_ms = (
+                self._db.table("goal_milestones")
+                .select("status")
+                .eq("goal_id", goal_id)
+                .execute()
+            )
+            all_statuses = [m.get("status") for m in (all_ms.data or [])]
+            if all_statuses and all(s in ("complete", "skipped") for s in all_statuses):
+                await self.complete_goal(user_id, goal_id)
+
             return cast(dict[str, Any], result.data[0])
 
         logger.warning(

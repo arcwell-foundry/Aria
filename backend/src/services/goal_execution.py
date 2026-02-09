@@ -248,13 +248,26 @@ class GoalExecutionService:
         prompt = builder(goal, context)
 
         try:
+            # Build role context from user profile
+            user_profile = context.get("user_profile", {})
+            user_role = user_profile.get("role", "")
+            user_title = user_profile.get("title", "")
+            company_name = context.get("company_name", "")
+
+            role_context = ""
+            if user_role or user_title:
+                role_context = (
+                    f"\nThe user is a {user_title} in {user_role} at {company_name}. "
+                    "Tailor your analysis to their perspective and priorities."
+                )
+
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 system_prompt=(
                     "You are ARIA, an AI Department Director for life sciences "
                     "commercial teams. You are performing an initial analysis based "
                     "on onboarding data. Be specific, actionable, and concise. "
-                    "Respond with a JSON object only."
+                    f"Respond with a JSON object only.{role_context}"
                 ),
                 max_tokens=2048,
                 temperature=0.4,
@@ -453,7 +466,7 @@ class GoalExecutionService:
         # Build enrichment summary from facts
         fact_texts = [f.get("fact", "") for f in facts[:20]]
 
-        return {
+        context = {
             "profile": profile,
             "company": company,
             "company_name": company.get("name", "the company"),
@@ -464,6 +477,33 @@ class GoalExecutionService:
             "gaps": [g.get("task", "") for g in gaps[:5]],
             "readiness": readiness,
         }
+
+        # Fetch user profile for role context
+        try:
+            profile_result = (
+                self._db.table("user_profiles")
+                .select("role, title, full_name, company_id")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile_result.data:
+                context["user_profile"] = profile_result.data
+                company_id = profile_result.data.get("company_id")
+                if company_id:
+                    company_result = (
+                        self._db.table("companies")
+                        .select("name")
+                        .eq("id", company_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    if company_result.data:
+                        context["company_name"] = company_result.data.get("name", "")
+        except Exception as e:
+            logger.warning("Failed to fetch user profile for context: %s", e)
+
+        return context
 
     # --- Prompt Builders ---
 

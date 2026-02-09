@@ -12,10 +12,12 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
     full_name: "",
     title: "",
     department: "",
+    role: "",
     linkedin_url: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [linkedinResearching, setLinkedinResearching] = useState(false);
 
   // Load saved profile data on mount (for revisiting completed step)
   useEffect(() => {
@@ -26,6 +28,7 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
           full_name: u.full_name || prev.full_name,
           title: u.title || prev.title,
           department: u.department || prev.department,
+          role: u.role || prev.role,
           linkedin_url: u.linkedin_url || prev.linkedin_url,
         }));
       })
@@ -44,6 +47,11 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
         return next;
       });
     }
+  };
+
+  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const validateForm = (): boolean => {
@@ -83,11 +91,17 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
       if (formData.department.trim()) {
         payload.department = formData.department.trim();
       }
+      if (formData.role) {
+        payload.role = formData.role;
+      }
       if (formData.linkedin_url.trim()) {
         payload.linkedin_url = formData.linkedin_url.trim();
       }
 
       await updateUserDetails(payload);
+      if (formData.linkedin_url.trim()) {
+        setLinkedinResearching(true);
+      }
       onComplete();
     } catch {
       setErrors({
@@ -240,6 +254,42 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
           />
         </div>
 
+        {/* Role */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="role"
+            className="font-sans text-[13px] font-medium text-secondary"
+          >
+            Role
+          </label>
+          <select
+            id="role"
+            name="role"
+            value={formData.role}
+            onChange={handleSelectChange}
+            disabled={isSubmitting}
+            className="
+              bg-subtle border border-border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content
+              focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive
+              transition-colors duration-150
+              disabled:opacity-50 disabled:cursor-not-allowed
+              appearance-none
+            "
+          >
+            <option value="">Select your role...</option>
+            <option value="Sales">Sales</option>
+            <option value="Business Development">Business Development</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Operations">Operations</option>
+            <option value="Executive">Executive</option>
+            <option value="Clinical">Clinical</option>
+            <option value="Regulatory">Regulatory</option>
+            <option value="Medical Affairs">Medical Affairs</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
         {/* LinkedIn URL */}
         <div className="flex flex-col gap-1.5">
           <label
@@ -336,6 +386,20 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             </button>
           )}
         </div>
+
+        {linkedinResearching && (
+          <div className="rounded-xl bg-subtle border border-border px-5 py-4 flex items-center gap-3">
+            <Loader2
+              size={16}
+              strokeWidth={1.5}
+              className="animate-spin text-interactive"
+              aria-hidden="true"
+            />
+            <p className="font-sans text-[13px] text-secondary">
+              ARIA is researching your background...
+            </p>
+          </div>
+        )}
       </form>
     </div>
   );

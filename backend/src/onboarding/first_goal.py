@@ -729,19 +729,49 @@ Respond ONLY with the JSON object."""
             logger.warning(f"Failed to update readiness score: {e}")
 
     async def _create_goal_milestones(
-        self, user_id: str, goal_id: str, title: str, _description: str | None
+        self, user_id: str, goal_id: str, title: str, description: str | None
     ) -> None:
-        """Create prospective memory entries for goal milestones.
+        """Decompose a goal into milestones via LLM and persist them.
+
+        Calls ``_decompose_goal`` to obtain 3-5 concrete milestones, inserts
+        each into the ``goal_milestones`` table, and creates a prospective
+        memory check-in for the next day.
 
         Args:
             user_id: The user's UUID.
             goal_id: The created goal's UUID.
             title: Goal title.
-            _description: Goal description (unused, reserved for future).
+            description: Goal description used for LLM decomposition.
         """
         try:
-            # Create a check-in task for tomorrow
-            tomorrow = datetime.now(UTC) + timedelta(days=1)
+            # --- 1. Decompose goal into milestones via LLM ----------------
+            milestones = await self._decompose_goal(title, description)
+
+            # --- 2. Persist each milestone --------------------------------
+            now = datetime.now(UTC)
+            for i, milestone in enumerate(milestones):
+                estimated_days = milestone.get("estimated_days", (i + 1) * 7)
+                due_date = now + timedelta(days=int(estimated_days))
+
+                self._db.table("goal_milestones").insert(
+                    {
+                        "goal_id": goal_id,
+                        "title": milestone["title"],
+                        "description": milestone.get("description", ""),
+                        "agent_type": milestone.get("agent_type"),
+                        "success_criteria": milestone.get("success_criteria"),
+                        "status": "pending",
+                        "sort_order": i + 1,
+                        "due_date": due_date.isoformat(),
+                    }
+                ).execute()
+
+            logger.info(
+                f"Created {len(milestones)} milestones for goal {goal_id}"
+            )
+
+            # --- 3. Prospective memory check-in (preserved behaviour) -----
+            tomorrow = now + timedelta(days=1)
 
             self._db.table("prospective_memories").insert(
                 {
@@ -761,6 +791,101 @@ Respond ONLY with the JSON object."""
 
         except Exception as e:
             logger.warning(f"Failed to create goal milestones: {e}")
+
+    async def _decompose_goal(
+        self, title: str, description: str | None
+    ) -> list[dict[str, Any]]:
+        """Use the LLM to break a goal into 3-5 actionable milestones.
+
+        Each milestone contains:
+        - ``title``: Short milestone name.
+        - ``description``: What needs to happen.
+        - ``agent_type``: Which ARIA agent owns the milestone
+          (hunter | analyst | scout | scribe | operator | strategist).
+        - ``estimated_days``: Days from now until the milestone is due.
+        - ``success_criteria``: How to know the milestone is complete.
+
+        On any LLM or parsing failure the method returns three sensible
+        fallback milestones so that the caller always receives a valid list.
+
+        Args:
+            title: The goal title.
+            description: Optional longer goal description.
+
+        Returns:
+            A list of 3-5 milestone dicts.
+        """
+        desc_block = description or "No additional description provided."
+
+        prompt = (
+            "You are ARIA, an AI Department Director for life-sciences "
+            "commercial teams. A user has set the following goal:\n\n"
+            f"Title: {title}\n"
+            f"Description: {desc_block}\n\n"
+            "Break this goal into 3-5 concrete, sequential milestones. "
+            "Return ONLY a JSON array (no markdown, no commentary). "
+            "Each element must be an object with exactly these keys:\n"
+            '  "title": short milestone name,\n'
+            '  "description": what needs to happen,\n'
+            '  "agent_type": one of "hunter", "analyst", "scout", '
+            '"scribe", "operator", "strategist",\n'
+            '  "estimated_days": integer days from today,\n'
+            '  "success_criteria": how to know this milestone is done.\n\n'
+            "Choose agent_type based on the nature of the milestone:\n"
+            "- hunter: pipeline generation, outreach, prospecting\n"
+            "- analyst: data analysis, reporting, metrics\n"
+            "- scout: market research, competitive intelligence\n"
+            "- scribe: documentation, content creation, meeting notes\n"
+            "- operator: process automation, integrations, scheduling\n"
+            "- strategist: planning, account strategy, deal coaching\n"
+        )
+
+        try:
+            raw = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.3,
+            )
+            result = json.loads(raw)
+
+            # Validate shape: must be a list of dicts with at least a title
+            if (
+                isinstance(result, list)
+                and len(result) >= 2
+                and all(isinstance(m, dict) and "title" in m for m in result)
+            ):
+                return result[:5]  # cap at 5
+
+            logger.warning(
+                "LLM returned unexpected milestone structure; using fallbacks"
+            )
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Goal decomposition LLM call failed: {e}")
+
+        # ----- Fallback milestones ----------------------------------------
+        return [
+            {
+                "title": "Research & preparation",
+                "description": f"Gather background information relevant to: {title}",
+                "agent_type": "scout",
+                "estimated_days": 3,
+                "success_criteria": "Key data points collected and summarised",
+            },
+            {
+                "title": "Strategy & planning",
+                "description": f"Create an action plan to achieve: {title}",
+                "agent_type": "strategist",
+                "estimated_days": 7,
+                "success_criteria": "Written plan with owners and timelines",
+            },
+            {
+                "title": "Execute & track",
+                "description": f"Carry out the plan and track progress toward: {title}",
+                "agent_type": "operator",
+                "estimated_days": 14,
+                "success_criteria": "Measurable progress against plan milestones",
+            },
+        ]
 
     async def _record_goal_event(
         self, user_id: str, goal_id: str, title: str

@@ -192,6 +192,23 @@ class PriorityEmailIngestion:
             # 12. Trigger retroactive enrichment (US-923)
             await self._trigger_retroactive_enrichment(user_id, contacts)
 
+            # Record activity for feed
+            try:
+                from src.services.activity_service import ActivityService
+
+                await ActivityService().record(
+                    user_id=user_id,
+                    agent="analyst",
+                    activity_type="email_bootstrap_complete",
+                    title="Analyzed email history",
+                    description=(
+                        "ARIA analyzed email history — identified key contacts and active deals"
+                    ),
+                    confidence=0.8,
+                )
+            except Exception as e:
+                logger.warning("Failed to record email bootstrap activity: %s", e)
+
             if progress_callback:
                 await progress_callback(
                     {

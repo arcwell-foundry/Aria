@@ -873,6 +873,30 @@ Respond ONLY with the JSON array, no additional text."""
             except Exception as e:
                 logger.warning(f"Failed to store hypothesis in Graphiti: {e}")
 
+        # Record activity for feed
+        try:
+            from src.services.activity_service import ActivityService
+
+            await ActivityService().record(
+                user_id=user_id,
+                agent="scout",
+                activity_type="enrichment_complete",
+                title="Researched company background",
+                description=(
+                    f"ARIA researched the company — discovered {len(result.facts)} facts "
+                    f"about their {result.classification.company_type} business"
+                ),
+                confidence=0.85,
+                related_entity_type="company",
+                related_entity_id=company_id,
+                metadata={
+                    "fact_count": len(result.facts),
+                    "company_type": result.classification.company_type,
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to record enrichment activity: %s", e)
+
         # Store knowledge gaps as Prospective Memory tasks
         for gap in result.gaps:
             try:

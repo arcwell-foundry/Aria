@@ -225,6 +225,8 @@ class FirstConversationGenerator:
             f"Write your FIRST message to {user_name or 'the user'}.\n\n"
             f"CONTEXT:\n"
             f"- Company classification: {classification or 'Unknown'}\n"
+            f"- User's role: {(user_profile or {}).get('role', 'Unknown')}\n"
+            f"- User's title: {(user_profile or {}).get('title', 'Unknown')}\n"
             f"- Key facts I've learned:\n{facts_summary or 'None yet'}\n\n"
             f"- Most interesting finding: {interesting_fact or 'None yet'}\n"
             f"- Knowledge gaps: {gap_list or 'None critical'}\n"

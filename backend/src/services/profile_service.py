@@ -21,6 +21,7 @@ ALLOWED_USER_FIELDS = frozenset(
         "full_name",
         "title",
         "department",
+        "role",
         "linkedin_url",
         "avatar_url",
         "communication_preferences",
@@ -201,6 +202,41 @@ class ProfileService:
             asyncio.create_task(
                 ProfileMergeService().process_update(user_id, old_data, update_data)
             )
+
+            # Fire LinkedIn research if linkedin_url was updated
+            try:
+                if "linkedin_url" in update_data and update_data["linkedin_url"]:
+                    from src.onboarding.linkedin_research import LinkedInResearchService
+
+                    full_name = update_data.get("full_name") or old_profile.get("full_name", "")
+                    title = update_data.get("title") or old_profile.get("title", "")
+                    company_name = ""
+                    company_id = old_profile.get("company_id")
+                    if company_id:
+                        try:
+                            comp_resp = (
+                                self.db.table("companies")
+                                .select("name")
+                                .eq("id", company_id)
+                                .maybe_single()
+                                .execute()
+                            )
+                            if comp_resp.data:
+                                company_name = comp_resp.data.get("name", "")
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(
+                        LinkedInResearchService().research_profile(
+                            user_id=user_id,
+                            linkedin_url=update_data["linkedin_url"],
+                            full_name=full_name,
+                            job_title=title,
+                            company_name=company_name,
+                        )
+                    )
+            except Exception as e:
+                logger.warning("Failed to fire LinkedIn research: %s", e)
 
             result = cast(dict[str, Any], response.data[0])
             result["merge_pending"] = True
