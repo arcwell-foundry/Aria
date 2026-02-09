@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useOnboardingState,
   useCompleteStep,
   useSkipStep,
   useInjectedQuestions,
+  onboardingKeys,
 } from "@/hooks/useOnboarding";
 import { SKIPPABLE_STEPS } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
@@ -13,9 +15,13 @@ import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoverySt
 import { DocumentUploadStep } from "@/components/onboarding/DocumentUploadStep";
 import { UserProfileStep } from "@/components/onboarding/UserProfileStep";
 import { WritingSampleStep } from "@/components/onboarding/WritingSampleStep";
+import { EmailIntegrationStep } from "@/components/onboarding/EmailIntegrationStep";
+import { IntegrationWizardStep } from "@/components/onboarding/IntegrationWizardStep";
+import { FirstGoalStep } from "@/components/onboarding/FirstGoalStep";
 
 export function OnboardingPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data, isLoading } = useOnboardingState();
   const completeMutation = useCompleteStep();
   const skipMutation = useSkipStep();
@@ -102,6 +108,21 @@ export function OnboardingPage() {
               <WritingSampleStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
+              />
+            ) : currentStep === "email_integration" ? (
+              <EmailIntegrationStep
+                onComplete={() => handleComplete()}
+                onSkip={handleSkip}
+              />
+            ) : currentStep === "integration_wizard" ? (
+              <IntegrationWizardStep
+                onComplete={() => handleComplete()}
+              />
+            ) : currentStep === "first_goal" ? (
+              <FirstGoalStep
+                onComplete={() => {
+                  queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
+                }}
               />
             ) : (
               <OnboardingStepPlaceholder
