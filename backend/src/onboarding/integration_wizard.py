@@ -174,7 +174,10 @@ class IntegrationWizardService:
             {"auth_url": str, "connection_id": str, "status": "pending"}
             or {"status": "error", "message": str} on failure.
         """
+        print(f"[DEBUG connect] connect_integration called: user_id={user_id!r}, app_name={app_name!r}")
+
         if app_name not in self.INTEGRATIONS:
+            print(f"[DEBUG connect] app_name={app_name!r} NOT in INTEGRATIONS keys={list(self.INTEGRATIONS.keys())}")
             logger.warning(
                 "Invalid integration name",
                 extra={"app_name": app_name, "user_id": user_id},
@@ -188,6 +191,7 @@ class IntegrationWizardService:
             oauth_client = get_oauth_client()
             integration_type = self.INTEGRATIONS[app_name]["composio_type"]
             redirect_uri = f"{self._get_base_url()}/integrations/callback"
+            print(f"[DEBUG connect] integration_type={integration_type!r}, redirect_uri={redirect_uri!r}")
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)
             auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
@@ -195,6 +199,7 @@ class IntegrationWizardService:
                 integration_type=integration_type,
                 redirect_uri=redirect_uri,
             )
+            print(f"[DEBUG connect] Got auth_url={auth_url!r}, connection_id={connection_id!r}")
 
             logger.info(
                 "OAuth initiated for integration",
@@ -209,6 +214,7 @@ class IntegrationWizardService:
 
         except ValueError as e:
             # Auth config not found — actionable error for the user
+            print(f"[DEBUG connect] ValueError: {e}")
             logger.warning(
                 "OAuth auth config missing",
                 extra={"user_id": user_id, "app_name": app_name, "error": str(e)},
@@ -220,6 +226,9 @@ class IntegrationWizardService:
             }
 
         except Exception as e:
+            print(f"[DEBUG connect] Exception: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             logger.warning(
                 "OAuth initiation failed",
                 extra={"user_id": user_id, "app_name": app_name, "error": str(e)},
