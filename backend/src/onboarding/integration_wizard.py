@@ -322,16 +322,24 @@ class IntegrationWizardService:
         Returns:
             Dict with save status: {"status": "saved"}
         """
-        # Save to user_settings
+        # Save to user_settings (merge into existing integrations JSONB)
+        existing = (
+            self._db.table("user_settings")
+            .select("integrations")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        merged_integrations = existing.data.get("integrations", {}) if existing.data else {}
+        merged_integrations["slack_channels"] = preferences.slack_channels
+        merged_integrations["notification_enabled"] = preferences.notification_enabled
+        merged_integrations["sync_frequency_hours"] = preferences.sync_frequency_hours
         self._db.table("user_settings").upsert(
             {
                 "user_id": user_id,
-                "integrations": {
-                    "slack_channels": preferences.slack_channels,
-                    "notification_enabled": preferences.notification_enabled,
-                    "sync_frequency_hours": preferences.sync_frequency_hours,
-                },
-            }
+                "integrations": merged_integrations,
+            },
+            on_conflict="user_id",
         ).execute()
 
         # Update readiness score (integrations domain)

@@ -178,19 +178,27 @@ class EmailIntegrationService:
         Returns:
             Dict with save status: {"status": "saved", "exclusions": int}
         """
-        # Save configuration to user_settings
+        # Save configuration to user_settings (merge into existing integrations JSONB)
+        existing = (
+            self._db.table("user_settings")
+            .select("integrations")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        merged_integrations = existing.data.get("integrations", {}) if existing.data else {}
+        merged_integrations["email"] = {
+            "provider": config.provider,
+            "privacy_exclusions": [e.model_dump() for e in config.privacy_exclusions],
+            "ingestion_scope_days": config.ingestion_scope_days,
+            "attachment_ingestion": config.attachment_ingestion,
+        }
         self._db.table("user_settings").upsert(
             {
                 "user_id": user_id,
-                "integrations": {
-                    "email": {
-                        "provider": config.provider,
-                        "privacy_exclusions": [e.model_dump() for e in config.privacy_exclusions],
-                        "ingestion_scope_days": config.ingestion_scope_days,
-                        "attachment_ingestion": config.attachment_ingestion,
-                    }
-                },
-            }
+                "integrations": merged_integrations,
+            },
+            on_conflict="user_id",
         ).execute()
 
         # Update readiness scores
