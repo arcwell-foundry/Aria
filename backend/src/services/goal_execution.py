@@ -261,6 +261,35 @@ class GoalExecutionService:
                     "Tailor your analysis to their perspective and priorities."
                 )
 
+            # Inject ARIA config and tone guidance (Gap #33)
+            config_context = ""
+            aria_config = context.get("aria_config", {})
+            if aria_config:
+                role_name = aria_config.get("role", "")
+                domain_focus = aria_config.get("domain_focus", {})
+                therapeutic_areas = domain_focus.get("therapeutic_areas", [])
+                if role_name:
+                    config_context += f"\nARIA role: {role_name}."
+                if therapeutic_areas:
+                    config_context += f"\nFocus areas: {', '.join(therapeutic_areas)}."
+                competitor_watchlist = aria_config.get("competitor_watchlist", [])
+                if competitor_watchlist:
+                    config_context += (
+                        f"\nCompetitor watchlist: {', '.join(competitor_watchlist)}."
+                    )
+                personality = aria_config.get("personality", {})
+                if personality:
+                    config_context += (
+                        f"\nPersonality: assertiveness={personality.get('assertiveness', 50)}, "
+                        f"verbosity={personality.get('verbosity', 50)}, "
+                        f"proactiveness={personality.get('proactiveness', 50)}."
+                    )
+
+            tone_context = ""
+            tone_guidance = context.get("tone_guidance", "")
+            if tone_guidance:
+                tone_context = f"\nCommunication style: {tone_guidance}"
+
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 system_prompt=(
@@ -268,6 +297,7 @@ class GoalExecutionService:
                     "commercial teams. You are performing an initial analysis based "
                     "on onboarding data. Be specific, actionable, and concise. "
                     f"Respond with a JSON object only.{role_context}"
+                    f"{config_context}{tone_context}"
                 ),
                 max_tokens=2048,
                 temperature=0.4,
@@ -302,6 +332,14 @@ class GoalExecutionService:
                 related_entity_id=goal["id"],
             )
 
+            # Submit recommended actions to action queue (Gap #32)
+            await self._submit_actions_to_queue(
+                user_id=user_id,
+                agent_type=agent_type,
+                content=content,
+                goal_id=goal["id"],
+            )
+
             return {
                 "agent_type": agent_type,
                 "success": True,
@@ -322,6 +360,63 @@ class GoalExecutionService:
                 "success": False,
                 "error": str(e),
             }
+
+    async def _submit_actions_to_queue(
+        self,
+        user_id: str,
+        agent_type: str,
+        content: dict[str, Any],
+        goal_id: str,
+    ) -> None:
+        """Submit recommended actions from agent analysis to action queue.
+
+        Extracts actionable recommendations from the analysis content and
+        submits them for user approval via the action queue workflow.
+        """
+        try:
+            from src.models.action_queue import (
+                ActionAgent,
+                ActionCreate,
+                ActionType,
+                RiskLevel,
+            )
+            from src.services.action_queue_service import ActionQueueService
+
+            # Map agent_type to ActionAgent enum
+            agent_map: dict[str, ActionAgent] = {
+                "scout": ActionAgent.SCOUT,
+                "analyst": ActionAgent.ANALYST,
+                "hunter": ActionAgent.HUNTER,
+                "strategist": ActionAgent.STRATEGIST,
+                "scribe": ActionAgent.SCRIBE,
+                "operator": ActionAgent.OPERATOR,
+            }
+            agent_enum = agent_map.get(agent_type)
+            if not agent_enum:
+                return
+
+            queue = ActionQueueService()
+            recommendations = content.get("recommendations", content.get("next_steps", []))
+            if isinstance(recommendations, list):
+                for rec in recommendations[:3]:
+                    action_title = rec if isinstance(rec, str) else rec.get("action", str(rec))
+                    action_data = ActionCreate(
+                        agent=agent_enum,
+                        action_type=ActionType.RESEARCH,
+                        title=action_title[:200],
+                        description=f"Recommended by {agent_type.title()} agent during initial analysis.",
+                        risk_level=RiskLevel.LOW,
+                        payload={
+                            "goal_id": goal_id,
+                            "source": "activation_analysis",
+                        },
+                    )
+                    await queue.submit_action(
+                        user_id=user_id,
+                        data=action_data,
+                    )
+        except Exception as e:
+            logger.warning("Failed to submit actions to queue: %s", e)
 
     async def _store_execution(
         self,
@@ -502,6 +597,28 @@ class GoalExecutionService:
                         context["company_name"] = company_result.data.get("name", "")
         except Exception as e:
             logger.warning("Failed to fetch user profile for context: %s", e)
+
+        # Load ARIA role configuration (Gap #33)
+        try:
+            settings_result = (
+                self._db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if settings_result.data:
+                prefs = settings_result.data.get("preferences", {})
+                aria_config = prefs.get("aria_config", {})
+                if aria_config:
+                    context["aria_config"] = aria_config
+                # Load personality calibration for tone guidance
+                dt = prefs.get("digital_twin", {})
+                calibration = dt.get("personality_calibration", {})
+                if calibration:
+                    context["tone_guidance"] = calibration.get("tone_guidance", "")
+        except Exception as e:
+            logger.warning("Failed to load aria_config for context: %s", e)
 
         return context
 

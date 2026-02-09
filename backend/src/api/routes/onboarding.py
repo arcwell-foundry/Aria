@@ -425,6 +425,22 @@ async def analyze_writing(
     """
     service = _get_writing_service()
     fingerprint = await service.analyze_samples(current_user.id, body.samples)
+
+    # Trigger early personality calibration after writing analysis (Gap #5)
+    try:
+        import asyncio
+
+        from src.onboarding.personality_calibrator import PersonalityCalibrator
+
+        task = asyncio.create_task(PersonalityCalibrator().calibrate(current_user.id))
+        task.add_done_callback(
+            lambda t: logger.warning("Early personality calibration failed: %s", t.exception())
+            if t.exception()
+            else None
+        )
+    except Exception as e:
+        logger.warning("Failed to trigger early personality calibration: %s", e)
+
     return fingerprint.model_dump()
 
 

@@ -1,0 +1,5 @@
+These migrations are DEPRECATED. The canonical migration directory is:
+  backend/supabase/migrations/
+
+Do NOT add new migrations here. All new migrations go in backend/supabase/migrations/.
+This directory is preserved only for reference — it will be removed in a future cleanup.

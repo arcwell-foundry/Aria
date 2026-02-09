@@ -689,8 +689,71 @@ class DocumentIngestionService:
                         },
                     }
                 ).execute()
+
+            # Generate causal hypotheses from extracted facts (Gap #14)
+            await self._generate_causal_hypotheses(user_id, company_id, doc_id, facts)
         except Exception as e:
             logger.warning("Knowledge extraction failed: %s", e)
+
+    async def _generate_causal_hypotheses(
+        self,
+        user_id: str,
+        company_id: str,
+        doc_id: str,
+        facts: list[dict[str, Any]],
+    ) -> None:
+        """Generate causal hypotheses from document facts (Gap #14).
+
+        Uses LLM to infer business implications from extracted facts,
+        stored with confidence 0.50-0.60 as inferred knowledge.
+        """
+        if len(facts) < 2:
+            return
+
+        fact_text = "\n".join(f"- {f['fact']}" for f in facts[:10])
+        prompt = (
+            "Given these business facts from a document:\n\n"
+            f"{fact_text}\n\n"
+            "Generate 3-5 causal business hypotheses — inferences about "
+            "what these facts imply for sales strategy. Format as JSON array:\n"
+            "[\n"
+            '  {"hypothesis": "Fact A → likely implication B", "confidence": 0.55}\n'
+            "]\n"
+            "Examples: 'Series C funding → hiring ramp → pipeline generation need', "
+            "'FDA approval → commercial launch prep → need for KOL mapping'. "
+            "Keep confidence between 0.50 and 0.60."
+        )
+
+        try:
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000,
+                temperature=0.5,
+            )
+            hypotheses: list[dict[str, Any]] = json.loads(response)
+            for h in hypotheses:
+                self._db.table("memory_semantic").insert(
+                    {
+                        "user_id": user_id,
+                        "fact": h["hypothesis"],
+                        "confidence": min(0.60, max(0.50, h.get("confidence", 0.55))),
+                        "source": "inferred_during_document_upload",
+                        "metadata": {
+                            "category": "causal_hypothesis",
+                            "document_id": doc_id,
+                            "company_id": company_id,
+                        },
+                    }
+                ).execute()
+            logger.info(
+                "Causal hypotheses generated from document",
+                extra={
+                    "document_id": doc_id,
+                    "hypothesis_count": len(hypotheses),
+                },
+            )
+        except Exception as e:
+            logger.warning("Causal hypothesis generation failed: %s", e)
 
     async def _update_progress(self, doc_id: str, progress: float, status: str) -> None:
         """Update document processing progress.

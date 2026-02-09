@@ -12,9 +12,11 @@ import {
   connectEmail,
   getEmailStatus,
   saveEmailPrivacy,
+  getBootstrapStatus,
   type EmailProvider,
   type PrivacyExclusion,
   type EmailIntegrationConfig,
+  type BootstrapStatus,
 } from "@/api/emailIntegration";
 
 interface EmailIntegrationStepProps {
@@ -42,6 +44,7 @@ export function EmailIntegrationStep({
   const [isSaving, setIsSaving] = useState(false);
   const [currentProvider, setCurrentProvider] = useState<EmailProvider | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
+  const [bootstrapStatus, setBootstrapStatus] = useState<BootstrapStatus | null>(null);
 
   useEffect(() => {
     loadEmailStatus();
@@ -121,6 +124,23 @@ export function EmailIntegrationStep({
     }
   };
 
+  // Poll bootstrap status after privacy config is saved
+  useEffect(() => {
+    if (!bootstrapStatus || bootstrapStatus.status === "idle") return;
+    if (bootstrapStatus.status === "complete" || bootstrapStatus.status === "failed") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await getBootstrapStatus();
+        setBootstrapStatus(status);
+      } catch {
+        // ignore polling errors
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [bootstrapStatus?.status]);
+
   const handleComplete = async () => {
     setIsSaving(true);
     try {
@@ -134,6 +154,7 @@ export function EmailIntegrationStep({
       };
 
       await saveEmailPrivacy(config);
+      setBootstrapStatus({ status: "processing" });
       onComplete();
     } catch (error) {
       console.error("Failed to save privacy config:", error);
@@ -235,6 +256,46 @@ export function EmailIntegrationStep({
               Connected to {currentProvider === "google" ? "Google Workspace" : "Microsoft 365"}
             </span>
           </div>
+
+          {/* Bootstrap Progress */}
+          {bootstrapStatus && bootstrapStatus.status === "processing" && (
+            <div className="flex flex-col gap-2 bg-[#161B2E] border border-[#2A2F42] rounded-xl p-4">
+              <div className="flex items-center gap-2">
+                <Loader2 size={14} strokeWidth={1.5} className="text-interactive animate-spin" />
+                <span className="font-sans text-[13px] font-medium text-content">
+                  Processing your email...
+                </span>
+              </div>
+              {bootstrapStatus.emails_processed != null && bootstrapStatus.emails_total != null && (
+                <div className="flex flex-col gap-1">
+                  <div className="w-full bg-border rounded-full h-1.5">
+                    <div
+                      className="bg-interactive h-1.5 rounded-full transition-all duration-300"
+                      style={{
+                        width: `${bootstrapStatus.emails_total > 0 ? Math.round((bootstrapStatus.emails_processed / bootstrapStatus.emails_total) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="font-sans text-[12px] text-secondary">
+                    {bootstrapStatus.emails_processed} of {bootstrapStatus.emails_total} emails
+                    {bootstrapStatus.contacts_found ? ` · ${bootstrapStatus.contacts_found} contacts found` : ""}
+                    {bootstrapStatus.deals_found ? ` · ${bootstrapStatus.deals_found} deals` : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {bootstrapStatus && bootstrapStatus.status === "complete" && (
+            <div className="flex items-center gap-2 bg-success/10 border border-success rounded-lg px-4 py-2.5">
+              <Check size={16} strokeWidth={1.5} className="text-success" />
+              <span className="font-sans text-[13px] font-medium text-success">
+                Email analysis complete
+                {bootstrapStatus.contacts_found ? ` — ${bootstrapStatus.contacts_found} contacts` : ""}
+                {bootstrapStatus.deals_found ? `, ${bootstrapStatus.deals_found} deals found` : ""}
+              </span>
+            </div>
+          )}
 
           {/* Privacy Controls Section */}
           <div className="flex flex-col gap-5">

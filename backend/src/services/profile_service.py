@@ -198,9 +198,16 @@ class ProfileService:
                 metadata={"fields": list(update_data.keys()), "section": "user_details"},
             )
 
-            # Fire US-922 Memory Merge Pipeline (background)
-            asyncio.create_task(
+            # Fire US-922 Memory Merge Pipeline (background) with error handling
+            task = asyncio.create_task(
                 ProfileMergeService().process_update(user_id, old_data, update_data)
+            )
+            task.add_done_callback(
+                lambda t: logger.error(
+                    "ProfileMerge pipeline failed: %s", t.exception()
+                )
+                if t.exception()
+                else None
             )
 
             # Fire LinkedIn research if linkedin_url was updated
@@ -226,7 +233,7 @@ class ProfileService:
                         except Exception:
                             pass
 
-                    asyncio.create_task(
+                    li_task = asyncio.create_task(
                         LinkedInResearchService().research_profile(
                             user_id=user_id,
                             linkedin_url=update_data["linkedin_url"],
@@ -234,6 +241,13 @@ class ProfileService:
                             job_title=title,
                             company_name=company_name,
                         )
+                    )
+                    li_task.add_done_callback(
+                        lambda t: logger.error(
+                            "LinkedIn research failed: %s", t.exception()
+                        )
+                        if t.exception()
+                        else None
                     )
             except Exception as e:
                 logger.warning("Failed to fire LinkedIn research: %s", e)

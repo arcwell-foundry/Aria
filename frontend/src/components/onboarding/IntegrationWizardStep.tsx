@@ -11,6 +11,7 @@ import {
   getIntegrationWizardStatus,
   connectIntegration,
   disconnectIntegration,
+  saveIntegrationPreferences,
   type IntegrationAppName,
   type IntegrationStatus,
 } from "@/api/onboarding";
@@ -354,7 +355,21 @@ export function IntegrationWizardStep({
           <div className="flex flex-col gap-3 pt-2">
             <button
               type="button"
-              onClick={onComplete}
+              onClick={async () => {
+                try {
+                  const slackChannels = statuses.messaging
+                    .filter((i) => i.connected && i.name === "SLACK")
+                    .map((i) => i.name);
+                  await saveIntegrationPreferences({
+                    slack_channels: slackChannels,
+                    notification_enabled: true,
+                    sync_frequency_hours: 1,
+                  });
+                } catch (e) {
+                  console.error("Failed to save integration preferences:", e);
+                }
+                onComplete();
+              }}
               className="bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[15px] hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2"
             >
               Continue

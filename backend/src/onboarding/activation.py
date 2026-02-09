@@ -163,6 +163,22 @@ class OnboardingCompletionOrchestrator:
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        # Final readiness recalculation (Gap #8)
+        try:
+            from src.onboarding.readiness import OnboardingReadinessService
+
+            readiness_service = OnboardingReadinessService()
+            await readiness_service.recalculate(user_id)
+            logger.info(
+                "Final readiness recalculation complete",
+                extra={"user_id": user_id},
+            )
+        except Exception as e:
+            logger.warning(
+                "Final readiness recalculation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
         # Record episodic memory event
         await self._record_activation_event(user_id, activations)
 

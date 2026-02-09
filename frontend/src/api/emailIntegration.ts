@@ -73,3 +73,18 @@ export async function saveEmailPrivacy(
   );
   return response.data;
 }
+
+export interface BootstrapStatus {
+  status: "idle" | "processing" | "complete" | "failed";
+  emails_processed?: number;
+  emails_total?: number;
+  contacts_found?: number;
+  deals_found?: number;
+}
+
+export async function getBootstrapStatus(): Promise<BootstrapStatus> {
+  const response = await apiClient.get<BootstrapStatus>(
+    "/onboarding/email/bootstrap/status"
+  );
+  return response.data;
+}
