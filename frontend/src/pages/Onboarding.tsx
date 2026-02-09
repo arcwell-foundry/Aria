@@ -11,6 +11,7 @@ import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
 import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
 import { DocumentUploadStep } from "@/components/onboarding/DocumentUploadStep";
+import { UserProfileStep } from "@/components/onboarding/UserProfileStep";
 import { WritingSampleStep } from "@/components/onboarding/WritingSampleStep";
 
 export function OnboardingPage() {
@@ -91,6 +92,11 @@ export function OnboardingPage() {
               <DocumentUploadStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
+              />
+            ) : currentStep === "user_profile" ? (
+              <UserProfileStep
+                onComplete={() => handleComplete()}
+                onSkip={isSkippable ? handleSkip : undefined}
               />
             ) : currentStep === "writing_samples" ? (
               <WritingSampleStep
