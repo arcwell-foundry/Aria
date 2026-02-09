@@ -218,6 +218,39 @@ class CompanyEnrichmentEngine:
             # Stage 7: Update readiness score
             await self._update_readiness(user_id, result.quality_score)
 
+            # Stage 8: Generate Memory Delta for frontend display
+            try:
+                from src.memory.delta_presenter import MemoryDeltaPresenter
+
+                presenter = MemoryDeltaPresenter()
+                deltas = await presenter.generate_delta(
+                    user_id=user_id,
+                    domain="corporate_memory",
+                )
+                # Store delta in onboarding_state.step_data for frontend consumption
+                delta_data = [d.model_dump() for d in deltas]
+                from src.db.supabase import SupabaseClient
+
+                db = SupabaseClient.get_client()
+                state_result = (
+                    db.table("onboarding_state")
+                    .select("step_data")
+                    .eq("user_id", user_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if state_result.data:
+                    step_data = state_result.data.get("step_data", {})
+                    step_data["enrichment_delta"] = delta_data
+                    db.table("onboarding_state").update({"step_data": step_data}).eq(
+                        "user_id", user_id
+                    ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Memory Delta generation after enrichment failed",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
+
             await self._report_progress(
                 EnrichmentProgress(
                     stage=EnrichmentStage.COMPLETE,
@@ -806,7 +839,7 @@ Respond ONLY with the JSON array, no additional text."""
             except Exception as e:
                 logger.warning(f"Failed to store fact: {e}")
 
-        # Store hypotheses in semantic memory (Graphiti fallback)
+        # Store hypotheses in semantic memory and Graphiti knowledge graph
         for hyp in result.hypotheses:
             try:
                 self._db.table("memory_semantic").insert(
@@ -822,7 +855,23 @@ Respond ONLY with the JSON array, no additional text."""
                     }
                 ).execute()
             except Exception as e:
-                logger.warning(f"Failed to store hypothesis: {e}")
+                logger.warning(f"Failed to store hypothesis in Supabase: {e}")
+
+            # Also store in Graphiti for temporal knowledge graph traversal
+            try:
+                from src.db.graphiti import GraphitiClient
+
+                await GraphitiClient.add_episode(
+                    name=f"causal_{hyp.premise[:40]}",
+                    episode_body=(
+                        f"Causal hypothesis: {hyp.premise} → {hyp.inference}. "
+                        f"Confidence: {hyp.confidence}"
+                    ),
+                    source_description="inferred_during_onboarding_enrichment",
+                    reference_time=datetime.now(UTC),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to store hypothesis in Graphiti: {e}")
 
         # Store knowledge gaps as Prospective Memory tasks
         for gap in result.gaps:

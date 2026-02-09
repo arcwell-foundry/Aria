@@ -69,6 +69,7 @@ class FirstConversationGenerator:
         gaps = await self._get_critical_gaps(user_id)
         goal = await self._get_first_goal(user_id)
         style = await self._get_writing_style(user_id)
+        personality = await self._get_personality_calibration(user_id)
         user_profile = await self._get_user_profile(user_id)
 
         # 2. Find the most interesting/surprising finding
@@ -83,6 +84,7 @@ class FirstConversationGenerator:
             gaps=gaps,
             goal=goal,
             style=style,
+            personality=personality,
         )
 
         # 4. Store as first message in conversation thread
@@ -171,6 +173,7 @@ class FirstConversationGenerator:
         gaps: list[dict[str, Any]],
         goal: dict[str, Any] | None,
         style: dict[str, Any] | None,
+        personality: dict[str, Any] | None = None,
     ) -> FirstConversationMessage:
         """Compose the full first message using LLM.
 
@@ -212,6 +215,11 @@ class FirstConversationGenerator:
             "you've done your homework and are worth the investment. Sound "
             "like an impressive, knowledgeable colleague — not a chatbot."
         )
+
+        # Inject personality calibration tone guidance if available
+        tone_guidance = (personality or {}).get("tone_guidance")
+        if tone_guidance:
+            system_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
 
         user_prompt = (
             f"Write your FIRST message to {user_name or 'the user'}.\n\n"
@@ -574,6 +582,30 @@ class FirstConversationGenerator:
         )
         if result.data:
             return result.data.get("preferences", {}).get("digital_twin", {}).get("writing_style")
+        return None
+
+    async def _get_personality_calibration(self, user_id: str) -> dict[str, Any] | None:
+        """Get personality calibration from Digital Twin for tone matching.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Personality calibration dict with tone_guidance, or None.
+        """
+        result = (
+            self._db.table("user_settings")
+            .select("preferences")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if result.data:
+            return (
+                result.data.get("preferences", {})
+                .get("digital_twin", {})
+                .get("personality_calibration")
+            )
         return None
 
     async def _get_user_profile(self, user_id: str) -> dict[str, Any] | None:

@@ -1,8 +1,9 @@
 """Graphiti client module for temporal knowledge graph operations."""
 
+import json
 import logging
-from datetime import datetime
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from src.core.circuit_breaker import CircuitBreaker
 from src.core.config import settings
@@ -160,6 +161,37 @@ class GraphitiClient:
             reference_time=reference_time,
         )
         return result
+
+    @classmethod
+    async def add_entity(
+        cls,
+        name: str,
+        entity_type: str,
+        metadata: dict[str, Any],
+        **_kwargs: Any,
+    ) -> object:
+        """Store an entity by creating an episode that references it.
+
+        Wraps entity creation as an episode with entity metadata,
+        since Graphiti's core abstraction is episodes (not raw nodes).
+
+        Args:
+            name: Entity name (e.g. person name, company name).
+            entity_type: Entity type (e.g. 'person', 'company', 'product').
+            metadata: Additional properties for the entity.
+            **_kwargs: Additional keyword args (e.g. user_id) for future use.
+
+        Returns:
+            The created episode object.
+        """
+        props = json.dumps(metadata) if metadata else "{}"
+        episode_body = f"Entity discovered: {name} ({entity_type}). Properties: {props}"
+        return await cls.add_episode(
+            name=f"entity_{entity_type}_{name}",
+            episode_body=episode_body,
+            source_description="onboarding_entity_extraction",
+            reference_time=datetime.now(UTC),
+        )
 
     @classmethod
     async def search(cls, query: str) -> list[object]:

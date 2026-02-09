@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,9 +6,14 @@ import {
   useCompleteStep,
   useSkipStep,
   useInjectedQuestions,
+  useEnrichmentDelta,
   onboardingKeys,
 } from "@/hooks/useOnboarding";
-import { SKIPPABLE_STEPS, type OnboardingStep } from "@/api/onboarding";
+import {
+  SKIPPABLE_STEPS,
+  answerInjectedQuestion,
+  type OnboardingStep,
+} from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
 import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
@@ -27,8 +32,31 @@ export function OnboardingPage() {
   const skipMutation = useSkipStep();
   const stepForQueries = data?.state?.current_step ?? "";
   const { data: injectedQuestions } = useInjectedQuestions(stepForQueries);
+  const { data: enrichmentDelta } = useEnrichmentDelta();
 
   const [viewingStep, setViewingStep] = useState<OnboardingStep | null>(null);
+  const [deltaAcknowledged, setDeltaAcknowledged] = useState(false);
+  const [oodaAnswers, setOodaAnswers] = useState<Record<number, string>>({});
+  const [oodaSubmitting, setOodaSubmitting] = useState<number | null>(null);
+
+  const handleOodaAnswer = useCallback(
+    async (index: number, question: string) => {
+      const answer = oodaAnswers[index];
+      if (!answer?.trim() || !stepForQueries) return;
+      setOodaSubmitting(index);
+      try {
+        await answerInjectedQuestion(stepForQueries, question, answer.trim());
+        setOodaAnswers((prev) => {
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
+      } finally {
+        setOodaSubmitting(null);
+      }
+    },
+    [oodaAnswers, stepForQueries]
+  );
 
   const currentStep = data?.state?.current_step;
   const prevStepRef = useRef(currentStep);
@@ -112,14 +140,86 @@ export function OnboardingPage() {
                 {injectedQuestions.map((q, i) => (
                   <div
                     key={i}
-                    className="rounded-xl border border-border bg-subtle px-5 py-4"
+                    className="rounded-xl border border-[#7B8EAA] bg-[#161B2E] px-5 py-4"
                   >
-                    <p className="text-[13px] font-medium text-secondary mb-1">
+                    <p className="text-[13px] font-medium text-[#8B92A5] mb-1">
                       {q.context}
                     </p>
-                    <p className="text-[15px] text-content">{q.question}</p>
+                    <p className="font-display text-[15px] text-[#E8E6E1] mb-3">{q.question}</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={oodaAnswers[i] ?? ""}
+                        onChange={(e) =>
+                          setOodaAnswers((prev) => ({ ...prev, [i]: e.target.value }))
+                        }
+                        placeholder="Your answer..."
+                        className="flex-1 bg-[#1E2235] border border-[#2A2F42] rounded-lg px-3 py-2 text-[14px] font-sans text-[#E8E6E1] placeholder:text-[#8B92A5]/50 focus:outline-none focus:border-[#7B8EAA] transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleOodaAnswer(i, q.question)}
+                        disabled={!oodaAnswers[i]?.trim() || oodaSubmitting === i}
+                        className="bg-[#7B8EAA] text-white rounded-lg px-3 py-2 text-[13px] font-sans font-medium hover:bg-[#95A5BD] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        {oodaSubmitting === i ? "..." : "Submit"}
+                      </button>
+                    </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Enrichment Memory Delta — show what ARIA learned after company discovery (US-920) */}
+            {!isRevisiting &&
+              displayStep === "document_upload" &&
+              !deltaAcknowledged &&
+              enrichmentDelta &&
+              enrichmentDelta.length > 0 && (
+              <div className="mb-8 rounded-xl border border-[#7B8EAA] bg-[#161B2E] p-6 animate-in fade-in slide-in-from-bottom-4 duration-400">
+                <h3 className="font-display text-[18px] text-[#E8E6E1] mb-1">
+                  Here&apos;s what I learned about your company
+                </h3>
+                <p className="font-sans text-[13px] text-[#8B92A5] mb-4">
+                  Review these findings — correct anything that looks off.
+                </p>
+                <div className="space-y-4">
+                  {enrichmentDelta.map((delta) => (
+                    <div key={delta.domain}>
+                      <p className="font-sans text-[13px] font-medium text-[#7B8EAA] uppercase tracking-wider mb-2">
+                        {delta.summary}
+                      </p>
+                      <div className="space-y-2">
+                        {delta.facts.slice(0, 8).map((fact) => (
+                          <div
+                            key={fact.id}
+                            className="flex items-start gap-3 bg-[#1E2235] rounded-lg px-4 py-3"
+                          >
+                            <div
+                              className={`mt-1 w-2 h-2 rounded-full shrink-0 ${
+                                fact.confidence >= 0.8
+                                  ? "bg-[#6B8F71]"
+                                  : fact.confidence >= 0.6
+                                    ? "bg-[#C4A962]"
+                                    : "bg-[#8B92A5]"
+                              }`}
+                            />
+                            <p className="font-sans text-[14px] text-[#E8E6E1] leading-relaxed">
+                              {fact.language || fact.fact}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeltaAcknowledged(true)}
+                  className="mt-4 bg-interactive text-white rounded-lg px-5 py-2 font-sans font-medium text-[14px] hover:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2"
+                >
+                  Looks good — continue
+                </button>
               </div>
             )}
 

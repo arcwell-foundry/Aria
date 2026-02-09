@@ -527,6 +527,69 @@ class OnboardingOrchestrator:
             extra={"user_id": user_id, "flags": integration_flags},
         )
 
+        # Update readiness score for integrations domain
+        connected_count = len(connected_providers)
+        # Score: 0 = no integrations, 30 = 1, 60 = 2, 80 = 3+
+        if connected_count >= 3:
+            integrations_score = 80.0
+        elif connected_count == 2:
+            integrations_score = 60.0
+        elif connected_count == 1:
+            integrations_score = 30.0
+        else:
+            integrations_score = 0.0
+
+        try:
+            await self.update_readiness_scores(user_id, {"integrations": integrations_score})
+        except Exception as e:
+            logger.warning(
+                "Failed to update integrations readiness",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # Create knowledge gaps for missing integrations → Prospective Memory
+        missing_categories: list[str] = []
+        if not integration_flags["crm_connected"]:
+            missing_categories.append("CRM (Salesforce/HubSpot)")
+        if not integration_flags["email_connected"]:
+            missing_categories.append("Email (Gmail/Outlook)")
+        if not integration_flags["calendar_connected"]:
+            missing_categories.append("Calendar")
+
+        if missing_categories:
+            try:
+                for category in missing_categories:
+                    self._db.table("prospective_memories").insert(
+                        {
+                            "user_id": user_id,
+                            "task": f"Connect {category} integration for enhanced ARIA capabilities",
+                            "status": "pending",
+                            "metadata": {
+                                "type": "knowledge_gap",
+                                "priority": "medium",
+                                "source": "integration_wizard",
+                                "gap_domain": "integrations",
+                            },
+                        }
+                    ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create integration gap entries",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
+
+        # Record episodic memory of integration wizard completion
+        await self._record_episodic_event(
+            user_id,
+            "integration_wizard_completed",
+            {
+                "connected_providers": connected_providers,
+                "connected_count": connected_count,
+                "integrations_readiness": integrations_score,
+                "missing_categories": missing_categories,
+            },
+        )
+
     async def _record_episodic_event(
         self,
         user_id: str,

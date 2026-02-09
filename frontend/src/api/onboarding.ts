@@ -113,6 +113,31 @@ export async function getEnrichmentStatus(): Promise<EnrichmentStatus> {
   return response.data;
 }
 
+// Enrichment Memory Delta (US-920)
+
+export interface EnrichmentMemoryFact {
+  id: string;
+  fact: string;
+  confidence: number;
+  source: string;
+  category: string;
+  language: string;
+}
+
+export interface EnrichmentMemoryDelta {
+  domain: string;
+  facts: EnrichmentMemoryFact[];
+  summary: string;
+  timestamp: string | null;
+}
+
+export async function getEnrichmentDelta(): Promise<EnrichmentMemoryDelta[]> {
+  const response = await apiClient.get<EnrichmentMemoryDelta[]>(
+    "/onboarding/enrichment/delta"
+  );
+  return response.data;
+}
+
 // Integration Wizard (US-909)
 
 export type IntegrationAppName =
@@ -333,6 +358,18 @@ export async function getInjectedQuestions(
 ): Promise<InjectedQuestion[]> {
   const response = await apiClient.get<InjectedQuestion[]>(
     `/onboarding/steps/${step}/injected-questions`
+  );
+  return response.data;
+}
+
+export async function answerInjectedQuestion(
+  step: string,
+  question: string,
+  answer: string
+): Promise<{ status: string }> {
+  const response = await apiClient.post<{ status: string }>(
+    `/onboarding/steps/${step}/injected-questions/answer`,
+    { question, answer }
   );
   return response.data;
 }

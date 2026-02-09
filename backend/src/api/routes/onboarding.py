@@ -179,6 +179,30 @@ async def get_enrichment_status(
     return {"status": "in_progress"}
 
 
+@router.get("/enrichment/delta")
+async def get_enrichment_delta(
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:
+    """Get Memory Delta generated after enrichment.
+
+    Returns the enrichment delta stored in onboarding_state.step_data
+    so the frontend can display what ARIA learned about the company.
+    """
+    db = SupabaseClient.get_client()
+    state = (
+        db.table("onboarding_state")
+        .select("step_data")
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not state.data:
+        return []
+
+    step_data = state.data.get("step_data", {})
+    return step_data.get("enrichment_delta", [])
+
+
 @router.post("/company-discovery/submit")
 async def submit_company_discovery(
     body: CompanyDiscoveryRequest,
@@ -941,9 +965,7 @@ async def activate_aria(
     from src.onboarding.activation import OnboardingCompletionOrchestrator
 
     activation_orchestrator = OnboardingCompletionOrchestrator()
-    asyncio.create_task(
-        activation_orchestrator.run_post_activation_pipeline(current_user.id)
-    )
+    asyncio.create_task(activation_orchestrator.run_post_activation_pipeline(current_user.id))
 
     return {"status": "activated", "redirect": "/dashboard"}
 
@@ -1134,6 +1156,56 @@ async def get_injected_questions(
     ooda = OnboardingOODAController()
     questions = await ooda.get_injected_questions(current_user.id, step)
     return [q.model_dump() for q in questions]
+
+
+class OODAQuestionAnswer(BaseModel):
+    """Request body for answering an OODA-injected question."""
+
+    question: str
+    answer: str
+
+
+@router.post("/steps/{step}/injected-questions/answer")
+async def answer_injected_question(
+    step: str,
+    body: OODAQuestionAnswer,
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """Store a user's answer to an OODA-injected question.
+
+    Saves the answer into onboarding_state.step_data under ooda_answers
+    so ARIA can incorporate this intelligence into memory construction.
+    """
+    db = SupabaseClient.get_client()
+    state = (
+        db.table("onboarding_state")
+        .select("step_data")
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not state.data:
+        raise HTTPException(status_code=404, detail="No onboarding state found")
+
+    step_data = state.data.get("step_data", {})
+    ooda_answers = step_data.get("ooda_answers", {})
+    if not isinstance(ooda_answers, dict):
+        ooda_answers = {}
+
+    # Key by step + question hash for uniqueness
+    answer_key = f"{step}_{hash(body.question) % 10000}"
+    ooda_answers[answer_key] = {
+        "step": step,
+        "question": body.question,
+        "answer": body.answer,
+    }
+    step_data["ooda_answers"] = ooda_answers
+
+    db.table("onboarding_state").update({"step_data": step_data}).eq(
+        "user_id", current_user.id
+    ).execute()
+
+    return {"status": "saved"}
 
 
 # Cross-user acceleration endpoints (US-917)

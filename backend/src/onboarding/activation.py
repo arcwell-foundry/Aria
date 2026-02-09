@@ -99,6 +99,26 @@ class OnboardingCompletionOrchestrator:
         # Strategist: Build go-to-market and account strategy
         activations["strategist"] = await self._activate_strategist(user_id, onboarding_data)
 
+        # Pre-install recommended skills based on company type + role (US-918)
+        try:
+            from src.onboarding.skill_recommender import SkillRecommendationEngine
+
+            enrichment_data = onboarding_data.get("company_discovery", {})
+            company_type = enrichment_data.get("company_type", "pharma")
+            skill_engine = SkillRecommendationEngine()
+            recommendations = await skill_engine.recommend(company_type)
+            installed = await skill_engine.pre_install(user_id, recommendations)
+            activations["skills_installed"] = installed
+            logger.info(
+                "Skills pre-installed during activation",
+                extra={"user_id": user_id, "installed": installed},
+            )
+        except Exception as e:
+            logger.warning(
+                "Skill pre-installation failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
         # Record episodic memory event
         await self._record_activation_event(user_id, activations)
 
@@ -722,10 +742,34 @@ class OnboardingCompletionOrchestrator:
             "Sound like an impressive colleague, not a chatbot. Be concise."
         )
 
+        # Fetch personality calibration tone guidance for this user
+        briefing_system_prompt = (
+            "You are ARIA, an AI Department Director for life sciences commercial teams."
+        )
+        try:
+            settings_result = (
+                self._db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            tone_guidance = (
+                (settings_result.data or {})
+                .get("preferences", {})
+                .get("digital_twin", {})
+                .get("personality_calibration", {})
+                .get("tone_guidance")
+            )
+            if tone_guidance:
+                briefing_system_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
+        except Exception:
+            pass  # Non-critical — fall back to default tone
+
         try:
             summary = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
-                system_prompt="You are ARIA, an AI Department Director for life sciences commercial teams.",
+                system_prompt=briefing_system_prompt,
                 max_tokens=300,
                 temperature=0.7,
             )

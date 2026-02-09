@@ -6,6 +6,7 @@ import {
   getRoutingDecision,
   getReadiness,
   getInjectedQuestions,
+  getEnrichmentDelta,
   type OnboardingStep,
 } from "@/api/onboarding";
 
@@ -16,6 +17,7 @@ export const onboardingKeys = {
   readiness: () => [...onboardingKeys.all, "readiness"] as const,
   injectedQuestions: (step: string) =>
     [...onboardingKeys.all, "injected-questions", step] as const,
+  enrichmentDelta: () => [...onboardingKeys.all, "enrichment-delta"] as const,
 };
 
 export function useOnboardingState() {
@@ -79,6 +81,13 @@ export function useInjectedQuestions(step: string) {
     queryKey: onboardingKeys.injectedQuestions(step),
     queryFn: () => getInjectedQuestions(step),
     enabled: !!step,
+  });
+}
+
+export function useEnrichmentDelta() {
+  return useQuery({
+    queryKey: onboardingKeys.enrichmentDelta(),
+    queryFn: getEnrichmentDelta,
   });
 }
 
