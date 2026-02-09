@@ -204,6 +204,7 @@ Respond in JSON format:
         company_data: dict[str, Any] = {
             "name": company_name,
             "domain": domain,
+            "website": website,
             "settings": {
                 "source": "onboarding",
                 "registered_by": user_id,

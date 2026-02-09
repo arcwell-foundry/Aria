@@ -165,6 +165,9 @@ class CrossUserAccelerationService:
         Returns ONLY corporate facts (no personal data). Privacy:
         User #2 never sees User #1's Digital Twin or personal contributions.
 
+        Queries both corporate_facts and memory_semantic tables to capture
+        all enrichment data (enrichment engine writes to memory_semantic).
+
         Args:
             company_id: ID of existing company.
             user_id: ID of requesting user (for logging, not filtering).
@@ -172,6 +175,8 @@ class CrossUserAccelerationService:
         Returns:
             Dict with facts list and metadata.
         """
+        facts = []
+
         # Query active corporate facts for this company
         result = (
             self._db.table("corporate_facts")
@@ -181,7 +186,6 @@ class CrossUserAccelerationService:
             .execute()
         )
 
-        facts = []
         if result.data:
             for row in result.data:
                 fact = MemoryDeltaFact(
@@ -192,6 +196,44 @@ class CrossUserAccelerationService:
                     source=row["source"],
                 )
                 facts.append(fact.to_dict())
+
+        # Also query memory_semantic for enrichment facts with this company_id.
+        # The enrichment engine writes to memory_semantic with company_id in metadata.
+        seen_facts = {f["object"] for f in facts}
+        try:
+            semantic_result = (
+                self._db.table("memory_semantic")
+                .select("fact, confidence, source, metadata")
+                .contains("metadata", {"company_id": company_id})
+                .execute()
+            )
+
+            if semantic_result.data:
+                for row in semantic_result.data:
+                    # Skip personal/digital-twin facts — only corporate data
+                    source = row.get("source", "")
+                    if "digital_twin" in source or "user_stated" in source:
+                        continue
+                    # Deduplicate against corporate_facts
+                    fact_text = row["fact"]
+                    if fact_text in seen_facts:
+                        continue
+                    seen_facts.add(fact_text)
+
+                    metadata = row.get("metadata") or {}
+                    fact = MemoryDeltaFact(
+                        subject=metadata.get("category", "Company"),
+                        predicate="has fact",
+                        object=fact_text,
+                        confidence=row["confidence"],
+                        source=source,
+                    )
+                    facts.append(fact.to_dict())
+        except Exception as e:
+            logger.warning(
+                "Failed to query memory_semantic for company facts",
+                extra={"company_id": company_id, "error": str(e)},
+            )
 
         logger.info(
             "Company memory delta retrieved",
@@ -316,9 +358,12 @@ class CrossUserAccelerationService:
     def _calculate_corporate_richness(self, company_id: str) -> int:
         """Calculate Corporate Memory richness score for a company.
 
+        Queries both corporate_facts and memory_semantic to capture all
+        enrichment data (enrichment engine writes to memory_semantic).
+
         Richness is based on:
-        - Number of active corporate_facts (target: 20+)
-        - Diversity of predicates (target: 8+ unique predicates)
+        - Number of facts across both tables (target: 20+)
+        - Diversity of predicates/categories (target: 8+ unique)
         - Confidence aggregation (average confidence)
 
         Args:
@@ -327,7 +372,10 @@ class CrossUserAccelerationService:
         Returns:
             Richness score from 0-100.
         """
-        # Get all active facts for company
+        all_predicates: set[str] = set()
+        all_confidences: list[float] = []
+
+        # Get all active facts from corporate_facts
         result = (
             self._db.table("corporate_facts")
             .select("predicate, confidence")
@@ -336,23 +384,46 @@ class CrossUserAccelerationService:
             .execute()
         )
 
-        if not result.data:
+        if result.data:
+            for f in result.data:
+                all_predicates.add(f["predicate"])
+                all_confidences.append(f["confidence"])
+
+        # Also query memory_semantic for enrichment facts with this company_id
+        try:
+            semantic_result = (
+                self._db.table("memory_semantic")
+                .select("confidence, source, metadata")
+                .contains("metadata", {"company_id": company_id})
+                .execute()
+            )
+
+            if semantic_result.data:
+                for row in semantic_result.data:
+                    # Skip personal facts — only corporate data
+                    source = row.get("source", "")
+                    if "digital_twin" in source or "user_stated" in source:
+                        continue
+                    all_confidences.append(row["confidence"])
+                    metadata = row.get("metadata") or {}
+                    category = metadata.get("category", source)
+                    all_predicates.add(category)
+        except Exception as e:
+            logger.warning(
+                "Failed to query memory_semantic for richness",
+                extra={"company_id": company_id, "error": str(e)},
+            )
+
+        fact_count = len(all_confidences)
+        if fact_count == 0:
             return 0
 
-        facts = result.data
-        fact_count = len(facts)
-
-        # Count unique predicates (diversity metric)
-        unique_predicates = {f["predicate"] for f in facts}
-        predicate_diversity = len(unique_predicates)
-
-        # Calculate average confidence
-        confidences = [f["confidence"] for f in facts]
-        avg_confidence = sum(confidences) / max(fact_count, 1)
+        predicate_diversity = len(all_predicates)
+        avg_confidence = sum(all_confidences) / fact_count
 
         # Richness formula:
         # - Fact count: 40% weight (target 20+)
-        # - Predicate diversity: 30% weight (target 8+)
+        # - Predicate diversity: 30% weight (target 8+ unique)
         # - Confidence: 30% weight
 
         fact_score = min(100, (fact_count / 20) * 100)
