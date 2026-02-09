@@ -122,9 +122,16 @@ Respond in JSON format:
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse life sciences gate response: {response}")
             return {
-                "is_life_sciences": False,
-                "confidence": 0.0,
-                "reasoning": "Unable to determine — manual review needed",
+                "is_life_sciences": True,
+                "confidence": 0.5,
+                "reasoning": "Unable to parse LLM response — allowing through for manual review",
+            }
+        except Exception as e:
+            logger.exception(f"Life sciences gate check failed: {e}")
+            return {
+                "is_life_sciences": True,
+                "confidence": 0.5,
+                "reasoning": "Gate check unavailable — allowing through for manual review",
             }
 
     async def check_existing_company(self, domain: str) -> dict[str, Any] | None:

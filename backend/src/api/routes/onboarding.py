@@ -192,21 +192,30 @@ async def submit_company_discovery(
     For non-life-sciences companies, adds to waitlist and returns
     a graceful message (not an error).
     """
-    service = _get_company_service()
-    result = await service.submit_company_discovery(
-        user_id=current_user.id,
-        company_name=body.company_name,
-        website=body.website,
-        email=body.email,
-    )
+    try:
+        service = _get_company_service()
+        result = await service.submit_company_discovery(
+            user_id=current_user.id,
+            company_name=body.company_name,
+            website=body.website,
+            email=body.email,
+        )
 
-    # Email validation errors are 400
-    if not result["success"] and result.get("type") == "email_validation":
-        raise HTTPException(status_code=400, detail=result["error"])
+        # Email validation errors are 400
+        if not result["success"] and result.get("type") == "email_validation":
+            raise HTTPException(status_code=400, detail=result["error"])
 
-    # Other results (including vertical mismatch) return 200
-    # with the full result for frontend handling
-    return result
+        # Other results (including vertical mismatch) return 200
+        # with the full result for frontend handling
+        return result
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Company discovery submission failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Company discovery failed. Please try again.",
+        )
 
 
 # Document upload endpoints (US-904)
