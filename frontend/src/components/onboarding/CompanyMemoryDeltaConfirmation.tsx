@@ -122,7 +122,7 @@ export function CompanyMemoryDeltaConfirmation({
 
       {/* High Confidence Facts */}
       {highConfidenceFacts.length > 0 && (
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-elevated border border-border rounded-xl p-6">
           <h2 className="font-sans text-[15px] font-medium text-content mb-4">
             What I know about {data.company_name || "your company"}
           </h2>
@@ -267,7 +267,7 @@ export function CompanyMemoryDeltaConfirmation({
           type="button"
           onClick={handleSomethingChanged}
           disabled={confirmMutation.isPending}
-          className="flex-1 bg-white text-content border border-border rounded-xl px-6 py-3.5 font-sans font-medium text-[15px] hover:bg-primary hover:border-interactive active:bg-border transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 min-h-[52px]"
+          className="flex-1 bg-elevated text-content border border-border rounded-xl px-6 py-3.5 font-sans font-medium text-[15px] hover:bg-subtle hover:border-interactive active:bg-border transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 min-h-[52px]"
         >
           Something's changed
         </button>

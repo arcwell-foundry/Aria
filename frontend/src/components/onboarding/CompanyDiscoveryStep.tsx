@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Building2, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   validateEmail,
   submitCompanyDiscovery,
 } from "@/api/companyDiscovery";
+import { getFullProfile } from "@/api/profile";
 import { EnrichmentProgress } from "@/components/onboarding/EnrichmentProgress";
 import { checkCrossUser } from "@/api/onboarding";
 import { CompanyMemoryDeltaConfirmation } from "./CompanyMemoryDeltaConfirmation";
@@ -24,6 +25,23 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+
+  // Load saved company data on mount (for revisiting completed step)
+  useEffect(() => {
+    getFullProfile()
+      .then((profile) => {
+        if (profile.company) {
+          setFormData((prev) => ({
+            company_name: profile.company!.name || prev.company_name,
+            website: profile.company!.website || prev.website,
+            email: prev.email,
+          }));
+        }
+      })
+      .catch(() => {
+        // No saved data yet
+      });
+  }, []);
 
   // Extract domain from email for cross-user check
   const emailDomain = formData.email.trim().split("@")[1];
@@ -204,7 +222,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
               placeholder="e.g., Genentech"
               autoComplete="organization"
               className={`
-                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+                bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans
+                text-content placeholder:text-secondary/50
                 focus:outline-none focus:ring-1 transition-colors duration-150
                 disabled:opacity-50 disabled:cursor-not-allowed
                 ${
@@ -249,7 +268,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
               placeholder="https://yourcompany.com"
               autoComplete="organization url"
               className={`
-                bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+                bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans
+                text-content placeholder:text-secondary/50
                 focus:outline-none focus:ring-1 transition-colors duration-150
                 disabled:opacity-50 disabled:cursor-not-allowed
                 ${
@@ -294,7 +314,8 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
                 placeholder="you@yourcompany.com"
                 autoComplete="email"
                 className={`
-                  bg-white border rounded-lg px-4 py-3 text-[15px] font-sans w-full pr-10
+                  bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans w-full pr-10
+                  text-content placeholder:text-secondary/50
                   focus:outline-none focus:ring-1 transition-colors duration-150
                   disabled:opacity-50 disabled:cursor-not-allowed
                   ${

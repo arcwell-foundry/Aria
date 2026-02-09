@@ -65,8 +65,7 @@ export function OnboardingStepPlaceholder({
     <div className="animate-in flex flex-col items-start gap-8 max-w-lg">
       <div className="flex flex-col gap-3">
         <h1
-          className="text-[32px] leading-[1.2] text-content"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-[32px] leading-[1.2] text-content font-display"
         >
           {info.title}
         </h1>

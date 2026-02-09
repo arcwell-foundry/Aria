@@ -249,7 +249,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                     key={index}
                     type="button"
                     onClick={() => handleSelectSuggestion(suggestion)}
-                    className="bg-white border border-border rounded-xl p-5 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
+                    className="bg-elevated border border-border rounded-xl p-5 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
                   >
                     <div className="flex items-start gap-3">
                       <Target size={20} strokeWidth={1.5} className="text-interactive shrink-0 mt-0.5" />
@@ -269,7 +269,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                   </button>
                 ))
               ) : (
-                <div className="bg-white border border-border rounded-xl p-6 text-center">
+                <div className="bg-elevated border border-border rounded-xl p-6 text-center">
                   <Sparkles size={24} strokeWidth={1.5} className="text-secondary mx-auto mb-3" />
                   <p className="font-sans text-[13px] text-secondary">
                     Complete more onboarding steps to get personalized suggestions,
@@ -294,7 +294,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                         key={index}
                         type="button"
                         onClick={() => handleSelectTemplate(template)}
-                        className="bg-white border border-border rounded-lg p-4 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
+                        className="bg-elevated border border-border rounded-lg p-4 text-left hover:border-interactive hover:shadow-sm transition-all duration-200 group"
                       >
                         <div className="flex flex-col gap-1">
                           <h4 className="font-sans text-[13px] font-medium text-content group-hover:text-interactive transition-colors">
@@ -315,7 +315,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
           {/* Free-form Input */}
           {inputMode === "freeform" && (
             <div className="flex flex-col gap-4">
-              <div className="bg-white border border-border rounded-xl p-5">
+              <div className="bg-elevated border border-border rounded-xl p-5">
                 <label
                   htmlFor="goal-input"
                   className="font-sans text-[13px] font-medium text-secondary mb-2 block"
@@ -328,7 +328,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                   onChange={(e) => setFreeformInput(e.target.value)}
                   placeholder="e.g., 'Help me prepare for the Pfizer meeting on Friday' or 'I need to build pipeline in the Northeast territory this quarter'"
                   rows={3}
-                  className="w-full bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive resize-none"
+                  className="w-full bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive resize-none"
                 />
                 <button
                   type="button"
@@ -365,7 +365,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
                       <p className="font-sans text-[13px] text-secondary">
                         Based on what you said, here's a more specific version:
                       </p>
-                      <div className="bg-white border border-border rounded-lg p-3">
+                      <div className="bg-elevated border border-border rounded-lg p-3">
                         <p className="font-sans text-[13px] text-content">
                           {validationResult.refined_version}
                         </p>
@@ -399,7 +399,7 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
       {/* Goal Preview */}
       {selectedGoal && (
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="bg-white border border-border rounded-xl p-6">
+          <div className="bg-elevated border border-border rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-sans text-[18px] font-medium text-content">
                 Goal Preview

@@ -398,7 +398,7 @@ function DocumentRow({ doc, onRemove }: DocumentRowProps) {
   return (
     <div
       role="listitem"
-      className="flex items-center gap-3 rounded-lg bg-white border border-border px-4 py-3 transition-colors duration-150"
+      className="flex items-center gap-3 rounded-lg bg-elevated border border-border px-4 py-3 transition-colors duration-150"
     >
       {/* Icon */}
       {fileIcon(doc.file_type)}

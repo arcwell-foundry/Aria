@@ -207,7 +207,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             ${
               inputMethod === "paste"
-                ? "bg-white text-content shadow-sm"
+                ? "bg-elevated text-content shadow-sm"
                 : "text-secondary hover:text-content"
             }
           `}
@@ -228,7 +228,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
             focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2
             ${
               inputMethod === "upload"
-                ? "bg-white text-content shadow-sm"
+                ? "bg-elevated text-content shadow-sm"
                 : "text-secondary hover:text-content"
             }
           `}
@@ -249,9 +249,9 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                 placeholder="Paste a recent email, proposal, or message you wrote..."
                 rows={4}
                 className="
-                  w-full bg-white border border-border rounded-lg px-4 py-3
-                  font-sans text-[15px] text-content
-                  placeholder:text-secondary/50
+                  w-full bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3
+                  font-sans text-[15px]
+
                   focus:border-interactive focus:ring-1 focus:ring-interactive
                   focus:outline-none resize-y
                   transition-colors duration-150
@@ -357,7 +357,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
                 <div
                   key={`${file.name}-${index}`}
                   role="listitem"
-                  className="flex items-center gap-3 rounded-lg bg-white border border-border px-4 py-3"
+                  className="flex items-center gap-3 rounded-lg bg-elevated border border-border px-4 py-3"
                 >
                   <FileText size={20} strokeWidth={1.5} className="text-interactive shrink-0" />
                   <span className="flex-1 font-sans text-[15px] text-content truncate">
@@ -421,7 +421,7 @@ export function WritingSampleStep({ onComplete, onSkip }: WritingSampleStepProps
 
       {/* Style preview card */}
       {fingerprint && (
-        <div className="rounded-xl bg-white border border-border p-6 flex flex-col gap-4 animate-in fade-in duration-400">
+        <div className="rounded-xl bg-elevated border border-border p-6 flex flex-col gap-4 animate-in fade-in duration-400">
           <p className="font-sans text-[15px] font-medium text-content">
             Here&apos;s how I&apos;d describe your style:
           </p>

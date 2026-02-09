@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,11 +31,15 @@ export function OnboardingPage() {
   const [viewingStep, setViewingStep] = useState<OnboardingStep | null>(null);
 
   const currentStep = data?.state?.current_step;
+  const prevStepRef = useRef(currentStep);
 
   // Reset viewingStep when the server's current step advances
-  useEffect(() => {
-    setViewingStep(null);
-  }, [currentStep]);
+  if (currentStep !== prevStepRef.current) {
+    prevStepRef.current = currentStep;
+    if (viewingStep !== null) {
+      setViewingStep(null);
+    }
+  }
 
   // Redirect to dashboard if onboarding is already complete
   useEffect(() => {

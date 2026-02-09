@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { updateUserDetails } from "@/api/profile";
+import { getFullProfile, updateUserDetails } from "@/api/profile";
 
 interface UserProfileStepProps {
   onComplete: () => void;
@@ -16,6 +16,23 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Load saved profile data on mount (for revisiting completed step)
+  useEffect(() => {
+    getFullProfile()
+      .then((profile) => {
+        const u = profile.user;
+        setFormData((prev) => ({
+          full_name: u.full_name || prev.full_name,
+          title: u.title || prev.title,
+          department: u.department || prev.department,
+          linkedin_url: u.linkedin_url || prev.linkedin_url,
+        }));
+      })
+      .catch(() => {
+        // No saved data yet
+      });
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -127,7 +144,8 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             placeholder="e.g., Jane Chen"
             autoComplete="name"
             className={`
-              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+              bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content placeholder:text-secondary/50
               focus:outline-none focus:ring-1 transition-colors duration-150
               disabled:opacity-50 disabled:cursor-not-allowed
               ${
@@ -170,7 +188,8 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             placeholder="e.g., Regional Sales Director"
             autoComplete="organization-title"
             className={`
-              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+              bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content placeholder:text-secondary/50
               focus:outline-none focus:ring-1 transition-colors duration-150
               disabled:opacity-50 disabled:cursor-not-allowed
               ${
@@ -212,7 +231,8 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             placeholder="e.g., Commercial Operations"
             autoComplete="off"
             className="
-              bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans
+              bg-subtle border border-border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content placeholder:text-secondary/50
               focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive
               transition-colors duration-150
               disabled:opacity-50 disabled:cursor-not-allowed
@@ -239,7 +259,8 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             placeholder="https://www.linkedin.com/in/yourprofile"
             autoComplete="off"
             className={`
-              bg-white border rounded-lg px-4 py-3 text-[15px] font-sans
+              bg-subtle border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content placeholder:text-secondary/50
               focus:outline-none focus:ring-1 transition-colors duration-150
               disabled:opacity-50 disabled:cursor-not-allowed
               ${

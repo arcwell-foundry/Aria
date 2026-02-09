@@ -170,7 +170,7 @@ export function EmailIntegrationStep({
               onClick={() => handleConnect("google")}
               disabled={connecting !== null}
               className={`
-                bg-white border rounded-xl p-5 flex flex-col items-center gap-3
+                bg-elevated border rounded-xl p-5 flex flex-col items-center gap-3
                 transition-all duration-200 cursor-pointer focus:outline-none
                 focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
@@ -196,7 +196,7 @@ export function EmailIntegrationStep({
               onClick={() => handleConnect("microsoft")}
               disabled={connecting !== null}
               className={`
-                bg-white border rounded-xl p-5 flex flex-col items-center gap-3
+                bg-elevated border rounded-xl p-5 flex flex-col items-center gap-3
                 transition-all duration-200 cursor-pointer focus:outline-none
                 focus:ring-2 focus:ring-interactive focus:ring-offset-2
                 ${
@@ -260,7 +260,7 @@ export function EmailIntegrationStep({
                       type: e.target.value as "sender" | "domain" | "category",
                     })
                   }
-                  className="bg-white border border-border rounded-lg px-3 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
+                  className="bg-subtle text-content border border-border rounded-lg px-3 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
                 >
                   <option value="sender">Sender</option>
                   <option value="domain">Domain</option>
@@ -280,7 +280,7 @@ export function EmailIntegrationStep({
                         : "category name"
                   }
                   onKeyPress={(e) => e.key === "Enter" && handleAddExclusion()}
-                  className="flex-1 bg-white border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
+                  className="flex-1 bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive"
                 />
                 <button
                   type="button"
@@ -329,7 +329,7 @@ export function EmailIntegrationStep({
                 ].map(({ key, label }) => (
                   <label
                     key={key}
-                    className="flex items-center justify-between bg-white border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150"
+                    className="flex items-center justify-between bg-elevated border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150"
                   >
                     <span className="font-sans text-[15px] text-content">
                       {label}
@@ -378,7 +378,7 @@ export function EmailIntegrationStep({
                   onChange={(e) =>
                     setIngestionScope(Number(e.target.value))
                   }
-                  className="w-full bg-white border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans appearance-none focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive cursor-pointer"
+                  className="w-full bg-subtle text-content border border-border rounded-lg px-4 py-2.5 text-[15px] font-sans appearance-none focus:outline-none focus:border-interactive focus:ring-1 focus:ring-interactive cursor-pointer"
                 >
                   <option value={90}>Last 3 months</option>
                   <option value={180}>Last 6 months</option>
@@ -393,7 +393,7 @@ export function EmailIntegrationStep({
             </div>
 
             {/* Attachment Handling */}
-            <label className="flex items-center justify-between bg-white border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150">
+            <label className="flex items-center justify-between bg-elevated border border-border rounded-lg px-4 py-3 cursor-pointer hover:border-interactive transition-colors duration-150">
               <div className="flex flex-col gap-0.5">
                 <span className="font-sans text-[15px] text-content">
                   Also learn from attachments
@@ -434,7 +434,7 @@ export function EmailIntegrationStep({
           </div>
 
           {/* Trust Statement */}
-          <div className="bg-white border border-border rounded-xl p-5">
+          <div className="bg-elevated border border-border rounded-xl p-5">
             <div className="flex gap-3">
               <Shield size={20} strokeWidth={1.5} className="text-interactive shrink-0" />
               <p className="font-sans text-[13px] leading-relaxed text-secondary">

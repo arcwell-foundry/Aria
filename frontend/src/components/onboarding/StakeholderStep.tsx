@@ -234,7 +234,7 @@ interface StakeholderCardProps {
 
 function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: StakeholderCardProps) {
   return (
-    <div className="bg-white border border-border rounded-xl p-5 relative">
+    <div className="bg-elevated border border-border rounded-xl p-5 relative">
       {/* Remove button */}
       {onRemove && (
         <button
@@ -263,7 +263,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.name}
             onChange={(e) => onUpdate(index, "name", e.target.value)}
             placeholder="e.g., Sarah Johnson"
-            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
+            className="bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
             aria-required="true"
           />
         </div>
@@ -283,7 +283,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
               value={stakeholder.title}
               onChange={(e) => onUpdate(index, "title", e.target.value)}
               placeholder="e.g., VP of R&D"
-              className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
+              className="bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
             />
           </div>
 
@@ -301,7 +301,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
               onChange={(e) =>
                 onUpdate(index, "relationship_type", e.target.value)
               }
-              className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 cursor-pointer"
+              className="bg-subtle text-content border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 cursor-pointer"
             >
               {RELATIONSHIP_TYPES.map((type) => (
                 <option key={type.value} value={type.value}>
@@ -326,7 +326,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.company}
             onChange={(e) => onUpdate(index, "company", e.target.value)}
             placeholder="e.g., Pfizer"
-            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
+            className="bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
           />
         </div>
 
@@ -344,7 +344,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             value={stakeholder.email}
             onChange={(e) => onUpdate(index, "email", e.target.value)}
             placeholder="e.g., sarah@company.com"
-            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
+            className="bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150"
           />
         </div>
 
@@ -362,7 +362,7 @@ function StakeholderCard({ stakeholder, index, onUpdate, onRemove }: Stakeholder
             onChange={(e) => onUpdate(index, "notes", e.target.value)}
             placeholder="Any context about this relationship..."
             rows={2}
-            className="bg-white border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 resize-none"
+            className="bg-subtle text-content placeholder:text-secondary/50 border border-border rounded-lg px-4 py-3 text-[15px] font-sans focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive transition-colors duration-150 resize-none"
           />
         </div>
       </div>
