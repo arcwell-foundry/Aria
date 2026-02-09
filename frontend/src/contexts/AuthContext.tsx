@@ -37,10 +37,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         try {
           const userData = await authApi.getCurrentUser();
           setUser(userData);
-        } catch {
-          // Token invalid, clear storage
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
+        } catch (error: unknown) {
+          // Only clear tokens on auth failures (401/403), not server errors.
+          // The axios response interceptor already handles 401 token refresh,
+          // so if we get here with a 401 the refresh also failed.
+          const status =
+            error && typeof error === "object" && "response" in error
+              ? (error as { response?: { status?: number } }).response?.status
+              : undefined;
+          if (status === 401 || status === 403) {
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("refresh_token");
+          }
+          // For server errors (500, network), keep tokens — the server
+          // may recover and the token is still valid.
         }
       }
       setIsLoading(false);
