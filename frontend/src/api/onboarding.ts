@@ -152,6 +152,7 @@ export interface ConnectIntegrationResponse {
   auth_url: string;
   connection_id: string;
   status: string;
+  message?: string;
 }
 
 export interface DisconnectIntegrationRequest {

@@ -189,14 +189,12 @@ class IntegrationWizardService:
             integration_type = self.INTEGRATIONS[app_name]["composio_type"]
             redirect_uri = f"{self._get_base_url()}/integrations/callback"
 
-            # Generate OAuth URL via Composio
-            auth_url = await oauth_client.generate_auth_url(
+            # Generate OAuth URL via Composio SDK (returns real connection ID)
+            auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
                 user_id=user_id,
                 integration_type=integration_type,
                 redirect_uri=redirect_uri,
             )
-
-            connection_id = str(uuid.uuid4())
 
             logger.info(
                 "OAuth initiated for integration",
@@ -207,6 +205,18 @@ class IntegrationWizardService:
                 "auth_url": auth_url,
                 "connection_id": connection_id,
                 "status": "pending",
+            }
+
+        except ValueError as e:
+            # Auth config not found — actionable error for the user
+            logger.warning(
+                "OAuth auth config missing",
+                extra={"user_id": user_id, "app_name": app_name, "error": str(e)},
+            )
+            return {
+                "auth_url": "",
+                "status": "error",
+                "message": str(e),
             }
 
         except Exception as e:

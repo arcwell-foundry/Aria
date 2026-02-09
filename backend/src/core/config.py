@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # Composio OAuth Configuration
     COMPOSIO_API_KEY: SecretStr | None = None
-    COMPOSIO_BASE_URL: str = "https://api.composio.dev"
+    COMPOSIO_BASE_URL: str = "https://api.composio.dev"  # Deprecated: SDK manages its own URL
 
     # Skills.sh Integration Configuration
     SKILLS_SH_API_URL: str = "https://api.skills.sh/v1"

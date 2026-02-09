@@ -33,7 +33,7 @@ python-pptx>=0.6.23,<1.0.0
 openpyxl>=3.1.0,<4.0.0
 
 # Integrations
-composio>=0.10.7,<1.0.0
+composio>=1.0.0rc1,<2.0.0
 
 # Security & 2FA (US-926)
 pyotp>=2.9.0,<3.0.0

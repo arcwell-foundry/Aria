@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import {
+  AlertTriangle,
   Check,
   Loader2,
   Link as LinkIcon,
@@ -58,6 +59,7 @@ export function IntegrationWizardStep({
     null
   );
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadStatuses();
@@ -81,14 +83,21 @@ export function IntegrationWizardStep({
 
   const handleConnect = async (appName: IntegrationAppName) => {
     setConnecting(appName);
+    setErrorMessage(null);
     try {
       const response = await connectIntegration(appName);
+      if (response.status === "error") {
+        setErrorMessage(response.message ?? "Failed to initiate connection.");
+        setConnecting(null);
+        return;
+      }
       if (response.status === "pending" && response.auth_url) {
         // Redirect to OAuth flow
         window.location.href = response.auth_url;
       }
     } catch (error) {
       console.error("Failed to connect integration:", error);
+      setErrorMessage("Unable to connect. Please try again.");
       setConnecting(null);
     }
   };
@@ -252,6 +261,21 @@ export function IntegrationWizardStep({
             {renderCategory("calendar", statuses.calendar)}
             {renderCategory("messaging", statuses.messaging)}
           </div>
+
+          {/* Error banner */}
+          {errorMessage && (
+            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
+              <AlertTriangle size={18} strokeWidth={1.5} className="text-red-600 mt-0.5 shrink-0" />
+              <div className="flex flex-col gap-1">
+                <span className="font-sans text-[14px] font-medium text-red-800">
+                  Connection failed
+                </span>
+                <p className="font-sans text-[13px] text-red-700 leading-relaxed">
+                  {errorMessage}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ARIA presence */}
           <div className="flex flex-col gap-2 bg-subtle border border-border rounded-xl p-5">

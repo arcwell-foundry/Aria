@@ -1,33 +1,71 @@
-"""Composio OAuth client integration."""
+"""Composio OAuth client integration using the Composio SDK."""
 
+import asyncio
+import logging
 from typing import Any
 
-import httpx
+from composio import Composio
 
 from src.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 class ComposioOAuthClient:
-    """Client for Composio OAuth operations using their REST API."""
+    """Client for Composio OAuth operations using the official SDK.
 
-    _http_client: httpx.AsyncClient | None = None
+    All SDK calls are synchronous — wrapped with asyncio.to_thread()
+    for FastAPI compatibility.
+    """
+
+    _composio: Composio | None = None
+    _auth_config_cache: dict[str, str] = {}
 
     @property
-    def _http(self) -> httpx.AsyncClient:
-        """Lazy initialization of HTTP client."""
-        if self._http_client is None:
-            headers: dict[str, str] = {
-                "Content-Type": "application/json",
-            }
-            if settings.COMPOSIO_API_KEY is not None:
-                headers["x-api-key"] = settings.COMPOSIO_API_KEY.get_secret_value()
-
-            self._http_client = httpx.AsyncClient(
-                base_url=settings.COMPOSIO_BASE_URL,
-                headers=headers,
-                timeout=30.0,
+    def _client(self) -> Composio:
+        """Lazy initialization of Composio SDK client."""
+        if self._composio is None:
+            api_key = (
+                settings.COMPOSIO_API_KEY.get_secret_value()
+                if settings.COMPOSIO_API_KEY is not None
+                else ""
             )
-        return self._http_client
+            self._composio = Composio(api_key=api_key)
+        return self._composio
+
+    async def _resolve_auth_config_id(self, toolkit_slug: str) -> str:
+        """Look up the auth config ID for a toolkit.
+
+        Args:
+            toolkit_slug: The toolkit slug (e.g., 'SALESFORCE', 'GMAIL').
+
+        Returns:
+            The auth config ID string.
+
+        Raises:
+            ValueError: If no auth config exists for this toolkit.
+        """
+        # Check cache first
+        if toolkit_slug in self._auth_config_cache:
+            return self._auth_config_cache[toolkit_slug]
+
+        def _list_configs() -> Any:
+            return self._client.client.auth_configs.list(
+                toolkit_slug=toolkit_slug,
+            )
+
+        result = await asyncio.to_thread(_list_configs)
+
+        if not result.items:
+            raise ValueError(
+                f"No auth config found for '{toolkit_slug}'. "
+                f"Create one at https://app.composio.dev → Auth Configs → "
+                f"select '{toolkit_slug}' toolkit and configure OAuth credentials."
+            )
+
+        auth_config_id: str = result.items[0].id
+        self._auth_config_cache[toolkit_slug] = auth_config_id
+        return auth_config_id
 
     async def generate_auth_url(
         self,
@@ -38,57 +76,68 @@ class ComposioOAuthClient:
         """Generate OAuth authorization URL for an integration.
 
         Args:
-            user_id: The user's ID
-            integration_type: The integration type (e.g., 'google_calendar')
-            redirect_uri: The redirect URI for OAuth callback
+            user_id: The user's ID.
+            integration_type: The toolkit slug (e.g., 'SALESFORCE').
+            redirect_uri: The redirect URI for OAuth callback.
 
         Returns:
-            The authorization URL
+            The authorization URL.
 
         Raises:
-            httpx.HTTPError: If the API request fails
+            ValueError: If no auth config is found for the toolkit.
         """
-        response = await self._http.post(
-            "/oauth/auth_url",
-            json={
-                "user_id": user_id,
-                "integration_type": integration_type,
-                "redirect_uri": redirect_uri,
-            },
+        auth_url, _ = await self.generate_auth_url_with_connection_id(
+            user_id=user_id,
+            integration_type=integration_type,
+            redirect_uri=redirect_uri,
         )
-        response.raise_for_status()
-        data: dict[str, Any] = response.json()
-        return str(data["authorization_url"])
+        return auth_url
 
-    async def exchange_code_for_connection(
+    async def generate_auth_url_with_connection_id(
         self,
         user_id: str,
-        code: str,
         integration_type: str,
-    ) -> dict[str, Any]:
-        """Exchange OAuth code for a connection.
+        redirect_uri: str,
+    ) -> tuple[str, str]:
+        """Generate OAuth authorization URL and return connection ID.
+
+        Uses the Composio SDK's link.create() to initiate OAuth.
 
         Args:
-            user_id: The user's ID
-            code: The OAuth authorization code
-            integration_type: The integration type
+            user_id: The user's ID.
+            integration_type: The toolkit slug (e.g., 'SALESFORCE').
+            redirect_uri: The redirect URI for OAuth callback.
 
         Returns:
-            Connection details including connection_id
+            Tuple of (authorization_url, connection_id).
 
         Raises:
-            httpx.HTTPError: If the API request fails
+            ValueError: If no auth config is found for the toolkit.
         """
-        response = await self._http.post(
-            "/oauth/exchange",
-            json={
+        auth_config_id = await self._resolve_auth_config_id(integration_type)
+
+        def _create_link() -> Any:
+            return self._client.client.link.create(
+                auth_config_id=auth_config_id,
+                user_id=user_id,
+                callback_url=redirect_uri,
+            )
+
+        result = await asyncio.to_thread(_create_link)
+
+        redirect_url: str = result.redirect_url
+        connection_id: str = result.connected_account_id
+
+        logger.info(
+            "OAuth link created via Composio SDK",
+            extra={
                 "user_id": user_id,
-                "code": code,
                 "integration_type": integration_type,
+                "connection_id": connection_id,
             },
         )
-        response.raise_for_status()
-        return dict(response.json())
+
+        return redirect_url, connection_id
 
     async def disconnect_integration(
         self,
@@ -98,17 +147,19 @@ class ComposioOAuthClient:
         """Disconnect an integration connection.
 
         Args:
-            user_id: The user's ID
-            connection_id: The connection ID to disconnect
-
-        Raises:
-            httpx.HTTPError: If the API request fails
+            user_id: The user's ID (kept for interface compatibility).
+            connection_id: The Composio connection nanoid.
         """
-        response = await self._http.delete(
-            f"/connections/{connection_id}",
-            params={"user_id": user_id},
+
+        def _delete() -> Any:
+            return self._client.client.connected_accounts.delete(connection_id)
+
+        await asyncio.to_thread(_delete)
+
+        logger.info(
+            "Integration disconnected via Composio SDK",
+            extra={"user_id": user_id, "connection_id": connection_id},
         )
-        response.raise_for_status()
 
     async def test_connection(
         self,
@@ -117,20 +168,17 @@ class ComposioOAuthClient:
         """Test if a connection is working.
 
         Args:
-            connection_id: The connection ID to test
+            connection_id: The Composio connection nanoid.
 
         Returns:
-            True if connection is working, False otherwise
-
-        Raises:
-            httpx.HTTPError: If the API request fails
+            True if connection status is ACTIVE, False otherwise.
         """
-        response = await self._http.get(
-            f"/connections/{connection_id}/test",
-        )
-        response.raise_for_status()
-        data: dict[str, Any] = response.json()
-        return bool(data.get("is_working", False))
+
+        def _retrieve() -> Any:
+            return self._client.client.connected_accounts.retrieve(connection_id)
+
+        result = await asyncio.to_thread(_retrieve)
+        return str(result.status).upper() == "ACTIVE"
 
     async def execute_action(
         self,
@@ -141,28 +189,33 @@ class ComposioOAuthClient:
         """Execute an action via Composio.
 
         Args:
-            connection_id: The connection ID
-            action: The action to execute (e.g., 'gmail_send_email')
-            params: Parameters for the action
+            connection_id: The Composio connection nanoid.
+            action: The tool slug (e.g., 'gmail_send_email').
+            params: Parameters for the action.
 
         Returns:
-            Action result
-
-        Raises:
-            httpx.HTTPError: If the API request fails
+            Action result dict.
         """
-        response = await self._http.post(
-            f"/connections/{connection_id}/actions/{action}",
-            json=params,
-        )
-        response.raise_for_status()
-        return dict(response.json())
+
+        def _execute() -> Any:
+            return self._client.client.tools.execute(
+                tool_slug=action,
+                connected_account_id=connection_id,
+                arguments=params,
+            )
+
+        result = await asyncio.to_thread(_execute)
+        # The SDK returns various response types; normalize to dict
+        if hasattr(result, "model_dump"):
+            return dict(result.model_dump())
+        if isinstance(result, dict):
+            return result
+        return {"result": str(result)}
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
+        """Clean up the SDK client."""
+        self._composio = None
+        self._auth_config_cache.clear()
 
 
 # Singleton instance
@@ -173,7 +226,7 @@ def get_oauth_client() -> ComposioOAuthClient:
     """Get the singleton OAuth client instance.
 
     Returns:
-        The ComposioOAuthClient instance
+        The ComposioOAuthClient instance.
     """
     global _oauth_client
     if _oauth_client is None:
