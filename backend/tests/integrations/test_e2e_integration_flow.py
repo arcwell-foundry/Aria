@@ -39,56 +39,39 @@ class TestFullOAuthFlow:
         """Test complete OAuth flow for Google Calendar integration.
 
         Flow:
-        1. Generate authorization URL
-        2. Exchange auth code for connection
-        3. Create integration record
-        4. Verify integration exists
+        1. Generate authorization URL (returns URL + connection_id)
+        2. Create integration record using returned connection_id
+        3. Verify integration exists
         """
         oauth_client = ComposioOAuthClient()
         service = IntegrationService()
 
-        # Mock the async HTTP client for auth URL generation
-        mock_auth_response = MagicMock()
-        mock_auth_response.json = MagicMock(return_value={
-            "authorization_url": "https://auth.composio.dev/authorize?code=test_auth_code_123"
-        })
-        mock_auth_response.raise_for_status = MagicMock()
-        mock_http = AsyncMock()
-        mock_http.post = AsyncMock(return_value=mock_auth_response)
+        # Mock Composio SDK for auth URL generation
+        mock_composio = MagicMock()
+        oauth_client._composio = mock_composio
 
-        # Step 1: Generate auth URL
-        with patch.object(oauth_client, "_http_client", mock_http):
-            auth_url = await oauth_client.generate_auth_url(
-                user_id="user-123",
-                integration_type="google_calendar",
-                redirect_uri="http://localhost:5173/integrations/callback",
-            )
+        mock_config = MagicMock()
+        mock_config.id = "auth-config-gcal"
+        mock_list_response = MagicMock()
+        mock_list_response.items = [mock_config]
+        mock_composio.client.auth_configs.list.return_value = mock_list_response
 
-            assert auth_url == "https://auth.composio.dev/authorize?code=test_auth_code_123"
-            mock_http.post.assert_called_once()
+        mock_link_response = MagicMock()
+        mock_link_response.redirect_url = "https://auth.composio.dev/authorize?code=test_auth_code_123"
+        mock_link_response.connected_account_id = "conn-abc123"
+        mock_composio.client.link.create.return_value = mock_link_response
 
-        # Step 2: Mock token exchange
-        mock_exchange_response = MagicMock()
-        mock_exchange_response.json = MagicMock(return_value={
-            "connection_id": "conn-abc123",
-            "account_id": "acct-xyz789",
-            "account_email": "user@example.com",
-        })
-        mock_exchange_response.raise_for_status = MagicMock()
-        mock_http.post = AsyncMock(return_value=mock_exchange_response)
+        # Step 1: Generate auth URL with connection ID
+        auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
+            user_id="user-123",
+            integration_type="google_calendar",
+            redirect_uri="http://localhost:5173/integrations/callback",
+        )
 
-        connection_data = None
-        with patch.object(oauth_client, "_http_client", mock_http):
-            connection_data = await oauth_client.exchange_code_for_connection(
-                user_id="user-123",
-                code="test_auth_code_123",
-                integration_type="google_calendar",
-            )
+        assert auth_url == "https://auth.composio.dev/authorize?code=test_auth_code_123"
+        assert connection_id == "conn-abc123"
 
-            assert connection_data["connection_id"] == "conn-abc123"
-            assert connection_data["account_email"] == "user@example.com"
-
-        # Step 3: Create integration record - use proper mocking pattern
+        # Step 2: Create integration record - use proper mocking pattern
         mock_response = MagicMock()
         mock_response.data = [
             {
@@ -112,9 +95,8 @@ class TestFullOAuthFlow:
         integration = await service.create_integration(
             user_id="user-123",
             integration_type=IntegrationType.GOOGLE_CALENDAR,
-            composio_connection_id=connection_data["connection_id"],
-            composio_account_id=connection_data.get("account_id"),
-            display_name=connection_data.get("account_email"),
+            composio_connection_id=connection_id,
+            display_name="user@example.com",
         )
 
         assert integration["integration_type"] == "google_calendar"
@@ -141,27 +123,30 @@ class TestFullOAuthFlow:
         oauth_client = ComposioOAuthClient()
         service = IntegrationService()
 
-        # Mock token exchange
-        mock_response = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "connection_id": "conn-gmail-123",
-            "account_id": "acct-gmail-456",
-            "account_email": "test@gmail.com",
-        })
-        mock_response.raise_for_status = MagicMock()
-        mock_http = AsyncMock()
-        mock_http.post = AsyncMock(return_value=mock_response)
+        # Mock Composio SDK for auth URL generation
+        mock_composio = MagicMock()
+        oauth_client._composio = mock_composio
 
-        connection_data = None
-        with patch.object(oauth_client, "_http_client", mock_http):
-            connection_data = await oauth_client.exchange_code_for_connection(
-                user_id="user-123",
-                code="gmail_auth_code",
-                integration_type="gmail",
-            )
+        mock_config = MagicMock()
+        mock_config.id = "auth-config-gmail"
+        mock_list_response = MagicMock()
+        mock_list_response.items = [mock_config]
+        mock_composio.client.auth_configs.list.return_value = mock_list_response
 
-            assert connection_data["connection_id"] == "conn-gmail-123"
-            assert connection_data["account_email"] == "test@gmail.com"
+        mock_link_response = MagicMock()
+        mock_link_response.redirect_url = "https://accounts.google.com/o/oauth2/auth?gmail"
+        mock_link_response.connected_account_id = "conn-gmail-123"
+        mock_composio.client.link.create.return_value = mock_link_response
+
+        # Step 1: Generate auth URL with connection ID
+        auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
+            user_id="user-123",
+            integration_type="gmail",
+            redirect_uri="http://localhost:5173/integrations/callback",
+        )
+
+        assert auth_url == "https://accounts.google.com/o/oauth2/auth?gmail"
+        assert connection_id == "conn-gmail-123"
 
         # Create integration
         mock_insert_response = MagicMock()
@@ -187,9 +172,8 @@ class TestFullOAuthFlow:
         integration = await service.create_integration(
             user_id="user-123",
             integration_type=IntegrationType.GMAIL,
-            composio_connection_id=connection_data["connection_id"],
-            composio_account_id=connection_data.get("account_id"),
-            display_name=connection_data.get("account_email"),
+            composio_connection_id=connection_id,
+            display_name="test@gmail.com",
         )
 
         assert integration["integration_type"] == "gmail"
@@ -205,26 +189,30 @@ class TestFullOAuthFlow:
         oauth_client = ComposioOAuthClient()
         service = IntegrationService()
 
-        # Mock token exchange
-        mock_response = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "connection_id": "conn-sfdc-123",
-            "account_id": "acct-sfdc-456",
-            "account_email": "sales@example.com",
-        })
-        mock_response.raise_for_status = MagicMock()
-        mock_http = AsyncMock()
-        mock_http.post = AsyncMock(return_value=mock_response)
+        # Mock Composio SDK for auth URL generation
+        mock_composio = MagicMock()
+        oauth_client._composio = mock_composio
 
-        connection_data = None
-        with patch.object(oauth_client, "_http_client", mock_http):
-            connection_data = await oauth_client.exchange_code_for_connection(
-                user_id="user-123",
-                code="sfdc_auth",
-                integration_type="salesforce",
-            )
+        mock_config = MagicMock()
+        mock_config.id = "auth-config-sfdc"
+        mock_list_response = MagicMock()
+        mock_list_response.items = [mock_config]
+        mock_composio.client.auth_configs.list.return_value = mock_list_response
 
-            assert connection_data["connection_id"] == "conn-sfdc-123"
+        mock_link_response = MagicMock()
+        mock_link_response.redirect_url = "https://login.salesforce.com/services/oauth2/authorize"
+        mock_link_response.connected_account_id = "conn-sfdc-123"
+        mock_composio.client.link.create.return_value = mock_link_response
+
+        # Step 1: Generate auth URL with connection ID
+        auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
+            user_id="user-123",
+            integration_type="salesforce",
+            redirect_uri="http://localhost:5173/integrations/callback",
+        )
+
+        assert auth_url == "https://login.salesforce.com/services/oauth2/authorize"
+        assert connection_id == "conn-sfdc-123"
 
         # Create integration
         mock_insert_response = MagicMock()
@@ -250,9 +238,8 @@ class TestFullOAuthFlow:
         integration = await service.create_integration(
             user_id="user-123",
             integration_type=IntegrationType.SALESFORCE,
-            composio_connection_id=connection_data["connection_id"],
-            composio_account_id=connection_data.get("account_id"),
-            display_name=connection_data.get("account_email"),
+            composio_connection_id=connection_id,
+            display_name="sales@example.com",
         )
 
         assert integration["integration_type"] == "salesforce"

@@ -58,6 +58,9 @@ def mock_oauth() -> MagicMock:
     """Create a mock Composio OAuth client."""
     oauth = MagicMock()
     oauth.generate_auth_url = AsyncMock(return_value="https://example.com/oauth")
+    oauth.generate_auth_url_with_connection_id = AsyncMock(
+        return_value=("https://example.com/oauth", "conn-new-123")
+    )
     oauth.disconnect_integration = AsyncMock()
     return oauth
 
@@ -102,14 +105,14 @@ async def test_get_status_with_connections(
     """Returns connected status for connected integrations."""
     connected_data = [
         {
-            "app_name": "SALESFORCE",
+            "integration_type": "salesforce",
             "created_at": "2026-02-06T10:00:00+00:00",
-            "connection_id": "conn-123",
+            "composio_connection_id": "conn-123",
         },
         {
-            "app_name": "GOOGLECALENDAR",
+            "integration_type": "googlecalendar",
             "created_at": "2026-02-06T11:00:00+00:00",
-            "connection_id": "conn-456",
+            "composio_connection_id": "conn-456",
         },
     ]
     chain = _build_chain(connected_data)
@@ -152,7 +155,7 @@ async def test_connect_salesflow_success(
     assert result["auth_url"] == "https://example.com/oauth"
     assert "connection_id" in result
 
-    mock_oauth.generate_auth_url.assert_called_once()
+    mock_oauth.generate_auth_url_with_connection_id.assert_called_once()
 
 
 @pytest.mark.asyncio()
@@ -172,7 +175,7 @@ async def test_connect_oauth_error(
     mock_oauth: MagicMock,
 ) -> None:
     """Handles OAuth client errors gracefully."""
-    mock_oauth.generate_auth_url.side_effect = Exception("Composio error")
+    mock_oauth.generate_auth_url_with_connection_id.side_effect = Exception("Composio error")
 
     with patch("src.onboarding.integration_wizard.get_oauth_client", return_value=mock_oauth):
         result = await service.connect_integration("user-123", "SLACK")
@@ -193,7 +196,7 @@ async def test_disconnect_success(
     """Successfully disconnects an integration."""
     # Mock the connection lookup
     connection_data = {
-        "connection_id": "conn-123",
+        "composio_connection_id": "conn-123",
     }
     select_chain = _build_chain(connection_data)
     # Mock the delete

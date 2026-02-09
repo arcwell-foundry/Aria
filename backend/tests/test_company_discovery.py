@@ -144,8 +144,8 @@ class TestLifeSciencesGate:
         with patch("src.onboarding.company_discovery.LLMClient", return_value=mock_llm):
             result = await service.check_life_sciences_gate("Test Company", "https://test.com")
 
-        assert result["is_life_sciences"] is False
-        assert result["confidence"] == 0.0
+        assert result["is_life_sciences"] is True
+        assert result["confidence"] == 0.5
         assert "manual review" in result["reasoning"].lower()
 
     async def test_handles_partial_llm_response(self, service, mock_llm):

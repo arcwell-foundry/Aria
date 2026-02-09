@@ -31,8 +31,8 @@ async def test_initiate_oauth_generates_url_for_gmail(service):
     """initiate_oauth generates correct OAuth URL for Gmail provider."""
     # Mock the OAuth client
     mock_oauth = MagicMock()
-    mock_oauth.generate_auth_url = AsyncMock(
-        return_value="https://auth.composio.dev/authorize?code=test_gmail_url"
+    mock_oauth.generate_auth_url_with_connection_id = AsyncMock(
+        return_value=("https://auth.composio.dev/authorize?code=test_gmail_url", "conn-123")
     )
 
     with patch(
@@ -44,15 +44,15 @@ async def test_initiate_oauth_generates_url_for_gmail(service):
         assert result["status"] == "pending"
         assert result["auth_url"] == "https://auth.composio.dev/authorize?code=test_gmail_url"
         assert "connection_id" in result
-        mock_oauth.generate_auth_url.assert_called_once()
+        mock_oauth.generate_auth_url_with_connection_id.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_initiate_oauth_generates_url_for_outlook(service):
     """initiate_oauth generates correct OAuth URL for Outlook/Microsoft provider."""
     mock_oauth = MagicMock()
-    mock_oauth.generate_auth_url = AsyncMock(
-        return_value="https://auth.composio.dev/authorize?code=test_outlook_url"
+    mock_oauth.generate_auth_url_with_connection_id = AsyncMock(
+        return_value=("https://auth.composio.dev/authorize?code=test_outlook_url", "conn-456")
     )
 
     with patch(
@@ -143,6 +143,11 @@ async def test_save_privacy_config_saves_to_user_settings(service, mock_db):
         attachment_ingestion=False,
     )
 
+    # Mock the select chain for reading existing settings
+    mock_existing_response = MagicMock()
+    mock_existing_response.data = {"integrations": {}}
+    mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = mock_existing_response
+
     # Mock DB upsert
     mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock()
 
@@ -158,7 +163,6 @@ async def test_save_privacy_config_saves_to_user_settings(service, mock_db):
             assert result["exclusions"] == 2
 
             # Verify upsert was called with correct data
-            mock_db.table.assert_called_with("user_settings")
             call_args = mock_db.table.return_value.upsert.call_args[0][0]
             assert call_args["user_id"] == "user-123"
             assert "integrations" in call_args

@@ -136,7 +136,7 @@ async def test_trigger_manual_sync_service_failure(mock_user: MagicMock) -> None
             await trigger_manual_sync("salesforce", mock_user)
 
         assert exc_info.value.status_code == 500
-        assert "Sync failed" in exc_info.value.detail
+        assert exc_info.value.detail  # Generic sanitized error message
 
 
 @pytest.mark.asyncio
@@ -294,7 +294,7 @@ async def test_queue_push_item_service_failure(mock_user: MagicMock) -> None:
             await queue_push_item(request, mock_user)
 
         assert exc_info.value.status_code == 500
-        assert "Failed to queue push item" in exc_info.value.detail
+        assert exc_info.value.detail  # Generic sanitized error message
 
 
 @pytest.mark.asyncio

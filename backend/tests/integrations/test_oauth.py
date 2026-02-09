@@ -73,7 +73,7 @@ async def test_generate_auth_url_with_connection_id(mock_composio):
     assert connection_id == "conn-nano-456"
 
     mock_composio.client.auth_configs.list.assert_called_once_with(
-        toolkit_slug="GOOGLECALENDAR",
+        toolkit_slug="googlecalendar",
     )
     mock_composio.client.link.create.assert_called_once_with(
         auth_config_id="auth-config-123",
@@ -118,7 +118,7 @@ async def test_generate_auth_url_no_auth_config(mock_composio):
     mock_list_response.items = []
     mock_composio.client.auth_configs.list.return_value = mock_list_response
 
-    with pytest.raises(ValueError, match="No auth config found for 'SLACK'"):
+    with pytest.raises(ValueError, match="No auth config found for 'slack'"):
         await client.generate_auth_url_with_connection_id(
             user_id="user-1",
             integration_type="SLACK",

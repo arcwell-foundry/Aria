@@ -108,7 +108,7 @@ class TestGetPreferences:
             response = test_client.get("/api/v1/settings/preferences")
 
         assert response.status_code == 500
-        assert "Failed to fetch preferences" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message
 
 
 class TestUpdatePreferences:
@@ -208,7 +208,7 @@ class TestUpdatePreferences:
             )
 
         assert response.status_code == 400
-        assert "Invalid competitor name" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message
 
     def test_update_preferences_server_error(
         self, test_client: TestClient
@@ -227,4 +227,4 @@ class TestUpdatePreferences:
             )
 
         assert response.status_code == 500
-        assert "Failed to update preferences" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message

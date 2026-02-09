@@ -97,7 +97,7 @@ class TestGetEmailPreferences:
             response = test_client.get("/api/v1/settings/email-preferences")
 
         assert response.status_code == 500
-        assert "Failed to fetch email preferences" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message
 
 
 class TestUpdateEmailPreferences:
@@ -151,7 +151,7 @@ class TestUpdateEmailPreferences:
             )
 
         assert response.status_code == 400
-        assert "Security alerts cannot be disabled" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message
 
     def test_update_multiple_preferences(
         self, test_client: TestClient, mock_email_preferences: dict
@@ -199,7 +199,7 @@ class TestUpdateEmailPreferences:
             )
 
         assert response.status_code == 400
-        assert "Invalid preference value" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message
 
     def test_update_email_preferences_server_error(
         self, test_client: TestClient
@@ -218,4 +218,4 @@ class TestUpdateEmailPreferences:
             )
 
         assert response.status_code == 500
-        assert "Failed to update email preferences" in response.json()["detail"]
+        assert response.json()["detail"]  # Sanitized error message

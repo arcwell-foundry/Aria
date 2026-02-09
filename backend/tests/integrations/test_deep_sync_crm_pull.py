@@ -373,8 +373,13 @@ async def test_pull_contacts_stores_semantic_memory(
 
     sync_service.supabase = type("obj", (object,), {"get_client": lambda: MagicMock(table=mock_table_factory_with_memory)})
 
-    # Execute sync
-    result = await sync_service.sync_crm_to_aria(user_id, integration_type)
+    # Mock SemanticMemory to avoid Neo4j connection
+    mock_semantic = MagicMock()
+    mock_semantic.add_fact = AsyncMock(return_value="memory-123")
+
+    with patch("src.memory.semantic.SemanticMemory", return_value=mock_semantic):
+        # Execute sync
+        result = await sync_service.sync_crm_to_aria(user_id, integration_type)
 
     # Verify contact was stored
     assert result.records_processed == 1
@@ -430,8 +435,13 @@ async def test_pull_activities_stores_episodic_memory(
 
     sync_service.supabase = type("obj", (object,), {"get_client": lambda: MagicMock(table=mock_table_factory_with_memory)})
 
-    # Execute sync
-    result = await sync_service.sync_crm_to_aria(user_id, integration_type)
+    # Mock EpisodicMemory to avoid Neo4j connection
+    mock_episodic = MagicMock()
+    mock_episodic.store_episode = AsyncMock(return_value="episodic-123")
+
+    with patch("src.memory.episodic.EpisodicMemory", return_value=mock_episodic):
+        # Execute sync
+        result = await sync_service.sync_crm_to_aria(user_id, integration_type)
 
     # Verify activity was stored
     assert result.records_processed == 1

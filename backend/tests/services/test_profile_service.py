@@ -334,11 +334,11 @@ class TestUpdateUserDetails:
             data={"full_name": "Jane", "role": "admin", "id": "hacker"},
         )
 
-        # The update call should NOT include role or id
+        # The update call should NOT include id (role is in ALLOWED_USER_FIELDS)
         update_call = mock_table.update.call_args[0][0]
-        assert "role" not in update_call
         assert "id" not in update_call
         assert "full_name" in update_call
+        assert "role" in update_call
 
 
 class TestUpdateCompanyDetails:

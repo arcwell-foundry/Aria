@@ -192,6 +192,7 @@ class TestPostCommunicate:
     def test_all_channels_fail_returns_503(self, test_client: TestClient) -> None:
         """Should return 503 when all channels fail."""
         request_data = {
+            "user_id": "test-user-123",
             "message": "Urgent alert",
             "priority": "critical",
         }
@@ -228,6 +229,7 @@ class TestPostCommunicate:
     def test_internal_error_returns_500(self, test_client: TestClient) -> None:
         """Should return 500 on unexpected internal errors."""
         request_data = {
+            "user_id": "test-user-123",
             "message": "Test",
             "priority": "fyi",
         }
@@ -244,6 +246,7 @@ class TestPostCommunicate:
     def test_background_priority_with_no_channels(self, test_client: TestClient) -> None:
         """BACKGROUND priority should succeed even with no channels used."""
         request_data = {
+            "user_id": "test-user-123",
             "message": "Background task done",
             "priority": "background",
         }
