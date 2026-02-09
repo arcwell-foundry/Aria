@@ -310,33 +310,37 @@ async def list_conversations(
     Returns:
         List of conversations ordered by most recently updated.
     """
-    db = get_supabase_client()
-    service = ConversationService(db_client=db)
+    try:
+        db = get_supabase_client()
+        service = ConversationService(db_client=db)
 
-    conversations = await service.list_conversations(
-        user_id=current_user.id,
-        search_query=search,
-        limit=limit,
-        offset=offset,
-    )
+        conversations = await service.list_conversations(
+            user_id=current_user.id,
+            search_query=search,
+            limit=limit,
+            offset=offset,
+        )
 
-    # Get total count
-    count_result = (
-        db.table("conversations")
-        .select("id", count="exact")
-        .eq("user_id", current_user.id)
-        .execute()
-    )
-    total = (
-        count_result.count
-        if hasattr(count_result, "count") and count_result.count is not None
-        else len(conversations)
-    )
+        # Get total count
+        count_result = (
+            db.table("conversations")
+            .select("id", count="exact")
+            .eq("user_id", current_user.id)
+            .execute()
+        )
+        total = (
+            count_result.count
+            if hasattr(count_result, "count") and count_result.count is not None
+            else len(conversations)
+        )
 
-    return ConversationListResponse(
-        conversations=[c.to_dict() for c in conversations],
-        total=total,
-    )
+        return ConversationListResponse(
+            conversations=[c.to_dict() for c in conversations],
+            total=total,
+        )
+    except Exception:
+        logger.exception("Failed to list conversations")
+        return ConversationListResponse(conversations=[], total=0)
 
 
 @router.get(
