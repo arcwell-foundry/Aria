@@ -355,7 +355,7 @@ export function IntegrationWizardStep({
             <button
               type="button"
               onClick={onComplete}
-              className="bg-[#7B8EAA] text-white rounded-lg px-5 py-2.5 font-sans font-medium hover:bg-[#95A5BD] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#7B8EAA] focus:ring-offset-2"
+              className="bg-interactive text-white rounded-lg px-5 py-2.5 font-sans font-medium text-[15px] hover:bg-interactive-hover active:bg-interactive-hover transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2"
             >
               Continue
             </button>

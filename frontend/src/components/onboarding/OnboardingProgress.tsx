@@ -19,15 +19,21 @@ const STEPS: StepDefinition[] = [
 
 interface OnboardingProgressProps {
   currentStep: OnboardingStep;
+  activeStep?: OnboardingStep;
   completedSteps: string[];
   skippedSteps: string[];
+  onStepClick?: (step: OnboardingStep) => void;
 }
 
 export function OnboardingProgress({
   currentStep,
+  activeStep,
   completedSteps,
   skippedSteps,
+  onStepClick,
 }: OnboardingProgressProps) {
+  const displayStep = activeStep ?? currentStep;
+
   return (
     <nav aria-label="Onboarding progress" className="w-full">
       {/* Desktop: vertical list */}
@@ -36,35 +42,59 @@ export function OnboardingProgress({
           const isCompleted = completedSteps.includes(step.key);
           const isSkipped = skippedSteps.includes(step.key);
           const isCurrent = step.key === currentStep;
+          const isActive = step.key === displayStep;
+          const isClickable =
+            onStepClick != null && (isCompleted || isSkipped || isCurrent);
+
+          const inner = (
+            <>
+              <StepIndicator
+                isCompleted={isCompleted}
+                isSkipped={isSkipped}
+                isCurrent={isCurrent}
+              />
+              <span
+                className={`
+                  font-sans text-[13px] leading-snug
+                  ${isActive ? "font-medium text-content" : ""}
+                  ${isCompleted && !isActive ? "text-success" : ""}
+                  ${isSkipped && !isActive ? "text-secondary" : ""}
+                  ${!isActive && !isCompleted && !isSkipped ? "text-secondary" : ""}
+                `}
+              >
+                {step.label}
+              </span>
+            </>
+          );
+
+          const classes = `
+            flex items-center gap-3 rounded-lg px-3 py-2.5 w-full text-left
+            transition-colors duration-150
+            ${isActive ? "bg-subtle" : ""}
+            ${isClickable && !isActive ? "hover:bg-subtle/50" : ""}
+          `;
 
           return (
             <li key={step.key}>
-              <div
-                className={`
-                  flex items-center gap-3 rounded-lg px-3 py-2.5
-                  transition-colors duration-150
-                  ${isCurrent ? "bg-subtle" : ""}
-                `}
-                aria-current={isCurrent ? "step" : undefined}
-                aria-label={`${step.label}${isCompleted ? " — completed" : ""}${isSkipped ? " — skipped" : ""}${isCurrent ? " — current step" : ""}`}
-              >
-                <StepIndicator
-                  isCompleted={isCompleted}
-                  isSkipped={isSkipped}
-                  isCurrent={isCurrent}
-                />
-                <span
-                  className={`
-                    font-sans text-[13px] leading-snug
-                    ${isCurrent ? "font-medium text-content" : ""}
-                    ${isCompleted ? "text-success" : ""}
-                    ${isSkipped ? "text-secondary" : ""}
-                    ${!isCurrent && !isCompleted && !isSkipped ? "text-secondary" : ""}
-                  `}
+              {isClickable ? (
+                <button
+                  type="button"
+                  onClick={() => onStepClick(step.key)}
+                  className={`${classes} cursor-pointer`}
+                  aria-current={isActive ? "step" : undefined}
+                  aria-label={`${step.label}${isCompleted ? " — completed" : ""}${isSkipped ? " — skipped" : ""}${isActive ? " — viewing" : ""}${isCurrent && !isActive ? " — current step" : ""}`}
                 >
-                  {step.label}
-                </span>
-              </div>
+                  {inner}
+                </button>
+              ) : (
+                <div
+                  className={classes}
+                  aria-current={isActive ? "step" : undefined}
+                  aria-label={`${step.label} — not yet available`}
+                >
+                  {inner}
+                </div>
+              )}
             </li>
           );
         })}
@@ -76,22 +106,34 @@ export function OnboardingProgress({
           const isCompleted = completedSteps.includes(step.key);
           const isSkipped = skippedSteps.includes(step.key);
           const isCurrent = step.key === currentStep;
+          const isActive = step.key === displayStep;
+          const isClickable =
+            onStepClick != null && (isCompleted || isSkipped || isCurrent);
+
+          const dotClasses = `
+            h-1.5 rounded-full transition-all duration-300
+            ${isActive ? "w-8 bg-interactive" : "w-4"}
+            ${isCompleted && !isActive ? "bg-success" : ""}
+            ${isSkipped && !isActive ? "bg-border" : ""}
+            ${!isActive && !isCompleted && !isSkipped ? "bg-border" : ""}
+          `;
 
           return (
             <li
               key={step.key}
-              aria-current={isCurrent ? "step" : undefined}
-              aria-label={`${step.label}${isCompleted ? " — completed" : ""}${isSkipped ? " — skipped" : ""}${isCurrent ? " — current step" : ""}`}
+              aria-current={isActive ? "step" : undefined}
+              aria-label={`${step.label}${isCompleted ? " — completed" : ""}${isSkipped ? " — skipped" : ""}${isActive ? " — viewing" : ""}`}
             >
-              <div
-                className={`
-                  h-1.5 rounded-full transition-all duration-300
-                  ${isCurrent ? "w-8 bg-interactive" : "w-4"}
-                  ${isCompleted ? "bg-success" : ""}
-                  ${isSkipped ? "bg-border" : ""}
-                  ${!isCurrent && !isCompleted && !isSkipped ? "bg-border" : ""}
-                `}
-              />
+              {isClickable ? (
+                <button
+                  type="button"
+                  onClick={() => onStepClick(step.key)}
+                  className={`${dotClasses} cursor-pointer`}
+                  aria-label={`Go to ${step.label}`}
+                />
+              ) : (
+                <div className={dotClasses} />
+              )}
             </li>
           );
         })}

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,7 +8,7 @@ import {
   useInjectedQuestions,
   onboardingKeys,
 } from "@/hooks/useOnboarding";
-import { SKIPPABLE_STEPS } from "@/api/onboarding";
+import { SKIPPABLE_STEPS, type OnboardingStep } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { OnboardingStepPlaceholder } from "@/components/onboarding/OnboardingStepPlaceholder";
 import { CompanyDiscoveryStep } from "@/components/onboarding/CompanyDiscoveryStep";
@@ -28,6 +28,15 @@ export function OnboardingPage() {
   const stepForQueries = data?.state?.current_step ?? "";
   const { data: injectedQuestions } = useInjectedQuestions(stepForQueries);
 
+  const [viewingStep, setViewingStep] = useState<OnboardingStep | null>(null);
+
+  const currentStep = data?.state?.current_step;
+
+  // Reset viewingStep when the server's current step advances
+  useEffect(() => {
+    setViewingStep(null);
+  }, [currentStep]);
+
   // Redirect to dashboard if onboarding is already complete
   useEffect(() => {
     if (data?.is_complete) {
@@ -40,15 +49,33 @@ export function OnboardingPage() {
   }
 
   const { state } = data;
-  const currentStep = state.current_step;
-  const isSkippable = SKIPPABLE_STEPS.has(currentStep);
+  const serverStep = state.current_step;
+  const displayStep = viewingStep ?? serverStep;
+  const isRevisiting = viewingStep !== null;
+  const isSkippable = SKIPPABLE_STEPS.has(serverStep);
 
   function handleComplete(companyData?: { company_name: string; website: string; email: string }) {
-    completeMutation.mutate({ step: currentStep, stepData: companyData || {} });
+    if (isRevisiting) {
+      setViewingStep(null);
+      return;
+    }
+    completeMutation.mutate({ step: serverStep, stepData: companyData || {} });
   }
 
   function handleSkip() {
-    skipMutation.mutate({ step: currentStep });
+    if (isRevisiting) {
+      setViewingStep(null);
+      return;
+    }
+    skipMutation.mutate({ step: serverStep });
+  }
+
+  function handleStepClick(step: OnboardingStep) {
+    if (step === serverStep) {
+      setViewingStep(null);
+    } else {
+      setViewingStep(step);
+    }
   }
 
   return (
@@ -65,16 +92,18 @@ export function OnboardingPage() {
           {/* Left: Progress indicator */}
           <aside className="md:w-48 shrink-0">
             <OnboardingProgress
-              currentStep={currentStep}
+              currentStep={serverStep}
+              activeStep={displayStep}
               completedSteps={state.completed_steps}
               skippedSteps={state.skipped_steps}
+              onStepClick={handleStepClick}
             />
           </aside>
 
           {/* Right: Step content */}
           <main className="flex-1 min-w-0">
             {/* OODA-injected contextual questions (US-916) */}
-            {injectedQuestions && injectedQuestions.length > 0 && (
+            {!isRevisiting && injectedQuestions && injectedQuestions.length > 0 && (
               <div className="mb-6 space-y-3">
                 {injectedQuestions.map((q, i) => (
                   <div
@@ -90,45 +119,49 @@ export function OnboardingPage() {
               </div>
             )}
 
-            {currentStep === "company_discovery" ? (
+            {displayStep === "company_discovery" ? (
               <CompanyDiscoveryStep
                 onComplete={(companyData) => handleComplete(companyData)}
               />
-            ) : currentStep === "document_upload" ? (
+            ) : displayStep === "document_upload" ? (
               <DocumentUploadStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
               />
-            ) : currentStep === "user_profile" ? (
+            ) : displayStep === "user_profile" ? (
               <UserProfileStep
                 onComplete={() => handleComplete()}
-                onSkip={isSkippable ? handleSkip : undefined}
+                onSkip={!isRevisiting && isSkippable ? handleSkip : undefined}
               />
-            ) : currentStep === "writing_samples" ? (
+            ) : displayStep === "writing_samples" ? (
               <WritingSampleStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
               />
-            ) : currentStep === "email_integration" ? (
+            ) : displayStep === "email_integration" ? (
               <EmailIntegrationStep
                 onComplete={() => handleComplete()}
                 onSkip={handleSkip}
               />
-            ) : currentStep === "integration_wizard" ? (
+            ) : displayStep === "integration_wizard" ? (
               <IntegrationWizardStep
                 onComplete={() => handleComplete()}
               />
-            ) : currentStep === "first_goal" ? (
+            ) : displayStep === "first_goal" ? (
               <FirstGoalStep
                 onComplete={() => {
+                  if (isRevisiting) {
+                    setViewingStep(null);
+                    return;
+                  }
                   queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
                 }}
               />
             ) : (
               <OnboardingStepPlaceholder
-                step={currentStep}
+                step={displayStep}
                 onComplete={handleComplete}
-                onSkip={isSkippable ? handleSkip : undefined}
+                onSkip={!isRevisiting && isSkippable ? handleSkip : undefined}
                 isCompleting={completeMutation.isPending}
                 isSkipping={skipMutation.isPending}
               />
