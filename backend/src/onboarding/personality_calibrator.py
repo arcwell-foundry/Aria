@@ -83,7 +83,7 @@ class PersonalityCalibrator:
             formality=fingerprint.get("formality_index", 0.5),
         )
 
-        calibration.tone_guidance = self._generate_tone_guidance(calibration)
+        calibration.tone_guidance = self._generate_tone_guidance(calibration, fingerprint)
         calibration.example_adjustments = self._generate_examples(calibration)
 
         # Store calibration in Digital Twin
@@ -146,46 +146,122 @@ class PersonalityCalibrator:
 
         return max(0.0, min(1.0, score))
 
-    def _generate_tone_guidance(self, cal: PersonalityCalibration) -> str:
+    def _generate_tone_guidance(
+        self,
+        cal: PersonalityCalibration,
+        fingerprint: dict[str, Any] | None = None,
+    ) -> str:
         """Generate a prompt-ready tone guidance string.
 
-        Each trait beyond the moderate range adds a specific instruction
-        for LLM prompt injection.
+        Incorporates all 20 writing fingerprint fields when available,
+        producing a concise guidance block (3-4 sentences) for LLM
+        prompt injection.
 
         Args:
             cal: The computed calibration.
+            fingerprint: Optional full writing fingerprint dict for
+                extended style dimensions.
 
         Returns:
-            Space-joined guidance string for LLM prompts.
+            Concise guidance string for LLM prompts.
         """
         parts: list[str] = []
+        fp = fingerprint or {}
 
+        # --- Core 5 traits ---
         if cal.directness > 0.7:
-            parts.append("Be direct and concise. No hedging or excessive politeness.")
+            parts.append("Be direct and concise.")
         elif cal.directness < 0.3:
-            parts.append("Be diplomatic and considerate. Frame suggestions gently.")
+            parts.append("Be diplomatic; frame suggestions gently.")
 
         if cal.warmth > 0.7:
-            parts.append("Use warm, personal tone. Build rapport.")
+            parts.append("Use a warm, personal tone.")
         elif cal.warmth < 0.3:
-            parts.append("Keep tone professional and focused. Minimal small talk.")
+            parts.append("Keep tone professional and focused.")
 
         if cal.assertiveness > 0.7:
-            parts.append("Be confident in recommendations. Push back when warranted.")
+            parts.append("Be confident in recommendations.")
         elif cal.assertiveness < 0.3:
-            parts.append("Present options rather than directives. Let user decide.")
+            parts.append("Present options rather than directives.")
 
         if cal.detail_orientation > 0.7:
             parts.append("Include detailed analysis and data points.")
         elif cal.detail_orientation < 0.3:
-            parts.append("Keep it high-level. Lead with conclusions, support on request.")
+            parts.append("Keep it high-level; lead with conclusions.")
 
         if cal.formality > 0.7:
             parts.append("Use formal, professional language.")
         elif cal.formality < 0.3:
             parts.append("Keep it casual and conversational.")
 
-        return " ".join(parts) if parts else "Balanced, professional tone with moderate warmth."
+        # --- Extended fingerprint dimensions (P2-8) ---
+
+        # Opening/closing style
+        opening = fp.get("opening_style", "")
+        closing = fp.get("closing_style", "")
+        if opening or closing:
+            style_hints: list[str] = []
+            if opening:
+                style_hints.append(f"open with a {opening} style")
+            if closing:
+                style_hints.append(f"close with a {closing} style")
+            parts.append("When drafting messages, " + " and ".join(style_hints) + ".")
+
+        # Rhetorical style
+        rhetorical = fp.get("rhetorical_style", "")
+        if rhetorical:
+            parts.append(f"Use a {rhetorical} argumentation approach.")
+
+        # Data-driven
+        if fp.get("data_driven"):
+            parts.append("Include evidence and data to support points.")
+
+        # Emoji usage
+        emoji_usage = fp.get("emoji_usage", "")
+        if emoji_usage == "frequent":
+            parts.append("Use emojis occasionally to match their style.")
+        elif emoji_usage == "never":
+            parts.append("Avoid emojis entirely.")
+
+        # Punctuation preferences
+        punctuation_notes: list[str] = []
+        if fp.get("uses_em_dashes"):
+            punctuation_notes.append("em dashes")
+        if fp.get("uses_semicolons"):
+            punctuation_notes.append("semicolons")
+        if fp.get("ellipsis_usage") == "frequent":
+            punctuation_notes.append("ellipses")
+        if punctuation_notes:
+            parts.append(
+                "Mirror their punctuation: use " + ", ".join(punctuation_notes) + "."
+            )
+
+        # Exclamation frequency
+        excl = fp.get("exclamation_frequency", "")
+        if excl == "frequent":
+            parts.append("Match their enthusiasm with occasional exclamation marks.")
+        elif excl == "never":
+            parts.append("Avoid exclamation marks.")
+
+        # Paragraph style
+        para = fp.get("paragraph_style", "")
+        if para == "short_punchy":
+            parts.append("Keep paragraphs short and punchy.")
+        elif para == "long_detailed":
+            parts.append("Use longer, detailed paragraphs.")
+
+        # Lexical diversity / vocabulary
+        lexical = fp.get("lexical_diversity", "")
+        if lexical == "high":
+            parts.append("Use varied, sophisticated vocabulary.")
+        elif lexical == "low":
+            parts.append("Use simple, consistent vocabulary.")
+
+        if not parts:
+            return "Balanced, professional tone with moderate warmth."
+
+        # Cap at 3-4 sentences to avoid bloating prompts
+        return " ".join(parts[:8])
 
     def _generate_examples(self, cal: PersonalityCalibration) -> list[str]:
         """Generate example phrasings showing calibrated style.

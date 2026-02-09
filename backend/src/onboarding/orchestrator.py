@@ -157,6 +157,9 @@ class OnboardingOrchestrator:
         except Exception as e:
             logger.warning("OODA assessment failed to launch: %s", e)
 
+        # Record procedural memory for step completion (P2-15)
+        await self._record_procedural_memory(user_id, step, step_data)
+
         # Record episodic event
         await self._record_episodic_event(
             user_id,
@@ -589,6 +592,67 @@ class OnboardingOrchestrator:
                 "missing_categories": missing_categories,
             },
         )
+
+    async def _record_procedural_memory(
+        self,
+        user_id: str,
+        step: OnboardingStep,
+        step_data: dict[str, Any],
+    ) -> None:
+        """Record an onboarding step as a procedural memory workflow pattern.
+
+        Feeds the adaptive controller's learning about which patterns
+        lead to higher readiness scores.
+
+        Args:
+            user_id: The user's ID.
+            step: The completed onboarding step.
+            step_data: Data collected during the step.
+        """
+        try:
+            from src.memory.procedural import ProceduralMemory, Workflow
+
+            memory = ProceduralMemory()
+            now = datetime.now(UTC)
+
+            # Determine data quality: how many non-empty fields were provided
+            provided_fields = [k for k, v in step_data.items() if v] if step_data else []
+            data_quality = min(100, len(provided_fields) * 20) if provided_fields else 0
+
+            workflow = Workflow(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                workflow_name=f"onboarding_{step.value}",
+                description=f"Onboarding step '{step.value}' completed",
+                trigger_conditions={
+                    "event": "onboarding_step_complete",
+                    "step": step.value,
+                },
+                steps=[
+                    {
+                        "action": "complete_step",
+                        "step_name": step.value,
+                        "data_quality_score": data_quality,
+                        "fields_provided": provided_fields,
+                        "fields_skipped": [
+                            k for k, v in (step_data or {}).items() if not v
+                        ],
+                    }
+                ],
+                success_count=1,
+                failure_count=0,
+                is_shared=False,
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            await memory.create_workflow(workflow)
+        except Exception as e:
+            # Non-critical — log and continue
+            logger.warning(
+                "Failed to record procedural memory for step",
+                extra={"step": step.value, "error": str(e)},
+            )
 
     async def _record_episodic_event(
         self,

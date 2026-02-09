@@ -337,14 +337,17 @@ class DocumentIngestionService:
             return self._extract_xlsx(content)
 
         if file_type == "image":
-            logger.info("Image OCR not yet implemented — skipping text extraction")
-            return ""
+            return self._extract_image_ocr(content)
 
         return ""
 
     @staticmethod
     def _extract_pdf(content: bytes) -> str:
-        """Extract text from a PDF using PyMuPDF.
+        """Extract text from a PDF using PyMuPDF, with OCR fallback for scanned pages.
+
+        For each page, tries native text extraction first. If a page yields
+        minimal text (< 50 chars), falls back to OCR via pytesseract on a
+        rendered pixmap of the page.
 
         Args:
             content: Raw PDF bytes.
@@ -354,15 +357,70 @@ class DocumentIngestionService:
         """
         try:
             import fitz  # PyMuPDF
-
-            doc = fitz.open(stream=content, filetype="pdf")
-            text = ""
-            for page in doc:
-                text += page.get_text() + "\n\n"
-            doc.close()
-            return text
         except ImportError:
             logger.warning("PyMuPDF not installed — PDF text extraction unavailable")
+            return ""
+
+        doc = fitz.open(stream=content, filetype="pdf")
+        text = ""
+        for page in doc:
+            page_text = page.get_text()
+            if len(page_text.strip()) < 50:
+                # Scanned/image-based page — try OCR
+                page_text = DocumentIngestionService._ocr_pdf_page(page)
+            text += page_text + "\n\n"
+        doc.close()
+        return text
+
+    @staticmethod
+    def _ocr_pdf_page(page: "Any") -> str:
+        """Run OCR on a single PDF page rendered as an image.
+
+        Args:
+            page: A PyMuPDF page object.
+
+        Returns:
+            OCR'd text, or empty string if Tesseract is unavailable.
+        """
+        try:
+            import pytesseract
+            from PIL import Image
+
+            pix = page.get_pixmap(dpi=300)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            return pytesseract.image_to_string(img)
+        except ImportError:
+            logger.warning(
+                "pytesseract/Pillow not installed — OCR unavailable for scanned PDF page"
+            )
+            return ""
+        except Exception as e:
+            logger.warning("OCR failed for PDF page: %s", e)
+            return ""
+
+    @staticmethod
+    def _extract_image_ocr(content: bytes) -> str:
+        """Extract text from a standalone image file via OCR.
+
+        Args:
+            content: Raw image bytes (PNG, JPG, WebP).
+
+        Returns:
+            OCR'd text, or empty string if Tesseract is unavailable.
+        """
+        try:
+            import pytesseract
+            from PIL import Image
+
+            img = Image.open(BytesIO(content))
+            return pytesseract.image_to_string(img)
+        except ImportError:
+            logger.warning(
+                "pytesseract/Pillow not installed — image OCR unavailable"
+            )
+            return ""
+        except Exception as e:
+            logger.warning("Image OCR failed: %s", e)
             return ""
 
     @staticmethod

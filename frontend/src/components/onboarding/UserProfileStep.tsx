@@ -13,6 +13,7 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
     title: "",
     department: "",
     role: "",
+    phone: "",
     linkedin_url: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -29,6 +30,7 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
           title: u.title || prev.title,
           department: u.department || prev.department,
           role: u.role || prev.role,
+          phone: u.phone || prev.phone,
           linkedin_url: u.linkedin_url || prev.linkedin_url,
         }));
       })
@@ -93,6 +95,9 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
       }
       if (formData.role) {
         payload.role = formData.role;
+      }
+      if (formData.phone.trim()) {
+        payload.phone = formData.phone.trim();
       }
       if (formData.linkedin_url.trim()) {
         payload.linkedin_url = formData.linkedin_url.trim();
@@ -288,6 +293,34 @@ export function UserProfileStep({ onComplete, onSkip }: UserProfileStepProps) {
             <option value="Medical Affairs">Medical Affairs</option>
             <option value="Other">Other</option>
           </select>
+        </div>
+
+        {/* Phone */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="phone"
+            className="font-sans text-[13px] font-medium text-secondary"
+          >
+            Phone{" "}
+            <span className="text-tertiary font-normal">(optional)</span>
+          </label>
+          <input
+            type="tel"
+            id="phone"
+            name="phone"
+            value={formData.phone}
+            onChange={handleChange}
+            disabled={isSubmitting}
+            placeholder="e.g., +1 (555) 123-4567"
+            autoComplete="tel"
+            className="
+              bg-subtle border border-border rounded-lg px-4 py-3 text-[15px] font-sans
+              text-content placeholder:text-secondary/50
+              focus:outline-none focus:ring-1 focus:border-interactive focus:ring-interactive
+              transition-colors duration-150
+              disabled:opacity-50 disabled:cursor-not-allowed
+            "
+          />
         </div>
 
         {/* LinkedIn URL */}

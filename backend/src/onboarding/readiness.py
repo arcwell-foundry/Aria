@@ -88,11 +88,11 @@ class OnboardingReadinessService:
             scores_data = {}
 
         scores = ReadinessBreakdown(
-            corporate_memory=float(scores_data.get("corporate_memory", 0.0)),
-            digital_twin=float(scores_data.get("digital_twin", 0.0)),
-            relationship_graph=float(scores_data.get("relationship_graph", 0.0)),
-            integrations=float(scores_data.get("integrations", 0.0)),
-            goal_clarity=float(scores_data.get("goal_clarity", 0.0)),
+            corporate_memory=min(100.0, max(0.0, float(scores_data.get("corporate_memory", 0.0)))),
+            digital_twin=min(100.0, max(0.0, float(scores_data.get("digital_twin", 0.0)))),
+            relationship_graph=min(100.0, max(0.0, float(scores_data.get("relationship_graph", 0.0)))),
+            integrations=min(100.0, max(0.0, float(scores_data.get("integrations", 0.0)))),
+            goal_clarity=min(100.0, max(0.0, float(scores_data.get("goal_clarity", 0.0)))),
         )
 
         # Calculate weighted overall
@@ -213,13 +213,13 @@ class OnboardingReadinessService:
             Weighted overall score (0-100).
         """
         overall = (
-            corporate_memory * WEIGHTS["corporate_memory"]
-            + digital_twin * WEIGHTS["digital_twin"]
-            + relationship_graph * WEIGHTS["relationship_graph"]
-            + integrations * WEIGHTS["integrations"]
-            + goal_clarity * WEIGHTS["goal_clarity"]
+            min(100.0, corporate_memory) * WEIGHTS["corporate_memory"]
+            + min(100.0, digital_twin) * WEIGHTS["digital_twin"]
+            + min(100.0, relationship_graph) * WEIGHTS["relationship_graph"]
+            + min(100.0, integrations) * WEIGHTS["integrations"]
+            + min(100.0, goal_clarity) * WEIGHTS["goal_clarity"]
         )
-        return round(overall, 1)
+        return min(100.0, round(overall, 1))
 
     def _get_confidence_modifier(self, overall: float) -> str:
         """Map overall score to confidence modifier string.

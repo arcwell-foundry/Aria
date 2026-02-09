@@ -619,6 +619,24 @@ Respond ONLY with the JSON object."""
                 extra={"user_id": user_id, "title": title, "goal_type": goal_type.value},
             )
 
+            # Run SMART validation before persisting (P2-25)
+            original_title = title
+            original_description = description
+            try:
+                smart_result = await self.validate_smart(title, description)
+                if smart_result.score < 40 and smart_result.refined_version:
+                    logger.info(
+                        "SMART score below threshold, using refined version",
+                        extra={
+                            "user_id": user_id,
+                            "original_score": smart_result.score,
+                            "refined": smart_result.refined_version,
+                        },
+                    )
+                    title = smart_result.refined_version
+            except Exception as e:
+                logger.warning("SMART validation failed, proceeding with original: %s", e)
+
             # Create the goal using GoalService
             goal_data = GoalCreate(
                 title=title,
@@ -627,6 +645,8 @@ Respond ONLY with the JSON object."""
                 config={
                     "source": "onboarding_first_goal",
                     "created_during_onboarding": True,
+                    "original_title": original_title,
+                    "original_description": original_description,
                 },
             )
 

@@ -87,6 +87,10 @@ async def lifespan(_app: FastAPI) -> Any:
     # US-942: Start the sync scheduler
     scheduler = get_sync_scheduler()
     await scheduler.start()
+    # P2-36: Start ambient gap filler scheduler
+    from src.services.scheduler import start_scheduler as start_ambient_scheduler
+
+    await start_ambient_scheduler()
     # Generate any missing daily briefings on startup
     try:
         import asyncio
@@ -102,6 +106,10 @@ async def lifespan(_app: FastAPI) -> Any:
     logger.info("Shutting down ARIA API...")
     # US-942: Stop the sync scheduler
     await scheduler.stop()
+    # P2-36: Stop ambient gap filler scheduler
+    from src.services.scheduler import stop_scheduler as stop_ambient_scheduler
+
+    await stop_ambient_scheduler()
     if GraphitiClient.is_initialized():
         await GraphitiClient.close()
         logger.info("Graphiti connection closed")

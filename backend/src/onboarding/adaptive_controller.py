@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.memory.working import WorkingMemoryManager
 from src.onboarding.models import OnboardingStep
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,10 @@ class OnboardingOODAController:
     """
 
     def __init__(self) -> None:
-        """Initialize with Supabase and LLM clients."""
+        """Initialize with Supabase, LLM, and WorkingMemory clients."""
         self._db = SupabaseClient.get_client()
         self._llm = LLMClient()
+        self._wm_manager = WorkingMemoryManager()
 
     async def assess_next_step(
         self, user_id: str, completed_step: OnboardingStep
@@ -64,14 +66,24 @@ class OnboardingOODAController:
         Returns:
             OODAAssessment with observation, orientation, decision, and reasoning.
         """
+        # Create a working memory session for this OODA cycle
+        session_id = f"ooda_{user_id}_{completed_step.value}"
+        wm = self._wm_manager.get_or_create(session_id, user_id)
+        wm.set_goal("Adapt onboarding flow after step completion", {
+            "completed_step": completed_step.value,
+        })
+
         # OBSERVE: Gather current state
         observation = await self._observe(user_id)
+        wm.add_message("system", json.dumps(observation), {"phase": "observe"})
 
         # ORIENT: Assess what matters most
         orientation = await self._orient(observation)
+        wm.add_message("system", json.dumps(orientation), {"phase": "orient"})
 
         # DECIDE: Determine adaptations
         decision = await self._decide(observation, orientation, completed_step)
+        wm.add_message("system", json.dumps(decision), {"phase": "decide"})
 
         # Build assessment
         assessment = OODAAssessment(
@@ -83,6 +95,9 @@ class OnboardingOODAController:
 
         # ACT: Log and store
         await self._log_assessment(user_id, assessment)
+
+        # Clean up the working memory session after the cycle
+        self._wm_manager.delete(session_id)
 
         return assessment
 

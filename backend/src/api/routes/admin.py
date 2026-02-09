@@ -841,3 +841,30 @@ async def consolidate_procedural_insights(
     count = await tracker.consolidate_to_procedural()
 
     return {"message": f"Consolidated {count} new procedural insights"}
+
+
+# --- Ambient Gap Filler (P2-36) ---
+
+
+@router.post(
+    "/run-ambient-gaps",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+)
+async def run_ambient_gaps(
+    _current_user: AdminUser,
+) -> dict[str, Any]:
+    """Trigger ambient gap filler check for all active users.
+
+    Can be called by an external cron (Railway, pg_cron) or manually by admins.
+    The ``ENABLE_SCHEDULER`` env var controls the built-in APScheduler alternative.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        Status with count of processed users.
+    """
+    from src.services.scheduler import run_ambient_gaps_admin
+
+    return await run_ambient_gaps_admin()
