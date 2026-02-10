@@ -82,6 +82,20 @@ export interface BootstrapStatus {
   deals_found?: number;
 }
 
+export interface SavedEmailPreferences {
+  provider?: EmailProvider;
+  privacy_exclusions?: PrivacyExclusion[];
+  ingestion_scope_days?: number;
+  attachment_ingestion?: boolean;
+}
+
+export async function getEmailPreferences(): Promise<SavedEmailPreferences> {
+  const response = await apiClient.get<SavedEmailPreferences>(
+    "/onboarding/email/preferences"
+  );
+  return response.data;
+}
+
 export async function getBootstrapStatus(): Promise<BootstrapStatus> {
   const response = await apiClient.get<BootstrapStatus>(
     "/onboarding/email/bootstrap/status"

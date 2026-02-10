@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ArrowRight, CheckCircle2, Circle, Loader2, Sparkles, Zap } from "lucide-react";
 import {
   getSkillRecommendations,
+  getOnboardingState,
   installRecommendedSkills,
   completeStep,
 } from "@/api/onboarding";
@@ -122,13 +123,27 @@ export function SkillsConfigurationStep({
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const response = await getSkillRecommendations({
-        company_type: companyType,
-        role: userRole,
-      });
+      // Load recommendations and check for previously saved selections in parallel
+      const [response, onboardingState] = await Promise.all([
+        getSkillRecommendations({
+          company_type: companyType,
+          role: userRole,
+        }),
+        getOnboardingState().catch(() => null),
+      ]);
       setRecommendations(response);
-      // Pre-select all recommended skills
-      setSelectedSkills(new Set(response.recommendations.map((r) => r.skill_id)));
+
+      // Restore previously configured skills on revisit
+      const stepData = onboardingState?.state?.step_data as Record<string, unknown> | undefined;
+      const firstGoalData = stepData?.first_goal as Record<string, unknown> | undefined;
+      const savedSkills = firstGoalData?.skills_configured as string[] | undefined;
+
+      if (savedSkills && savedSkills.length > 0) {
+        setSelectedSkills(new Set(savedSkills));
+      } else {
+        // Pre-select all recommended skills for first visit
+        setSelectedSkills(new Set(response.recommendations.map((r) => r.skill_id)));
+      }
     } catch {
       setErrorMessage("Failed to load skill recommendations. Please try again.");
     } finally {

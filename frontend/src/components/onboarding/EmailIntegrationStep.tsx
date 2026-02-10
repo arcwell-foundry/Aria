@@ -11,6 +11,7 @@ import {
 import {
   connectEmail,
   getEmailStatus,
+  getEmailPreferences,
   saveEmailPrivacy,
   getBootstrapStatus,
   type EmailProvider,
@@ -53,9 +54,34 @@ export function EmailIntegrationStep({
   const loadEmailStatus = async () => {
     setLoadingStatus(true);
     try {
-      const status = await getEmailStatus();
+      // Load connection status and saved preferences in parallel
+      const [status, savedPrefs] = await Promise.all([
+        getEmailStatus(),
+        getEmailPreferences().catch(() => ({})),
+      ]);
+
       if (status.google.connected) setCurrentProvider("google");
       else if (status.microsoft.connected) setCurrentProvider("microsoft");
+
+      // Restore saved privacy preferences on revisit
+      if (savedPrefs && Object.keys(savedPrefs).length > 0) {
+        if (savedPrefs.attachment_ingestion !== undefined) {
+          setAttachmentIngestion(savedPrefs.attachment_ingestion);
+        }
+        if (savedPrefs.ingestion_scope_days !== undefined) {
+          setIngestionScope(savedPrefs.ingestion_scope_days);
+        }
+        if (savedPrefs.privacy_exclusions && savedPrefs.privacy_exclusions.length > 0) {
+          setPrivacyExclusions(savedPrefs.privacy_exclusions);
+          // Restore category toggles from saved exclusions
+          const savedValues = new Set(savedPrefs.privacy_exclusions.map((e) => e.value));
+          setCategoryToggles({
+            personal: savedValues.has("spouse/partner") || savedValues.has("family"),
+            financial: savedValues.has("financial/banking"),
+            medical: savedValues.has("medical"),
+          });
+        }
+      }
     } catch (error) {
       console.error("Failed to load email status:", error);
     } finally {

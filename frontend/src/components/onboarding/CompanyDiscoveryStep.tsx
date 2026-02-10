@@ -6,6 +6,8 @@ import {
   submitCompanyDiscovery,
 } from "@/api/companyDiscovery";
 import { getFullProfile } from "@/api/profile";
+import { getCurrentUser } from "@/api/auth";
+import { getOnboardingState } from "@/api/onboarding";
 import { EnrichmentProgress } from "@/components/onboarding/EnrichmentProgress";
 import { checkCrossUser } from "@/api/onboarding";
 import { CompanyMemoryDeltaConfirmation } from "./CompanyMemoryDeltaConfirmation";
@@ -28,19 +30,38 @@ export function CompanyDiscoveryStep({ onComplete }: CompanyDiscoveryStepProps) 
 
   // Load saved company data on mount (for revisiting completed step)
   useEffect(() => {
-    getFullProfile()
-      .then((profile) => {
-        if (profile.company) {
-          setFormData((prev) => ({
-            company_name: profile.company!.name || prev.company_name,
-            website: profile.company!.website || prev.website,
-            email: prev.email,
-          }));
-        }
-      })
-      .catch(() => {
+    const loadSavedData = async () => {
+      try {
+        // Load from multiple sources in parallel
+        const [profile, user, onboardingState] = await Promise.all([
+          getFullProfile().catch(() => null),
+          getCurrentUser().catch(() => null),
+          getOnboardingState().catch(() => null),
+        ]);
+
+        // Check onboarding step_data first (most reliable for revisit)
+        const stepData = onboardingState?.state?.step_data as Record<string, unknown> | undefined;
+        const companyDiscoveryData = stepData?.company_discovery as Record<string, string> | undefined;
+
+        setFormData((prev) => ({
+          company_name:
+            companyDiscoveryData?.company_name ||
+            profile?.company?.name ||
+            prev.company_name,
+          website:
+            companyDiscoveryData?.website ||
+            profile?.company?.website ||
+            prev.website,
+          email:
+            companyDiscoveryData?.email ||
+            user?.email ||
+            prev.email,
+        }));
+      } catch {
         // No saved data yet
-      });
+      }
+    };
+    loadSavedData();
   }, []);
 
   // Extract domain from email for cross-user check

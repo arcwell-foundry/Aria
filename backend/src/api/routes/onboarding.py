@@ -538,6 +538,35 @@ async def save_email_privacy(
     return await service.save_privacy_config(current_user.id, body)
 
 
+@router.get("/email/preferences")
+async def get_email_preferences(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get saved email privacy preferences for the current user.
+
+    Returns saved privacy exclusions, ingestion scope, and attachment
+    preference from user_settings so the frontend can restore state
+    when revisiting the email integration step.
+
+    Returns:
+        Dict with saved email preferences or empty dict if none saved.
+    """
+    db = SupabaseClient.get_client()
+    result = (
+        db.table("user_settings")
+        .select("integrations")
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not result.data:
+        return {}
+
+    integrations = result.data.get("integrations", {})
+    email_prefs = integrations.get("email", {})
+    return email_prefs
+
+
 # Email bootstrap status endpoint (US-908)
 
 

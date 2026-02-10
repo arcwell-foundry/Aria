@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ArrowRight, Loader2, Target, Sparkles } from "lucide-react";
 import {
   getFirstGoalSuggestions,
+  getOnboardingState,
   validateGoalSmart,
   createFirstGoal,
   completeStep,
@@ -63,14 +64,30 @@ export function FirstGoalStep({ onComplete }: FirstGoalStepProps) {
   const [isValidating, setIsValidating] = useState(false);
 
   useEffect(() => {
-    loadSuggestions();
+    loadData();
   }, []);
 
-  const loadSuggestions = async () => {
+  const loadData = async () => {
     setIsLoading(true);
     try {
-      const response = await getFirstGoalSuggestions();
+      // Load suggestions and check for previously saved goal in parallel
+      const [response, onboardingState] = await Promise.all([
+        getFirstGoalSuggestions(),
+        getOnboardingState().catch(() => null),
+      ]);
       setSuggestions(response);
+
+      // Restore previously selected goal on revisit
+      const stepData = onboardingState?.state?.step_data as Record<string, unknown> | undefined;
+      const firstGoalData = stepData?.first_goal as Record<string, unknown> | undefined;
+      const savedGoal = firstGoalData?.goal as { title: string; description: string; goal_type: string } | undefined;
+      if (savedGoal?.title) {
+        setSelectedGoal({
+          title: savedGoal.title,
+          description: savedGoal.description || "",
+          goal_type: savedGoal.goal_type || "custom",
+        });
+      }
     } catch {
       // Continue with default state on error
     } finally {
