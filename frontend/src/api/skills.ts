@@ -69,6 +69,42 @@ export interface TrustInfo {
   globally_approved_at: string | null;
 }
 
+export type DataAccessLevel = "public" | "internal" | "confidential" | "restricted" | "regulated";
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type PlanStatus = "draft" | "pending_approval" | "approved" | "executing" | "completed" | "failed" | "cancelled";
+
+export interface ExecutionStep {
+  step_number: number;
+  skill_id: string;
+  skill_path: string;
+  skill_name: string;
+  depends_on: number[];
+  status: StepStatus;
+  agent_id: string | null;
+  data_classes: DataAccessLevel[];
+  estimated_seconds: number;
+  started_at: string | null;
+  completed_at: string | null;
+  output_summary: string | null;
+  error: string | null;
+}
+
+export interface ExecutionPlan {
+  id: string;
+  task_description: string;
+  steps: ExecutionStep[];
+  parallel_groups: number[][];
+  estimated_duration_ms: number;
+  risk_level: RiskLevel;
+  approval_required: boolean;
+  reasoning: string;
+  status: PlanStatus;
+  created_at: string;
+  approved_at: string | null;
+  completed_at: string | null;
+}
+
 export interface AvailableSkillsFilters {
   query?: string;
   trust_level?: TrustLevel;
@@ -143,5 +179,25 @@ export async function approveSkillGlobally(skillId: string): Promise<TrustInfo> 
   const response = await apiClient.post<TrustInfo>(
     `/skills/autonomy/${skillId}/approve`
   );
+  return response.data;
+}
+
+export async function getExecutionPlan(planId: string): Promise<ExecutionPlan> {
+  const response = await apiClient.get<ExecutionPlan>(`/skills/plans/${planId}`);
+  return response.data;
+}
+
+export async function approveExecutionPlan(planId: string): Promise<ExecutionPlan> {
+  const response = await apiClient.post<ExecutionPlan>(`/skills/plans/${planId}/approve`);
+  return response.data;
+}
+
+export async function rejectExecutionPlan(planId: string): Promise<ExecutionPlan> {
+  const response = await apiClient.post<ExecutionPlan>(`/skills/plans/${planId}/reject`);
+  return response.data;
+}
+
+export async function listPendingPlans(): Promise<ExecutionPlan[]> {
+  const response = await apiClient.get<ExecutionPlan[]>("/skills/plans?status=pending_approval");
   return response.data;
 }
