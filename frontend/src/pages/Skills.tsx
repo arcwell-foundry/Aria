@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { SkillBrowser, InstalledSkills, SkillAuditLog } from "@/components/skills";
+import { SkillBrowser, SkillPerformancePanel, SkillAuditLog } from "@/components/skills";
 import { HelpTooltip } from "@/components/HelpTooltip";
 
 type SkillTab = "browse" | "installed" | "activity";
@@ -76,7 +76,7 @@ export function SkillsPage() {
 
           {/* Tab content */}
           {activeTab === "browse" && <SkillBrowser />}
-          {activeTab === "installed" && <InstalledSkills />}
+          {activeTab === "installed" && <SkillPerformancePanel />}
           {activeTab === "activity" && <SkillAuditLog />}
         </div>
       </div>
