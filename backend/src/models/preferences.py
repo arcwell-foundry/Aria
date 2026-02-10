@@ -56,6 +56,15 @@ class PreferenceUpdate(BaseModel):
         None, description="List of tracked competitor names"
     )
     timezone: str | None = Field(None, description="User timezone")
+    linkedin_posting_enabled: bool | None = Field(
+        None, description="Enable ARIA LinkedIn posting features"
+    )
+    linkedin_auto_post: bool | None = Field(
+        None, description="Allow ARIA to auto-publish high-confidence drafts"
+    )
+    linkedin_posts_per_week_goal: int | None = Field(
+        None, ge=0, le=14, description="Weekly LinkedIn posting goal"
+    )
 
     @field_validator("briefing_time")
     @classmethod
@@ -95,9 +104,7 @@ class EmailPreferencesUpdate(BaseModel):
     Note: security_alerts cannot be disabled and will always return True.
     """
 
-    weekly_summary: bool | None = Field(
-        None, description="Receive weekly summary emails"
-    )
+    weekly_summary: bool | None = Field(None, description="Receive weekly summary emails")
     feature_announcements: bool | None = Field(
         None, description="Receive feature announcement emails"
     )
@@ -111,9 +118,7 @@ class EmailPreferencesResponse(BaseModel):
 
     user_id: str = Field(..., description="User ID")
     weekly_summary: bool = Field(..., description="Receive weekly summary emails")
-    feature_announcements: bool = Field(
-        ..., description="Receive feature announcement emails"
-    )
+    feature_announcements: bool = Field(..., description="Receive feature announcement emails")
     security_alerts: bool = Field(
         ..., description="Security alerts (always True - cannot be disabled)"
     )
