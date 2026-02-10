@@ -672,3 +672,10 @@ async def delete_custom_skill(
     )
 
     return StatusResponse(status="deleted")
+
+
+# --- Replay Sub-Router ---
+
+from src.api.routes.skill_replay import router as replay_router  # noqa: E402
+
+router.include_router(replay_router)
