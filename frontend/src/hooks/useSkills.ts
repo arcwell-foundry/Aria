@@ -5,6 +5,11 @@ import {
   installSkill,
   uninstallSkill,
   getSkillAudit,
+  getExecutionPlan,
+  approveExecutionPlan,
+  rejectExecutionPlan,
+  listPendingPlans,
+  approveSkillGlobally,
   type AvailableSkillsFilters,
 } from "@/api/skills";
 
@@ -18,6 +23,9 @@ export const skillKeys = {
   audit: () => [...skillKeys.all, "audit"] as const,
   auditFiltered: (skillId?: string) =>
     [...skillKeys.audit(), { skillId }] as const,
+  plans: () => [...skillKeys.all, "plans"] as const,
+  pendingPlans: () => [...skillKeys.plans(), "pending"] as const,
+  plan: (planId: string) => [...skillKeys.plans(), planId] as const,
 };
 
 // List available skills
@@ -67,5 +75,63 @@ export function useSkillAudit(skillId?: string) {
   return useQuery({
     queryKey: skillKeys.auditFiltered(skillId),
     queryFn: () => getSkillAudit(skillId),
+  });
+}
+
+// Execution plan polling (2s when executing/pending_approval, stops otherwise)
+export function useExecutionPlan(planId: string | null) {
+  return useQuery({
+    queryKey: skillKeys.plan(planId ?? ""),
+    queryFn: () => getExecutionPlan(planId!),
+    enabled: !!planId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === "executing" || status === "pending_approval") return 2_000;
+      return false;
+    },
+  });
+}
+
+// List pending execution plans (polls every 10s)
+export function usePendingPlans() {
+  return useQuery({
+    queryKey: skillKeys.pendingPlans(),
+    queryFn: () => listPendingPlans(),
+    refetchInterval: 10_000,
+  });
+}
+
+// Approve an execution plan
+export function useApproveExecutionPlan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (planId: string) => approveExecutionPlan(planId),
+    onSuccess: (plan) => {
+      queryClient.setQueryData(skillKeys.plan(plan.id), plan);
+      queryClient.invalidateQueries({ queryKey: skillKeys.pendingPlans() });
+    },
+  });
+}
+
+// Reject an execution plan
+export function useRejectExecutionPlan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (planId: string) => rejectExecutionPlan(planId),
+    onSuccess: (plan) => {
+      queryClient.setQueryData(skillKeys.plan(plan.id), plan);
+      queryClient.invalidateQueries({ queryKey: skillKeys.pendingPlans() });
+    },
+  });
+}
+
+// Approve a skill globally (skip future approval prompts)
+export function useApproveSkillGlobally() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (skillId: string) => approveSkillGlobally(skillId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: skillKeys.all });
+    },
   });
 }
