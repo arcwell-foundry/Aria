@@ -144,6 +144,26 @@ body {
   animation: card-lift 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
+@keyframes skill-auto-approve {
+  0% { border-color: var(--success); box-shadow: 0 0 0 0 rgba(107, 143, 113, 0.4); }
+  50% { border-color: var(--success); box-shadow: 0 0 20px 4px rgba(107, 143, 113, 0.2); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+@keyframes skill-step-complete {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+.animate-skill-auto-approve {
+  animation: skill-auto-approve 1.5s ease-out forwards;
+}
+
+.animate-skill-step-complete {
+  animation: skill-step-complete 0.3s ease-out;
+}
+
 /* ARIA Ambient Presence Mark — "light moving through water" */
 
 @keyframes aria-breathe {
