@@ -275,7 +275,13 @@ class FirstGoalService:
                     settings = company.get("settings") or {}
                     classification = settings.get("classification") or {}
                     context["company_type"] = classification.get("company_type")
+                    context["company_description"] = classification.get("company_description", "")
+                    context["primary_customers"] = classification.get("primary_customers", [])
+                    context["value_chain_position"] = classification.get("value_chain_position", "")
                     context["therapeutic_areas"] = classification.get("therapeutic_areas", [])
+                    context["key_products"] = (
+                        classification.get("key_products", []) or context["key_products"]
+                    )
         except Exception as e:
             logger.warning(f"Failed to fetch profile for suggestions: {e}")
 
@@ -400,6 +406,9 @@ class FirstGoalService:
         title = context.get("title") or "team member"
         company_name = context.get("company_name") or "their company"
         company_type = context.get("company_type") or "life sciences company"
+        company_description = context.get("company_description") or ""
+        primary_customers = context.get("primary_customers") or []
+        value_chain_position = context.get("value_chain_position") or ""
         role = context.get("role") or "user"
         department = context.get("department") or ""
         therapeutic_areas = context.get("therapeutic_areas") or []
@@ -445,10 +454,16 @@ class FirstGoalService:
         categories = [c.value for c in GoalCategory]
         goal_types = [g.value for g in GoalType]
 
+        # Company context block
+        customers_block = ", ".join(primary_customers) if primary_customers else "not specified"
+
         return f"""You are ARIA, an AI assistant for life sciences commercial teams.
 
 The user is {full_name}, {title} at {company_name}.
 {company_name} is a {company_type}.
+{f"Company description: {company_description}" if company_description else ""}
+{f"Primary customers: {customers_block}" if primary_customers else ""}
+{f"Value chain position: {value_chain_position}" if value_chain_position else ""}
 Therapeutic focus areas: {ta_block}
 Key products: {products_block}
 The user's role is: {role}

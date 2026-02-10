@@ -203,6 +203,65 @@ async def get_enrichment_delta(
     return step_data.get("enrichment_delta", [])
 
 
+@router.post("/enrichment/re-run")
+async def re_run_enrichment(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Re-run company enrichment for the user's company.
+
+    Triggers the full enrichment pipeline again — useful after
+    classification logic changes or when initial enrichment was
+    incomplete. Overwrites existing classification and facts.
+
+    Returns:
+        Dict with enrichment result summary or error.
+    """
+    db = SupabaseClient.get_client()
+
+    # Get user's company
+    profile = (
+        db.table("user_profiles")
+        .select("company_id, companies(name, domain, website)")
+        .eq("id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not profile.data or not profile.data.get("company_id"):
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    company_id = profile.data["company_id"]
+    company = profile.data.get("companies", {})
+    company_name = company.get("name", "")
+    website = company.get("website", company.get("domain", ""))
+
+    if not company_name:
+        raise HTTPException(status_code=400, detail="Company name not found")
+
+    try:
+        from src.onboarding.enrichment import CompanyEnrichmentEngine
+
+        engine = CompanyEnrichmentEngine()
+        result = await engine.enrich_company(
+            company_id=company_id,
+            company_name=company_name,
+            website=website,
+            user_id=current_user.id,
+        )
+
+        return {
+            "status": "complete",
+            "classification": result.classification.model_dump(),
+            "facts_discovered": len(result.facts),
+            "quality_score": result.quality_score,
+        }
+    except Exception as e:
+        logger.exception("Enrichment re-run failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Enrichment re-run failed. Please try again.",
+        ) from e
+
+
 @router.post("/company-discovery/submit")
 async def submit_company_discovery(
     body: CompanyDiscoveryRequest,

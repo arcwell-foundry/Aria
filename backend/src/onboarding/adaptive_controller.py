@@ -69,9 +69,12 @@ class OnboardingOODAController:
         # Create a working memory session for this OODA cycle
         session_id = f"ooda_{user_id}_{completed_step.value}"
         wm = self._wm_manager.get_or_create(session_id, user_id)
-        wm.set_goal("Adapt onboarding flow after step completion", {
-            "completed_step": completed_step.value,
-        })
+        wm.set_goal(
+            "Adapt onboarding flow after step completion",
+            {
+                "completed_step": completed_step.value,
+            },
+        )
 
         # OBSERVE: Gather current state
         observation = await self._observe(user_id)
@@ -167,19 +170,28 @@ class OnboardingOODAController:
             Dict with priority_action, emphasis, and skip_recommendation.
         """
         classification = observation.get("classification", {})
-        company_type = (
-            classification.get("company_type", "Unknown") if classification else "Unknown"
-        )
+
+        # Build rich company context from full classification
+        if classification:
+            company_context = (
+                f"Company type: {classification.get('company_type', 'Unknown')}\n"
+                f"Description: {classification.get('company_description', 'Not available')}\n"
+                f"Customers: {', '.join(classification.get('primary_customers', []))}\n"
+                f"Value chain: {classification.get('value_chain_position', 'Unknown')}\n"
+                f"Posture: {classification.get('company_posture', 'Unknown')}"
+            )
+        else:
+            company_context = "Company type: Unknown"
 
         prompt = (
-            f"Given this onboarding state for a {company_type} user, "
-            "assess what matters most.\n\n"
+            f"Given this onboarding state, assess what matters most.\n\n"
+            f"Company classification:\n{company_context}\n\n"
             f"Completed steps: {observation.get('completed_steps', [])}\n"
             f"Facts discovered: {observation.get('fact_count', 0)}\n"
             f"Integrations: {observation.get('connected_integrations', [])}\n"
             f"Readiness: {observation.get('readiness_scores', {})}\n\n"
             f"What is the highest-value next action for this specific user? Consider:\n"
-            f"- Their company type ({company_type})\n"
+            "- What their company actually does and who their customers are\n"
             "- What data gaps exist\n"
             "- Whether they seem rushed or thorough\n\n"
             "Return JSON:\n"
@@ -224,20 +236,13 @@ class OnboardingOODAController:
         }
 
         classification = observation.get("classification", {})
-        company_type = (classification.get("company_type", "") if classification else "").lower()
 
-        # CDMO user → inject question about manufacturing capabilities
-        if "cdmo" in company_type and completed_step == OnboardingStep.COMPANY_DISCOVERY:
-            decision["inject_questions"].append(
-                {
-                    "question": (
-                        "I see you're at a CDMO. Which modalities does your facility "
-                        "support — biologics, small molecule, cell therapy, or others?"
-                    ),
-                    "context": "CDMO-specific capability mapping",
-                    "insert_after_step": "company_discovery",
-                }
-            )
+        # Use LLM to determine if contextual questions should be injected
+        # based on the full classification (replaces rigid "CDMO" string check)
+        if classification and completed_step == OnboardingStep.COMPANY_DISCOVERY:
+            injected = await self._generate_contextual_questions(classification)
+            if injected:
+                decision["inject_questions"].extend(injected)
 
         # User who connected CRM → leverage pipeline data
         connected = observation.get("connected_integrations", [])
@@ -255,6 +260,69 @@ class OnboardingOODAController:
             decision["reasoning"] = "Low fact count — document upload is high-value"
 
         return decision
+
+    async def _generate_contextual_questions(
+        self, classification: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Use LLM to generate contextual questions based on company classification.
+
+        Instead of rigid checks like 'if CDMO, ask about manufacturing',
+        the LLM reasons about what additional context would be valuable
+        based on what the company actually does.
+
+        Args:
+            classification: Full company classification dict.
+
+        Returns:
+            List of injected question dicts, or empty list.
+        """
+        company_type = classification.get("company_type", "Unknown")
+        description = classification.get("company_description", "")
+        value_chain = classification.get("value_chain_position", "")
+        customers = classification.get("primary_customers", [])
+
+        prompt = (
+            "Based on this company classification, determine if ARIA should ask "
+            "a contextual question during onboarding to better understand the user's "
+            "specific situation.\n\n"
+            f"Company type: {company_type}\n"
+            f"Description: {description}\n"
+            f"Value chain position: {value_chain}\n"
+            f"Customers: {', '.join(customers)}\n\n"
+            "If a contextual question would help ARIA serve this user better, return JSON:\n"
+            '[{"question": "the question to ask", "context": "why this question matters"}]\n\n'
+            "If no special question is needed, return an empty array: []\n\n"
+            "Rules:\n"
+            "- Only ask if the company type genuinely benefits from a clarifying question\n"
+            "- Manufacturing companies → ask about modalities/capabilities\n"
+            "- Service providers → ask about service specialties\n"
+            "- Platform companies → ask about key use cases\n"
+            "- Drug developers → usually don't need extra questions\n"
+            "- Maximum 1 question\n"
+            "Return ONLY the JSON array."
+        )
+
+        try:
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.3,
+            )
+            questions = json.loads(response)
+            if isinstance(questions, list):
+                return [
+                    {
+                        "question": q["question"],
+                        "context": q.get("context", ""),
+                        "insert_after_step": "company_discovery",
+                    }
+                    for q in questions[:1]  # Max 1 question
+                    if isinstance(q, dict) and "question" in q
+                ]
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Contextual question generation failed: {e}")
+
+        return []
 
     async def _log_assessment(self, user_id: str, assessment: OODAAssessment) -> None:
         """Log OODA reasoning to episodic memory and store injections.

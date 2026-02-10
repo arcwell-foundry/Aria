@@ -108,49 +108,78 @@ class OnboardingCompletionOrchestrator:
 
         # Scout: Monitor competitors and industry
         activations["scout"] = await self._activate_scout(
-            user_id, company_id, company_domain, onboarding_data,
+            user_id,
+            company_id,
+            company_domain,
+            onboarding_data,
             priority="medium" if "scout" in priority_agents else "low",
         )
 
         # Analyst: Research top accounts
         activations["analyst"] = await self._activate_analyst(
-            user_id, onboarding_data,
+            user_id,
+            onboarding_data,
             priority="medium" if "analyst" in priority_agents else "low",
         )
 
         # Hunter: Only if lead_gen goal set
         if goal_type == "lead_gen":
             activations["hunter"] = await self._activate_hunter(
-                user_id, onboarding_data,
+                user_id,
+                onboarding_data,
                 priority="medium" if "hunter" in priority_agents else "low",
             )
 
         # Operator: Scan CRM for data quality
         activations["operator"] = await self._activate_operator(
-            user_id, onboarding_data,
+            user_id,
+            onboarding_data,
             priority="medium" if "operator" in priority_agents else "low",
         )
 
         # Scribe: Pre-draft follow-ups for stale conversations
         activations["scribe"] = await self._activate_scribe(
-            user_id, onboarding_data,
+            user_id,
+            onboarding_data,
             priority="medium" if "scribe" in priority_agents else "low",
         )
 
         # Strategist: Build go-to-market and account strategy
         activations["strategist"] = await self._activate_strategist(
-            user_id, onboarding_data,
+            user_id,
+            onboarding_data,
             priority="medium" if "strategist" in priority_agents else "low",
         )
 
-        # Pre-install recommended skills based on company type + role (US-918)
+        # Pre-install recommended skills based on full classification + role (US-918)
         try:
             from src.onboarding.skill_recommender import SkillRecommendationEngine
 
-            enrichment_data = onboarding_data.get("company_discovery", {})
-            company_type = enrichment_data.get("company_type", "pharma")
+            # Fetch full classification from company settings
+            classification: dict[str, Any] | None = None
+            company_type = "Unknown"
+            try:
+                profile_result2 = (
+                    self._db.table("user_profiles")
+                    .select("companies(settings)")
+                    .eq("id", user_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if profile_result2 and profile_result2.data:
+                    company = profile_result2.data.get("companies")
+                    if company:
+                        company_settings = company.get("settings") or {}
+                        classification = company_settings.get("classification")
+                        if classification:
+                            company_type = classification.get("company_type", "Unknown")
+            except Exception:
+                pass
+
             skill_engine = SkillRecommendationEngine()
-            recommendations = await skill_engine.recommend(company_type)
+            recommendations = await skill_engine.recommend(
+                company_type, role=user_role, classification=classification
+            )
             installed = await skill_engine.pre_install(user_id, recommendations)
             activations["skills_installed"] = installed
             logger.info(
@@ -209,8 +238,7 @@ class OnboardingCompletionOrchestrator:
             from src.services.activity_service import ActivityService
 
             activated_agents = [
-                k for k, v in activations.items()
-                if v is not None and k != "skills_installed"
+                k for k, v in activations.items() if v is not None and k != "skills_installed"
             ]
             await ActivityService().record(
                 user_id=user_id,

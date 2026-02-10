@@ -54,12 +54,20 @@ class EnrichmentProgress(BaseModel):
 
 
 class CompanyClassification(BaseModel):
-    """LLM-derived classification of a life sciences company."""
+    """LLM-derived classification of a life sciences company.
 
-    company_type: str  # Biotech, Large Pharma, CDMO, CRO, etc.
-    primary_modality: str  # Biologics, Small Molecule, Cell Therapy, etc.
-    company_posture: str  # Buyer or Seller of services
+    Uses open-ended reasoning — the LLM describes what the company
+    actually does instead of picking from a rigid category list.
+    """
+
+    company_type: str  # Free-text, e.g. "Bioprocessing Equipment Manufacturer"
+    company_description: str = ""  # 1-2 sentence description of what the company does
+    primary_customers: list[str] = []  # Who the company sells to
+    value_chain_position: str = ""  # e.g. "Upstream supplier / equipment vendor"
+    primary_modality: str = ""  # Biologics, Small Molecule, etc. (free-text)
+    company_posture: str = ""  # Buyer or Seller of services
     therapeutic_areas: list[str] = []
+    key_products: list[str] = []  # Major products or services
     likely_pain_points: list[str] = []
     confidence: float = 0.0
 
@@ -282,36 +290,56 @@ class CompanyEnrichmentEngine:
             raise
 
     async def _classify_company(self, company_name: str, website: str) -> CompanyClassification:
-        """Use LLM to classify company type, modality, and posture.
+        """Use LLM to classify company through open-ended reasoning.
+
+        Fetches website content first (via Exa) so the LLM can read what the
+        company actually says about itself, rather than guessing from the name.
 
         Args:
             company_name: Name of the company.
             website: Company website URL.
 
         Returns:
-            Classification result with type, modality, posture, and pain points.
+            Classification result with free-text type, description, customers, etc.
         """
-        prompt = f"""Classify this life sciences company.
+        # Fetch website content to feed into classification
+        website_content = await self._fetch_website_content(website)
+
+        website_block = ""
+        if website_content:
+            # Cap at ~4000 chars to leave room for prompt
+            truncated = website_content[:4000]
+            website_block = f"\n\nWebsite content:\n{truncated}"
+
+        prompt = f"""Analyze this life sciences company. Describe what they actually do — don't force them into a predefined category.
 
 Company: {company_name}
-Website: {website}
+Website: {website}{website_block}
 
 Provide a JSON response with:
 {{
-    "company_type": "one of: Biotech, Large Pharma, CDMO, CRO, Cell/Gene Therapy, Diagnostics, Medical Device, Healthcare Tech",
-    "primary_modality": "one of: Biologics, Small Molecule, Cell Therapy, Gene Therapy, ADC, Biosimilars, Diagnostics, Services, Platform, Mixed",
-    "company_posture": "Buyer or Seller (of services — CDMOs/CROs are Sellers, pharma/biotech are Buyers)",
-    "therapeutic_areas": ["list of likely therapeutic focus areas"],
-    "likely_pain_points": ["3-5 pain points based on company type and modality"],
+    "company_type": "Describe the company type in your own words (e.g. 'Bioprocessing Equipment Manufacturer', 'Clinical-Stage Oncology Biotech', 'Contract Development and Manufacturing Organization'). Be specific and accurate.",
+    "company_description": "1-2 sentence description of what the company actually does",
+    "primary_customers": ["list of who the company sells to or serves"],
+    "value_chain_position": "Where the company sits in the industry value chain (e.g. 'Upstream supplier / equipment vendor', 'Drug developer', 'Service provider to pharma/biotech', 'Platform technology provider')",
+    "primary_modality": "Primary technology or modality (e.g. 'Biologics', 'Small Molecule', 'Bioprocessing Equipment', 'Cell Therapy', 'Gene Therapy', 'ADC', 'Diagnostics', 'Lab Services', 'Software/Platform'). Use your own words.",
+    "company_posture": "Buyer or Seller (of services/products to the life sciences industry)",
+    "therapeutic_areas": ["list of therapeutic focus areas if applicable, empty list if not a drug developer"],
+    "key_products": ["list of major products, platforms, or services the company offers"],
+    "likely_pain_points": ["3-5 business pain points specific to this company's actual business model"],
     "confidence": 0.0-1.0
 }}
 
-Be specific. Use your knowledge of the life sciences industry.
+IMPORTANT:
+- Do NOT pick from a fixed list of categories. Describe the company accurately in your own words.
+- Read the website content carefully if provided — classify based on what the company says about itself.
+- A bioprocessing equipment company is NOT a CDMO. A diagnostics platform is NOT a pharma company. Be precise.
+- If the company doesn't develop drugs, therapeutic_areas should be empty or reflect areas they serve.
 Respond ONLY with the JSON object, no additional text."""
 
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+            max_tokens=800,
             temperature=0.3,
         )
         try:
@@ -321,10 +349,47 @@ Respond ONLY with the JSON object, no additional text."""
             logger.warning(f"Classification parse failed: {e}")
             return CompanyClassification(
                 company_type="Unknown",
-                primary_modality="Unknown",
                 company_posture="Unknown",
                 confidence=0.0,
             )
+
+    async def _fetch_website_content(self, website: str) -> str:
+        """Fetch website content via Exa API for classification context.
+
+        Args:
+            website: Company website URL.
+
+        Returns:
+            Concatenated text from top website pages, or empty string on failure.
+        """
+        try:
+            if not settings.EXA_API_KEY:
+                return ""
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.exa.ai/search",
+                    headers={"x-api-key": settings.EXA_API_KEY},
+                    json={
+                        "query": f"site:{website}",
+                        "numResults": 5,
+                        "type": "auto",
+                        "contents": {"text": {"maxCharacters": 2000}},
+                    },
+                    timeout=15.0,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    texts = []
+                    for item in data.get("results", []):
+                        text = item.get("text", "")
+                        if text:
+                            texts.append(text)
+                    return "\n\n".join(texts)
+        except Exception as e:
+            logger.warning(f"Website content fetch for classification failed: {e}")
+
+        return ""
 
     async def _run_research_modules(
         self,

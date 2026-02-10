@@ -29,18 +29,26 @@ def test_company_classification_model() -> None:
     from src.onboarding.enrichment import CompanyClassification
 
     classification = CompanyClassification(
-        company_type="Biotech",
-        primary_modality="Biologics",
-        company_posture="Buyer",
+        company_type="Bioprocessing Equipment Manufacturer",
+        company_description="Develops bioprocessing equipment for biopharmaceutical manufacturing",
+        primary_customers=["CDMOs", "Pharma companies", "Biotech companies"],
+        value_chain_position="Upstream supplier / equipment vendor",
+        primary_modality="Bioprocessing Equipment",
+        company_posture="Seller",
         therapeutic_areas=["Oncology", "Immunology"],
+        key_products=["OPUS chromatography columns", "XCell ATF filtration"],
         likely_pain_points=["Pipeline visibility", "CRO management"],
         confidence=0.85,
     )
 
-    assert classification.company_type == "Biotech"
-    assert classification.primary_modality == "Biologics"
-    assert classification.company_posture == "Buyer"
+    assert classification.company_type == "Bioprocessing Equipment Manufacturer"
+    assert classification.company_description != ""
+    assert len(classification.primary_customers) == 3
+    assert classification.value_chain_position == "Upstream supplier / equipment vendor"
+    assert classification.primary_modality == "Bioprocessing Equipment"
+    assert classification.company_posture == "Seller"
     assert len(classification.therapeutic_areas) == 2
+    assert len(classification.key_products) == 2
     assert len(classification.likely_pain_points) == 2
     assert classification.confidence == 0.85
 
@@ -51,11 +59,15 @@ def test_company_classification_defaults() -> None:
 
     classification = CompanyClassification(
         company_type="Unknown",
-        primary_modality="Unknown",
         company_posture="Unknown",
     )
 
+    assert classification.company_description == ""
+    assert classification.primary_customers == []
+    assert classification.value_chain_position == ""
+    assert classification.primary_modality == ""
     assert classification.therapeutic_areas == []
+    assert classification.key_products == []
     assert classification.likely_pain_points == []
     assert classification.confidence == 0.0
 
@@ -150,14 +162,18 @@ def test_enrichment_progress_model() -> None:
 
 @pytest.mark.asyncio
 async def test_classify_company_parses_valid_json() -> None:
-    """Test _classify_company parses valid LLM JSON response."""
+    """Test _classify_company parses valid LLM JSON response with open-ended fields."""
     from src.onboarding.enrichment import CompanyEnrichmentEngine
 
     llm_response = json.dumps({
-        "company_type": "Biotech",
+        "company_type": "Clinical-Stage Oncology Biotech",
+        "company_description": "Develops novel cell therapies for solid tumors",
+        "primary_customers": ["Hospitals", "Cancer centers"],
+        "value_chain_position": "Drug developer",
         "primary_modality": "Cell Therapy",
         "company_posture": "Buyer",
         "therapeutic_areas": ["Oncology"],
+        "key_products": ["CAR-T platform", "TIL therapy program"],
         "likely_pain_points": ["Manufacturing scale-up"],
         "confidence": 0.82,
     })
@@ -172,13 +188,19 @@ async def test_classify_company_parses_valid_json() -> None:
         mock_llm_cls.return_value = mock_llm
 
         engine = CompanyEnrichmentEngine()
+        # Mock _fetch_website_content to avoid real HTTP calls
+        engine._fetch_website_content = AsyncMock(return_value="We develop cell therapies")
         result = await engine._classify_company("TestBio", "https://testbio.com")
 
-    assert result.company_type == "Biotech"
+    assert result.company_type == "Clinical-Stage Oncology Biotech"
+    assert result.company_description == "Develops novel cell therapies for solid tumors"
+    assert result.primary_customers == ["Hospitals", "Cancer centers"]
+    assert result.value_chain_position == "Drug developer"
     assert result.primary_modality == "Cell Therapy"
     assert result.company_posture == "Buyer"
     assert result.confidence == 0.82
     assert "Oncology" in result.therapeutic_areas
+    assert len(result.key_products) == 2
 
 
 @pytest.mark.asyncio
@@ -196,6 +218,7 @@ async def test_classify_company_handles_invalid_json() -> None:
         mock_llm_cls.return_value = mock_llm
 
         engine = CompanyEnrichmentEngine()
+        engine._fetch_website_content = AsyncMock(return_value="")
         result = await engine._classify_company("BadCo", "https://badco.com")
 
     assert result.company_type == "Unknown"
