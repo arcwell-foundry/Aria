@@ -1,0 +1,242 @@
+name: financial-intel
+description: Extracts and analyzes SEC EDGAR filings (10-K, 10-Q) to produce financial intelligence for life sciences companies
+agent_assignment:
+  - analyst
+  - strategist
+trust_level: core
+estimated_seconds: 45
+
+system_prompt: |
+  You are ARIA's Financial Intelligence Analyst — a specialized engine that extracts
+  actionable financial intelligence from SEC EDGAR filings for life sciences commercial
+  teams. You analyze 10-K and 10-Q filings to surface revenue trends, R&D investment
+  patterns, pipeline mentions, and risk factors relevant to account strategy.
+
+  Data Source: SEC EDGAR FULL-TEXT SEARCH API
+  - Base URL: https://efts.sec.gov/LATEST/search-index
+  - Full-text search: GET https://efts.sec.gov/LATEST/search-index?q={query}&dateRange=custom&startdt={start}&enddt={end}&forms=10-K,10-Q
+  - Company filings: GET https://efts.sec.gov/LATEST/search-index?q={query}&entityName={company}
+  - Filing detail: Parse SGML/HTML filing documents linked from search results
+  - Rate limit: 10 requests/second, identify via User-Agent header
+  - No authentication required (public API)
+
+  Prompt Chain Architecture:
+  1. FILING DISCOVERY: Search EDGAR for recent 10-K and 10-Q filings by company name or CIK
+  2. SECTION EXTRACTION: Parse key sections — Item 1 (Business), Item 1A (Risk Factors),
+     Item 2 (MD&A), Item 7 (Financial Statements), Item 8 (Notes)
+  3. FINANCIAL EXTRACTION: Pull revenue figures, R&D spend, SG&A, gross margins,
+     operating income, cash position, debt levels, and guidance
+  4. PIPELINE MINING: Identify product/pipeline mentions, clinical program references,
+     regulatory milestones, and commercial launch timelines
+  5. RISK ANALYSIS: Categorize risk factors into market, regulatory, competitive,
+     operational, and financial buckets with severity assessment
+  6. SYNTHESIS: Produce structured analysis with trend indicators and strategic implications
+
+  Guidelines:
+  - Output must be valid JSON matching the output schema exactly.
+  - All monetary values must be numeric (in millions USD) — the frontend formats display.
+  - Percentages should be 0–100 numeric values.
+  - Always include the filing period (e.g., "FY2025", "Q3 2025") with each data point.
+  - When comparing periods, calculate absolute and percentage changes.
+  - Flag anomalies: revenue swings >15%, R&D changes >20%, new risk factors not in prior filing.
+  - For pipeline mentions, capture phase, indication, and any timeline references.
+  - Colors must use ARIA's palette:
+    primary: "#6366F1", success: "#10B981", warning: "#F59E0B",
+    danger: "#EF4444", info: "#3B82F6", muted: "#6B7280",
+    accent1: "#8B5CF6", accent2: "#EC4899", accent3: "#14B8A6".
+  - Include confidence_level based on data completeness:
+    high = multiple filings with clean extraction,
+    moderate = single filing or partial extraction,
+    low = estimated from incomplete data.
+  - When filing data is unavailable, return empty data arrays with a note
+    in metadata.summary explaining the gap.
+
+output_schema:
+  type: object
+  required:
+    - chart_type
+    - data
+    - config
+    - metadata
+    - financial_context
+  properties:
+    chart_type:
+      type: string
+      enum:
+        - bar
+        - line
+        - funnel
+        - radar
+        - treemap
+      description: Recharts component type to render
+    data:
+      type: array
+      items:
+        type: object
+      description: Array of data points for the chart
+    config:
+      type: object
+      required:
+        - title
+        - xKey
+        - yKeys
+      properties:
+        title:
+          type: string
+          description: Chart title displayed above the visualization
+        subtitle:
+          type: string
+          description: Filing period range or company context
+        xKey:
+          type: string
+          description: Data key for the x-axis or category axis
+        yKeys:
+          type: array
+          items:
+            type: object
+            required:
+              - key
+              - label
+              - color
+            properties:
+              key:
+                type: string
+                description: Data key for this series
+              label:
+                type: string
+                description: Human-readable legend label
+              color:
+                type: string
+                description: Hex color for this series
+              stackId:
+                type: string
+                description: Optional stack group identifier
+          description: Data series to render
+        layout:
+          type: object
+          properties:
+            width:
+              type: integer
+              description: Suggested width in pixels
+            height:
+              type: integer
+              description: Suggested height in pixels
+            margin:
+              type: object
+              properties:
+                top:
+                  type: integer
+                right:
+                  type: integer
+                bottom:
+                  type: integer
+                left:
+                  type: integer
+    financial_context:
+      type: object
+      properties:
+        company_name:
+          type: string
+          description: Canonical company name from filings
+        cik:
+          type: string
+          description: SEC Central Index Key
+        ticker:
+          type: string
+          description: Stock ticker symbol
+        filings_analyzed:
+          type: array
+          items:
+            type: object
+            properties:
+              form_type:
+                type: string
+                description: "10-K or 10-Q"
+              period:
+                type: string
+                description: "Filing period (e.g., FY2025, Q3 2025)"
+              filed_date:
+                type: string
+                description: ISO 8601 date when filed
+              accession_number:
+                type: string
+                description: SEC accession number for source tracing
+          description: List of filings used in this analysis
+        pipeline_mentions:
+          type: array
+          items:
+            type: object
+            properties:
+              product_name:
+                type: string
+              phase:
+                type: string
+              indication:
+                type: string
+              timeline_reference:
+                type: string
+          description: Products and pipeline programs mentioned in filings
+        risk_factors:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+                enum:
+                  - market
+                  - regulatory
+                  - competitive
+                  - operational
+                  - financial
+              summary:
+                type: string
+              severity:
+                type: string
+                enum:
+                  - high
+                  - moderate
+                  - low
+              is_new:
+                type: boolean
+                description: True if not present in prior filing
+          description: Categorized risk factors from Item 1A
+    metadata:
+      type: object
+      properties:
+        template:
+          type: string
+          description: Template used to generate this analysis
+        generated_at:
+          type: string
+          description: ISO 8601 timestamp
+        data_sources:
+          type: array
+          items:
+            type: string
+          description: APIs and filing sources queried
+        record_count:
+          type: integer
+          description: Number of filings processed
+        confidence_level:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+          description: Confidence based on data completeness
+        summary:
+          type: string
+          description: One-line natural language summary of the analysis
+
+input_requirements:
+  - template_name
+  - company_name
+
+templates:
+  company_financial_snapshot:
+    description: "Latest financial overview from most recent 10-K/10-Q for {company_name} — revenue, margins, R&D spend, cash position, pipeline highlights"
+  revenue_trend_analysis:
+    description: "Multi-period revenue trend with segment breakdown from sequential 10-K/10-Q filings for {company_name}"
+  rd_investment_tracker:
+    description: "R&D spending trends, pipeline investment allocation, and R&D-to-revenue ratio analysis for {company_name}"

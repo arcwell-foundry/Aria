@@ -1,0 +1,261 @@
+name: kol-mapper
+description: Maps and ranks Key Opinion Leaders via PubMed publication tracking and influence scoring for life sciences therapeutic areas
+agent_assignment:
+  - analyst
+  - scout
+trust_level: core
+estimated_seconds: 40
+
+system_prompt: |
+  You are ARIA's KOL Mapper — a specialized Key Opinion Leader identification and
+  ranking engine for life sciences commercial teams. You analyze PubMed publication
+  data and academic signals to identify, score, and rank KOLs within therapeutic areas.
+
+  Data Source: NCBI PubMed E-Utilities API
+  - Base URL: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/
+  - Search: GET esearch.fcgi?db=pubmed&term={query}&retmax=200&sort=date&retmode=json
+  - Fetch details: GET efetch.fcgi?db=pubmed&id={pmid_list}&retmode=xml
+  - Summary: GET esummary.fcgi?db=pubmed&id={pmid_list}&retmode=json
+  - Rate limit: 3 requests/second without API key, 10/second with NCBI API key
+  - Optional API key via api_key parameter (not required for basic access)
+
+  Prompt Chain Architecture:
+  1. THERAPEUTIC AREA SEARCH: Query PubMed for publications in the target therapeutic
+     area using MeSH terms and keyword combinations
+  2. AUTHOR EXTRACTION: Aggregate authors across search results, identifying first/last
+     author positions (which indicate PI-level involvement)
+  3. PUBLICATION SCORING: For each candidate KOL, calculate:
+     - Total publication count in the therapeutic area
+     - First/last author publications (weighted 2x)
+     - Recency-weighted score (publications in last 2 years weighted 3x, 2-5 years 1.5x)
+     - Journal impact factor tier (top-tier journals weighted 2x)
+  4. CITATION ANALYSIS: Estimate citation impact from PubMed Central cross-references
+     and highly-cited publication indicators
+  5. INFLUENCE SCORING: Composite score (0-100) combining:
+     - Publication volume (25% weight)
+     - Citation impact (25% weight)
+     - Recency and activity (20% weight)
+     - First/last authorship ratio (15% weight)
+     - Journal quality tier (15% weight)
+  6. KOL PROFILING: For top-ranked KOLs, extract institutional affiliations, co-author
+     networks, therapeutic sub-specialties, and clinical trial involvement
+
+  Guidelines:
+  - Output must be valid JSON matching the output schema exactly.
+  - Influence scores should be 0–100 numeric values.
+  - Publication counts must be exact integers from PubMed results.
+  - Always include the MeSH terms or search query used for reproducibility.
+  - Distinguish between "rising stars" (high recency score, lower total) and
+    "established leaders" (high total, broad citation base).
+  - Flag potential advisory board candidates: high influence + clinical trial PI roles.
+  - Colors must use ARIA's palette:
+    primary: "#6366F1", success: "#10B981", warning: "#F59E0B",
+    danger: "#EF4444", info: "#3B82F6", muted: "#6B7280",
+    accent1: "#8B5CF6", accent2: "#EC4899", accent3: "#14B8A6".
+  - Include confidence_level based on data completeness:
+    high = >50 publications analyzed with clear differentiation,
+    moderate = 20–50 publications or close scoring clusters,
+    low = <20 publications or thin data in the therapeutic area.
+  - When PubMed data is insufficient, return empty data arrays with a note
+    in metadata.summary explaining the gap.
+
+output_schema:
+  type: object
+  required:
+    - chart_type
+    - data
+    - config
+    - metadata
+    - kol_context
+  properties:
+    chart_type:
+      type: string
+      enum:
+        - bar
+        - radar
+        - treemap
+        - line
+        - funnel
+      description: Recharts component type to render
+    data:
+      type: array
+      items:
+        type: object
+      description: Array of data points for the chart
+    config:
+      type: object
+      required:
+        - title
+        - xKey
+        - yKeys
+      properties:
+        title:
+          type: string
+          description: Chart title displayed above the visualization
+        subtitle:
+          type: string
+          description: Therapeutic area and date range context
+        xKey:
+          type: string
+          description: Data key for the x-axis or category axis
+        yKeys:
+          type: array
+          items:
+            type: object
+            required:
+              - key
+              - label
+              - color
+            properties:
+              key:
+                type: string
+                description: Data key for this series
+              label:
+                type: string
+                description: Human-readable legend label
+              color:
+                type: string
+                description: Hex color for this series
+              stackId:
+                type: string
+                description: Optional stack group identifier
+          description: Data series to render
+        layout:
+          type: object
+          properties:
+            width:
+              type: integer
+              description: Suggested width in pixels
+            height:
+              type: integer
+              description: Suggested height in pixels
+            margin:
+              type: object
+              properties:
+                top:
+                  type: integer
+                right:
+                  type: integer
+                bottom:
+                  type: integer
+                left:
+                  type: integer
+    kol_context:
+      type: object
+      properties:
+        therapeutic_area:
+          type: string
+          description: Target therapeutic area searched
+        mesh_terms:
+          type: array
+          items:
+            type: string
+          description: MeSH terms used in the PubMed query
+        search_query:
+          type: string
+          description: Full PubMed search query for reproducibility
+        time_range:
+          type: object
+          properties:
+            start:
+              type: string
+              description: ISO 8601 date for search window start
+            end:
+              type: string
+              description: ISO 8601 date for search window end
+        total_publications_scanned:
+          type: integer
+          description: Total PubMed results processed
+        kol_profiles:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Full author name
+              institution:
+                type: string
+                description: Most recent institutional affiliation
+              influence_score:
+                type: number
+                description: Composite influence score (0-100)
+              publication_count:
+                type: integer
+                description: Total publications in therapeutic area
+              first_last_author_count:
+                type: integer
+                description: Publications as first or last author
+              estimated_citations:
+                type: integer
+                description: Estimated total citations
+              h_index_estimate:
+                type: integer
+                description: Estimated h-index within therapeutic area
+              recency_score:
+                type: number
+                description: Recency-weighted activity score (0-100)
+              top_journals:
+                type: array
+                items:
+                  type: string
+                description: Top journals published in
+              subspecialties:
+                type: array
+                items:
+                  type: string
+                description: Therapeutic sub-specialties identified
+              kol_tier:
+                type: string
+                enum:
+                  - tier_1_global
+                  - tier_2_national
+                  - tier_3_regional
+                  - rising_star
+                description: KOL classification tier
+              advisory_board_candidate:
+                type: boolean
+                description: Flagged as potential advisory board candidate
+              clinical_trial_pi:
+                type: boolean
+                description: Identified as clinical trial PI
+          description: Detailed profiles for top-ranked KOLs
+    metadata:
+      type: object
+      properties:
+        template:
+          type: string
+          description: Template used to generate this analysis
+        generated_at:
+          type: string
+          description: ISO 8601 timestamp
+        data_sources:
+          type: array
+          items:
+            type: string
+          description: APIs and databases queried
+        record_count:
+          type: integer
+          description: Number of publications processed
+        confidence_level:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+          description: Confidence based on data completeness
+        summary:
+          type: string
+          description: One-line natural language summary of the KOL landscape
+
+input_requirements:
+  - template_name
+  - therapeutic_area
+
+templates:
+  kol_landscape:
+    description: "Comprehensive KOL map for {therapeutic_area} — top 15 ranked KOLs with influence scores, tier classifications, and institutional affiliations"
+  publication_tracker:
+    description: "Publication volume trends over time in {therapeutic_area} — identify research momentum shifts and emerging sub-topics"
+  influence_ranking:
+    description: "Multi-axis influence comparison of top KOLs in {therapeutic_area} — radar chart of publication volume, citation impact, recency, journal quality, and leadership roles"
