@@ -8,7 +8,9 @@ import {
   ChevronUp,
   Bot,
   Zap,
+  PlayCircle,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { ActivityItem } from "@/api/activity";
 
 // Agent color mapping (same as ExecutionPlanCard)
@@ -60,6 +62,7 @@ export function SkillActivityEntry({ activity, onClick }: SkillActivityEntryProp
     activity.activity_type === "skill_step_failed";
 
   const metadata = activity.metadata as Record<string, unknown>;
+  const executionId = (metadata.execution_id as string) ?? (metadata.audit_id as string) ?? null;
   const skillName = (metadata.skill_name as string) ?? null;
   const stepNumber = (metadata.step_number as number) ?? null;
   const executionTimeMs = (metadata.execution_time_ms as number) ?? null;
@@ -159,6 +162,16 @@ export function SkillActivityEntry({ activity, onClick }: SkillActivityEntryProp
                     <p className="text-xs text-slate-500">
                       Plan: <span className="font-mono text-slate-400">{planId.slice(0, 8)}</span>
                     </p>
+                  )}
+                  {executionId && (
+                    <Link
+                      to={`/dashboard/skills/audit/${executionId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1.5 text-xs text-interactive hover:text-interactive/80 transition-colors mt-1"
+                    >
+                      <PlayCircle className="w-3 h-3" />
+                      View Replay
+                    </Link>
                   )}
                 </div>
               )}

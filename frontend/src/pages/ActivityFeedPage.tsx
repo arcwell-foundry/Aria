@@ -549,6 +549,23 @@ function ActivityListItem({
               {new Date(item.created_at).toLocaleString()}
             </p>
           </div>
+
+          {/* Skill replay link */}
+          {item.activity_type.startsWith("skill_") && item.metadata?.execution_id && (
+            <div>
+              <Link
+                to={`/dashboard/skills/audit/${item.metadata.execution_id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1.5 text-sm text-interactive hover:text-interactive/80 transition-colors"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polygon points="10 8 16 12 10 16 10 8" />
+                </svg>
+                View full execution replay
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </div>

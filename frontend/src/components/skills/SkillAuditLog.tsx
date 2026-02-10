@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import type { AuditEntry } from "@/api/skills";
 import { useSkillAudit } from "@/hooks/useSkills";
 import { TrustLevelBadge } from "./TrustLevelBadge";
@@ -19,8 +21,13 @@ function formatDuration(ms: number): string {
 }
 
 function AuditEntryRow({ entry }: { entry: AuditEntry }) {
+  const navigate = useNavigate();
+
   return (
-    <div className="group bg-slate-800/30 border border-slate-700/50 rounded-lg p-4 transition-colors hover:bg-slate-800/50">
+    <div
+      className="group bg-slate-800/30 border border-slate-700/50 rounded-lg p-4 transition-colors hover:bg-slate-800/50 cursor-pointer"
+      onClick={() => navigate(`/dashboard/skills/audit/${entry.id}`)}
+    >
       <div className="flex items-start justify-between gap-3">
         {/* Left: status + skill info */}
         <div className="flex items-start gap-3 min-w-0">
@@ -90,16 +97,19 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
           </div>
         </div>
 
-        {/* Right: success/fail badge */}
-        <span
-          className={`flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded ${
-            entry.success
-              ? "text-success bg-success/10"
-              : "text-critical bg-critical/10"
-          }`}
-        >
-          {entry.success ? "Success" : "Failed"}
-        </span>
+        {/* Right: success/fail badge + chevron */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span
+            className={`px-2 py-0.5 text-xs font-medium rounded ${
+              entry.success
+                ? "text-success bg-success/10"
+                : "text-critical bg-critical/10"
+            }`}
+          >
+            {entry.success ? "Success" : "Failed"}
+          </span>
+          <ChevronRight className="w-4 h-4 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+        </div>
       </div>
     </div>
   );
