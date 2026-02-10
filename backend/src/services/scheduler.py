@@ -49,6 +49,16 @@ async def _run_ambient_gap_checks() -> None:
         logger.exception("Ambient gap filler scheduler run failed")
 
 
+async def _run_predictive_preexec() -> None:
+    """Run the predictive pre-executor for all active users."""
+    try:
+        from src.skills.predictive_preexec import run_predictive_preexec_cron
+
+        await run_predictive_preexec_cron()
+    except Exception:
+        logger.exception("Predictive pre-executor scheduler run failed")
+
+
 async def _run_calendar_meeting_checks() -> None:
     """Check upcoming meetings for all active users and trigger briefs."""
     try:
@@ -125,10 +135,18 @@ async def start_scheduler() -> None:
             name="Calendar meeting prep checks",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_predictive_preexec,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="predictive_preexec",
+            name="Predictive pre-executor (Enhancement 9)",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "Background scheduler started — ambient gaps at 06:00 daily, "
-            "calendar meeting checks every 30 min"
+            "calendar meeting checks every 30 min, "
+            "predictive pre-executor every 30 min"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
