@@ -40,6 +40,13 @@ from src.skills.orchestrator import (
     SkillOrchestrator,
     WorkingMemoryEntry,
 )
+from src.skills.registry import (
+    PerformanceMetrics,
+    RankedSkill,
+    SkillEntry,
+    SkillRegistry,
+    SkillType,
+)
 
 __all__ = [
     # Autonomy
@@ -75,4 +82,10 @@ __all__ = [
     "ExecutionStep",
     "PlanResult",
     "WorkingMemoryEntry",
+    # Registry
+    "SkillRegistry",
+    "SkillEntry",
+    "SkillType",
+    "RankedSkill",
+    "PerformanceMetrics",
 ]
