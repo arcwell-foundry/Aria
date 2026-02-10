@@ -17,13 +17,13 @@ def test_all_prebuilt_workflows_are_shared() -> None:
         assert wf.is_shared is True, f"{wf.name} should be shared"
 
 
-def test_morning_prep_trigger_is_cron() -> None:
-    """Morning Prep workflow fires on a cron schedule (6 AM weekdays)."""
+def test_morning_prep_trigger_is_time() -> None:
+    """Morning Prep workflow fires on a time (cron) schedule."""
     workflows = get_prebuilt_workflows()
     morning = _find_workflow(workflows, "Morning Prep")
 
-    assert morning.trigger.type == "cron"
-    assert morning.trigger.params["schedule"] == "0 6 * * 1-5"
+    assert morning.trigger.type == "time"
+    assert morning.trigger.cron_expression == "0 6 * * 1-5"
 
 
 def test_morning_prep_has_correct_actions() -> None:
@@ -32,9 +32,9 @@ def test_morning_prep_has_correct_actions() -> None:
     morning = _find_workflow(workflows, "Morning Prep")
 
     assert len(morning.actions) == 2
-    assert morning.actions[0].type == "run_skill"
-    assert morning.actions[0].skill_id == "morning-briefing"
-    assert morning.actions[1].type == "send_notification"
+    assert morning.actions[0].action_type == "run_skill"
+    assert morning.actions[0].config["skill_id"] == "morning-briefing"
+    assert morning.actions[1].action_type == "send_notification"
 
 
 def test_post_meeting_trigger_is_event() -> None:
@@ -43,7 +43,7 @@ def test_post_meeting_trigger_is_event() -> None:
     post = _find_workflow(workflows, "Post-Meeting")
 
     assert post.trigger.type == "event"
-    assert post.trigger.params["event_name"] == "calendar_event_ended"
+    assert post.trigger.event_type == "calendar_event_ended"
 
 
 def test_post_meeting_has_correct_actions() -> None:
@@ -68,7 +68,9 @@ def test_signal_alert_trigger_is_condition() -> None:
     signal = _find_workflow(workflows, "Signal Alert")
 
     assert signal.trigger.type == "condition"
-    assert "market_signals.relevance_score > 0.8" in signal.trigger.params["expression"]
+    assert signal.trigger.condition_field == "market_signals.relevance_score"
+    assert signal.trigger.condition_operator == "gt"
+    assert signal.trigger.condition_value == 0.8
 
 
 def test_signal_alert_has_correct_actions() -> None:
@@ -77,9 +79,9 @@ def test_signal_alert_has_correct_actions() -> None:
     signal = _find_workflow(workflows, "Signal Alert")
 
     assert len(signal.actions) == 2
-    assert signal.actions[0].type == "run_skill"
-    assert signal.actions[0].skill_id == "signal-formatter"
-    assert signal.actions[1].type == "send_notification"
+    assert signal.actions[0].action_type == "run_skill"
+    assert signal.actions[0].config["skill_id"] == "signal-formatter"
+    assert signal.actions[1].action_type == "send_notification"
 
 
 def test_workflow_metadata_categories() -> None:

@@ -5,12 +5,12 @@ so they appear in every user's workflow library without per-user copies.
 
 Three workflows are provided:
 
-* **Morning Prep** — Runs a morning briefing at 6 AM on weekdays and
+* **Morning Prep** -- Runs a morning briefing at 6 AM on weekdays and
   pushes the summary to Slack.
-* **Post-Meeting** — Fires after a calendar event ends, prompts the user
+* **Post-Meeting** -- Fires after a calendar event ends, prompts the user
   for meeting notes (approval gate), extracts action items, and drafts a
   follow-up email.
-* **Signal Alert** — Evaluates incoming market signals and, when the
+* **Signal Alert** -- Evaluates incoming market signals and, when the
   relevance score exceeds 0.8, formats the signal and pushes alerts to
   Slack and in-app notifications.
 """
@@ -47,17 +47,18 @@ def _morning_prep() -> UserWorkflowDefinition:
     return UserWorkflowDefinition(
         name="Morning Prep",
         trigger=WorkflowTrigger(
-            type="cron",
-            params={"schedule": "0 6 * * 1-5"},
+            type="time",
+            cron_expression="0 6 * * 1-5",
         ),
         actions=[
             WorkflowAction(
-                type="run_skill",
-                skill_id="morning-briefing",
-                config={"template": "daily_summary"},
+                step_id="briefing",
+                action_type="run_skill",
+                config={"skill_id": "morning-briefing", "template": "daily_summary"},
             ),
             WorkflowAction(
-                type="send_notification",
+                step_id="notify",
+                action_type="send_notification",
                 config={"channel": "slack"},
             ),
         ],
@@ -77,20 +78,23 @@ def _post_meeting() -> UserWorkflowDefinition:
         name="Post-Meeting",
         trigger=WorkflowTrigger(
             type="event",
-            params={"event_name": "calendar_event_ended"},
+            event_type="calendar_event_ended",
         ),
         actions=[
             WorkflowAction(
-                type="run_skill",
-                skill_id="meeting-notes-prompt",
+                step_id="notes",
+                action_type="run_skill",
+                config={"skill_id": "meeting-notes-prompt"},
                 requires_approval=True,
             ),
             WorkflowAction(
-                type="run_skill",
-                skill_id="action-item-extractor",
+                step_id="actions",
+                action_type="run_skill",
+                config={"skill_id": "action-item-extractor"},
             ),
             WorkflowAction(
-                type="draft_email",
+                step_id="email",
+                action_type="draft_email",
                 config={"purpose": "follow_up"},
             ),
         ],
@@ -113,16 +117,19 @@ def _signal_alert() -> UserWorkflowDefinition:
         name="Signal Alert",
         trigger=WorkflowTrigger(
             type="condition",
-            params={"expression": "market_signals.relevance_score > 0.8"},
+            condition_field="market_signals.relevance_score",
+            condition_operator="gt",
+            condition_value=0.8,
         ),
         actions=[
             WorkflowAction(
-                type="run_skill",
-                skill_id="signal-formatter",
-                config={"template": "alert_summary"},
+                step_id="format",
+                action_type="run_skill",
+                config={"skill_id": "signal-formatter", "template": "alert_summary"},
             ),
             WorkflowAction(
-                type="send_notification",
+                step_id="alert",
+                action_type="send_notification",
                 config={"channels": ["slack", "in-app"]},
             ),
         ],
