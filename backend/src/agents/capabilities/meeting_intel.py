@@ -372,6 +372,62 @@ class MeetingIntelligenceCapability(BaseCapability):
         # ── 5. Store insights in meeting_debriefs ────────────────────
         await self._store_debrief_insights(user_id, meeting_id, analysis)
 
+        # ── 5b. Trigger LinkedIn post draft for industry-relevant topics ──
+        industry_keywords = {
+            "fda",
+            "clinical trial",
+            "pipeline",
+            "regulatory",
+            "oncology",
+            "immunotherapy",
+            "biotech",
+            "pharma",
+            "drug discovery",
+            "therapeutic",
+            "approval",
+            "phase 3",
+            "phase 2",
+            "rare disease",
+            "gene therapy",
+            "cell therapy",
+            "biosimilar",
+        }
+        topics_lower = [t.lower() for t in analysis.key_topics]
+        summary_lower = analysis.summary.lower()
+        industry_match = any(
+            kw in topic or kw in summary_lower for kw in industry_keywords for topic in topics_lower
+        )
+        if industry_match:
+            try:
+                from src.agents.capabilities.linkedin import (
+                    LinkedInIntelligenceCapability,
+                )
+
+                linkedin_cap = LinkedInIntelligenceCapability(
+                    supabase_client=SupabaseClient.get_client(),
+                    memory_service=None,
+                    knowledge_graph=None,
+                    user_context=self._user_context,
+                )
+                await linkedin_cap.draft_post(
+                    user_id=user_id,
+                    trigger_context={
+                        "trigger_type": "meeting",
+                        "trigger_source": f"Meeting insights: {meeting_id}",
+                        "content": (
+                            f"Meeting summary: {analysis.summary}\n\n"
+                            f"Key topics: {', '.join(analysis.key_topics)}\n\n"
+                            f"Decisions: {'; '.join(d.description for d in analysis.decision_points)}"
+                        ),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "LinkedIn draft trigger failed for meeting %s: %s",
+                    meeting_id,
+                    exc,
+                )
+
         # ── 6. Activity log ──────────────────────────────────────────
         await self.log_activity(
             activity_type="transcript_analyzed",

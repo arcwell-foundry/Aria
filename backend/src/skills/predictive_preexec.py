@@ -78,6 +78,7 @@ class PredictivePreExecutor:
             "followup_drafts": 0,
             "battle_card_refreshes": 0,
             "contact_enrichments": 0,
+            "linkedin_cadence_drafts": 0,
             "errors": 0,
         }
 
@@ -143,6 +144,17 @@ class PredictivePreExecutor:
             except Exception as exc:
                 logger.warning(
                     "Contact enrichment pre-gen failed for user %s: %s",
+                    user_id,
+                    exc,
+                )
+                summary["errors"] += 1
+
+            try:
+                li_drafts = await self._check_linkedin_cadence(db, user_id)
+                summary["linkedin_cadence_drafts"] += li_drafts
+            except Exception as exc:
+                logger.warning(
+                    "LinkedIn cadence check failed for user %s: %s",
                     user_id,
                     exc,
                 )
@@ -551,6 +563,165 @@ class PredictivePreExecutor:
             )
 
         return enriched
+
+    # ── LinkedIn cadence check ───────────────────────────────────────
+
+    async def _check_linkedin_cadence(
+        self,
+        db: Any,
+        user_id: str,
+    ) -> int:
+        """Check LinkedIn posting cadence and draft posts if under goal.
+
+        Counts posts published this week from ``aria_actions``, compares
+        against the user's posting goal in ``user_preferences``, and
+        triggers a draft from recent high-relevance signals if under goal.
+
+        Args:
+            db: Supabase client.
+            user_id: User UUID.
+
+        Returns:
+            Number of LinkedIn drafts generated.
+        """
+        now = datetime.now(UTC)
+        week_start = now - timedelta(days=now.weekday())
+        week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Count posts published this week
+        try:
+            posts_resp = (
+                db.table("aria_actions")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("action_type", "linkedin_post")
+                .eq("status", "user_approved")
+                .gte("created_at", week_start.isoformat())
+                .execute()
+            )
+            posts_this_week = len(posts_resp.data or [])
+        except Exception as exc:
+            logger.warning("Failed to count LinkedIn posts this week: %s", exc)
+            return 0
+
+        # Get posting goal from user preferences (default: 3 per week)
+        posting_goal = 3
+        try:
+            pref_resp = (
+                db.table("user_preferences")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if pref_resp.data:
+                meta = pref_resp.data[0].get("metadata", {})
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                posting_goal = int(meta.get("linkedin_posts_per_week", 3))
+        except Exception as exc:
+            logger.debug("Failed to load LinkedIn posting goal: %s", exc)
+
+        if posts_this_week >= posting_goal:
+            return 0
+
+        # Also check if there are already pending drafts
+        try:
+            pending_resp = (
+                db.table("aria_actions")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("action_type", "linkedin_post")
+                .eq("status", "pending")
+                .execute()
+            )
+            if pending_resp.data:
+                # User already has pending drafts to review
+                return 0
+        except Exception as exc:
+            logger.debug("Failed to check pending LinkedIn drafts: %s", exc)
+
+        # Curate from recent high-relevance signals
+        try:
+            signals_resp = (
+                db.table("market_signals")
+                .select("headline, summary, company_name, signal_type, source_name")
+                .eq("user_id", user_id)
+                .gte("detected_at", (now - timedelta(days=7)).isoformat())
+                .gte("relevance_score", 0.6)
+                .order("relevance_score", desc=True)
+                .limit(5)
+                .execute()
+            )
+            recent_signals = signals_resp.data or []
+        except Exception as exc:
+            logger.warning("Failed to fetch recent signals for cadence draft: %s", exc)
+            return 0
+
+        if not recent_signals:
+            return 0
+
+        # Build content from top signals
+        signal_summaries = []
+        for s in recent_signals[:3]:
+            signal_summaries.append(
+                f"- {s.get('headline', '')} ({s.get('company_name', '')}): "
+                f"{s.get('summary', '')[:200]}"
+            )
+        content = "Recent industry signals for thought leadership post:\n\n" + "\n".join(
+            signal_summaries
+        )
+
+        # Trigger LinkedIn draft
+        try:
+            from src.agents.capabilities.base import UserContext
+            from src.agents.capabilities.linkedin import (
+                LinkedInIntelligenceCapability,
+            )
+
+            ctx = UserContext(user_id=user_id)
+            linkedin_cap = LinkedInIntelligenceCapability(
+                supabase_client=db,
+                memory_service=None,
+                knowledge_graph=None,
+                user_context=ctx,
+            )
+            drafts = await linkedin_cap.draft_post(
+                user_id=user_id,
+                trigger_context={
+                    "trigger_type": "cadence",
+                    "trigger_source": "Weekly posting cadence check",
+                    "content": content,
+                },
+            )
+
+            if drafts:
+                await self._activity.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="predictive_preexec",
+                    title="LinkedIn post draft for weekly cadence",
+                    description=(
+                        f"You've posted {posts_this_week}/{posting_goal} times "
+                        f"this week. ARIA drafted a post from recent signals."
+                    ),
+                    confidence=0.75,
+                    metadata={
+                        "category": "linkedin_cadence",
+                        "posts_this_week": posts_this_week,
+                        "posting_goal": posting_goal,
+                    },
+                )
+                return len(drafts)
+
+        except Exception as exc:
+            logger.warning(
+                "LinkedIn cadence draft generation failed for user %s: %s",
+                user_id,
+                exc,
+            )
+
+        return 0
 
     # ── Storage helpers ───────────────────────────────────────────────
 

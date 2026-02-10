@@ -549,6 +549,39 @@ class SignalRadarCapability(BaseCapability):
                     exc,
                 )
 
+            # Trigger LinkedIn post draft for high-relevance signals
+            if signal.relevance_score >= 0.7:
+                try:
+                    from src.agents.capabilities.linkedin import (
+                        LinkedInIntelligenceCapability,
+                    )
+
+                    linkedin_cap = LinkedInIntelligenceCapability(
+                        supabase_client=client,
+                        memory_service=None,
+                        knowledge_graph=None,
+                        user_context=self._user_context,
+                    )
+                    await linkedin_cap.draft_post(
+                        user_id=user_id,
+                        trigger_context={
+                            "trigger_type": "signal",
+                            "trigger_source": signal.headline[:120],
+                            "content": (
+                                f"{signal.headline}\n\n{signal.summary}\n\n"
+                                f"Company: {signal.company_name} | "
+                                f"Type: {signal.signal_type} | "
+                                f"Source: {signal.source_name}"
+                            ),
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "LinkedIn draft trigger failed for signal %s: %s",
+                        signal.id,
+                        exc,
+                    )
+
     # ── Source scanners (private) ────────────────────────────────────
 
     async def _scan_rss_feeds(self, entities: list[dict[str, Any]]) -> list[Signal]:
