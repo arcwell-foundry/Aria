@@ -113,7 +113,9 @@ class SkillPerformanceResponse(BaseModel):
     success_rate: float = 0.0
     total_executions: int = 0
     avg_execution_time_ms: int = 0
-    satisfaction: dict = Field(default_factory=lambda: {"positive": 0, "negative": 0, "ratio": 0.0})
+    satisfaction: dict[str, int | float] = Field(
+        default_factory=lambda: {"positive": 0, "negative": 0, "ratio": 0.0}
+    )
     trust_level: str = "community"
     recent_failures: int = 0
 
@@ -125,9 +127,9 @@ class CustomSkillResponse(BaseModel):
     skill_name: str
     description: str | None = None
     skill_type: str
-    definition: dict
+    definition: dict[str, Any]
     trust_level: str = "user"
-    performance_metrics: dict = Field(default_factory=dict)
+    performance_metrics: dict[str, Any] = Field(default_factory=dict)
     is_published: bool = False
     version: int = 1
     created_at: str
@@ -139,7 +141,7 @@ class UpdateCustomSkillRequest(BaseModel):
 
     skill_name: str | None = None
     description: str | None = None
-    definition: dict | None = None
+    definition: dict[str, Any] | None = None
 
 
 # --- Service Getters ---
