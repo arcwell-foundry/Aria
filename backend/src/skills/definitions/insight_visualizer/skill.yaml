@@ -1,0 +1,159 @@
+name: insight-visualizer
+description: Generates Recharts-compatible data visualization specifications from ARIA intelligence
+agent_assignment:
+  - analyst
+  - strategist
+trust_level: core
+estimated_seconds: 20
+
+system_prompt: |
+  You are ARIA's Insight Visualizer — a specialized data visualization engine for
+  life sciences commercial teams. You transform raw ARIA intelligence data into
+  structured chart specifications that the frontend renders using Recharts.
+
+  Guidelines:
+  - Output must be valid JSON matching the output schema exactly.
+  - All data arrays must contain objects with keys matching Recharts dataKey conventions.
+  - Use descriptive, human-readable labels (e.g. "Qualification" not "QUALIFIED").
+  - Monetary values should be numeric (not formatted strings) — the frontend formats display.
+  - Percentages should be 0–100 numeric values.
+  - Colors must be valid hex codes from ARIA's palette:
+    primary: "#6366F1", success: "#10B981", warning: "#F59E0B",
+    danger: "#EF4444", info: "#3B82F6", muted: "#6B7280",
+    accent1: "#8B5CF6", accent2: "#EC4899", accent3: "#14B8A6".
+  - When data is insufficient for a meaningful chart, return an empty data array
+    with a note in metadata.summary explaining the gap.
+  - Include confidence_level based on data completeness:
+    high = >80% of expected records present,
+    moderate = 50–80% present,
+    low = <50% present.
+  - Sort data logically: pipeline stages by funnel order, time series chronologically,
+    geographic data by value descending.
+  - Limit data points to what renders well: max 8 funnel stages, 12 months for trends,
+    6 axes for spider charts, 50 regions for heatmaps.
+
+output_schema:
+  type: object
+  required:
+    - chart_type
+    - data
+    - config
+    - metadata
+  properties:
+    chart_type:
+      type: string
+      enum:
+        - funnel
+        - radar
+        - treemap
+        - line
+        - bar
+      description: Recharts component type to render
+    data:
+      type: array
+      items:
+        type: object
+      description: Array of data points for the chart
+    config:
+      type: object
+      required:
+        - title
+        - xKey
+        - yKeys
+      properties:
+        title:
+          type: string
+          description: Chart title displayed above the visualization
+        subtitle:
+          type: string
+          description: Optional subtitle or date range context
+        xKey:
+          type: string
+          description: Data key for the x-axis or category axis
+        yKeys:
+          type: array
+          items:
+            type: object
+            required:
+              - key
+              - label
+              - color
+            properties:
+              key:
+                type: string
+                description: Data key for this series
+              label:
+                type: string
+                description: Human-readable legend label
+              color:
+                type: string
+                description: Hex color for this series
+              stackId:
+                type: string
+                description: Optional stack group identifier
+          description: Data series to render
+        layout:
+          type: object
+          properties:
+            width:
+              type: integer
+              description: Suggested width in pixels
+            height:
+              type: integer
+              description: Suggested height in pixels
+            margin:
+              type: object
+              properties:
+                top:
+                  type: integer
+                right:
+                  type: integer
+                bottom:
+                  type: integer
+                left:
+                  type: integer
+    metadata:
+      type: object
+      properties:
+        template:
+          type: string
+          description: Template used to generate this visualization
+        generated_at:
+          type: string
+          description: ISO 8601 timestamp
+        data_sources:
+          type: array
+          items:
+            type: string
+          description: Tables and memory types queried
+        record_count:
+          type: integer
+          description: Number of source records processed
+        confidence_level:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+          description: Confidence based on data completeness
+        summary:
+          type: string
+          description: One-line natural language summary of the visualization
+
+input_requirements:
+  - template_name
+  - user_id
+
+templates:
+  pipeline_funnel:
+    description: "Pipeline stage distribution from lead_memories for {user_id}"
+  competitive_spider:
+    description: "Multi-axis competitor comparison from battle_cards for {competitor_names}"
+  territory_heatmap:
+    description: "Geographic coverage from lead_memories locations for {user_id}"
+  win_loss_trend:
+    description: "Win/loss rates over time from lead_memories status changes for {user_id}"
+  engagement_timeline:
+    description: "Communication frequency per lead from lead_memory_events for {user_id}"
+  health_distribution:
+    description: "Health score distribution across portfolio from health_score_history for {user_id}"
