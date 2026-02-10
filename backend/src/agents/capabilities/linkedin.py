@@ -21,9 +21,13 @@ from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.models.social import (
+    EngagementReport,
+    EngagementStats,
+    EngagerInfo,
     PostDraft,
     PostVariation,
     PostVariationType,
+    PublishResult,
     TriggerType,
 )
 
@@ -653,6 +657,439 @@ class LinkedInIntelligenceCapability(BaseCapability):
         )
 
         return [draft]
+
+    async def publish_post(self, action_id: str) -> PublishResult:
+        """Publish an approved LinkedIn post draft via the LinkedIn API.
+
+        Retrieves the approved draft from aria_actions, obtains the user's
+        OAuth token, posts to LinkedIn, updates the action status, and
+        schedules engagement checks.
+
+        Args:
+            action_id: The aria_actions row ID for the approved draft.
+
+        Returns:
+            PublishResult indicating success or failure.
+        """
+        db = SupabaseClient.get_client()
+        user_id = self._user_context.user_id
+
+        # Load the approved draft
+        try:
+            action_resp = (
+                db.table("aria_actions")
+                .select("*")
+                .eq("id", action_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+            action = action_resp.data
+        except Exception as e:
+            logger.warning("Failed to load action %s: %s", action_id, e)
+            return PublishResult(success=False, error=f"Draft not found: {e}")
+
+        if not action:
+            return PublishResult(success=False, error="Draft not found")
+
+        payload = action.get("payload", {})
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        # Get user's LinkedIn OAuth token
+        try:
+            token_resp = (
+                db.table("user_integrations")
+                .select("access_token")
+                .eq("user_id", user_id)
+                .eq("provider", "linkedin")
+                .single()
+                .execute()
+            )
+            access_token = token_resp.data.get("access_token", "") if token_resp.data else ""
+        except Exception as e:
+            logger.warning("Failed to get LinkedIn OAuth token: %s", e)
+            return PublishResult(success=False, error="LinkedIn not connected")
+
+        if not access_token:
+            return PublishResult(success=False, error="LinkedIn OAuth token not found")
+
+        # Get LinkedIn profile URN
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                profile_resp = await client.get(
+                    "https://api.linkedin.com/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                profile_resp.raise_for_status()
+                profile_data = profile_resp.json()
+                person_urn = f"urn:li:person:{profile_data.get('sub', '')}"
+        except Exception as e:
+            logger.warning("Failed to get LinkedIn profile URN: %s", e)
+            return PublishResult(success=False, error=f"LinkedIn profile lookup failed: {e}")
+
+        # Select the variation text (first variation by default)
+        variations = payload.get("variations", [])
+        selected_idx = payload.get("selected_variation_index", 0)
+        if not variations:
+            return PublishResult(success=False, error="No variations in draft")
+
+        selected = variations[min(selected_idx, len(variations) - 1)]
+        post_text = payload.get("edited_text") or selected.get("text", "")
+        hashtags = payload.get("edited_hashtags") or selected.get("hashtags", [])
+        if hashtags:
+            post_text = post_text + "\n\n" + " ".join(hashtags)
+
+        # POST to LinkedIn UGC API
+        ugc_body = {
+            "author": person_urn,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": post_text},
+                    "shareMediaCategory": "NONE",
+                }
+            },
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                publish_resp = await client.post(
+                    "https://api.linkedin.com/v2/ugcPosts",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                        "X-Restli-Protocol-Version": "2.0.0",
+                    },
+                    json=ugc_body,
+                )
+                publish_resp.raise_for_status()
+                post_urn = publish_resp.headers.get("X-RestLi-Id", "")
+        except Exception as e:
+            logger.warning("Failed to publish LinkedIn post: %s", e)
+            return PublishResult(success=False, error=f"LinkedIn publish failed: {e}")
+
+        # Update aria_actions with post_urn and status
+        now = datetime.now(UTC).isoformat()
+        try:
+            existing_meta = action.get("metadata", {})
+            if isinstance(existing_meta, str):
+                existing_meta = json.loads(existing_meta)
+            existing_meta["post_urn"] = post_urn
+            existing_meta["published_at"] = now
+
+            db.table("aria_actions").update(
+                {
+                    "status": "user_approved",
+                    "metadata": json.dumps(existing_meta),
+                }
+            ).eq("id", action_id).execute()
+        except Exception as e:
+            logger.warning("Failed to update action status: %s", e)
+
+        # Schedule engagement checks at 1h, 4h, 24h, 48h
+        check_offsets_hours = [1, 4, 24, 48]
+        for offset_h in check_offsets_hours:
+            try:
+                check_time = datetime.now(UTC)
+                from datetime import timedelta
+
+                check_time = check_time + timedelta(hours=offset_h)
+                db.table("prospective_memories").insert(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "user_id": user_id,
+                        "memory_type": "engagement_check",
+                        "title": f"Check LinkedIn post engagement ({offset_h}h)",
+                        "description": f"Check engagement for post {post_urn}",
+                        "trigger_time": check_time.isoformat(),
+                        "metadata": json.dumps({"post_urn": post_urn, "action_id": action_id}),
+                        "status": "pending",
+                        "created_at": now,
+                    }
+                ).execute()
+            except Exception as e:
+                logger.debug("Failed to schedule engagement check at %dh: %s", offset_h, e)
+
+        # Log activity
+        await self.log_activity(
+            activity_type="linkedin_post_published",
+            title="Published LinkedIn post",
+            description=f"Successfully published LinkedIn post (URN: {post_urn})",
+            confidence=0.95,
+            metadata={"action_id": action_id, "post_urn": post_urn},
+        )
+
+        return PublishResult(success=True, post_urn=post_urn)
+
+    async def check_engagement(
+        self,
+        post_urn: str,
+        user_id: str,
+    ) -> EngagementReport:
+        """Check engagement metrics for a published LinkedIn post.
+
+        Fetches social actions (likes, comments, shares), cross-references
+        engagers with lead_memory_stakeholders, and creates notifications
+        when prospects engage.
+
+        Args:
+            post_urn: LinkedIn post URN identifier.
+            user_id: Authenticated user UUID.
+
+        Returns:
+            EngagementReport with stats and notable engagers.
+        """
+        db = SupabaseClient.get_client()
+
+        # Get OAuth token
+        access_token = ""
+        try:
+            token_resp = (
+                db.table("user_integrations")
+                .select("access_token")
+                .eq("user_id", user_id)
+                .eq("provider", "linkedin")
+                .single()
+                .execute()
+            )
+            access_token = token_resp.data.get("access_token", "") if token_resp.data else ""
+        except Exception as e:
+            logger.warning("Failed to get LinkedIn token for engagement check: %s", e)
+
+        stats = EngagementStats()
+        notable_engagers: list[EngagerInfo] = []
+
+        if access_token:
+            # GET social actions for the post
+            try:
+                encoded_urn = post_urn.replace(":", "%3A")
+                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                    actions_resp = await client.get(
+                        f"https://api.linkedin.com/v2/socialActions/{encoded_urn}",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    actions_resp.raise_for_status()
+                    data = actions_resp.json()
+
+                    stats = EngagementStats(
+                        likes=data.get("likesSummary", {}).get("totalLikes", 0),
+                        comments=data.get("commentsSummary", {}).get("totalFirstLevelComments", 0),
+                        shares=data.get("sharesSummary", {}).get("totalShares", 0),
+                        impressions=data.get("impressionsSummary", {}).get("totalImpressions", 0),
+                    )
+            except Exception as e:
+                logger.warning("Failed to fetch engagement stats: %s", e)
+
+            # Get likes list and cross-reference with stakeholders
+            try:
+                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                    likes_resp = await client.get(
+                        f"https://api.linkedin.com/v2/socialActions/{encoded_urn}/likes",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    likes_resp.raise_for_status()
+                    likes_data = likes_resp.json()
+
+                    # Load stakeholders for cross-reference
+                    stakeholders_resp = (
+                        db.table("lead_memory_stakeholders")
+                        .select("id, name, linkedin_url")
+                        .eq("user_id", user_id)
+                        .execute()
+                    )
+                    stakeholder_urns: dict[str, dict[str, Any]] = {}
+                    if stakeholders_resp.data:
+                        for s in stakeholders_resp.data:
+                            if s.get("linkedin_url"):
+                                stakeholder_urns[s["linkedin_url"]] = s
+
+                    for like in likes_data.get("elements", []):
+                        actor_urn = like.get("actor", "")
+                        actor_name = like.get("actorName", actor_urn)
+                        # Check if this engager is a known stakeholder
+                        is_known = actor_urn in stakeholder_urns
+                        engager = EngagerInfo(
+                            name=actor_name,
+                            linkedin_url=actor_urn,
+                            relationship="known_stakeholder" if is_known else "",
+                            lead_id=stakeholder_urns.get(actor_urn, {}).get("id"),
+                        )
+                        notable_engagers.append(engager)
+            except Exception as e:
+                logger.debug("Failed to fetch likes list: %s", e)
+
+        # Store engagement metrics in aria_actions metadata
+        try:
+            actions_resp_db = (
+                db.table("aria_actions")
+                .select("id, metadata")
+                .eq("user_id", user_id)
+                .eq("action_type", "linkedin_post")
+                .execute()
+            )
+            if actions_resp_db.data:
+                for act in actions_resp_db.data:
+                    meta = act.get("metadata", {})
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    if meta.get("post_urn") == post_urn:
+                        meta["engagement_metrics"] = stats.model_dump()
+                        meta["engagement_checked_at"] = datetime.now(UTC).isoformat()
+                        db.table("aria_actions").update({"metadata": json.dumps(meta)}).eq(
+                            "id", act["id"]
+                        ).execute()
+                        break
+        except Exception as e:
+            logger.debug("Failed to store engagement metrics: %s", e)
+
+        # Create notification if a known prospect engaged
+        known_engagers = [e for e in notable_engagers if e.relationship == "known_stakeholder"]
+        if known_engagers:
+            try:
+                db.table("notifications").insert(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "user_id": user_id,
+                        "type": "prospect_engagement",
+                        "title": f"{len(known_engagers)} prospect(s) engaged with your LinkedIn post",
+                        "body": ", ".join(e.name for e in known_engagers[:5]),
+                        "metadata": json.dumps(
+                            {"post_urn": post_urn, "engager_count": len(known_engagers)}
+                        ),
+                        "read": False,
+                        "created_at": datetime.now(UTC).isoformat(),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.debug("Failed to create engagement notification: %s", e)
+
+        return EngagementReport(
+            stats=stats,
+            notable_engagers=notable_engagers,
+        )
+
+    async def auto_post_check(self, user_id: str) -> None:
+        """Check for and auto-publish qualifying LinkedIn post drafts.
+
+        Checks if the user has enabled linkedin_auto_post in preferences,
+        then finds pending drafts with voice_match_confidence > 0.8 and
+        no sensitive keywords, and auto-publishes them.
+
+        Args:
+            user_id: Authenticated user UUID.
+        """
+        db = SupabaseClient.get_client()
+
+        # Check user preferences for auto-post setting
+        try:
+            pref_resp = (
+                db.table("user_preferences")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if not pref_resp.data:
+                return
+            metadata = pref_resp.data[0].get("metadata", {})
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            if not metadata.get("linkedin_auto_post", False):
+                return
+        except Exception as e:
+            logger.debug("Failed to check auto-post preferences: %s", e)
+            return
+
+        # Find pending linkedin_post drafts
+        try:
+            drafts_resp = (
+                db.table("aria_actions")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("action_type", "linkedin_post")
+                .eq("status", "pending")
+                .execute()
+            )
+            if not drafts_resp.data:
+                return
+        except Exception as e:
+            logger.debug("Failed to query pending drafts: %s", e)
+            return
+
+        sensitive_keywords = [
+            "confidential",
+            "internal only",
+            "not for distribution",
+            "proprietary",
+            "trade secret",
+            "nda",
+            "under embargo",
+        ]
+
+        for draft_action in drafts_resp.data:
+            payload = draft_action.get("payload", {})
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+
+            variations = payload.get("variations", [])
+            if not variations:
+                continue
+
+            # Find a variation with high enough confidence
+            best_variation = None
+            best_idx = 0
+            for idx, v in enumerate(variations):
+                confidence = float(v.get("voice_match_confidence", 0.0))
+                if confidence > 0.8:
+                    text_lower = v.get("text", "").lower()
+                    has_sensitive = any(kw in text_lower for kw in sensitive_keywords)
+                    if not has_sensitive and (
+                        best_variation is None
+                        or confidence > float(best_variation.get("voice_match_confidence", 0.0))
+                    ):
+                        best_variation = v
+                        best_idx = idx
+
+            if best_variation is None:
+                continue
+
+            # Mark as auto-approved and publish
+            try:
+                payload["selected_variation_index"] = best_idx
+                db.table("aria_actions").update(
+                    {
+                        "status": "approved",
+                        "payload": json.dumps(payload),
+                        "metadata": json.dumps(
+                            {
+                                **(
+                                    json.loads(draft_action.get("metadata", "{}"))
+                                    if isinstance(draft_action.get("metadata"), str)
+                                    else (draft_action.get("metadata") or {})
+                                ),
+                                "auto_approved": True,
+                                "auto_approved_at": datetime.now(UTC).isoformat(),
+                            }
+                        ),
+                    }
+                ).eq("id", draft_action["id"]).execute()
+
+                result = await self.publish_post(draft_action["id"])
+                if result.success:
+                    logger.info(
+                        "Auto-published LinkedIn post %s",
+                        draft_action["id"],
+                    )
+                else:
+                    logger.warning(
+                        "Auto-publish failed for %s: %s",
+                        draft_action["id"],
+                        result.error,
+                    )
+            except Exception as e:
+                logger.warning("Auto-publish error for %s: %s", draft_action["id"], e)
 
     async def _fetch_page(self, url: str) -> str | None:
         """Fetch a web page and return its text content.
