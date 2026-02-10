@@ -4,3 +4,4 @@ export { SkillCard } from "./SkillCard";
 export { InstalledSkills } from "./InstalledSkills";
 export { TrustLevelBadge } from "./TrustLevelBadge";
 export { ExecutionPlanCard } from "./ExecutionPlanCard";
+export { SkillActivityEntry } from "./SkillActivityEntry";
