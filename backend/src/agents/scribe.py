@@ -163,6 +163,9 @@ class ScribeAgent(SkillAwareAgent):
         Returns:
             AgentResult with drafted content.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         comm_type = task["communication_type"]
         recipient = task.get("recipient")
         context = task.get("context", "")

@@ -102,6 +102,9 @@ class ScoutAgent(SkillAwareAgent):
         Returns:
             AgentResult with success status and output data.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         logger.info("Scout agent starting intelligence gathering task")
 
         # Extract task parameters

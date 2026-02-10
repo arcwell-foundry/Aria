@@ -111,6 +111,9 @@ class HunterAgent(SkillAwareAgent):
         Returns:
             AgentResult with success status and output data.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         logger.info("Hunter agent starting lead discovery task")
 
         # Extract task parameters

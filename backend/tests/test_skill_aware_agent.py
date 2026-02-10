@@ -13,7 +13,6 @@ from src.agents.skill_aware_agent import (
     SkillAwareAgent,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper: Concrete test subclass of SkillAwareAgent
 # ---------------------------------------------------------------------------
@@ -30,7 +29,7 @@ class _TestAgent(SkillAwareAgent):
         """Return empty tool registry."""
         return {}
 
-    async def execute(self, task: dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
         """Return a simple success result."""
         return AgentResult(success=True, data={"native": True})
 
@@ -62,6 +61,25 @@ def test_skill_analysis_defaults() -> None:
     assert analysis.skills_needed is False
     assert analysis.recommended_skills == []
     assert analysis.reasoning == ""
+    assert analysis.is_simple is True
+
+
+def test_skill_analysis_is_simple_field() -> None:
+    """Test SkillAnalysis is_simple field defaults and overrides."""
+    # Default is True
+    a1 = SkillAnalysis(
+        skills_needed=True, recommended_skills=["pdf"], reasoning="one skill"
+    )
+    assert a1.is_simple is True
+
+    # Explicit False for multi-skill
+    a2 = SkillAnalysis(
+        skills_needed=True,
+        recommended_skills=["pdf", "docx"],
+        reasoning="multiple skills",
+        is_simple=False,
+    )
+    assert a2.is_simple is False
 
 
 # ===========================================================================
@@ -186,7 +204,7 @@ def test_get_available_skills_unknown_agent_returns_empty() -> None:
         def _register_tools(self) -> dict[str, Any]:
             return {}
 
-        async def execute(self, task: dict[str, Any]) -> AgentResult:
+        async def execute(self, task: dict[str, Any]) -> AgentResult:  # noqa: ARG002
             return AgentResult(success=True, data={})
 
     mock_llm = MagicMock()
@@ -293,15 +311,66 @@ async def test_analyze_skill_needs_handles_malformed_json() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_with_skills_delegates_to_orchestrator() -> None:
-    """Test execute_with_skills uses orchestrator when skills are recommended."""
-    # Mock LLM to recommend skills
+async def test_execute_with_skills_simple_path() -> None:
+    """Test execute_with_skills takes the simple path for 1 recommended skill."""
     mock_llm = MagicMock()
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
             "recommended_skills": ["competitor-analysis"],
             "reasoning": "Need competitor data",
+        })
+    )
+
+    # Mock skill index with get_by_path
+    mock_index = MagicMock()
+    mock_skill_entry = MagicMock()
+    mock_skill_entry.id = "skill-uuid-1"
+    mock_index.get_by_path = AsyncMock(return_value=mock_skill_entry)
+
+    # Mock orchestrator for single-skill plan
+    mock_orchestrator = MagicMock()
+    mock_plan = MagicMock()
+    mock_plan.plan_id = "plan-simple"
+    mock_plan.steps = [MagicMock()]
+    mock_orchestrator.create_execution_plan = AsyncMock(return_value=mock_plan)
+
+    mock_wm_entry = MagicMock()
+    mock_wm_entry.step_number = 1
+    mock_wm_entry.skill_id = "skill-uuid-1"
+    mock_wm_entry.status = "completed"
+    mock_wm_entry.summary = "Done"
+    mock_wm_entry.artifacts = []
+    mock_orchestrator.execute_plan = AsyncMock(return_value=[mock_wm_entry])
+
+    agent = _TestAgent(
+        llm_client=mock_llm,
+        user_id="user-1",
+        skill_orchestrator=mock_orchestrator,
+        skill_index=mock_index,
+    )
+
+    result = await agent.execute_with_skills({"goal": "analyze competitor"})
+
+    assert result.success is True
+    assert result.data["skill_execution"] is True
+    assert result.data["execution_mode"] == "simple"
+    assert result.data["skill_path"] == "competitor-analysis"
+
+    # Verify get_by_path was used (simple path)
+    mock_index.get_by_path.assert_awaited_once_with("competitor-analysis")
+
+
+@pytest.mark.asyncio
+async def test_execute_with_skills_delegates_to_orchestrator() -> None:
+    """Test execute_with_skills uses orchestrator when 2+ skills are recommended."""
+    # Mock LLM to recommend multiple skills (triggers orchestrator path)
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value=json.dumps({
+            "skills_needed": True,
+            "recommended_skills": ["competitor-analysis", "lead-research"],
+            "reasoning": "Need competitor data and lead research",
         })
     )
 
@@ -338,6 +407,7 @@ async def test_execute_with_skills_delegates_to_orchestrator() -> None:
 
     assert result.success is True
     assert result.data["skill_execution"] is True
+    assert result.data["execution_mode"] == "orchestrator"
     assert result.data["plan_id"] == "plan-123"
     assert len(result.data["steps"]) == 1
     assert result.data["steps"][0]["status"] == "completed"
@@ -395,7 +465,7 @@ async def test_execute_with_skills_handles_orchestrator_error() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis"],
+            "recommended_skills": ["competitor-analysis", "lead-research"],
             "reasoning": "Skills needed",
         })
     )

@@ -1,15 +1,21 @@
 """Skill-aware agent base class for ARIA.
 
-Extends BaseAgent with skills.sh integration, enabling agents to
+Extends BaseAgent with skills integration, enabling agents to
 discover and execute skills as part of their OODA ACT phase.
+
+Enhancement 5 (Conversational Invocation): Detects if a task is simple
+(single service call → bypass orchestrator) vs complex (needs multi-skill
+orchestration). Simple tasks execute directly; complex tasks use the full
+SkillOrchestrator DAG pipeline.
 """
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import AgentResult, AgentStatus, BaseAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -27,11 +33,13 @@ class SkillAnalysis:
         skills_needed: Whether any skills should be invoked.
         recommended_skills: List of skill paths to use.
         reasoning: LLM explanation of the decision.
+        is_simple: True if 0-1 skills (bypass orchestrator), False if multi-skill.
     """
 
     skills_needed: bool
     recommended_skills: list[str]
     reasoning: str
+    is_simple: bool = True
 
 
 # Maps agent_id to the skill paths that agent is authorized to use.
@@ -81,6 +89,11 @@ class SkillAwareAgent(BaseAgent):
     - LLM-based skill need analysis
     - execute_with_skills() for skill-augmented task execution
 
+    Enhancement 5 (Conversational Invocation):
+    - Simple tasks (0-1 skills) bypass the orchestrator
+    - Complex tasks (2+ skills) use full DAG orchestration
+    - All skill decisions are logged to aria_activity
+
     Subclasses must set the `agent_id` class attribute to one of the
     keys in AGENT_SKILLS.
     """
@@ -104,6 +117,7 @@ class SkillAwareAgent(BaseAgent):
         """
         self.skill_orchestrator = skill_orchestrator
         self.skill_index = skill_index
+        self._last_skill_analysis: SkillAnalysis | None = None
         super().__init__(llm_client=llm_client, user_id=user_id)
 
     def _get_available_skills(self) -> list[str]:
@@ -125,7 +139,8 @@ class SkillAwareAgent(BaseAgent):
             task: Task specification to analyze.
 
         Returns:
-            SkillAnalysis with skills_needed, recommended_skills, reasoning.
+            SkillAnalysis with skills_needed, recommended_skills, reasoning,
+            and is_simple classification.
             On error, returns SkillAnalysis with skills_needed=False.
         """
         available_skills = self._get_available_skills()
@@ -135,6 +150,7 @@ class SkillAwareAgent(BaseAgent):
                 skills_needed=False,
                 recommended_skills=[],
                 reasoning="No skills available for this agent",
+                is_simple=True,
             )
 
         prompt = (
@@ -159,17 +175,17 @@ class SkillAwareAgent(BaseAgent):
             parsed = json.loads(response)
 
             # Filter recommended skills to only those available
-            recommended = [
-                s for s in parsed.get("recommended_skills", []) if s in available_skills
-            ]
+            recommended = [s for s in parsed.get("recommended_skills", []) if s in available_skills]
 
             # If filtering removed all skills, mark as not needed
             skills_needed = parsed.get("skills_needed", False) and len(recommended) > 0
+            is_simple = len(recommended) <= 1
 
             return SkillAnalysis(
                 skills_needed=skills_needed,
                 recommended_skills=recommended,
                 reasoning=parsed.get("reasoning", ""),
+                is_simple=is_simple,
             )
 
         except (json.JSONDecodeError, KeyError, TypeError) as e:
@@ -178,6 +194,7 @@ class SkillAwareAgent(BaseAgent):
                 skills_needed=False,
                 recommended_skills=[],
                 reasoning=f"Failed to parse LLM response: {e}",
+                is_simple=True,
             )
         except Exception as e:
             logger.error(f"Skill analysis failed: {e}")
@@ -185,15 +202,179 @@ class SkillAwareAgent(BaseAgent):
                 skills_needed=False,
                 recommended_skills=[],
                 reasoning=f"Skill analysis error: {e}",
+                is_simple=True,
             )
+
+    async def _log_skill_decision(
+        self,
+        task: dict[str, Any],
+        analysis: SkillAnalysis,
+        execution_path: str,
+    ) -> None:
+        """Log skill routing decision to aria_activity.
+
+        Records the skill analysis result and chosen execution path
+        for audit trail and transparency.
+
+        Args:
+            task: The task that was analyzed.
+            analysis: The skill analysis result.
+            execution_path: Which path was chosen (native, simple_skill, orchestrator).
+        """
+        try:
+            from src.services.activity_service import ActivityService
+
+            activity = ActivityService()
+            await activity.record(
+                user_id=self.user_id,
+                agent=self.agent_id,
+                activity_type="skill_decision",
+                title=f"{self.name} evaluated skill routing",
+                description=(
+                    f"Skills needed: {analysis.skills_needed}. "
+                    f"Recommended: {', '.join(analysis.recommended_skills) or 'none'}. "
+                    f"Path: {execution_path}. "
+                    f"Reasoning: {analysis.reasoning}"
+                ),
+                confidence=0.9,
+                metadata={
+                    "skills_needed": analysis.skills_needed,
+                    "recommended_skills": analysis.recommended_skills,
+                    "is_simple": analysis.is_simple,
+                    "execution_path": execution_path,
+                    "task_keys": list(task.keys()),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log skill decision to aria_activity: {e}")
+
+    async def _log_skill_consideration(self) -> None:
+        """Log that this agent considered skills before native execution.
+
+        Called at the start of execute() to record the OODA ACT phase
+        skill evaluation in aria_activity. Reads the cached analysis
+        from _last_skill_analysis set by execute_with_skills().
+
+        If called outside the execute_with_skills() flow (i.e., execute()
+        called directly), this is a no-op.
+        """
+        if self._last_skill_analysis is None:
+            return
+
+        analysis = self._last_skill_analysis
+        try:
+            from src.services.activity_service import ActivityService
+
+            activity = ActivityService()
+            await activity.record(
+                user_id=self.user_id,
+                agent=self.agent_id,
+                activity_type="skill_consideration",
+                title=f"{self.name} proceeding with native execution",
+                description=(
+                    f"Available skills: {', '.join(self._get_available_skills()) or 'none'}. "
+                    f"Decision: {'skills recommended but unavailable' if analysis.skills_needed else 'native execution preferred'}. "
+                    f"Reasoning: {analysis.reasoning}"
+                ),
+                confidence=0.85,
+                metadata={
+                    "available_skills": self._get_available_skills(),
+                    "skills_needed": analysis.skills_needed,
+                    "recommended_skills": analysis.recommended_skills,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log skill consideration: {e}")
+
+    async def _execute_simple_skill(
+        self,
+        task: dict[str, Any],
+        skill_path: str,
+    ) -> AgentResult:
+        """Execute a single skill directly, bypassing full DAG orchestration.
+
+        For simple tasks that need only one skill, this looks up the skill
+        by path and creates a minimal 1-step execution plan. Falls back
+        to native execute() if the skill isn't found.
+
+        Args:
+            task: Task specification with parameters.
+            skill_path: The skill path to execute.
+
+        Returns:
+            AgentResult with execution outcome.
+        """
+        if self.skill_index is None:
+            logger.warning(
+                f"Agent {self.name}: skill index unavailable for simple execution, "
+                "falling back to native execution",
+            )
+            return await self.execute(task)
+
+        try:
+            # Look up skill by path
+            skill_entry = await self.skill_index.get_by_path(skill_path)
+            if skill_entry is None:
+                logger.warning(
+                    f"Agent {self.name}: skill '{skill_path}' not found in index, "
+                    "falling back to native execution",
+                )
+                return await self.execute(task)
+
+            # Use orchestrator with minimal plan for the single skill
+            if self.skill_orchestrator is not None:
+                task_description = json.dumps(task, default=str)
+                plan = await self.skill_orchestrator.create_execution_plan(
+                    task=task_description,
+                    available_skills=[skill_entry],
+                )
+
+                working_memory = await self.skill_orchestrator.execute_plan(
+                    user_id=self.user_id,
+                    plan=plan,
+                )
+
+                if working_memory:
+                    entry = working_memory[0]
+                    return AgentResult(
+                        success=entry.status == "completed",
+                        data={
+                            "skill_execution": True,
+                            "execution_mode": "simple",
+                            "skill_path": skill_path,
+                            "summary": entry.summary,
+                            "artifacts": entry.artifacts,
+                        },
+                        error=(
+                            None
+                            if entry.status == "completed"
+                            else f"Skill step failed: {entry.status}"
+                        ),
+                    )
+
+            # No orchestrator available — fall back to native
+            return await self.execute(task)
+
+        except Exception as e:
+            logger.error(
+                f"Agent {self.name}: simple skill execution failed for '{skill_path}': {e}",
+                extra={"agent_id": self.agent_id, "skill_path": skill_path, "error": str(e)},
+            )
+            return await self.execute(task)
 
     async def execute_with_skills(self, task: dict[str, Any]) -> AgentResult:
         """Execute a task, using skills if beneficial.
 
-        This is the OODA ACT phase integration point. Analyzes whether
-        skills would help, and if so, delegates to the SkillOrchestrator.
-        Falls back to the agent's native execute() if skills aren't needed
-        or aren't available.
+        This is the OODA ACT phase integration point. Routes tasks through
+        three execution paths based on skill analysis:
+
+        1. **Native** (0 skills needed): Direct agent execute()
+        2. **Simple** (1 skill needed): Single-skill execution, bypasses
+           full DAG orchestration overhead
+        3. **Orchestrator** (2+ skills needed): Full multi-skill DAG
+           execution with working memory and parallel steps
+
+        All routing decisions are logged to aria_activity for transparency.
 
         Args:
             task: Task specification with parameters.
@@ -203,15 +384,29 @@ class SkillAwareAgent(BaseAgent):
         """
         # Step 1: Analyze if skills would help
         analysis = await self._analyze_skill_needs(task)
+        self._last_skill_analysis = analysis
 
         if not analysis.skills_needed:
+            await self._log_skill_decision(task, analysis, "native")
             logger.info(
                 f"Agent {self.name}: no skills needed, using native execution",
                 extra={"agent_id": self.agent_id, "reasoning": analysis.reasoning},
             )
             return await self.execute(task)
 
-        # Step 2: Check if orchestrator is available
+        # Step 2: Simple path — single skill, bypass full orchestration
+        if analysis.is_simple and len(analysis.recommended_skills) == 1:
+            skill_path = analysis.recommended_skills[0]
+            await self._log_skill_decision(task, analysis, f"simple_skill:{skill_path}")
+            logger.info(
+                f"Agent {self.name}: simple task, executing skill '{skill_path}' directly",
+                extra={"agent_id": self.agent_id, "skill": skill_path},
+            )
+            return await self._execute_simple_skill(task, skill_path)
+
+        # Step 3: Complex path — multi-skill orchestration
+        await self._log_skill_decision(task, analysis, "orchestrator")
+
         if self.skill_orchestrator is None or self.skill_index is None:
             logger.warning(
                 f"Agent {self.name}: skills recommended but no orchestrator available, "
@@ -223,23 +418,20 @@ class SkillAwareAgent(BaseAgent):
             )
             return await self.execute(task)
 
-        # Step 3: Find skill metadata from index
         try:
             available_skill_entries = await self.skill_index.search(
                 query=" ".join(analysis.recommended_skills),
             )
 
-            # Build task description for orchestrator
             task_description = json.dumps(task, default=str)
 
-            # Step 4: Create execution plan
             plan = await self.skill_orchestrator.create_execution_plan(
                 task=task_description,
                 available_skills=available_skill_entries,
             )
 
             logger.info(
-                f"Agent {self.name}: executing skill plan with {len(plan.steps)} steps",
+                f"Agent {self.name}: executing multi-skill plan with {len(plan.steps)} steps",
                 extra={
                     "agent_id": self.agent_id,
                     "plan_id": plan.plan_id,
@@ -247,23 +439,23 @@ class SkillAwareAgent(BaseAgent):
                 },
             )
 
-            # Step 5: Execute the plan
             working_memory = await self.skill_orchestrator.execute_plan(
                 user_id=self.user_id,
                 plan=plan,
             )
 
-            # Step 6: Build result from working memory
             skill_outputs = []
             all_succeeded = True
             for entry in working_memory:
-                skill_outputs.append({
-                    "step": entry.step_number,
-                    "skill_id": entry.skill_id,
-                    "status": entry.status,
-                    "summary": entry.summary,
-                    "artifacts": entry.artifacts,
-                })
+                skill_outputs.append(
+                    {
+                        "step": entry.step_number,
+                        "skill_id": entry.skill_id,
+                        "status": entry.status,
+                        "summary": entry.summary,
+                        "artifacts": entry.artifacts,
+                    }
+                )
                 if entry.status != "completed":
                     all_succeeded = False
 
@@ -271,6 +463,7 @@ class SkillAwareAgent(BaseAgent):
                 success=all_succeeded,
                 data={
                     "skill_execution": True,
+                    "execution_mode": "orchestrator",
                     "plan_id": plan.plan_id,
                     "steps": skill_outputs,
                 },
@@ -279,11 +472,95 @@ class SkillAwareAgent(BaseAgent):
 
         except Exception as e:
             logger.error(
-                f"Agent {self.name}: skill execution failed: {e}",
+                f"Agent {self.name}: multi-skill execution failed: {e}",
                 extra={"agent_id": self.agent_id, "error": str(e)},
             )
             return AgentResult(
                 success=False,
                 data=None,
                 error=f"Skill execution failed: {e}",
+            )
+
+    async def run(self, task: dict[str, Any]) -> AgentResult:
+        """Run the agent with skill-aware lifecycle management.
+
+        Overrides BaseAgent.run() to route through execute_with_skills()
+        instead of execute(), enabling automatic skill consideration
+        for every task.
+
+        Args:
+            task: Task specification with parameters.
+
+        Returns:
+            AgentResult with execution outcome.
+        """
+        start_time = time.perf_counter()
+        self.status = AgentStatus.RUNNING
+
+        logger.info(
+            f"Agent {self.name} starting skill-aware execution",
+            extra={
+                "agent": self.name,
+                "user_id": self.user_id,
+                "task_keys": list(task.keys()),
+            },
+        )
+
+        try:
+            # Validate input
+            if not self.validate_input(task):
+                self.status = AgentStatus.FAILED
+                return AgentResult(
+                    success=False,
+                    data=None,
+                    error="Input validation failed",
+                )
+
+            # Route through skill-aware execution
+            result = await self.execute_with_skills(task)
+
+            # Format output
+            result.data = self.format_output(result.data)
+
+            # Calculate execution time
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            result.execution_time_ms = elapsed_ms
+
+            # Accumulate token usage
+            self.total_tokens_used += result.tokens_used
+
+            self.status = AgentStatus.COMPLETE if result.success else AgentStatus.FAILED
+
+            logger.info(
+                f"Agent {self.name} skill-aware execution complete",
+                extra={
+                    "agent": self.name,
+                    "user_id": self.user_id,
+                    "success": result.success,
+                    "execution_time_ms": elapsed_ms,
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            self.status = AgentStatus.FAILED
+
+            logger.error(
+                f"Agent {self.name} skill-aware execution failed: {e}",
+                extra={
+                    "agent": self.name,
+                    "user_id": self.user_id,
+                    "error": str(e),
+                    "execution_time_ms": elapsed_ms,
+                },
+            )
+
+            return AgentResult(
+                success=False,
+                data=None,
+                error=str(e),
+                execution_time_ms=elapsed_ms,
             )

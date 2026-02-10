@@ -127,6 +127,9 @@ class StrategistAgent(SkillAwareAgent):
             AgentResult with complete strategy data including analysis,
             strategy, timeline, and metadata.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         # Extract task components
         goal = task.get("goal", {})
         resources = task.get("resources", {})

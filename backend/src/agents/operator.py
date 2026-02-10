@@ -101,6 +101,9 @@ class OperatorAgent(SkillAwareAgent):
         Returns:
             AgentResult with success status and output data.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         operation_type = task["operation_type"]
         parameters = task["parameters"]
 

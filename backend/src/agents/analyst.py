@@ -135,6 +135,9 @@ class AnalystAgent(SkillAwareAgent):
         Returns:
             AgentResult with structured research report.
         """
+        # OODA ACT: Log skill consideration before native execution
+        await self._log_skill_consideration()
+
         from datetime import datetime
 
         from src.agents.base import AgentResult

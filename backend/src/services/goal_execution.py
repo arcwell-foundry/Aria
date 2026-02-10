@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 class GoalExecutionService:
     """Executes agent goals by running LLM-powered analyses.
 
-    For beta this is synchronous — each agent runs its analysis via
-    a single LLM call, stores the result, and moves to the next.
+    Supports two execution modes:
+    1. **Skill-aware**: Instantiates agent objects, calls execute_with_skills()
+       which routes through skill analysis → simple/complex execution.
+    2. **Prompt-based** (fallback): Builds agent-specific prompts and sends
+       directly to LLM for structured analysis.
     """
 
     def __init__(self) -> None:
@@ -201,6 +204,188 @@ class GoalExecutionService:
 
         return all_results
 
+    def _create_agent_instance(
+        self,
+        agent_type: str,
+        user_id: str,
+    ) -> Any:
+        """Create an agent instance for skill-aware execution.
+
+        Args:
+            agent_type: The agent type string (scout, analyst, etc.).
+            user_id: The user's ID.
+
+        Returns:
+            Agent instance or None if creation fails.
+        """
+        try:
+            from src.agents import (
+                AnalystAgent,
+                HunterAgent,
+                OperatorAgent,
+                ScoutAgent,
+                ScribeAgent,
+                StrategistAgent,
+            )
+            from src.skills.index import SkillIndex
+            from src.skills.orchestrator import SkillOrchestrator
+
+            agent_classes: dict[str, type] = {
+                "scout": ScoutAgent,
+                "analyst": AnalystAgent,
+                "hunter": HunterAgent,
+                "strategist": StrategistAgent,
+                "scribe": ScribeAgent,
+                "operator": OperatorAgent,
+            }
+
+            agent_cls = agent_classes.get(agent_type)
+            if agent_cls is None:
+                return None
+
+            # Initialize skill infrastructure (best-effort)
+            skill_orchestrator = None
+            skill_index = None
+            try:
+                skill_index = SkillIndex()
+                skill_orchestrator = SkillOrchestrator()
+            except Exception as e:
+                logger.debug(f"Skill infrastructure not available: {e}")
+
+            return agent_cls(
+                llm_client=self._llm,
+                user_id=user_id,
+                skill_orchestrator=skill_orchestrator,
+                skill_index=skill_index,
+            )
+
+        except Exception as e:
+            logger.debug(f"Failed to create agent instance for {agent_type}: {e}")
+            return None
+
+    def _build_agent_task(
+        self,
+        agent_type: str,
+        goal: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Build a task dict compatible with an agent's execute() method.
+
+        Maps goal context to each agent's expected task format.
+
+        Args:
+            agent_type: The agent type string.
+            goal: The goal dict.
+            context: Gathered execution context.
+
+        Returns:
+            Task dict or None if the agent type isn't supported.
+        """
+        config = goal.get("config", {})
+        facts = context.get("facts", [])
+        company_name = context.get("company_name", "")
+
+        if agent_type == "hunter":
+            return {
+                "icp": {
+                    "industry": config.get("industry", "Life Sciences"),
+                    "size": config.get("company_size", ""),
+                    "geography": config.get("geography", ""),
+                },
+                "target_count": config.get("target_count", 5),
+                "exclusions": config.get("exclusions", []),
+            }
+        elif agent_type == "analyst":
+            return {
+                "query": goal.get("title", company_name),
+                "depth": config.get("depth", "standard"),
+            }
+        elif agent_type == "strategist":
+            return {
+                "goal": {
+                    "title": goal.get("title", ""),
+                    "type": config.get("goal_type", "research"),
+                    "target_company": company_name,
+                },
+                "resources": {
+                    "time_horizon_days": config.get("time_horizon_days", 90),
+                    "available_agents": ["Hunter", "Analyst", "Scribe", "Operator", "Scout"],
+                },
+                "constraints": config.get("constraints", {}),
+                "context": {
+                    "facts": facts[:10],
+                    "company_name": company_name,
+                },
+            }
+        elif agent_type == "scribe":
+            return {
+                "communication_type": config.get("communication_type", "email"),
+                "goal": goal.get("title", f"Follow up for {company_name}"),
+                "context": "; ".join(facts[:5]) if facts else "",
+                "tone": config.get("tone", "formal"),
+            }
+        elif agent_type == "operator":
+            return {
+                "operation_type": config.get("operation_type", "crm_read"),
+                "parameters": config.get("parameters", {"record_type": "accounts"}),
+            }
+        elif agent_type == "scout":
+            entities = config.get("entities", [])
+            if not entities and company_name:
+                entities = [company_name]
+            return {
+                "entities": entities if entities else ["Unknown"],
+                "signal_types": config.get("signal_types"),
+            }
+
+        return None
+
+    async def _try_skill_execution(
+        self,
+        user_id: str,
+        goal: dict[str, Any],
+        agent_type: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Try to execute using skill-aware agent instance.
+
+        Creates an agent instance, builds a compatible task, and calls
+        execute_with_skills(). Returns the result data if skills were
+        used successfully, or None to fall through to prompt-based execution.
+
+        Args:
+            user_id: The user's ID.
+            goal: The goal dict.
+            agent_type: The agent type string.
+            context: Gathered execution context.
+
+        Returns:
+            Result data dict if skills were used, None otherwise.
+        """
+        try:
+            agent = self._create_agent_instance(agent_type, user_id)
+            if agent is None:
+                return None
+
+            task = self._build_agent_task(agent_type, goal, context)
+            if task is None:
+                return None
+
+            # Only proceed with skill execution if the agent thinks skills are needed
+            analysis = await agent._analyze_skill_needs(task)
+            if not analysis.skills_needed:
+                return None  # Let prompt-based flow handle it
+
+            result = await agent.execute_with_skills(task)
+            if result.success and result.data:
+                return result.data
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Skill execution attempt failed for {agent_type}: {e}")
+            return None
+
     async def _execute_agent(
         self,
         user_id: str,
@@ -210,6 +395,9 @@ class GoalExecutionService:
         goal_agent_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a single agent's analysis.
+
+        First attempts skill-aware execution via agent instances. If skills
+        aren't applicable, falls back to prompt-based LLM analysis.
 
         Args:
             user_id: The user's ID.
@@ -230,7 +418,60 @@ class GoalExecutionService:
             },
         )
 
-        # Build agent-specific prompt
+        # Step 1: Try skill-aware execution
+        skill_result = await self._try_skill_execution(
+            user_id=user_id,
+            goal=goal,
+            agent_type=agent_type,
+            context=context,
+        )
+
+        if skill_result is not None:
+            logger.info(
+                "Agent executed via skill-aware path",
+                extra={"agent_type": agent_type, "user_id": user_id},
+            )
+
+            # Store execution result
+            await self._store_execution(
+                user_id=user_id,
+                goal_id=goal["id"],
+                agent_type=agent_type,
+                content=skill_result,
+                goal_agent_id=goal_agent_id,
+            )
+
+            # Record activity
+            await self._activity.record(
+                user_id=user_id,
+                agent=agent_type,
+                activity_type="analysis_complete",
+                title=f"{agent_type.title()} completed skill-augmented analysis",
+                description=skill_result.get(
+                    "summary", f"{agent_type.title()} skill execution for: {goal.get('title', '')}"
+                ),
+                confidence=0.85,
+                related_entity_type="goal",
+                related_entity_id=goal["id"],
+                metadata={"execution_mode": "skill_aware"},
+            )
+
+            # Submit recommended actions to action queue (Gap #32)
+            await self._submit_actions_to_queue(
+                user_id=user_id,
+                agent_type=agent_type,
+                content=skill_result,
+                goal_id=goal["id"],
+            )
+
+            return {
+                "agent_type": agent_type,
+                "success": True,
+                "content": skill_result,
+                "execution_mode": "skill_aware",
+            }
+
+        # Step 2: Fall back to prompt-based LLM analysis
         prompt_builder = {
             "scout": self._build_scout_prompt,
             "analyst": self._build_analyst_prompt,
@@ -274,9 +515,7 @@ class GoalExecutionService:
                     config_context += f"\nFocus areas: {', '.join(therapeutic_areas)}."
                 competitor_watchlist = aria_config.get("competitor_watchlist", [])
                 if competitor_watchlist:
-                    config_context += (
-                        f"\nCompetitor watchlist: {', '.join(competitor_watchlist)}."
-                    )
+                    config_context += f"\nCompetitor watchlist: {', '.join(competitor_watchlist)}."
                 personality = aria_config.get("personality", {})
                 if personality:
                     config_context += (
@@ -330,6 +569,7 @@ class GoalExecutionService:
                 confidence=0.8,
                 related_entity_type="goal",
                 related_entity_id=goal["id"],
+                metadata={"execution_mode": "prompt_based"},
             )
 
             # Submit recommended actions to action queue (Gap #32)
@@ -344,6 +584,7 @@ class GoalExecutionService:
                 "agent_type": agent_type,
                 "success": True,
                 "content": content,
+                "execution_mode": "prompt_based",
             }
 
         except Exception as e:
