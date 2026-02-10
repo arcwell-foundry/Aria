@@ -46,6 +46,7 @@ from src.api.routes import (
     search,
     signals,
     skills,
+    workflows,
 )
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
@@ -179,6 +180,7 @@ app.include_router(profile.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
+app.include_router(workflows.router, prefix="/api/v1")
 
 # US-942: Deep sync routes
 app.include_router(deep_sync.router, prefix="/api/v1")

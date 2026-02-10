@@ -15,6 +15,7 @@ import {
   listCustomSkills,
   updateCustomSkill,
   deleteCustomSkill,
+  getExecutionReplay,
   type AvailableSkillsFilters,
   type UpdateCustomSkillData,
 } from "@/api/skills";
@@ -35,6 +36,7 @@ export const skillKeys = {
   performance: (skillId: string) =>
     [...skillKeys.all, "performance", skillId] as const,
   custom: () => [...skillKeys.all, "custom"] as const,
+  replay: (executionId: string) => [...skillKeys.all, "replay", executionId] as const,
 };
 
 // List available skills
@@ -204,5 +206,14 @@ export function useDeleteCustomSkill() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: skillKeys.custom() });
     },
+  });
+}
+
+// Execution replay
+export function useExecutionReplay(executionId: string | null) {
+  return useQuery({
+    queryKey: skillKeys.replay(executionId ?? ""),
+    queryFn: () => getExecutionReplay(executionId!),
+    enabled: !!executionId,
   });
 }

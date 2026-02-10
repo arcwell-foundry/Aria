@@ -267,3 +267,72 @@ export async function updateCustomSkill(
 export async function deleteCustomSkill(skillId: string): Promise<void> {
   await apiClient.delete(`/skills/custom/${skillId}`);
 }
+
+// Execution Replay types
+
+export type UserClearance = "admin" | "manager" | "rep";
+export type TrustDelta = "increased" | "decreased" | "unchanged";
+
+export interface ReplayStep {
+  step_number: number;
+  skill_id: string;
+  skill_name: string | null;
+  status: StepStatus;
+  input_data: unknown | null;
+  input_summary: string | null;
+  output_data: unknown | null;
+  output_summary: string | null;
+  prompt_used: string | null;
+  api_calls: string[] | null;
+  artifacts: unknown[];
+  extracted_facts: unknown[];
+  execution_time_ms: number | null;
+  agent_id: string | null;
+}
+
+export interface TrustImpact {
+  before: string;
+  after: string;
+  delta: TrustDelta;
+}
+
+export interface DataAccessAudit {
+  requested: string[];
+  granted: string[];
+  denied: string[];
+  redacted_fields: string[];
+}
+
+export interface ExecutionReplay {
+  audit_entry: AuditEntry;
+  plan: ExecutionPlan | null;
+  steps: ReplayStep[];
+  trust_impact: TrustImpact;
+  data_access_audit: DataAccessAudit;
+  user_clearance: UserClearance;
+  hash_chain: {
+    previous_hash: string;
+    entry_hash: string;
+  };
+}
+
+// Execution Replay API functions
+
+export async function getExecutionReplay(
+  executionId: string
+): Promise<ExecutionReplay> {
+  const response = await apiClient.get<ExecutionReplay>(
+    `/skills/audit/${executionId}/replay`
+  );
+  return response.data;
+}
+
+export async function downloadReplayPdf(
+  executionId: string
+): Promise<Blob> {
+  const response = await apiClient.get(
+    `/skills/audit/${executionId}/replay/pdf`,
+    { responseType: "blob" }
+  );
+  return response.data;
+}
