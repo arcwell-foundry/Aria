@@ -24,6 +24,12 @@ from src.skills.context_manager import (
     SkillContextManager,
     SummaryVerbosity,
 )
+from src.skills.creator import (
+    CustomSkill,
+    Outcome,
+    SkillBlueprint,
+    SkillCreator,
+)
 from src.skills.discovery import (
     GapReport,
     Recommendation,
@@ -60,6 +66,11 @@ __all__ = [
     "SkillAutonomyService",
     "SkillRiskLevel",
     "TrustHistory",
+    # Creator
+    "SkillCreator",
+    "SkillBlueprint",
+    "CustomSkill",
+    "Outcome",
     # Context Manager
     "ORCHESTRATOR_BUDGET",
     "SKILL_INDEX_BUDGET",
