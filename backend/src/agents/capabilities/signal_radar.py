@@ -489,15 +489,40 @@ class SignalRadarCapability(BaseCapability):
 
         Inserts into both ``market_signals`` (if not already stored) and
         ``notifications`` tables so the user sees them in the UI.
+        Each signal is also passed through implication analysis to trigger
+        skill execution plans for actionable insights.
 
         Args:
             signals: Signals to alert on.
             user_id: User UUID.
         """
+        from src.skills.implication_trigger import process_signal_with_implications
+
         client = SupabaseClient.get_client()
 
         for signal in signals:
-            # Write notification
+            # Run implication analysis before notification — this may create
+            # a richer, implication-aware notification instead of a plain one.
+            try:
+                triggers = await process_signal_with_implications(signal, user_id)
+                if triggers:
+                    # Implication trigger already sent a richer notification,
+                    # skip the plain one.
+                    logger.info(
+                        "Signal %s handled by implication trigger (%d actions)",
+                        signal.id,
+                        len(triggers),
+                    )
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    "Implication analysis failed for signal %s, "
+                    "falling back to plain notification: %s",
+                    signal.id,
+                    exc,
+                )
+
+            # Fallback: plain notification when no implications detected
             try:
                 client.table("notifications").insert(
                     {
@@ -1732,16 +1757,31 @@ async def run_signal_radar_scan(user_id: str) -> dict[str, Any]:
     signals = await capability.scan_all_sources(user_id)
 
     # Run implication detection on top signals
+    implication_triggers_total = 0
     if signals:
+        from src.skills.implication_trigger import process_signal_with_implications
+
         user_context = await capability._build_user_context(user_id)
         top_signals = [s for s in signals if s.relevance_score >= 0.6][:5]
         for signal in top_signals:
+            # Run both legacy implication detection (for Graphiti facts)
+            # and the new implication-aware skill triggering
             await capability.detect_implications(signal, user_context)
+            try:
+                triggers = await process_signal_with_implications(signal, user_id)
+                implication_triggers_total += len(triggers)
+            except Exception as exc:
+                logger.warning(
+                    "Implication skill triggering failed for signal %s: %s",
+                    signal.id,
+                    exc,
+                )
 
     return {
         "user_id": user_id,
         "signals_found": len(signals),
         "high_relevance": len([s for s in signals if s.relevance_score >= 0.7]),
+        "implication_triggers": implication_triggers_total,
     }
 
 

@@ -37,6 +37,12 @@ from src.skills.discovery import (
     SkillRecommendation,
 )
 from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor
+from src.skills.implication_trigger import (
+    ImplicationAwareSkillTrigger,
+    ImplicationPlan,
+    SkillTrigger,
+    process_signal_with_implications,
+)
 from src.skills.index import (
     TIER_1_CORE_SKILLS,
     TIER_2_RELEVANT_TAG,
@@ -104,6 +110,11 @@ __all__ = [
     "GapReport",
     "SkillRecommendation",
     "Recommendation",
+    # Implication Trigger
+    "ImplicationAwareSkillTrigger",
+    "ImplicationPlan",
+    "SkillTrigger",
+    "process_signal_with_implications",
     # Registry
     "SkillRegistry",
     "SkillEntry",
