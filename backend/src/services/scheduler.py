@@ -43,12 +43,56 @@ async def _run_ambient_gap_checks() -> None:
             try:
                 await filler.check_and_generate(user_id)
             except Exception:
-                logger.warning(
-                    "Ambient gap check failed for user %s", user_id, exc_info=True
-                )
+                logger.warning("Ambient gap check failed for user %s", user_id, exc_info=True)
 
     except Exception:
         logger.exception("Ambient gap filler scheduler run failed")
+
+
+async def _run_calendar_meeting_checks() -> None:
+    """Check upcoming meetings for all active users and trigger briefs."""
+    try:
+        from src.agents.capabilities.base import UserContext
+        from src.agents.capabilities.calendar_intel import CalendarIntelligenceCapability
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Find users with active Google Calendar integrations
+        result = (
+            db.table("user_integrations")
+            .select("user_id")
+            .eq("integration_type", "google_calendar")
+            .eq("status", "active")
+            .execute()
+        )
+
+        user_ids: list[str] = list({row["user_id"] for row in (result.data or [])})
+        logger.info("Calendar meeting check: processing %d users", len(user_ids))
+
+        total_briefs = 0
+        for user_id in user_ids:
+            try:
+                ctx = UserContext(user_id=user_id)
+                capability = CalendarIntelligenceCapability(
+                    supabase_client=db,
+                    memory_service=None,
+                    knowledge_graph=None,
+                    user_context=ctx,
+                )
+                briefs = await capability.check_upcoming_meetings()
+                total_briefs += briefs
+            except Exception:
+                logger.warning(
+                    "Calendar meeting check failed for user %s",
+                    user_id,
+                    exc_info=True,
+                )
+
+        logger.info("Calendar meeting check complete: %d briefs triggered", total_briefs)
+
+    except Exception:
+        logger.exception("Calendar meeting check scheduler run failed")
 
 
 _scheduler: Any = None
@@ -74,8 +118,18 @@ async def start_scheduler() -> None:
             name="Daily ambient gap filler",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_calendar_meeting_checks,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="calendar_meeting_checks",
+            name="Calendar meeting prep checks",
+            replace_existing=True,
+        )
         _scheduler.start()
-        logger.info("Background scheduler started — ambient gap filler at 06:00 daily")
+        logger.info(
+            "Background scheduler started — ambient gaps at 06:00 daily, "
+            "calendar meeting checks every 30 min"
+        )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
     except Exception:
@@ -101,10 +155,7 @@ async def run_ambient_gaps_admin() -> dict[str, Any]:
 
     db = SupabaseClient.get_client()
     result = (
-        db.table("onboarding_state")
-        .select("user_id")
-        .not_.is_("completed_at", "null")
-        .execute()
+        db.table("onboarding_state").select("user_id").not_.is_("completed_at", "null").execute()
     )
     user_ids = [row["user_id"] for row in (result.data or [])]
 
