@@ -3,7 +3,7 @@
 These workflows are available out-of-the-box and marked ``is_shared=True``
 so they appear in every user's workflow library without per-user copies.
 
-Three workflows are provided:
+Eight workflows are provided:
 
 * **Morning Prep** -- Runs a morning briefing at 6 AM on weekdays and
   pushes the summary to Slack.
@@ -13,14 +13,29 @@ Three workflows are provided:
 * **Signal Alert** -- Evaluates incoming market signals and, when the
   relevance score exceeds 0.8, formats the signal and pushes alerts to
   Slack and in-app notifications.
+* **Newsletter Curator** -- Weekly AI-curated newsletter from market
+  signals, distributed to prospects every Monday at 7 AM.
+* **Deep Research** -- On-demand multi-source research with SEC filings,
+  patents, web scraping, and AI synthesis.
+* **Smart Alerts** -- Event-driven alert pipeline with LLM urgency
+  scoring and multi-channel dispatch.
+* **Domain Intelligence** -- Daily competitor website monitoring with
+  diff analysis and automatic alert creation.
+* **Pre-Meeting Pipeline** -- Daily meeting prep with attendee enrichment,
+  company research, and one-pager generation.
 """
 
+from src.skills.workflows.deep_research import get_deep_research_definition
+from src.skills.workflows.domain_intelligence import get_domain_intelligence_definition
 from src.skills.workflows.models import (
     UserWorkflowDefinition,
     WorkflowAction,
     WorkflowMetadata,
     WorkflowTrigger,
 )
+from src.skills.workflows.newsletter_curator import get_newsletter_curator_definition
+from src.skills.workflows.pre_meeting_pipeline import get_pre_meeting_pipeline_definition
+from src.skills.workflows.smart_alerts import get_smart_alerts_definition
 
 
 def get_prebuilt_workflows() -> list[UserWorkflowDefinition]:
@@ -34,6 +49,11 @@ def get_prebuilt_workflows() -> list[UserWorkflowDefinition]:
         _morning_prep(),
         _post_meeting(),
         _signal_alert(),
+        get_newsletter_curator_definition(),
+        get_deep_research_definition(),
+        get_smart_alerts_definition(),
+        get_domain_intelligence_definition(),
+        get_pre_meeting_pipeline_definition(),
     ]
 
 
