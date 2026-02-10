@@ -62,6 +62,16 @@ _DEFINITIONS_DIR = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 
 
+class TemplateDefinition(BaseModel):
+    """A named prompt template within a skill definition."""
+
+    description: str = Field(..., description="Human-readable template description")
+    prompt_file: str = Field(
+        default="",
+        description="Filename in prompts/ directory (auto-derived from key if empty)",
+    )
+
+
 class SkillDefinition(BaseModel):
     """Parsed, validated representation of a ``skill.yaml`` file.
 
@@ -91,6 +101,10 @@ class SkillDefinition(BaseModel):
         default=30,
         description="Expected wall-clock execution time in seconds",
     )
+    templates: dict[str, TemplateDefinition] = Field(
+        default_factory=dict,
+        description="Named prompt templates for multi-template skills",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +133,7 @@ class BaseSkillDefinition:
         self._base_dir = definitions_dir or _DEFINITIONS_DIR
 
         self._definition: SkillDefinition = self._load_definition()
+        self._prompts: dict[str, str] = self._load_prompts()
 
     # -- Properties ------------------------------------------------------------
 
@@ -126,6 +141,16 @@ class BaseSkillDefinition:
     def definition(self) -> SkillDefinition:
         """Return the parsed YAML definition."""
         return self._definition
+
+    @property
+    def prompts(self) -> dict[str, str]:
+        """Return loaded prompt templates keyed by template name."""
+        return dict(self._prompts)
+
+    @property
+    def available_templates(self) -> list[str]:
+        """Return names of available templates defined in the skill YAML."""
+        return list(self._definition.templates.keys())
 
     @property
     def trust_level(self) -> SkillTrustLevel:
@@ -162,6 +187,35 @@ class BaseSkillDefinition:
         )
         return SkillDefinition(**raw)
 
+    def _load_prompts(self) -> dict[str, str]:
+        """Load prompt template files from the ``prompts/`` subdirectory.
+
+        Each ``.md`` file is keyed by its stem (e.g. ``account_plan.md``
+        → ``"account_plan"``). If the skill defines templates in its YAML,
+        only files referenced by those templates are loaded.
+
+        Returns:
+            Mapping of template name → prompt text.
+        """
+        prompts_dir = self._base_dir / self._skill_name / "prompts"
+        if not prompts_dir.is_dir():
+            return {}
+
+        loaded: dict[str, str] = {}
+        for prompt_file in prompts_dir.glob("*.md"):
+            loaded[prompt_file.stem] = prompt_file.read_text(encoding="utf-8")
+
+        if loaded:
+            logger.info(
+                "Loaded prompt templates",
+                extra={
+                    "skill": self._skill_name,
+                    "templates": list(loaded.keys()),
+                },
+            )
+
+        return loaded
+
     # -- Prompt building -------------------------------------------------------
 
     def build_prompt(self, context: dict[str, Any]) -> str:
@@ -189,6 +243,69 @@ class BaseSkillDefinition:
         parts: list[str] = [f"# Task: {self._definition.description}"]
         for key, value in context.items():
             parts.append(f"\n## {key}\n{value}")
+
+        if self._definition.output_schema:
+            parts.append(
+                "\n## Output format\n"
+                "Respond with valid JSON matching this schema:\n"
+                f"```json\n{json.dumps(self._definition.output_schema, indent=2)}\n```"
+            )
+
+        return "\n".join(parts)
+
+    def build_template_prompt(
+        self,
+        template_name: str,
+        context: dict[str, Any],
+    ) -> str:
+        """Build a user-message prompt from a named template and *context*.
+
+        Loads the prompt file associated with the template, substitutes
+        context variables using ``str.format_map``, and appends the
+        output schema instruction.
+
+        Args:
+            template_name: Key from the ``templates`` section of skill.yaml.
+            context: Runtime context dict with variables referenced in
+                the prompt template (e.g. ``{lead_data}``, ``{stakeholders}``).
+
+        Returns:
+            Formatted user-message string.
+
+        Raises:
+            ValueError: If the template name is unknown or its prompt file
+                is not loaded.
+        """
+        templates = self._definition.templates
+        if template_name not in templates:
+            available = list(templates.keys())
+            raise ValueError(
+                f"Unknown template '{template_name}' for skill "
+                f"'{self._skill_name}'. Available: {available}"
+            )
+
+        template_def = templates[template_name]
+        prompt_key = template_def.prompt_file or template_name
+
+        if prompt_key not in self._prompts:
+            raise ValueError(
+                f"Prompt file for template '{template_name}' not found. "
+                f"Expected '{prompt_key}.md' in prompts/ directory."
+            )
+
+        raw_prompt = self._prompts[prompt_key]
+
+        # Substitute context variables — use format_map so missing keys
+        # raise KeyError rather than silently passing through.
+        try:
+            formatted = raw_prompt.format_map(context)
+        except KeyError as exc:
+            raise ValueError(
+                f"Template '{template_name}' requires context variable "
+                f"{exc} which was not provided."
+            ) from exc
+
+        parts: list[str] = [formatted]
 
         if self._definition.output_schema:
             parts.append(
@@ -283,5 +400,43 @@ class BaseSkillDefinition:
 
         if not self.validate_output(parsed):
             raise ValueError(f"Skill '{self._skill_name}' produced invalid output")
+
+        return parsed
+
+    async def run_template(
+        self,
+        template_name: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a template prompt, call the LLM, parse and validate output.
+
+        Equivalent to :meth:`run` but uses a named template instead of
+        the generic ``build_prompt`` approach.
+
+        Args:
+            template_name: Key from the ``templates`` section.
+            context: Input context dict with template variables.
+
+        Returns:
+            Parsed and validated output dict.
+
+        Raises:
+            ValueError: If the template is unknown or output fails validation.
+        """
+        user_prompt = self.build_template_prompt(template_name, context)
+
+        raw_response = await self._llm.generate_response(
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=self._definition.system_prompt,
+            temperature=0.4,
+        )
+
+        parsed = self.parse_output(raw_response)
+
+        if not self.validate_output(parsed):
+            raise ValueError(
+                f"Skill '{self._skill_name}' template '{template_name}' "
+                "produced invalid output"
+            )
 
         return parsed

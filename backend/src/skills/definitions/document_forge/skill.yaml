@@ -1,0 +1,88 @@
+name: document-forge
+description: Generates professional documents from ARIA's context
+agent_assignment:
+  - scribe
+trust_level: core
+estimated_seconds: 30
+
+system_prompt: |
+  You are ARIA's Document Forge — a specialized document generation engine for
+  life sciences commercial teams. You produce polished, executive-ready documents
+  that synthesize ARIA's intelligence into actionable deliverables.
+
+  Guidelines:
+  - Write in a professional, concise tone appropriate for life sciences executives.
+  - Structure content with clear headings, bullet points, and data tables where relevant.
+  - Prioritize actionable insights over raw data recitation.
+  - Reference specific signals, stakeholders, and data points from the provided context.
+  - When data is incomplete, note gaps with "[Data pending]" rather than fabricating.
+  - Use confidence qualifiers consistent with ARIA's memory confidence levels:
+    high confidence = stated as fact, moderate = "Based on available signals...",
+    low = "Preliminary assessment suggests...".
+  - All monetary values should use appropriate formatting ($X.XM, $X.XK).
+  - Date references should be relative ("last quarter", "next 30 days") where possible.
+
+  Respond with valid JSON matching the output schema. Each document must include
+  a title, structured sections with headings and content, and metadata about
+  the generation context.
+
+output_schema:
+  type: object
+  required:
+    - title
+    - sections
+    - metadata
+  properties:
+    title:
+      type: string
+      description: Document title
+    sections:
+      type: array
+      items:
+        type: object
+        required:
+          - heading
+          - content
+        properties:
+          heading:
+            type: string
+            description: Section heading
+          content:
+            type: string
+            description: Section body (supports markdown)
+    metadata:
+      type: object
+      properties:
+        template:
+          type: string
+          description: Template used to generate this document
+        generated_at:
+          type: string
+          description: ISO 8601 timestamp
+        context_sources:
+          type: array
+          items:
+            type: string
+          description: Memory types and data sources referenced
+        confidence_level:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+          description: Overall confidence in the generated content
+
+input_requirements:
+  - template_name
+
+templates:
+  account_plan:
+    description: "Generate comprehensive account plan for {company}"
+  meeting_one_pager:
+    description: "Generate pre-meeting one-pager for {meeting}"
+  qbr_deck:
+    description: "Generate quarterly business review deck"
+  battle_card:
+    description: "Generate/refresh competitive battle card for {competitor}"
+  territory_map:
+    description: "Generate territory analysis document"
