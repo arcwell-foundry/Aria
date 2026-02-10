@@ -12,14 +12,9 @@ import type { ErrorEvent } from "@/lib/errorEvents";
 // Mock framer-motion to render plain divs (avoids animation issues in tests)
 vi.mock("framer-motion", () => ({
   motion: {
-    div: ({
-      children,
-      className,
-      style,
-      ...rest
-    }: React.HTMLAttributes<HTMLDivElement> & Record<string, unknown>) => (
-      <div className={className} style={style as React.CSSProperties}>
-        {children}
+    div: (props: React.HTMLAttributes<HTMLDivElement> & Record<string, unknown>) => (
+      <div className={props.className as string} style={props.style as React.CSSProperties}>
+        {props.children}
       </div>
     ),
   },

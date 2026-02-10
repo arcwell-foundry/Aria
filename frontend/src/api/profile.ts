@@ -8,6 +8,7 @@ export interface ProfileUser {
   title: string | null;
   department: string | null;
   linkedin_url: string | null;
+  phone: string | null;
   avatar_url: string | null;
   company_id: string | null;
   role: string;

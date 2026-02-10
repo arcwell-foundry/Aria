@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { type JSX, useState, useEffect } from "react";
 import {
   AlertTriangle,
   Check,

@@ -3,7 +3,7 @@
  * @see /Users/dhruv/aria/frontend/src/api/client.ts
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { apiClient } from "../client";
 
 describe("API Client", () => {
@@ -13,13 +13,17 @@ describe("API Client", () => {
     setItem: vi.fn(),
     removeItem: vi.fn(),
     clear: vi.fn(),
+    length: 0,
+    key: vi.fn(),
   };
 
   beforeAll(() => {
-    global.localStorage = localStorageMock as Storage;
+    global.localStorage = localStorageMock as unknown as Storage;
     // Mock window.location
-    delete (window as { location?: Partial<Location> }).location;
-    window.location = { href: "" };
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { href: "" },
+    });
   });
 
   beforeEach(() => {

@@ -69,7 +69,7 @@ describe("Error Event System", () => {
 
       // Should not throw despite listener error
       expect(() => {
-        showError("test", "Test", "Description");
+        showError("client", "Test", "Description");
       }).not.toThrow();
 
       // Normal listener should still be called
@@ -84,12 +84,12 @@ describe("Error Event System", () => {
 
       expect(typeof unsubscribe).toBe("function");
 
-      showError("test", "Test", "Description");
+      showError("client", "Test", "Description");
       expect(listener).toHaveBeenCalledTimes(1);
 
       unsubscribe();
 
-      showError("test", "Test 2", "Description 2");
+      showError("client", "Test 2", "Description 2");
       expect(listener).toHaveBeenCalledTimes(1); // Should not increase
     });
 
@@ -102,7 +102,7 @@ describe("Error Event System", () => {
 
       unsubscribe1();
 
-      showError("test", "Test", "Description");
+      showError("client", "Test", "Description");
 
       expect(listener1).not.toHaveBeenCalled();
       expect(listener2).toHaveBeenCalledTimes(1);
@@ -120,7 +120,7 @@ describe("Error Event System", () => {
       // Remove middle listener
       unsub2();
 
-      showError("test", "Test 1", "Description 1");
+      showError("client", "Test 1", "Description 1");
 
       expect(listener1).toHaveBeenCalledTimes(1);
       expect(listener2).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe("Error Event System", () => {
       // Remove first listener
       unsub1();
 
-      showError("test", "Test 2", "Description 2");
+      showError("client", "Test 2", "Description 2");
 
       expect(listener1).toHaveBeenCalledTimes(1); // No increase
       expect(listener2).not.toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe("Error Event System", () => {
 
       clearAllErrorListeners();
 
-      showError("test", "Test", "Description");
+      showError("client", "Test", "Description");
 
       expect(listener1).not.toHaveBeenCalled();
       expect(listener2).not.toHaveBeenCalled();
@@ -226,8 +226,8 @@ describe("Error Event System", () => {
       const listener = vi.fn();
       onError(listener);
 
-      showError("test", "Error 1", "Description 1");
-      showError("test", "Error 2", "Description 2");
+      showError("client", "Error 1", "Description 1");
+      showError("client", "Error 2", "Description 2");
 
       const id1 = listener.mock.calls[0][0].id;
       const id2 = listener.mock.calls[1][0].id;
