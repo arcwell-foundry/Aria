@@ -214,13 +214,13 @@ export function ExecutionPlanCard({
     });
   }
 
-  // Auto-approved flash: if plan transitions to approved/executing without user action
-  const autoApproved = plan.status === "approved" || (isExecuting && !plan.approved_at);
+  // Auto-approved flash: plan was approved by system (not user click) — has approved_at but user didn't click approve
+  const autoApproved = (plan.status === "approved" || isExecuting) && !!plan.approved_at && !approveMutation.isSuccess;
 
   return (
     <div
       className={`relative bg-slate-800/50 border rounded-xl transition-all duration-300 ${
-        autoApproved ? "animate-pulse border-success/50 shadow-success/10 shadow-lg" :
+        autoApproved ? "animate-skill-auto-approve border-success/50 shadow-success/10 shadow-lg" :
         isPending ? "border-primary-500/30 shadow-primary-500/5 shadow-md" :
         isComplete ? "border-success/20" :
         isFailed ? "border-critical/30" :
@@ -234,7 +234,7 @@ export function ExecutionPlanCard({
             <Zap className="w-4 h-4 text-primary-400 flex-shrink-0" />
             <h3
               className={`font-semibold text-white truncate ${compact ? "text-sm" : "text-base"}`}
-              style={{ fontFamily: "var(--font-serif)" }}
+              style={{ fontFamily: "var(--font-display)" }}
             >
               {plan.task_description}
             </h3>

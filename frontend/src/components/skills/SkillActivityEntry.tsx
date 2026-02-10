@@ -126,7 +126,11 @@ export function SkillActivityEntry({ activity, onClick }: SkillActivityEntryProp
                     "bg-critical"
                   }`}
                 />
-                {Math.round(activity.confidence * 100)}%
+                {activity.confidence >= 0.95 ? "High confidence" :
+                 activity.confidence >= 0.8 ? "Confident" :
+                 activity.confidence >= 0.6 ? "Moderate" :
+                 activity.confidence >= 0.4 ? "Uncertain" :
+                 "Unconfirmed"}
               </span>
             )}
           </div>

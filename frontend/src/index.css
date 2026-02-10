@@ -243,4 +243,8 @@ body {
   .aria-settle {
     animation-duration: 0.01ms;
   }
+  .animate-skill-auto-approve,
+  .animate-skill-step-complete {
+    animation: none;
+  }
 }
