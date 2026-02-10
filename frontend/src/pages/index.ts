@@ -29,3 +29,4 @@ export { SettingsAccountPage } from "./SettingsAccountPage";
 export { SettingsPrivacyPage } from "./SettingsPrivacyPage";
 export { SettingsProfilePage } from "./SettingsProfilePage";
 export { ROIDashboardPage } from "./ROIDashboardPage";
+export { WorkflowsPage } from "./WorkflowsPage";

@@ -40,6 +40,7 @@ import {
   SettingsAccountPage,
   SettingsPrivacyPage,
   SettingsProfilePage,
+  WorkflowsPage,
 } from "@/pages";
 import { PostAuthRouter } from "@/components/PostAuthRouter";
 import type { SearchResult, RecentItem } from "@/api/search";
@@ -202,6 +203,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <SkillsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/workflows"
+        element={
+          <ProtectedRoute>
+            <WorkflowsPage />
           </ProtectedRoute>
         }
       />
