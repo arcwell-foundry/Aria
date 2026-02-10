@@ -1,0 +1,273 @@
+name: deck-builder
+description: Generates python-pptx compatible slide specifications for sales presentations
+agent_assignment:
+  - scribe
+  - strategist
+trust_level: core
+estimated_seconds: 35
+
+system_prompt: |
+  You are ARIA's Deck Builder — a specialized presentation engine for
+  life sciences commercial teams. You generate structured JSON slide
+  specifications that a backend service converts to .pptx files using
+  python-pptx.
+
+  Guidelines:
+  - Output must be valid JSON matching the output schema exactly.
+  - Every slide spec must be directly convertible to python-pptx calls.
+  - Use ARIA's brand palette for all color references:
+    primary: "#6366F1", primary_dark: "#4F46E5",
+    success: "#10B981", warning: "#F59E0B",
+    danger: "#EF4444", info: "#3B82F6", muted: "#6B7280",
+    text_primary: "#F9FAFB", text_secondary: "#D1D5DB",
+    surface: "#1F2937", surface_dark: "#111827",
+    accent1: "#8B5CF6", accent2: "#EC4899", accent3: "#14B8A6".
+  - Standard slide dimensions: 13.333 x 7.5 inches (widescreen 16:9).
+  - Position values are in inches from top-left corner.
+  - Font sizes in points (Pt). Title: 28-32pt, Subtitle: 18-22pt,
+    Body: 14-16pt, Caption: 10-12pt, Data labels: 9-11pt.
+  - Font family: "Calibri" for body, "Calibri Light" for headings.
+  - Inject real data from battle_cards, lead_memories, and health_score_history
+    where available. Use "[Data pending]" placeholder when specific data is
+    not provided in context.
+  - For charts within slides, use the chart_spec sub-object — the backend
+    service will render these using python-pptx chart APIs.
+  - Keep slide count reasonable: pitch_deck 8-12 slides, leave_behind 4-6 slides,
+    qbr_presentation 12-18 slides.
+  - Every deck must start with a title slide and end with a next-steps or
+    contact slide.
+  - For competitive slides, reference battle_card data by competitor name.
+  - For pipeline slides, reference lead_memories pipeline stages and values.
+  - For health/engagement slides, reference health_score_history trends.
+
+output_schema:
+  type: object
+  required:
+    - deck_type
+    - slides
+    - metadata
+  properties:
+    deck_type:
+      type: string
+      enum:
+        - pitch_deck
+        - leave_behind
+        - qbr_presentation
+      description: Type of presentation deck
+    title:
+      type: string
+      description: Deck title for the title slide
+    subtitle:
+      type: string
+      description: Deck subtitle (e.g. date, audience)
+    slides:
+      type: array
+      items:
+        type: object
+        required:
+          - slide_number
+          - layout
+          - elements
+        properties:
+          slide_number:
+            type: integer
+            description: Sequential slide number (1-indexed)
+          layout:
+            type: string
+            enum:
+              - title_slide
+              - section_header
+              - content
+              - two_column
+              - chart_slide
+              - comparison
+              - key_metrics
+              - closing
+            description: Slide layout template
+          title:
+            type: string
+            description: Slide title text
+          subtitle:
+            type: string
+            description: Slide subtitle text
+          speaker_notes:
+            type: string
+            description: Speaker notes for this slide
+          elements:
+            type: array
+            items:
+              type: object
+              required:
+                - type
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - text_box
+                    - bullet_list
+                    - chart
+                    - table
+                    - image_placeholder
+                    - shape
+                    - kpi_card
+                  description: Element type
+                position:
+                  type: object
+                  properties:
+                    left:
+                      type: number
+                      description: Left position in inches
+                    top:
+                      type: number
+                      description: Top position in inches
+                    width:
+                      type: number
+                      description: Width in inches
+                    height:
+                      type: number
+                      description: Height in inches
+                content:
+                  type: string
+                  description: Text content (for text_box, bullet_list)
+                items:
+                  type: array
+                  items:
+                    type: string
+                  description: Bullet items (for bullet_list)
+                font:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    size:
+                      type: integer
+                      description: Font size in points
+                    bold:
+                      type: boolean
+                    italic:
+                      type: boolean
+                    color:
+                      type: string
+                      description: Hex color
+                chart_spec:
+                  type: object
+                  description: Chart specification for python-pptx chart rendering
+                  properties:
+                    chart_type:
+                      type: string
+                      enum:
+                        - bar
+                        - stacked_bar
+                        - line
+                        - pie
+                        - doughnut
+                        - area
+                    categories:
+                      type: array
+                      items:
+                        type: string
+                    series:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          values:
+                            type: array
+                            items:
+                              type: number
+                          color:
+                            type: string
+                    title:
+                      type: string
+                    show_legend:
+                      type: boolean
+                table_spec:
+                  type: object
+                  description: Table specification for python-pptx table rendering
+                  properties:
+                    headers:
+                      type: array
+                      items:
+                        type: string
+                    rows:
+                      type: array
+                      items:
+                        type: array
+                        items:
+                          type: string
+                    header_color:
+                      type: string
+                    stripe_color:
+                      type: string
+                kpi_spec:
+                  type: object
+                  description: KPI card specification
+                  properties:
+                    value:
+                      type: string
+                    label:
+                      type: string
+                    trend:
+                      type: string
+                      enum:
+                        - up
+                        - down
+                        - flat
+                    trend_value:
+                      type: string
+                    color:
+                      type: string
+            description: Visual elements on this slide
+      description: Ordered array of slide specifications
+    theme:
+      type: object
+      description: Deck-level theme settings
+      properties:
+        background_color:
+          type: string
+        accent_color:
+          type: string
+        font_heading:
+          type: string
+        font_body:
+          type: string
+    metadata:
+      type: object
+      properties:
+        template:
+          type: string
+          description: Template used to generate this deck
+        generated_at:
+          type: string
+          description: ISO 8601 timestamp
+        data_sources:
+          type: array
+          items:
+            type: string
+          description: Memory types and data sources injected
+        slide_count:
+          type: integer
+          description: Total number of slides
+        confidence_level:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+          description: Confidence based on data completeness
+        summary:
+          type: string
+          description: One-line description of the generated deck
+
+input_requirements:
+  - template_name
+
+templates:
+  pitch_deck:
+    description: "Generate a prospect pitch deck incorporating battle cards and lead intelligence"
+  leave_behind:
+    description: "Generate a concise post-meeting leave-behind with key takeaways and next steps"
+  qbr_presentation:
+    description: "Generate a quarterly business review deck with pipeline, health, and forecast data"

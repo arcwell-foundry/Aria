@@ -6,6 +6,7 @@ how agents expose discrete, composable units of functionality.
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.agents.capabilities.calendar_intel import CalendarIntelligenceCapability
+from src.agents.capabilities.compliance import ComplianceScanner, auto_redact, check_sunshine_act
 from src.agents.capabilities.contact_enricher import ContactEnricherCapability
 from src.agents.capabilities.crm_sync import CRMDeepSyncCapability
 from src.agents.capabilities.email_intel import EmailIntelligenceCapability
@@ -18,6 +19,7 @@ __all__ = [
     "BaseCapability",
     "CalendarIntelligenceCapability",
     "CapabilityResult",
+    "ComplianceScanner",
     "ContactEnricherCapability",
     "CRMDeepSyncCapability",
     "EmailIntelligenceCapability",
@@ -25,4 +27,6 @@ __all__ = [
     "SignalRadarCapability",
     "TeamMessengerCapability",
     "WebIntelligenceCapability",
+    "auto_redact",
+    "check_sunshine_act",
 ]
