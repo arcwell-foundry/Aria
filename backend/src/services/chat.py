@@ -7,6 +7,7 @@ This service handles chat interactions by:
 4. Extracting and storing new information from the chat
 """
 
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -83,6 +84,9 @@ IMPORTANT: The user appears to be under high cognitive load right now. Adapt you
 - Use bullet points for clarity
 """
 
+# Skill detection confidence threshold
+_SKILL_CONFIDENCE_THRESHOLD = 0.7
+
 
 class ChatService:
     """Service for memory-integrated chat interactions."""
@@ -103,6 +107,304 @@ class ChatService:
             salience_service=SalienceService(db_client=db),
             db_client=db,
         )
+
+        # Skill detection — lazily initialized on first use
+        self._skill_registry: Any = None
+        self._skill_orchestrator: Any = None
+        self._skill_registry_initialized = False
+
+    async def _get_skill_registry(self) -> Any:
+        """Lazily initialize and return the SkillRegistry.
+
+        Returns:
+            Initialized SkillRegistry, or None if initialization fails.
+        """
+        if self._skill_registry_initialized:
+            return self._skill_registry
+
+        self._skill_registry_initialized = True
+        try:
+            from src.skills.registry import SkillRegistry
+
+            registry = SkillRegistry()
+            await registry.initialize()
+            self._skill_registry = registry
+        except Exception as e:
+            logger.warning("Failed to initialize SkillRegistry for chat: %s", e)
+            self._skill_registry = None
+
+        return self._skill_registry
+
+    async def _get_skill_orchestrator(self) -> Any:
+        """Lazily initialize and return the SkillOrchestrator.
+
+        Returns:
+            SkillOrchestrator instance, or None if initialization fails.
+        """
+        if self._skill_orchestrator is not None:
+            return self._skill_orchestrator
+
+        try:
+            from src.security.skill_audit import SkillAuditService
+            from src.skills.autonomy import SkillAutonomyService
+            from src.skills.executor import SkillExecutor
+            from src.skills.index import SkillIndex
+            from src.skills.orchestrator import SkillOrchestrator
+
+            index = SkillIndex()
+            executor = SkillExecutor(index=index, llm_client=self._llm_client)
+            autonomy = SkillAutonomyService()
+            audit = SkillAuditService()
+            self._skill_orchestrator = SkillOrchestrator(
+                executor=executor,
+                index=index,
+                autonomy=autonomy,
+                audit=audit,
+            )
+        except Exception as e:
+            logger.warning("Failed to initialize SkillOrchestrator for chat: %s", e)
+            self._skill_orchestrator = None
+
+        return self._skill_orchestrator
+
+    async def _detect_skill_match(
+        self,
+        message: str,
+    ) -> tuple[bool, list[Any], float]:
+        """Check if a message matches any skill capability.
+
+        Uses SkillRegistry.get_for_task() to find matching skills.
+        Returns True if the best match confidence exceeds the threshold.
+
+        Args:
+            message: The user's message to analyze.
+
+        Returns:
+            Tuple of (should_route, ranked_skills, best_confidence).
+        """
+        registry = await self._get_skill_registry()
+        if registry is None:
+            return False, [], 0.0
+
+        try:
+            task = {"description": message, "type": "chat_request"}
+            ranked_skills = await registry.get_for_task(task)
+
+            if not ranked_skills:
+                return False, [], 0.0
+
+            best_confidence = ranked_skills[0].relevance if ranked_skills else 0.0
+
+            if best_confidence >= _SKILL_CONFIDENCE_THRESHOLD:
+                logger.info(
+                    "Skill match detected in chat",
+                    extra={
+                        "best_skill": ranked_skills[0].entry.name,
+                        "confidence": best_confidence,
+                        "message_preview": message[:100],
+                    },
+                )
+                return True, ranked_skills, best_confidence
+
+            return False, ranked_skills, best_confidence
+
+        except Exception as e:
+            logger.warning("Skill detection failed: %s", e)
+            return False, [], 0.0
+
+    async def _detect_plan_extension(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+    ) -> str | None:
+        """Detect if the user is requesting a follow-on action to a prior skill result.
+
+        Checks if the previous ARIA response included skill results AND the
+        new message references those results. Uses LLM to determine intent.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Current conversation identifier.
+            message: The user's new message.
+
+        Returns:
+            The plan_id to extend, or None if not a follow-on.
+        """
+        # Get working memory to check last response
+        working_memory = self._working_memory_manager.get_or_create(
+            conversation_id=conversation_id,
+            user_id=user_id,
+        )
+        context = working_memory.get_context_for_llm()
+
+        if len(context) < 2:
+            return None
+
+        # Check if the last assistant message included skill execution results
+        last_assistant = None
+        last_plan_id = None
+        for msg in reversed(context):
+            if msg.get("role") == "assistant":
+                last_assistant = msg.get("content", "")
+                # Look for plan_id markers in metadata
+                metadata = msg.get("metadata", {})
+                if isinstance(metadata, dict):
+                    last_plan_id = metadata.get("skill_plan_id")
+                break
+
+        if not last_assistant or not last_plan_id:
+            # Also check DB for recent plans in this conversation
+            try:
+                db = get_supabase_client()
+                recent_plans = (
+                    db.table("skill_execution_plans")
+                    .select("id, status, task_description")
+                    .eq("user_id", user_id)
+                    .in_("status", ["completed", "failed"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if recent_plans.data:
+                    last_plan_id = recent_plans.data[0]["id"]
+                    last_assistant = recent_plans.data[0].get("task_description", "")
+                else:
+                    return None
+            except Exception:
+                return None
+
+        if not last_plan_id:
+            return None
+
+        # Use LLM to check if the new message is a follow-on
+        try:
+            check_prompt = (
+                "Determine if the user's new message is requesting a follow-on action "
+                "based on the previous skill execution results.\n\n"
+                f"Previous ARIA response (skill result summary):\n{last_assistant[:500]}\n\n"
+                f"User's new message:\n{message}\n\n"
+                'Respond with ONLY valid JSON: {"is_followon": true|false, "reasoning": "..."}'
+            )
+
+            response = await self._llm_client.generate_response(
+                messages=[{"role": "user", "content": check_prompt}],
+                system_prompt=(
+                    "You determine if a user message is a follow-on request "
+                    "to previous results. Output ONLY valid JSON."
+                ),
+                temperature=0.0,
+                max_tokens=100,
+            )
+
+            parsed = json.loads(response)
+            if parsed.get("is_followon"):
+                logger.info(
+                    "Plan extension detected",
+                    extra={
+                        "plan_id": last_plan_id,
+                        "reasoning": parsed.get("reasoning", ""),
+                    },
+                )
+                return last_plan_id
+
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug("Follow-on detection failed: %s", e)
+
+        return None
+
+    async def _route_through_skill(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        extend_plan_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Route a message through the skill orchestrator.
+
+        Either creates a new plan from the message or extends an existing plan.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Current conversation identifier.
+            message: The user's message.
+            extend_plan_id: If set, extend this plan instead of creating new.
+
+        Returns:
+            Dict with skill execution results, or None if routing failed.
+        """
+        _ = conversation_id  # Reserved for per-conversation plan scoping
+        orchestrator = await self._get_skill_orchestrator()
+        if orchestrator is None:
+            return None
+
+        try:
+            if extend_plan_id:
+                plan = await orchestrator.extend_plan(
+                    completed_plan_id=extend_plan_id,
+                    new_request=message,
+                    user_id=user_id,
+                )
+            else:
+                task = {"description": message}
+                plan = await orchestrator.analyze_task(task, user_id)
+
+            if not plan.steps:
+                return None
+
+            # Auto-approve if low risk
+            if not plan.approval_required:
+                result = await orchestrator.execute_plan(
+                    user_id=user_id,
+                    plan=plan,
+                )
+
+                # Build a summary of skill results for the LLM to incorporate
+                step_summaries = []
+                for entry in result.working_memory:
+                    step_summaries.append(f"- {entry.skill_id} [{entry.status}]: {entry.summary}")
+
+                return {
+                    "plan_id": result.plan_id,
+                    "status": result.status,
+                    "steps_completed": result.steps_completed,
+                    "steps_failed": result.steps_failed,
+                    "skill_summaries": "\n".join(step_summaries),
+                    "working_memory": [
+                        {
+                            "skill_id": e.skill_id,
+                            "status": e.status,
+                            "summary": e.summary,
+                            "artifacts": e.artifacts,
+                            "extracted_facts": e.extracted_facts,
+                        }
+                        for e in result.working_memory
+                    ],
+                }
+            else:
+                # Plan requires approval — return plan details for user review
+                return {
+                    "plan_id": plan.plan_id,
+                    "status": "pending_approval",
+                    "risk_level": plan.risk_level,
+                    "reasoning": plan.reasoning,
+                    "steps": [
+                        {
+                            "step_number": s.step_number,
+                            "skill_path": s.skill_path,
+                            "depends_on": s.depends_on,
+                        }
+                        for s in plan.steps
+                    ],
+                    "skill_summaries": (
+                        f"I've prepared a {plan.risk_level}-risk plan with "
+                        f"{len(plan.steps)} steps that needs your approval."
+                    ),
+                }
+
+        except Exception as e:
+            logger.warning("Skill routing failed: %s", e)
+            return None
 
     async def _ensure_conversation_record(
         self,
@@ -330,6 +632,47 @@ class ChatService:
             },
         )
 
+        # Skill-aware routing: check if message matches a skill capability
+        skill_result: dict[str, Any] | None = None
+        skill_ms = 0.0
+
+        skill_start = time.perf_counter()
+        try:
+            # First check for plan extension (follow-on to prior skill results)
+            extend_plan_id = await self._detect_plan_extension(user_id, conversation_id, message)
+
+            if extend_plan_id:
+                skill_result = await self._route_through_skill(
+                    user_id,
+                    conversation_id,
+                    message,
+                    extend_plan_id=extend_plan_id,
+                )
+            else:
+                # Check for new skill match
+                should_route, ranked_skills, best_confidence = await self._detect_skill_match(
+                    message
+                )
+                if should_route:
+                    skill_result = await self._route_through_skill(
+                        user_id,
+                        conversation_id,
+                        message,
+                    )
+        except Exception as e:
+            logger.warning("Skill detection/routing error: %s", e)
+        skill_ms = (time.perf_counter() - skill_start) * 1000
+
+        # If skill execution produced results, inject them into the LLM context
+        if skill_result and skill_result.get("skill_summaries"):
+            skill_context = (
+                "\n\n## Skill Execution Results\n"
+                "ARIA executed the following skills to gather real-time data "
+                "for this request. Incorporate these results into your response:\n\n"
+                f"{skill_result['skill_summaries']}"
+            )
+            system_prompt = system_prompt + skill_context
+
         # Generate response from LLM with timing
         llm_start = time.perf_counter()
         response_text = await self._llm_client.generate_response(
@@ -338,8 +681,12 @@ class ChatService:
         )
         llm_ms = (time.perf_counter() - llm_start) * 1000
 
-        # Add assistant response to working memory
-        working_memory.add_message("assistant", response_text)
+        # Add assistant response to working memory with skill metadata
+        assistant_metadata: dict[str, Any] = {}
+        if skill_result:
+            assistant_metadata["skill_plan_id"] = skill_result.get("plan_id")
+            assistant_metadata["skill_status"] = skill_result.get("status")
+        working_memory.add_message("assistant", response_text, metadata=assistant_metadata)
 
         # Build citations from used memories
         citations = self._build_citations(memories)
@@ -361,13 +708,14 @@ class ChatService:
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
-        return {
+        result: dict[str, Any] = {
             "message": response_text,
             "citations": citations,
             "conversation_id": conversation_id,
             "timing": {
                 "memory_query_ms": round(memory_ms, 2),
                 "proactive_query_ms": round(proactive_ms, 2),
+                "skill_detection_ms": round(skill_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
             },
@@ -378,6 +726,17 @@ class ChatService:
             },
             "proactive_insights": [insight.to_dict() for insight in proactive_insights],
         }
+
+        # Include skill execution data in response if present
+        if skill_result:
+            result["skill_execution"] = {
+                "plan_id": skill_result.get("plan_id"),
+                "status": skill_result.get("status"),
+                "steps_completed": skill_result.get("steps_completed", 0),
+                "steps_failed": skill_result.get("steps_failed", 0),
+            }
+
+        return result
 
     async def _query_relevant_memories(
         self,

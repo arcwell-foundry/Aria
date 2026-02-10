@@ -85,6 +85,7 @@ class ExecutionPlan:
     approval_required: bool
     plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     reasoning: str = ""
+    parent_plan_id: str | None = None
 
 
 @dataclass
@@ -244,7 +245,9 @@ class SkillOrchestrator:
         skill_info_lines: list[str] = []
         for skill in matching_skills:
             summary = summaries.get(skill.id, skill.skill_name)
-            permissions = ", ".join(skill.declared_permissions) if skill.declared_permissions else "none"
+            permissions = (
+                ", ".join(skill.declared_permissions) if skill.declared_permissions else "none"
+            )
             skill_info_lines.append(
                 f"- id={skill.id} path={skill.skill_path} "
                 f"trust={skill.trust_level.value} "
@@ -314,9 +317,7 @@ class SkillOrchestrator:
             raise ValueError(f"Failed to parse LLM response as JSON: {e}") from e
 
         if not isinstance(plan_data, dict) or "steps" not in plan_data:
-            raise ValueError(
-                "Failed to parse LLM plan: response missing required 'steps' field"
-            )
+            raise ValueError("Failed to parse LLM plan: response missing required 'steps' field")
 
         reasoning = plan_data.get("reasoning", "")
 
@@ -342,9 +343,7 @@ class SkillOrchestrator:
                 for s in plan_data["steps"]
             ]
         except (KeyError, TypeError) as e:
-            raise ValueError(
-                f"Failed to parse LLM plan: invalid step structure: {e}"
-            ) from e
+            raise ValueError(f"Failed to parse LLM plan: invalid step structure: {e}") from e
 
         # Estimate execution time from skill definitions
         estimated_ms = plan_data.get("estimated_duration_ms", 0)
@@ -378,6 +377,131 @@ class SkillOrchestrator:
         )
 
         return plan
+
+    # -------------------------------------------------------------------------
+    # extend_plan: continue from a completed plan
+    # -------------------------------------------------------------------------
+
+    async def extend_plan(
+        self,
+        completed_plan_id: str,
+        new_request: str,
+        user_id: str,
+    ) -> ExecutionPlan:
+        """Create a new plan that extends a completed plan.
+
+        Loads working memory from the completed plan and passes it as
+        starting context to analyze_task(), so the new plan inherits all
+        prior results. The returned plan is linked via parent_plan_id.
+
+        Args:
+            completed_plan_id: UUID of the completed plan to extend.
+            new_request: The user's follow-on request.
+            user_id: ID of the user requesting the extension.
+
+        Returns:
+            A new ExecutionPlan linked to the original via parent_plan_id.
+
+        Raises:
+            ValueError: If the plan is not found or not completed.
+        """
+        db = self._get_db()
+
+        # Load the completed plan
+        try:
+            plan_response = (
+                db.table("skill_execution_plans")
+                .select("*")
+                .eq("id", completed_plan_id)
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+        except Exception as e:
+            raise ValueError(f"Plan not found: {completed_plan_id}") from e
+
+        if not plan_response.data:
+            raise ValueError(f"Plan not found: {completed_plan_id}")
+
+        plan_row = plan_response.data
+        if plan_row.get("status") not in ("completed", "failed"):
+            raise ValueError(
+                f"Can only extend completed/failed plans, "
+                f"but plan {completed_plan_id} has status '{plan_row.get('status')}'"
+            )
+
+        # Load working memory entries from the completed plan
+        try:
+            wm_response = (
+                db.table("skill_working_memory")
+                .select("*")
+                .eq("plan_id", completed_plan_id)
+                .order("step_number")
+                .execute()
+            )
+            wm_rows = wm_response.data or []
+        except Exception as e:
+            logger.warning("Failed to load working memory for plan %s: %s", completed_plan_id, e)
+            wm_rows = []
+
+        # Build context summary from prior working memory
+        prior_context_parts: list[str] = []
+        prior_context_parts.append(f"Previous task: {plan_row.get('task_description', 'unknown')}")
+        prior_context_parts.append(f"Previous plan status: {plan_row.get('status', 'unknown')}")
+        for row in wm_rows:
+            step_num = row.get("step_number", "?")
+            skill_id = row.get("skill_id", "?")
+            status = row.get("status", "?")
+            summary = row.get("output_summary", "")
+            facts = row.get("extracted_facts", [])
+            hints = row.get("next_step_hints", [])
+            entry_str = f"Step {step_num} ({skill_id}) [{status}]: {summary}"
+            if facts:
+                facts_data = json.loads(facts) if isinstance(facts, str) else facts
+                if isinstance(facts_data, dict):
+                    facts_str = ", ".join(f"{k}={v}" for k, v in facts_data.items())
+                    entry_str += f"\n  Facts: {facts_str}"
+            if hints:
+                hints_data = json.loads(hints) if isinstance(hints, str) else hints
+                if isinstance(hints_data, list) and hints_data:
+                    entry_str += f"\n  Hints: {'; '.join(str(h) for h in hints_data)}"
+            prior_context_parts.append(entry_str)
+
+        prior_context = "\n".join(prior_context_parts)
+
+        # Build extended task description with prior context
+        extended_task = {
+            "description": (
+                f"Follow-on request: {new_request}\n\n"
+                f"Context from prior plan ({completed_plan_id}):\n{prior_context}"
+            ),
+        }
+
+        # Use analyze_task to create the new plan
+        new_plan = await self.analyze_task(extended_task, user_id)
+        new_plan.parent_plan_id = completed_plan_id
+
+        # Update persisted plan with parent link
+        try:
+            db.table("skill_execution_plans").update({"parent_plan_id": completed_plan_id}).eq(
+                "id", new_plan.plan_id
+            ).execute()
+        except Exception as e:
+            logger.warning("Failed to set parent_plan_id on plan %s: %s", new_plan.plan_id, e)
+
+        logger.info(
+            "Extended plan %s from parent %s",
+            new_plan.plan_id,
+            completed_plan_id,
+            extra={
+                "new_plan_id": new_plan.plan_id,
+                "parent_plan_id": completed_plan_id,
+                "user_id": user_id,
+                "step_count": len(new_plan.steps),
+            },
+        )
+
+        return new_plan
 
     # -------------------------------------------------------------------------
     # execute_plan: with DB persistence
@@ -427,9 +551,7 @@ class SkillOrchestrator:
         plan_status = row.get("status", "draft")
 
         if plan_status in ("completed", "failed", "cancelled"):
-            raise ValueError(
-                f"Plan {plan_id} has already been executed (status={plan_status})"
-            )
+            raise ValueError(f"Plan {plan_id} has already been executed (status={plan_status})")
 
         # Reconstruct ExecutionPlan from stored DAG
         plan_dag = row.get("plan_dag", {})
@@ -664,15 +786,12 @@ class SkillOrchestrator:
             ):
                 score += 50.0
             elif any(
-                any(keyword in s.lower() for keyword in skill_path_parts)
-                for s in agent_skills
+                any(keyword in s.lower() for keyword in skill_path_parts) for s in agent_skills
             ):
                 score += 25.0
 
             # Factor 2: Historical success rate (0-30 points)
-            trust = await self._autonomy.get_trust_history(
-                agent_id, step.skill_id
-            )
+            trust = await self._autonomy.get_trust_history(agent_id, step.skill_id)
             if trust is not None:
                 total = trust.successful_executions + trust.failed_executions
                 if total > 0:
@@ -732,11 +851,7 @@ class SkillOrchestrator:
         # Load plan
         try:
             plan_response = (
-                db.table("skill_execution_plans")
-                .select("*")
-                .eq("id", plan_id)
-                .single()
-                .execute()
+                db.table("skill_execution_plans").select("*").eq("id", plan_id).single().execute()
             )
         except Exception as e:
             logger.error("Failed to load plan for outcome recording: %s", e)
@@ -777,9 +892,7 @@ class SkillOrchestrator:
         # 2. Update custom_skills.performance_metrics if custom skill was used
         skill_ids_used = [e.get("skill_id", "") for e in wm_entries]
         if skill_ids_used:
-            await self._update_custom_skill_metrics(
-                db, skill_ids_used, wm_entries, user_feedback
-            )
+            await self._update_custom_skill_metrics(db, skill_ids_used, wm_entries, user_feedback)
 
         # 3. Store as episode in conversation_episodes
         await self._store_execution_episode(
@@ -788,9 +901,7 @@ class SkillOrchestrator:
 
         # 4. Feed into procedural_memories if successful pattern
         if plan_status == "completed":
-            await self._store_procedural_memory(
-                db, user_id, plan_row, plan_dag, wm_entries
-            )
+            await self._store_procedural_memory(db, user_id, plan_row, plan_dag, wm_entries)
 
         logger.info(
             "Recorded outcome for plan %s",
@@ -882,9 +993,7 @@ class SkillOrchestrator:
 
         # Validate required structure
         if not isinstance(plan_data, dict) or "steps" not in plan_data:
-            raise ValueError(
-                "Failed to parse LLM plan: response missing required 'steps' field"
-            )
+            raise ValueError("Failed to parse LLM plan: response missing required 'steps' field")
 
         # Build ExecutionPlan from parsed data
         try:
@@ -900,9 +1009,7 @@ class SkillOrchestrator:
                 for s in plan_data["steps"]
             ]
         except (KeyError, TypeError) as e:
-            raise ValueError(
-                f"Failed to parse LLM plan: invalid step structure: {e}"
-            ) from e
+            raise ValueError(f"Failed to parse LLM plan: invalid step structure: {e}") from e
 
         return ExecutionPlan(
             task_description=task,
@@ -1168,7 +1275,7 @@ class SkillOrchestrator:
 
         status = "pending_approval" if plan.approval_required else "approved"
 
-        record = {
+        record: dict[str, Any] = {
             "id": plan.plan_id,
             "user_id": user_id,
             "task_description": plan.task_description,
@@ -1178,6 +1285,8 @@ class SkillOrchestrator:
             "reasoning": plan.reasoning,
             "estimated_seconds": plan.estimated_duration_ms // 1000,
         }
+        if plan.parent_plan_id:
+            record["parent_plan_id"] = plan.parent_plan_id
 
         try:
             db.table("skill_execution_plans").upsert(record).execute()
@@ -1383,11 +1492,7 @@ class SkillOrchestrator:
                 old_execs = metrics.get("executions", 0)
                 new_execs = old_execs + total_new
                 old_rate = metrics.get("success_rate", 0)
-                new_rate = (
-                    (old_rate * old_execs + successes) / new_execs
-                    if new_execs > 0
-                    else 0
-                )
+                new_rate = (old_rate * old_execs + successes) / new_execs if new_execs > 0 else 0
 
                 # Update satisfaction if feedback provided
                 avg_sat = metrics.get("avg_satisfaction", 0)
@@ -1431,12 +1536,13 @@ class SkillOrchestrator:
             task_desc = plan_row.get("task_description", "")
             status = plan_row.get("status", "unknown")
             skill_ids = [e.get("skill_id", "") for e in wm_entries]
-            step_summaries = [e.get("output_summary", "") for e in wm_entries if e.get("output_summary")]
+            step_summaries = [
+                e.get("output_summary", "") for e in wm_entries if e.get("output_summary")
+            ]
 
             summary = (
                 f"Skill execution plan '{task_desc[:100]}' {status}. "
-                f"Steps: {len(wm_entries)}. "
-                + (" | ".join(step_summaries[:3]))
+                f"Steps: {len(wm_entries)}. " + (" | ".join(step_summaries[:3]))
             )
 
             outcomes: list[dict[str, Any]] = [
@@ -1449,10 +1555,12 @@ class SkillOrchestrator:
             ]
 
             if user_feedback:
-                outcomes.append({
-                    "type": "user_feedback",
-                    "feedback": user_feedback,
-                })
+                outcomes.append(
+                    {
+                        "type": "user_feedback",
+                        "feedback": user_feedback,
+                    }
+                )
 
             now = datetime.now(UTC)
             record = {
