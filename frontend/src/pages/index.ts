@@ -11,6 +11,7 @@ export { ChangelogPage } from "./ChangelogPage";
 export { DashboardPage } from "./Dashboard";
 export { DeepSyncPage } from "./DeepSyncPage";
 export { EmailDraftsPage } from "./EmailDrafts";
+export { ExecutionReplayPage } from "./ExecutionReplayPage";
 export { GoalsPage } from "./Goals";
 export { HelpPage } from "./HelpPage";
 export { IntegrationsCallbackPage } from "./IntegrationsCallback";

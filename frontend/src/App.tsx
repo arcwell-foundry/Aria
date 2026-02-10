@@ -21,6 +21,7 @@ import {
   ChangelogPage,
   DeepSyncPage,
   EmailDraftsPage,
+  ExecutionReplayPage,
   HelpPage,
   IntegrationsCallbackPage,
   IntegrationsSettingsPage,
@@ -203,6 +204,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <SkillsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/skills/audit/:executionId"
+        element={
+          <ProtectedRoute>
+            <ExecutionReplayPage />
           </ProtectedRoute>
         }
       />
