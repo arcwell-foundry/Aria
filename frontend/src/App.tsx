@@ -38,6 +38,7 @@ import {
   DashboardPage,
   GoalsPage,
   SkillsPage,
+  SocialPage,
   SettingsAccountPage,
   SettingsPrivacyPage,
   SettingsProfilePage,
@@ -196,6 +197,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <EmailDraftsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/social"
+        element={
+          <ProtectedRoute>
+            <SocialPage />
           </ProtectedRoute>
         }
       />

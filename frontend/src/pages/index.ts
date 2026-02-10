@@ -26,6 +26,7 @@ export { OnboardingPage } from "./Onboarding";
 export { PreferencesSettingsPage } from "./PreferencesSettings";
 export { SignupPage } from "./Signup";
 export { SkillsPage } from "./Skills";
+export { SocialPage } from "./SocialPage";
 export { SettingsAccountPage } from "./SettingsAccountPage";
 export { SettingsPrivacyPage } from "./SettingsPrivacyPage";
 export { SettingsProfilePage } from "./SettingsProfilePage";
