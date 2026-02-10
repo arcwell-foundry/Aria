@@ -188,286 +188,299 @@ class FirstGoalService:
         self._goal_service = GoalService()
 
     async def suggest_goals(self, user_id: str) -> list[GoalSuggestion]:
-        """Generate personalized goal suggestions from onboarding data.
+        """Generate personalized goal suggestions using enrichment data and LLM.
 
-        Analyzes:
-        - Company enrichment classification
-        - User role and profile
-        - Connected integrations (calendar events, CRM pipeline)
-        - Recent activities
+        Gathers full user context — profile, company classification, enrichment
+        facts from memory_semantic, connected integrations, and upcoming
+        calendar events — then uses the LLM to produce highly specific,
+        actionable goal suggestions grounded in real data.
 
         Args:
             user_id: The user's UUID.
 
         Returns:
-            List of personalized goal suggestions.
+            List of personalized goal suggestions (max 5).
         """
-        suggestions: list[GoalSuggestion] = []
         try:
-            # Get user profile and company data
-            profile_result = (
-                self._db.table("user_profiles")
-                .select("*, companies(*)")
-                .eq("id", user_id)
-                .maybe_single()
-                .execute()
-            )
+            # Gather all context in parallel-safe order
+            context = await self._gather_suggestion_context(user_id)
 
-            profile = profile_result.data if profile_result and profile_result.data else None
-            company = profile.get("companies") if profile else None
+            # Use LLM to generate personalized suggestions from context
+            suggestions = await self._generate_llm_suggestions(context)
 
-            # Get onboarding state for enrichment data
-            state_result = (
-                self._db.table("onboarding_state")
-                .select("step_data, readiness_scores, metadata")
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-
-            step_data = (
-                state_result.data.get("step_data") if state_result and state_result.data else {}
-            )
-            metadata = (
-                state_result.data.get("metadata") if state_result and state_result.data else {}
-            )
-
-            # Check for calendar integration and upcoming meetings
-            calendar_suggestions = await self._suggest_from_calendar(user_id, step_data)
-            suggestions.extend(calendar_suggestions)
-
-            # Check for CRM integration and pipeline suggestions
-            crm_suggestions = await self._suggest_from_crm(user_id, step_data)
-            suggestions.extend(crm_suggestions)
-
-            # Get suggestions based on company classification
-            if company:
-                company_suggestions = await self._suggest_from_company(
-                    user_id, company, step_data, metadata
+            if suggestions:
+                logger.info(
+                    "Generated LLM goal suggestions",
+                    extra={"user_id": user_id, "suggestion_count": len(suggestions)},
                 )
-                suggestions.extend(company_suggestions)
+                return suggestions[:5]
 
-            # Get suggestions based on user role
-            if profile and profile.get("role"):
-                role_suggestions = await self._suggest_from_role(
-                    user_id, profile["role"], step_data
-                )
-                suggestions.extend(role_suggestions)
-
-            # If no personalized suggestions, add defaults
-            if not suggestions:
-                suggestions.extend(self._get_default_suggestions(user_id))
-
-            # Limit to top 5 suggestions
-            suggestions = suggestions[:5]
-
-            logger.info(
-                "Generated goal suggestions",
-                extra={"user_id": user_id, "suggestion_count": len(suggestions)},
-            )
-
-            return suggestions
+            # LLM failed — fall back to defaults
+            logger.warning("LLM suggestions empty, using defaults", extra={"user_id": user_id})
+            return self._get_default_suggestions(user_id)
 
         except Exception as e:
             logger.exception(f"Failed to generate goal suggestions for {user_id}: {e}")
             return self._get_default_suggestions(user_id)
 
-    async def _suggest_from_calendar(
-        self, user_id: str, _step_data: dict[str, Any]
-    ) -> list[GoalSuggestion]:
-        """Generate suggestions from connected calendar data.
+    async def _gather_suggestion_context(self, user_id: str) -> dict[str, Any]:
+        """Gather all available context for goal suggestion generation.
+
+        Fetches user profile, company data, enrichment facts, connected
+        integrations, and upcoming calendar events.
 
         Args:
             user_id: The user's UUID.
-            _step_data: Onboarding step data (unused, reserved for future).
 
         Returns:
-            List of calendar-based goal suggestions.
+            Context dict with all available data for prompt construction.
         """
-        suggestions: list[GoalSuggestion] = []
+        context: dict[str, Any] = {
+            "user_id": user_id,
+            "full_name": None,
+            "title": None,
+            "role": None,
+            "department": None,
+            "company_name": None,
+            "company_type": None,
+            "therapeutic_areas": [],
+            "key_products": [],
+            "enrichment_facts": [],
+            "connected_integrations": [],
+            "upcoming_meetings": [],
+            "has_crm": False,
+            "has_calendar": False,
+        }
 
+        # 1. User profile + company
         try:
-            # Check integration status for calendars
-            integration_result = (
-                self._db.table("user_integrations")
-                .select("*")
+            profile_result = (
+                self._db.table("user_profiles")
+                .select("full_name, title, role, department, companies(*)")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile_result and profile_result.data:
+                profile = profile_result.data
+                context["full_name"] = profile.get("full_name")
+                context["title"] = profile.get("title")
+                context["role"] = profile.get("role")
+                context["department"] = profile.get("department")
+
+                company = profile.get("companies")
+                if company:
+                    context["company_name"] = company.get("name")
+                    context["key_products"] = company.get("key_products") or []
+                    settings = company.get("settings") or {}
+                    classification = settings.get("classification") or {}
+                    context["company_type"] = classification.get("company_type")
+                    context["therapeutic_areas"] = classification.get("therapeutic_areas", [])
+        except Exception as e:
+            logger.warning(f"Failed to fetch profile for suggestions: {e}")
+
+        # 2. Enrichment facts from memory_semantic (top 15 by confidence)
+        try:
+            facts_result = (
+                self._db.table("memory_semantic")
+                .select("fact, confidence, source, metadata")
                 .eq("user_id", user_id)
-                .eq("provider", "google")  # or outlook
+                .gte("confidence", 0.6)
+                .order("confidence", desc=True)
+                .limit(15)
+                .execute()
+            )
+            if facts_result and facts_result.data:
+                context["enrichment_facts"] = facts_result.data
+        except Exception as e:
+            logger.warning(f"Failed to fetch enrichment facts: {e}")
+
+        # 3. Connected integrations
+        try:
+            integrations_result = (
+                self._db.table("user_integrations")
+                .select("provider, status")
+                .eq("user_id", user_id)
                 .eq("status", "active")
                 .execute()
             )
+            if integrations_result and integrations_result.data:
+                providers = [i["provider"] for i in integrations_result.data]
+                context["connected_integrations"] = providers
+                context["has_crm"] = any(p in providers for p in ["salesforce", "hubspot"])
+                context["has_calendar"] = any(p in providers for p in ["google", "outlook"])
+        except Exception as e:
+            logger.warning(f"Failed to fetch integrations: {e}")
 
-            has_calendar = bool(integration_result.data) if integration_result else False
+        # 4. Upcoming calendar events (next 7 days)
+        if context["has_calendar"]:
+            try:
+                now = datetime.now(UTC)
+                week_ahead = now + timedelta(days=7)
+                events_result = (
+                    self._db.table("calendar_events")
+                    .select("title, start_time, attendees, external_company")
+                    .eq("user_id", user_id)
+                    .gte("start_time", now.isoformat())
+                    .lte("start_time", week_ahead.isoformat())
+                    .order("start_time")
+                    .limit(10)
+                    .execute()
+                )
+                if events_result and events_result.data:
+                    context["upcoming_meetings"] = events_result.data
+            except Exception as e:
+                # Table may not exist yet — not critical
+                logger.debug(f"Calendar events query failed (may not exist): {e}")
 
-            if not has_calendar:
+        return context
+
+    async def _generate_llm_suggestions(self, context: dict[str, Any]) -> list[GoalSuggestion]:
+        """Use the LLM to generate personalized goal suggestions.
+
+        Builds a rich prompt from all gathered context and asks the LLM
+        to produce 2-3 specific, actionable suggestions.
+
+        Args:
+            context: Gathered user/company/enrichment context.
+
+        Returns:
+            List of GoalSuggestion objects from LLM output.
+        """
+        prompt = self._build_suggestion_prompt(context)
+
+        try:
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.4,
+            )
+
+            result = json.loads(response)
+            if not isinstance(result, list) or len(result) == 0:
+                logger.warning("LLM returned non-list or empty suggestions")
                 return []
 
-            # Check for upcoming meetings in next 7 days
-            # For now, suggest meeting prep as a default
-            suggestions.append(
-                GoalSuggestion(
-                    title="Prepare for upcoming meetings",
-                    description="Research and create briefing documents for your scheduled meetings",
-                    category=GoalCategory.MEETING_PREP,
-                    urgency=GoalUrgency.THIS_WEEK,
-                    reason="I see you have calendar connected. I can prepare briefings for your "
-                    "upcoming meetings so you walk in prepared.",
-                    goal_type=GoalType.ANALYSIS,
-                )
-            )
+            suggestions: list[GoalSuggestion] = []
+            for item in result[:5]:
+                if not isinstance(item, dict) or "title" not in item:
+                    continue
+                try:
+                    suggestions.append(
+                        GoalSuggestion(
+                            title=item["title"],
+                            description=item.get("description", ""),
+                            category=GoalCategory(item.get("category", "custom")),
+                            urgency=GoalUrgency(item.get("urgency", "this_week")),
+                            reason=item.get("reason", ""),
+                            goal_type=GoalType(item.get("goal_type", "custom")),
+                        )
+                    )
+                except (ValueError, KeyError) as e:
+                    logger.warning(f"Skipping malformed suggestion: {e}")
+                    continue
 
-        except Exception as e:
-            logger.warning(f"Failed to suggest from calendar: {e}")
+            return suggestions
 
-        return suggestions
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"LLM suggestion generation failed: {e}")
+            return []
 
-    async def _suggest_from_crm(
-        self, user_id: str, _step_data: dict[str, Any]
-    ) -> list[GoalSuggestion]:
-        """Generate suggestions from connected CRM data.
+    def _build_suggestion_prompt(self, context: dict[str, Any]) -> str:
+        """Build the LLM prompt for goal suggestion generation.
 
         Args:
-            user_id: The user's UUID.
-            _step_data: Onboarding step data (unused, reserved for future).
+            context: Gathered user/company/enrichment context.
 
         Returns:
-            List of CRM-based goal suggestions.
+            Formatted prompt string.
         """
-        suggestions: list[GoalSuggestion] = []
+        # User identity
+        full_name = context.get("full_name") or "the user"
+        title = context.get("title") or "team member"
+        company_name = context.get("company_name") or "their company"
+        company_type = context.get("company_type") or "life sciences company"
+        role = context.get("role") or "user"
+        department = context.get("department") or ""
+        therapeutic_areas = context.get("therapeutic_areas") or []
+        key_products = context.get("key_products") or []
 
-        try:
-            # Check integration status for CRM
-            integration_result = (
-                self._db.table("user_integrations")
-                .select("*")
-                .eq("user_id", user_id)
-                .in_("provider", ["salesforce", "hubspot"])
-                .eq("status", "active")
-                .execute()
-            )
-
-            has_crm = bool(integration_result.data) if integration_result else False
-
-            if not has_crm:
-                return []
-
-            # Suggest pipeline-focused goal
-            suggestions.append(
-                GoalSuggestion(
-                    title="Build and qualify pipeline",
-                    description="Identify new prospects and qualify existing opportunities in your CRM",
-                    category=GoalCategory.PIPELINE,
-                    urgency=GoalUrgency.THIS_WEEK,
-                    reason="I see you have CRM connected. I can help identify high-potential prospects "
-                    "and qualify your existing pipeline.",
-                    goal_type=GoalType.LEAD_GEN,
+        # Build enrichment facts block
+        enrichment_facts = context.get("enrichment_facts") or []
+        facts_block = "No enrichment data available yet."
+        if enrichment_facts:
+            facts_lines = []
+            for f in enrichment_facts:
+                confidence = f.get("confidence", 0)
+                source = f.get("source", "unknown")
+                facts_lines.append(
+                    f"- {f['fact']} (confidence: {confidence:.0%}, source: {source})"
                 )
-            )
+            facts_block = "\n".join(facts_lines)
 
-        except Exception as e:
-            logger.warning(f"Failed to suggest from CRM: {e}")
+        # Connected integrations
+        integrations = context.get("connected_integrations") or []
+        integrations_block = ", ".join(integrations) if integrations else "none connected"
 
-        return suggestions
+        # Upcoming meetings
+        meetings = context.get("upcoming_meetings") or []
+        meetings_block = "None scheduled (or calendar not connected)."
+        if meetings:
+            meeting_lines = []
+            for m in meetings:
+                event_title = m.get("title", "Untitled meeting")
+                start = m.get("start_time", "")
+                ext_company = m.get("external_company")
+                line = f"- {event_title} on {start[:10] if start else 'TBD'}"
+                if ext_company:
+                    line += f" (with {ext_company})"
+                meeting_lines.append(line)
+            meetings_block = "\n".join(meeting_lines)
 
-    async def _suggest_from_company(
-        self,
-        _user_id: str,
-        company: dict[str, Any],
-        _step_data: dict[str, Any],
-        _metadata: dict[str, Any],
-    ) -> list[GoalSuggestion]:
-        """Generate suggestions based on company classification.
+        # Therapeutic areas and products
+        ta_block = ", ".join(therapeutic_areas) if therapeutic_areas else "not specified"
+        products_block = ", ".join(key_products) if key_products else "not specified"
 
-        Args:
-            _user_id: The user's UUID (unused, reserved for future).
-            company: Company data.
-            _step_data: Onboarding step data (unused, reserved for future).
-            _metadata: Onboarding metadata (unused, reserved for future).
+        # Category and goal_type enums for the LLM
+        categories = [c.value for c in GoalCategory]
+        goal_types = [g.value for g in GoalType]
 
-        Returns:
-            List of company-based goal suggestions.
-        """
-        suggestions: list[GoalSuggestion] = []
+        return f"""You are ARIA, an AI assistant for life sciences commercial teams.
 
-        try:
-            settings = company.get("settings", {})
-            classification = settings.get("classification", {})
-            company_type = classification.get("company_type", "Unknown")
+The user is {full_name}, {title} at {company_name}.
+{company_name} is a {company_type}.
+Therapeutic focus areas: {ta_block}
+Key products: {products_block}
+The user's role is: {role}
+{f"Department: {department}" if department else ""}
 
-            # CDMO/CRO focus on competitive positioning
-            if company_type in ["CDMO", "CRO"]:
-                suggestions.append(
-                    GoalSuggestion(
-                        title="Competitive positioning analysis",
-                        description="Analyze our competitive positioning in key therapeutic areas",
-                        category=GoalCategory.COMPETITIVE_INTEL,
-                        urgency=GoalUrgency.THIS_MONTH,
-                        reason=f"Given that you're a {company_type}, understanding competitive "
-                        "positioning is crucial for client conversations.",
-                        goal_type=GoalType.RESEARCH,
-                    )
-                )
+Here's what I know about their company from enrichment research:
+{facts_block}
 
-            # Biotech/Pharma focus on pipeline and territory
-            elif company_type in ["Biotech", "Large Pharma"]:
-                suggestions.append(
-                    GoalSuggestion(
-                        title="Territory planning and account prioritization",
-                        description="Analyze and prioritize target accounts in your territory",
-                        category=GoalCategory.TERRITORY,
-                        urgency=GoalUrgency.THIS_WEEK,
-                        reason=f"For a {company_type}, strategic territory planning drives pipeline "
-                        "quality and win rates.",
-                        goal_type=GoalType.ANALYSIS,
-                    )
-                )
+Connected integrations: {integrations_block}
 
-        except Exception as e:
-            logger.warning(f"Failed to suggest from company: {e}")
+Upcoming meetings (next 7 days):
+{meetings_block}
 
-        return suggestions
+Generate 2-3 highly specific, actionable goal suggestions as a JSON array.
+Each suggestion must be an object with these exact keys:
+  "title": concise goal title (reference specific companies, products, or data points),
+  "description": 1-2 sentence description of what ARIA will do,
+  "category": one of {json.dumps(categories)},
+  "urgency": one of {json.dumps([u.value for u in GoalUrgency])},
+  "reason": 1-2 sentence explanation of why THIS goal matters for THIS person (reference specific facts),
+  "goal_type": one of {json.dumps(goal_types)}
 
-    async def _suggest_from_role(
-        self, _user_id: str, role: str, _step_data: dict[str, Any]
-    ) -> list[GoalSuggestion]:
-        """Generate suggestions based on user role.
+Rules:
+- If there are upcoming meetings with external companies, the FIRST suggestion MUST be meeting prep for the soonest external meeting, titled "Prepare for your meeting with [company] on [date]".
+- Reference specific facts about the company, competitors, products, or industry — NOT generic advice.
+- Each suggestion should be immediately useful for someone in the user's role.
+- The "reason" must cite specific enrichment facts or context, not generic statements.
+- NEVER say "you're a [company type]" — the company is the [type], not the person.
+- If CRM is connected, include a pipeline-related suggestion.
+- If only email is connected (no CRM), suggest relationship or communication goals.
 
-        Args:
-            _user_id: The user's UUID (unused, reserved for future).
-            role: User's role.
-            _step_data: Onboarding step data (unused, reserved for future).
-
-        Returns:
-            List of role-based goal suggestions.
-        """
-        suggestions: list[GoalSuggestion] = []
-        role_lower = role.lower()
-
-        try:
-            # Get applicable templates for this role
-            applicable_templates: list[GoalTemplate] = []
-            for category_templates in self.TEMPLATES.values():
-                for template in category_templates:
-                    if any(role_lower in r.lower() for r in template.applicable_roles):
-                        applicable_templates.append(template)
-
-            # Convert templates to suggestions
-            for template in applicable_templates[:2]:  # Max 2 per role
-                suggestions.append(
-                    GoalSuggestion(
-                        title=template.title,
-                        description=template.description,
-                        category=template.category,
-                        urgency=GoalUrgency.THIS_WEEK,
-                        reason=f"As a {role}, this is a high-impact goal I can help you achieve.",
-                        goal_type=template.goal_type,
-                    )
-                )
-
-        except Exception as e:
-            logger.warning(f"Failed to suggest from role: {e}")
-
-        return suggestions
+Respond ONLY with the JSON array, no markdown or commentary."""
 
     def _get_default_suggestions(self, _user_id: str) -> list[GoalSuggestion]:
         """Get default suggestions when no personalized data available.
@@ -525,9 +538,7 @@ class FirstGoalService:
 
         for category, templates in self.TEMPLATES.items():
             applicable = [
-                t
-                for t in templates
-                if any(role_lower in r.lower() for r in t.applicable_roles)
+                t for t in templates if any(role_lower in r.lower() for r in t.applicable_roles)
             ]
             if applicable:
                 filtered[category] = applicable
@@ -786,9 +797,7 @@ Respond ONLY with the JSON object."""
                     }
                 ).execute()
 
-            logger.info(
-                f"Created {len(milestones)} milestones for goal {goal_id}"
-            )
+            logger.info(f"Created {len(milestones)} milestones for goal {goal_id}")
 
             # --- 3. Prospective memory check-in (preserved behaviour) -----
             tomorrow = now + timedelta(days=1)
@@ -812,9 +821,7 @@ Respond ONLY with the JSON object."""
         except Exception as e:
             logger.warning(f"Failed to create goal milestones: {e}")
 
-    async def _decompose_goal(
-        self, title: str, description: str | None
-    ) -> list[dict[str, Any]]:
+    async def _decompose_goal(self, title: str, description: str | None) -> list[dict[str, Any]]:
         """Use the LLM to break a goal into 3-5 actionable milestones.
 
         Each milestone contains:
@@ -876,9 +883,7 @@ Respond ONLY with the JSON object."""
             ):
                 return result[:5]  # cap at 5
 
-            logger.warning(
-                "LLM returned unexpected milestone structure; using fallbacks"
-            )
+            logger.warning("LLM returned unexpected milestone structure; using fallbacks")
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Goal decomposition LLM call failed: {e}")
 
@@ -907,9 +912,7 @@ Respond ONLY with the JSON object."""
             },
         ]
 
-    async def _record_goal_event(
-        self, user_id: str, goal_id: str, title: str
-    ) -> None:
+    async def _record_goal_event(self, user_id: str, goal_id: str, title: str) -> None:
         """Record goal creation in episodic memory.
 
         Args:
