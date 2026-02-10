@@ -9,13 +9,23 @@ Uses httpx for web requests as an initial implementation.
 LinkedIn API OAuth integration can be added later for richer data.
 """
 
+import json
 import logging
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
+from src.db.supabase import SupabaseClient
+from src.models.social import (
+    PostDraft,
+    PostVariation,
+    PostVariationType,
+    TriggerType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +218,6 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 max_tokens=1000,
             )
 
-            import json
-
             # Strip markdown fences if present
             text = raw_response.strip()
             if text.startswith("```"):
@@ -316,8 +324,6 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 max_tokens=800,
             )
 
-            import json
-
             text = raw_response.strip()
             if text.startswith("```"):
                 text = text[text.index("\n") + 1 :]
@@ -409,8 +415,6 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 max_tokens=600,
             )
 
-            import json
-
             text = raw_response.strip()
             if text.startswith("```"):
                 text = text[text.index("\n") + 1 :]
@@ -445,6 +449,210 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 success=False,
                 error=f"Connection request drafting failed: {e}",
             )
+
+    async def draft_post(
+        self,
+        user_id: str,
+        trigger_context: dict[str, Any],
+    ) -> list[PostDraft]:
+        """Draft LinkedIn post variations based on a trigger context.
+
+        Generates three post variations (insight, educational, engagement)
+        using the user's Digital Twin voice and therapeutic area context.
+
+        Args:
+            user_id: Authenticated user UUID.
+            trigger_context: Dict with 'trigger_type', 'trigger_source',
+                and 'content' describing what prompted the post.
+
+        Returns:
+            List of PostDraft objects stored in the action queue.
+        """
+        logger.info(
+            "Drafting LinkedIn post",
+            extra={
+                "user_id": user_id,
+                "trigger_type": trigger_context.get("trigger_type", ""),
+            },
+        )
+
+        db = SupabaseClient.get_client()
+
+        # Load Digital Twin voice profile for style matching
+        voice_profile = ""
+        try:
+            twin_resp = (
+                db.table("digital_twin_profiles")
+                .select("*")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if twin_resp.data:
+                profile = twin_resp.data[0]
+                voice_profile = (
+                    f"Tone: {profile.get('tone', 'professional')}\n"
+                    f"Style: {profile.get('writing_style', '')}\n"
+                    f"Vocabulary: {profile.get('vocabulary_patterns', '')}\n"
+                )
+        except Exception as e:
+            logger.debug("Could not load Digital Twin voice profile: %s", e)
+
+        # Load user preferences for therapeutic area context
+        therapeutic_context = ""
+        try:
+            pref_resp = (
+                db.table("user_preferences").select("*").eq("user_id", user_id).limit(1).execute()
+            )
+            if pref_resp.data:
+                prefs = pref_resp.data[0]
+                metadata = prefs.get("metadata", {}) or {}
+                ta = metadata.get("therapeutic_area", "")
+                if ta:
+                    therapeutic_context = f"Therapeutic area focus: {ta}\n"
+        except Exception as e:
+            logger.debug("Could not load user preferences: %s", e)
+
+        trigger_type_str = trigger_context.get("trigger_type", "signal")
+        trigger_source = trigger_context.get("trigger_source", "")
+        content = trigger_context.get("content", "")
+
+        prompt = (
+            "You are a LinkedIn content strategist for a life sciences sales professional.\n"
+            "Generate exactly 3 post variations as a JSON array.\n\n"
+            f"Trigger: {trigger_type_str} — {trigger_source}\n"
+            f"Content/Context: {content}\n"
+            f"{therapeutic_context}"
+            f"{voice_profile}\n"
+            "Return ONLY valid JSON in this exact format:\n"
+            "[\n"
+            "  {\n"
+            '    "variation_type": "insight",\n'
+            '    "text": "Post text here...",\n'
+            '    "hashtags": ["#hashtag1", "#hashtag2"],\n'
+            '    "voice_match_confidence": 0.85\n'
+            "  },\n"
+            "  {\n"
+            '    "variation_type": "educational",\n'
+            '    "text": "Post text here...",\n'
+            '    "hashtags": ["#hashtag1", "#hashtag2"],\n'
+            '    "voice_match_confidence": 0.85\n'
+            "  },\n"
+            "  {\n"
+            '    "variation_type": "engagement",\n'
+            '    "text": "Post text here...",\n'
+            '    "hashtags": ["#hashtag1", "#hashtag2"],\n'
+            '    "voice_match_confidence": 0.85\n'
+            "  }\n"
+            "]\n\n"
+            "Each variation should be 100-300 words, authentic, and professional. "
+            "voice_match_confidence should be 0.0-1.0 reflecting how well the text "
+            "matches the user's voice profile."
+        )
+
+        llm = LLMClient()
+        try:
+            raw_response = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a LinkedIn content strategist for life sciences professionals. "
+                    "Output ONLY valid JSON — no markdown fences, no commentary."
+                ),
+                temperature=0.7,
+                max_tokens=2000,
+            )
+
+            # Strip markdown fences if present
+            text = raw_response.strip()
+            if text.startswith("```"):
+                text = text[text.index("\n") + 1 :]
+            if text.endswith("```"):
+                text = text[:-3].rstrip()
+
+            variations_raw: list[dict[str, Any]] = json.loads(text)
+        except Exception as e:
+            logger.warning("Failed to generate LinkedIn post drafts: %s", e)
+            return []
+
+        # Parse into PostVariation objects
+        variations: list[PostVariation] = []
+        for v in variations_raw:
+            try:
+                variation = PostVariation(
+                    variation_type=PostVariationType(v.get("variation_type", "insight")),
+                    text=v.get("text", ""),
+                    hashtags=v.get("hashtags", []),
+                    voice_match_confidence=float(v.get("voice_match_confidence", 0.0)),
+                )
+                variations.append(variation)
+            except Exception as e:
+                logger.debug("Skipping invalid variation: %s", e)
+
+        if not variations:
+            logger.warning("No valid variations produced for LinkedIn post draft")
+            return []
+
+        # Store as an action in aria_actions
+        action_id = str(uuid.uuid4())
+        now = datetime.now(UTC).isoformat()
+
+        try:
+            trigger_type_enum = TriggerType(trigger_type_str)
+        except ValueError:
+            trigger_type_enum = TriggerType.SIGNAL
+
+        action_payload = {
+            "trigger_type": trigger_type_enum.value,
+            "trigger_source": trigger_source,
+            "variations": [v.model_dump() for v in variations],
+            "suggested_time": trigger_context.get("suggested_time"),
+            "suggested_time_reasoning": trigger_context.get("suggested_time_reasoning", ""),
+        }
+
+        try:
+            db.table("aria_actions").insert(
+                {
+                    "id": action_id,
+                    "user_id": user_id,
+                    "action_type": "linkedin_post",
+                    "status": "pending",
+                    "title": f"LinkedIn post draft: {trigger_source[:80]}",
+                    "description": f"Generated {len(variations)} post variations",
+                    "payload": json.dumps(action_payload),
+                    "metadata": json.dumps({"trigger_type": trigger_type_enum.value}),
+                    "created_at": now,
+                }
+            ).execute()
+        except Exception as e:
+            logger.warning("Failed to store LinkedIn post draft in actions: %s", e)
+
+        # Log activity
+        await self.log_activity(
+            activity_type="linkedin_post_draft",
+            title=f"Drafted LinkedIn post: {trigger_source[:60]}",
+            description=(
+                f"Generated {len(variations)} LinkedIn post variations "
+                f"from {trigger_type_enum.value} trigger."
+            ),
+            confidence=0.80,
+            metadata={
+                "action_id": action_id,
+                "trigger_type": trigger_type_enum.value,
+                "variation_count": len(variations),
+            },
+        )
+
+        draft = PostDraft(
+            action_id=action_id,
+            trigger_type=trigger_type_enum,
+            trigger_source=trigger_source,
+            variations=variations,
+            suggested_time=trigger_context.get("suggested_time"),
+            suggested_time_reasoning=trigger_context.get("suggested_time_reasoning", ""),
+            created_at=now,
+        )
+
+        return [draft]
 
     async def _fetch_page(self, url: str) -> str | None:
         """Fetch a web page and return its text content.
