@@ -11,3 +11,4 @@ export { SkillEditSlideOver } from "./SkillEditSlideOver";
 export { SkillPerformancePanel } from "./SkillPerformancePanel";
 export { SkillExecutionInline } from "./SkillExecutionInline";
 export type { SkillExecutionData } from "./SkillExecutionInline";
+export { WorkflowBuilder } from "./WorkflowBuilder";

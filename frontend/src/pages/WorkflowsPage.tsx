@@ -302,7 +302,7 @@ export function WorkflowsPage() {
   const [builderMode, setBuilderMode] = useState<
     "hidden" | "create" | "edit"
   >("hidden");
-  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(
+  const [editingWorkflow, setEditingWorkflow] = useState<WorkflowResponse | null>(
     null
   );
   const [deleteTarget, setDeleteTarget] = useState<WorkflowResponse | null>(
@@ -321,18 +321,31 @@ export function WorkflowsPage() {
 
   // Handlers
   function handleCreateNew() {
-    setEditingWorkflowId(null);
+    setEditingWorkflow(null);
     setBuilderMode("create");
   }
 
   function handleEdit(workflow: WorkflowResponse) {
-    setEditingWorkflowId(workflow.id);
+    setEditingWorkflow(workflow);
     setBuilderMode("edit");
   }
 
   function handleCloseBuilder() {
     setBuilderMode("hidden");
-    setEditingWorkflowId(null);
+    setEditingWorkflow(null);
+  }
+
+  function handleSaveWorkflow(data: CreateWorkflowData) {
+    if (builderMode === "edit" && editingWorkflow) {
+      updateWorkflow.mutate(
+        { workflowId: editingWorkflow.id, data },
+        { onSuccess: () => handleCloseBuilder() }
+      );
+    } else {
+      createWorkflow.mutate(data, {
+        onSuccess: () => handleCloseBuilder(),
+      });
+    }
   }
 
   function handleRun(workflow: WorkflowResponse) {
@@ -397,25 +410,13 @@ export function WorkflowsPage() {
 
           {/* ---- WorkflowBuilder overlay/section ---- */}
           {builderMode !== "hidden" && (
-            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-display text-white">
-                  {builderMode === "create"
-                    ? "New Workflow"
-                    : "Edit Workflow"}
-                </h2>
-                <button
-                  onClick={handleCloseBuilder}
-                  className="text-slate-400 hover:text-white transition-colors text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-              <WorkflowBuilder
-                workflowId={editingWorkflowId}
-                onClose={handleCloseBuilder}
-              />
-            </div>
+            <WorkflowBuilder
+              workflow={editingWorkflow ?? undefined}
+              prebuiltWorkflows={prebuiltWorkflows}
+              onSave={handleSaveWorkflow}
+              onCancel={handleCloseBuilder}
+              saving={createWorkflow.isPending || updateWorkflow.isPending}
+            />
           )}
 
           {/* ---- Workflow List ---- */}
