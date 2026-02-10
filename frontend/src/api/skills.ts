@@ -112,6 +112,36 @@ export interface AvailableSkillsFilters {
   limit?: number;
 }
 
+export interface SkillPerformance {
+  skill_id: string;
+  success_rate: number;
+  total_executions: number;
+  avg_execution_time_ms: number;
+  satisfaction: { positive: number; negative: number; ratio: number };
+  trust_level: TrustLevel;
+  recent_failures: number;
+}
+
+export interface CustomSkill {
+  id: string;
+  skill_name: string;
+  description: string | null;
+  skill_type: string;
+  definition: Record<string, unknown>;
+  trust_level: TrustLevel;
+  performance_metrics: Record<string, unknown>;
+  is_published: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateCustomSkillData {
+  skill_name?: string;
+  description?: string;
+  definition?: Record<string, unknown>;
+}
+
 // API functions
 
 export async function listAvailableSkills(
@@ -200,4 +230,40 @@ export async function rejectExecutionPlan(planId: string): Promise<ExecutionPlan
 export async function listPendingPlans(): Promise<ExecutionPlan[]> {
   const response = await apiClient.get<ExecutionPlan[]>("/skills/plans?status=pending_approval");
   return response.data;
+}
+
+export async function getSkillPerformance(
+  skillId: string
+): Promise<SkillPerformance> {
+  const response = await apiClient.get<SkillPerformance>(
+    `/skills/performance/${skillId}`
+  );
+  return response.data;
+}
+
+export async function submitSkillFeedback(
+  executionId: string,
+  feedback: "positive" | "negative"
+): Promise<void> {
+  await apiClient.post(`/skills/${executionId}/feedback`, { feedback });
+}
+
+export async function listCustomSkills(): Promise<CustomSkill[]> {
+  const response = await apiClient.get<CustomSkill[]>("/skills/custom");
+  return response.data;
+}
+
+export async function updateCustomSkill(
+  skillId: string,
+  data: UpdateCustomSkillData
+): Promise<CustomSkill> {
+  const response = await apiClient.put<CustomSkill>(
+    `/skills/custom/${skillId}`,
+    data
+  );
+  return response.data;
+}
+
+export async function deleteCustomSkill(skillId: string): Promise<void> {
+  await apiClient.delete(`/skills/custom/${skillId}`);
 }
