@@ -8,6 +8,7 @@ from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.agents.capabilities.calendar_intel import CalendarIntelligenceCapability
 from src.agents.capabilities.crm_sync import CRMDeepSyncCapability
 from src.agents.capabilities.email_intel import EmailIntelligenceCapability
+from src.agents.capabilities.messenger import TeamMessengerCapability
 from src.agents.capabilities.web_intel import WebIntelligenceCapability
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "CapabilityResult",
     "CRMDeepSyncCapability",
     "EmailIntelligenceCapability",
+    "TeamMessengerCapability",
     "WebIntelligenceCapability",
 ]
