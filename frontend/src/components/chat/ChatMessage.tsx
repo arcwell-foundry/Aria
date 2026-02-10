@@ -1,5 +1,7 @@
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { FeedbackWidget } from "@/components/FeedbackWidget";
+import { SkillExecutionInline } from "@/components/skills";
+import type { SkillExecutionData } from "@/components/skills";
 import type { ChatMessage as ChatMessageType } from "@/api/chat";
 
 interface ChatMessageProps {
@@ -125,6 +127,20 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
               <TypingIndicator />
             ) : null}
           </div>
+
+          {/* Skill execution inline (Enhancement 5) */}
+          {!isUser && message.skill_execution && (
+            <SkillExecutionInline
+              execution={{
+                type: message.skill_execution.type,
+                skillName: message.skill_execution.skill_name,
+                status: message.skill_execution.status,
+                resultSummary: message.skill_execution.result_summary,
+                executionTimeMs: message.skill_execution.execution_time_ms,
+                planId: message.skill_execution.plan_id,
+              } as SkillExecutionData}
+            />
+          )}
 
           {/* Streaming cursor */}
           {isStreaming && message.content && (

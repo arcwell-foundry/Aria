@@ -7,6 +7,15 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  /** Skill execution data attached to this message (Enhancement 5) */
+  skill_execution?: {
+    type: "simple" | "plan";
+    skill_name?: string;
+    status?: "pending" | "running" | "completed" | "failed" | "skipped";
+    result_summary?: string | null;
+    execution_time_ms?: number | null;
+    plan_id?: string;
+  } | null;
 }
 
 export interface Citation {
