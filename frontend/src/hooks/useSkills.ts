@@ -10,7 +10,13 @@ import {
   rejectExecutionPlan,
   listPendingPlans,
   approveSkillGlobally,
+  getSkillPerformance,
+  submitSkillFeedback,
+  listCustomSkills,
+  updateCustomSkill,
+  deleteCustomSkill,
   type AvailableSkillsFilters,
+  type UpdateCustomSkillData,
 } from "@/api/skills";
 
 // Query keys
@@ -26,6 +32,9 @@ export const skillKeys = {
   plans: () => [...skillKeys.all, "plans"] as const,
   pendingPlans: () => [...skillKeys.plans(), "pending"] as const,
   plan: (planId: string) => [...skillKeys.plans(), planId] as const,
+  performance: (skillId: string) =>
+    [...skillKeys.all, "performance", skillId] as const,
+  custom: () => [...skillKeys.all, "custom"] as const,
 };
 
 // List available skills
@@ -132,6 +141,68 @@ export function useApproveSkillGlobally() {
     mutationFn: (skillId: string) => approveSkillGlobally(skillId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: skillKeys.all });
+    },
+  });
+}
+
+// Skill performance metrics
+export function useSkillPerformance(skillId: string | null) {
+  return useQuery({
+    queryKey: skillKeys.performance(skillId ?? ""),
+    queryFn: () => getSkillPerformance(skillId!),
+    enabled: !!skillId,
+  });
+}
+
+// Submit skill feedback (thumbs up/down)
+export function useSubmitFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      executionId,
+      feedback,
+    }: {
+      executionId: string;
+      feedback: "positive" | "negative";
+    }) => submitSkillFeedback(executionId, feedback),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: skillKeys.all });
+    },
+  });
+}
+
+// List custom skills
+export function useCustomSkills() {
+  return useQuery({
+    queryKey: skillKeys.custom(),
+    queryFn: () => listCustomSkills(),
+  });
+}
+
+// Update custom skill
+export function useUpdateCustomSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      skillId,
+      data,
+    }: {
+      skillId: string;
+      data: UpdateCustomSkillData;
+    }) => updateCustomSkill(skillId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: skillKeys.custom() });
+    },
+  });
+}
+
+// Delete custom skill
+export function useDeleteCustomSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (skillId: string) => deleteCustomSkill(skillId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: skillKeys.custom() });
     },
   });
 }

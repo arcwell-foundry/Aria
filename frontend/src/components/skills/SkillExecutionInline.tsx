@@ -10,6 +10,7 @@ import {
 import type { StepStatus } from "@/api/skills";
 import { useExecutionPlan } from "@/hooks/useSkills";
 import { ExecutionPlanCard } from "./ExecutionPlanCard";
+import { SkillSatisfactionButtons } from "./SkillSatisfactionButtons";
 
 // --- Simple skill execution indicator (1 skill, auto-approved) ---
 
@@ -18,9 +19,10 @@ interface SimpleExecutionProps {
   status: StepStatus;
   resultSummary?: string | null;
   executionTimeMs?: number | null;
+  executionId?: string | null;
 }
 
-function SimpleExecution({ skillName, status, resultSummary, executionTimeMs }: SimpleExecutionProps) {
+function SimpleExecution({ skillName, status, resultSummary, executionTimeMs, executionId }: SimpleExecutionProps) {
   const [detailVisible, setDetailVisible] = useState(false);
 
   const isRunning = status === "running";
@@ -55,6 +57,10 @@ function SimpleExecution({ skillName, status, resultSummary, executionTimeMs }: 
 
         {executionTimeMs !== null && executionTimeMs !== undefined && isDone && (
           <span className="text-slate-500">{Math.round(executionTimeMs)}ms</span>
+        )}
+
+        {isDone && executionId && (
+          <SkillSatisfactionButtons executionId={executionId} />
         )}
       </div>
 
@@ -123,6 +129,7 @@ export interface SkillExecutionData {
   status?: StepStatus;
   resultSummary?: string | null;
   executionTimeMs?: number | null;
+  executionId?: string | null;
   /** For plan: the plan ID to fetch and render */
   planId?: string;
 }
@@ -140,6 +147,7 @@ export function SkillExecutionInline({ execution, onAction }: SkillExecutionInli
         status={execution.status ?? "pending"}
         resultSummary={execution.resultSummary}
         executionTimeMs={execution.executionTimeMs}
+        executionId={execution.executionId}
       />
     );
   }
