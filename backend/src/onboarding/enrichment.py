@@ -154,6 +154,14 @@ class CompanyEnrichmentEngine:
             Exception: If enrichment fails critically (logged and re-raised).
         """
         self._progress_callback = progress_callback
+
+        if not settings.EXA_API_KEY:
+            logger.warning(
+                "EXA_API_KEY is not set. Enrichment will classify using LLM "
+                "knowledge only — web research, news, and leadership modules "
+                "will be skipped."
+            )
+
         result = EnrichmentResult(
             classification=CompanyClassification(
                 company_type="Unknown",
@@ -171,7 +179,7 @@ class CompanyEnrichmentEngine:
                     message=f"Analyzing {company_name}...",
                 )
             )
-            result.classification = await self._classify_company(company_name, website)
+            result.classification = await self._classify_company(company_name, website, user_id)
 
             # Stage 2: Parallel Research
             await self._report_progress(
@@ -289,15 +297,19 @@ class CompanyEnrichmentEngine:
             )
             raise
 
-    async def _classify_company(self, company_name: str, website: str) -> CompanyClassification:
+    async def _classify_company(
+        self, company_name: str, website: str, user_id: str | None = None
+    ) -> CompanyClassification:
         """Use LLM to classify company through open-ended reasoning.
 
         Fetches website content first (via Exa) so the LLM can read what the
-        company actually says about itself, rather than guessing from the name.
+        company actually says about itself. When Exa is unavailable, falls
+        back to existing semantic memory facts and LLM training knowledge.
 
         Args:
             company_name: Name of the company.
             website: Company website URL.
+            user_id: Optional user ID to fetch existing semantic facts.
 
         Returns:
             Classification result with free-text type, description, customers, etc.
@@ -311,10 +323,44 @@ class CompanyEnrichmentEngine:
             truncated = website_content[:4000]
             website_block = f"\n\nWebsite content:\n{truncated}"
 
+        # When Exa is unavailable, try to pull existing semantic memory facts
+        # about this company to give the LLM more context
+        memory_block = ""
+        if not website_content and user_id:
+            try:
+                facts_result = (
+                    self._db.table("memory_semantic")
+                    .select("fact, confidence")
+                    .eq("user_id", user_id)
+                    .gte("confidence", 0.5)
+                    .limit(20)
+                    .execute()
+                )
+                if facts_result.data:
+                    facts_text = "\n".join(
+                        f"- {f['fact']} (confidence: {f['confidence']})" for f in facts_result.data
+                    )
+                    memory_block = f"\n\nExisting knowledge about this company:\n{facts_text}"
+            except Exception as e:
+                logger.warning(f"Failed to fetch semantic facts for classification: {e}")
+
+        # Extract domain from website URL for the LLM
+        domain = website.replace("https://", "").replace("http://", "").rstrip("/")
+
+        context_note = ""
+        if not website_content:
+            context_note = (
+                "\n\nNOTE: No website content was available. Classify this company "
+                "based on the company name, domain, any existing knowledge provided, "
+                "and your training knowledge about this company. Many major life sciences "
+                "companies are well-known — use what you know."
+            )
+
         prompt = f"""Analyze this life sciences company. Describe what they actually do — don't force them into a predefined category.
 
 Company: {company_name}
-Website: {website}{website_block}
+Domain: {domain}
+Website: {website}{website_block}{memory_block}{context_note}
 
 Provide a JSON response with:
 {{
@@ -343,7 +389,13 @@ Respond ONLY with the JSON object, no additional text."""
             temperature=0.3,
         )
         try:
-            data = json.loads(response)
+            # Strip markdown code fences if present (LLM sometimes wraps JSON)
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3].strip()
+            data = json.loads(cleaned)
             return CompanyClassification(**data)
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Classification parse failed: {e}")
@@ -364,6 +416,10 @@ Respond ONLY with the JSON object, no additional text."""
         """
         try:
             if not settings.EXA_API_KEY:
+                logger.warning(
+                    "EXA_API_KEY not set — website content fetch skipped. "
+                    "Classification will use LLM knowledge only."
+                )
                 return ""
 
             async with httpx.AsyncClient() as client:
@@ -871,17 +927,41 @@ Respond ONLY with the JSON array, no additional text."""
             user_id: UUID of the user.
             result: Complete enrichment result.
         """
-        # Store classification in company settings
+        # Store classification in company settings — only if new result is
+        # equal or higher confidence than existing (never overwrite good data
+        # with worse data, e.g. when Exa API is unavailable)
         try:
-            self._db.table("companies").update(
-                {
-                    "settings": {
-                        "classification": result.classification.model_dump(),
-                        "enrichment_quality_score": result.quality_score,
-                        "enriched_at": datetime.now(UTC).isoformat(),
+            existing = (
+                self._db.table("companies")
+                .select("settings")
+                .eq("id", company_id)
+                .maybe_single()
+                .execute()
+            )
+            existing_confidence = 0.0
+            if existing.data:
+                existing_settings = existing.data.get("settings") or {}
+                existing_classification = existing_settings.get("classification") or {}
+                existing_confidence = existing_classification.get("confidence", 0.0)
+
+            new_confidence = result.classification.confidence
+
+            if new_confidence >= existing_confidence:
+                self._db.table("companies").update(
+                    {
+                        "settings": {
+                            "classification": result.classification.model_dump(),
+                            "enrichment_quality_score": result.quality_score,
+                            "enriched_at": datetime.now(UTC).isoformat(),
+                        }
                     }
-                }
-            ).eq("id", company_id).execute()
+                ).eq("id", company_id).execute()
+            else:
+                logger.info(
+                    "Keeping existing classification (confidence %.2f) over new result (%.2f)",
+                    existing_confidence,
+                    new_confidence,
+                )
         except Exception as e:
             logger.warning(f"Failed to update company settings: {e}")
 
