@@ -6,6 +6,7 @@ as well as declarative workflow models and pre-built definitions.
 """
 
 from src.skills.workflows.base import BaseWorkflow, WorkflowStep
+from src.skills.workflows.engine import WorkflowEngine
 from src.skills.workflows.models import (
     ActionType,
     FailurePolicy,
@@ -25,6 +26,7 @@ __all__ = [
     "TriggerType",
     "UserWorkflowDefinition",
     "WorkflowAction",
+    "WorkflowEngine",
     "WorkflowMetadata",
     "WorkflowRunStatus",
     "WorkflowStep",
