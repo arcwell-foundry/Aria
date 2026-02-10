@@ -24,6 +24,12 @@ from src.skills.context_manager import (
     SkillContextManager,
     SummaryVerbosity,
 )
+from src.skills.discovery import (
+    GapReport,
+    Recommendation,
+    SkillDiscoveryAgent,
+    SkillRecommendation,
+)
 from src.skills.executor import SkillExecution, SkillExecutionError, SkillExecutor
 from src.skills.index import (
     TIER_1_CORE_SKILLS,
@@ -82,6 +88,11 @@ __all__ = [
     "ExecutionStep",
     "PlanResult",
     "WorkingMemoryEntry",
+    # Discovery
+    "SkillDiscoveryAgent",
+    "GapReport",
+    "SkillRecommendation",
+    "Recommendation",
     # Registry
     "SkillRegistry",
     "SkillEntry",
