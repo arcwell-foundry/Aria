@@ -12,6 +12,7 @@ import {
 import {
   SKIPPABLE_STEPS,
   answerInjectedQuestion,
+  activateAria,
   type OnboardingStep,
 } from "@/api/onboarding";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
@@ -38,6 +39,7 @@ export function OnboardingPage() {
   const [deltaAcknowledged, setDeltaAcknowledged] = useState(false);
   const [oodaAnswers, setOodaAnswers] = useState<Record<number, string>>({});
   const [oodaSubmitting, setOodaSubmitting] = useState<number | null>(null);
+  const [activating, setActivating] = useState(false);
 
   const handleOodaAnswer = useCallback(
     async (index: number, question: string) => {
@@ -100,6 +102,18 @@ export function OnboardingPage() {
       return;
     }
     skipMutation.mutate({ step: serverStep });
+  }
+
+  async function handleActivate() {
+    setActivating(true);
+    try {
+      const result = await activateAria();
+      queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
+      navigate(result.redirect || "/dashboard", { replace: true });
+    } catch (error) {
+      console.error("Activation failed:", error);
+      setActivating(false);
+    }
   }
 
   function handleStepClick(step: OnboardingStep) {
@@ -261,10 +275,18 @@ export function OnboardingPage() {
                   queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
                 }}
               />
+            ) : displayStep === "activation" ? (
+              <OnboardingStepPlaceholder
+                step={displayStep}
+                onComplete={() => handleActivate()}
+                onSkip={undefined}
+                isCompleting={activating}
+                isSkipping={false}
+              />
             ) : (
               <OnboardingStepPlaceholder
                 step={displayStep}
-                onComplete={handleComplete}
+                onComplete={() => handleComplete()}
                 onSkip={!isRevisiting && isSkippable ? handleSkip : undefined}
                 isCompleting={completeMutation.isPending}
                 isSkipping={skipMutation.isPending}

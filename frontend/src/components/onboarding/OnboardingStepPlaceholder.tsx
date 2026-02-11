@@ -84,7 +84,7 @@ export function OnboardingStepPlaceholder({
 
       <div className="flex items-center gap-3">
         <button
-          onClick={onComplete}
+          onClick={() => onComplete()}
           disabled={isCompleting || isSkipping}
           className="
             bg-interactive text-white rounded-lg px-5 py-2.5

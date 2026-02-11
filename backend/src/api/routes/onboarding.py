@@ -1060,42 +1060,71 @@ async def activate_aria(
 ) -> dict[str, Any]:
     """Complete onboarding and activate ARIA.
 
-    Marks the activation step as complete, fires off background
-    memory construction (US-911), and redirects user to dashboard.
+    Marks the activation step as complete via direct DB update (avoiding
+    blocking Graphiti calls), then fires background pipelines.
 
     Returns:
         Dict with activation status and dashboard redirect.
     """
-    orchestrator = _get_orchestrator()
+    from datetime import UTC, datetime
 
-    try:
-        await orchestrator.complete_step(
-            current_user.id,
-            OnboardingStep.ACTIVATION,
-            {},
+    db = SupabaseClient.get_client()
+    user_id = current_user.id
+
+    # Read current onboarding state
+    result = (
+        db.table("onboarding_state")
+        .select("*")
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not result or not result.data:
+        raise HTTPException(status_code=400, detail="No onboarding state found")
+
+    state = result.data
+    if state["current_step"] != "activation":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot activate — current step is '{state['current_step']}'",
         )
-    except ValueError as e:
-        logger.exception("Error activating ARIA for user %s", current_user.id)
-        raise HTTPException(status_code=400, detail=sanitize_error(e)) from e
 
-    # Run personality calibration before agents are spawned (US-919)
-    from src.onboarding.personality_calibrator import PersonalityCalibrator
+    # Mark activation complete directly (fast DB write, no Graphiti)
+    completed = list(set(state.get("completed_steps", []) + ["activation"]))
+    db.table("onboarding_state").update(
+        {
+            "completed_steps": completed,
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+    ).eq("user_id", user_id).execute()
 
-    calibrator = PersonalityCalibrator()
-    asyncio.create_task(calibrator.calibrate(current_user.id))
+    logger.info("ARIA activated for user %s", user_id)
 
-    # Fire memory construction as a background task
-    from src.onboarding.memory_constructor import MemoryConstructionOrchestrator
+    # Fire all post-activation work as non-blocking background tasks
+    async def _run_post_activation(uid: str) -> None:
+        """Run all post-activation pipelines, catching errors individually."""
+        try:
+            from src.onboarding.personality_calibrator import PersonalityCalibrator
 
-    constructor = MemoryConstructionOrchestrator()
-    asyncio.create_task(constructor.run_construction(current_user.id))
+            await PersonalityCalibrator().calibrate(uid)
+        except Exception as e:
+            logger.warning("Personality calibration failed: %s", e)
 
-    # Sprint 2: Run post-activation pipeline (goal execution → first conversation → first briefing)
-    # This runs as a background task so the user sees a loading state while ARIA works
-    from src.onboarding.activation import OnboardingCompletionOrchestrator
+        try:
+            from src.onboarding.memory_constructor import MemoryConstructionOrchestrator
 
-    activation_orchestrator = OnboardingCompletionOrchestrator()
-    asyncio.create_task(activation_orchestrator.run_post_activation_pipeline(current_user.id))
+            await MemoryConstructionOrchestrator().run_construction(uid)
+        except Exception as e:
+            logger.warning("Memory construction failed: %s", e)
+
+        try:
+            from src.onboarding.activation import OnboardingCompletionOrchestrator
+
+            await OnboardingCompletionOrchestrator().run_post_activation_pipeline(uid)
+        except Exception as e:
+            logger.warning("Post-activation pipeline failed: %s", e)
+
+    asyncio.create_task(_run_post_activation(user_id))
 
     return {"status": "activated", "redirect": "/dashboard"}
 
