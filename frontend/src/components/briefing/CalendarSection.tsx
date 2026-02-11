@@ -4,11 +4,11 @@ import type { BriefingCalendar } from "@/api/briefings";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 
 interface CalendarSectionProps {
-  calendar: BriefingCalendar;
+  calendar?: BriefingCalendar;
 }
 
 export function CalendarSection({ calendar }: CalendarSectionProps) {
-  const { meeting_count, key_meetings } = calendar;
+  const { meeting_count = 0, key_meetings = [] } = calendar ?? {};
 
   if (meeting_count === 0) {
     return (

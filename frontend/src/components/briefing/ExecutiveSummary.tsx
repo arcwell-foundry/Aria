@@ -1,10 +1,12 @@
 import { Sparkles } from "lucide-react";
 
 interface ExecutiveSummaryProps {
-  summary: string;
+  summary?: string;
 }
 
 export function ExecutiveSummary({ summary }: ExecutiveSummaryProps) {
+  if (!summary) return null;
+
   return (
     <div className="relative overflow-hidden bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-primary-900/30 border border-slate-700/50 rounded-xl p-6">
       {/* Subtle gradient overlay */}

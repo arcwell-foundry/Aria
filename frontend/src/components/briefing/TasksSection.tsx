@@ -3,7 +3,7 @@ import type { BriefingTask, BriefingTasks } from "@/api/briefings";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 
 interface TasksSectionProps {
-  tasks: BriefingTasks;
+  tasks?: BriefingTasks;
 }
 
 function TaskCard({
@@ -60,7 +60,7 @@ function TaskCard({
 }
 
 export function TasksSection({ tasks }: TasksSectionProps) {
-  const { overdue, due_today } = tasks;
+  const { overdue = [], due_today = [] } = tasks ?? {};
   const totalCount = overdue.length + due_today.length;
   const hasOverdue = overdue.length > 0;
 

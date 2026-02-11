@@ -3,7 +3,7 @@ import type { BriefingSignal, BriefingSignals } from "@/api/briefings";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 
 interface SignalsSectionProps {
-  signals: BriefingSignals;
+  signals?: BriefingSignals;
 }
 
 function SignalCard({ signal }: { signal: BriefingSignal }) {
@@ -46,7 +46,7 @@ function SignalCard({ signal }: { signal: BriefingSignal }) {
 }
 
 export function SignalsSection({ signals }: SignalsSectionProps) {
-  const { company_news, market_trends, competitive_intel } = signals;
+  const { company_news = [], market_trends = [], competitive_intel = [] } = signals ?? {};
   const totalCount = company_news.length + market_trends.length + competitive_intel.length;
 
   if (totalCount === 0) {

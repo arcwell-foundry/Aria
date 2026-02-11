@@ -77,11 +77,17 @@ export interface BriefingResponse {
   content: BriefingContent;
 }
 
+// Response wrapper from GET /briefings/today
+interface TodayBriefingResponse {
+  briefing: BriefingContent | null;
+  status: "ready" | "not_generated";
+}
+
 // API functions
-export async function getTodayBriefing(regenerate = false): Promise<BriefingContent> {
+export async function getTodayBriefing(regenerate = false): Promise<BriefingContent | null> {
   const params = regenerate ? "?regenerate=true" : "";
-  const response = await apiClient.get<BriefingContent>(`/briefings/today${params}`);
-  return response.data;
+  const response = await apiClient.get<TodayBriefingResponse>(`/briefings/today${params}`);
+  return response.data.briefing;
 }
 
 export async function listBriefings(limit = 7): Promise<BriefingListItem[]> {

@@ -4,7 +4,7 @@ import type { BriefingLead, BriefingLeads } from "@/api/briefings";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 
 interface LeadsSectionProps {
-  leads: BriefingLeads;
+  leads?: BriefingLeads;
 }
 
 function LeadCard({ lead, variant }: { lead: BriefingLead; variant: "hot" | "attention" | "active" }) {
@@ -64,7 +64,7 @@ function LeadCard({ lead, variant }: { lead: BriefingLead; variant: "hot" | "att
 }
 
 export function LeadsSection({ leads }: LeadsSectionProps) {
-  const { hot_leads, needs_attention, recently_active } = leads;
+  const { hot_leads = [], needs_attention = [], recently_active = [] } = leads ?? {};
   const totalCount = hot_leads.length + needs_attention.length + recently_active.length;
 
   if (totalCount === 0) {
