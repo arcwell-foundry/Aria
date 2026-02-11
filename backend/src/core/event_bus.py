@@ -6,6 +6,7 @@ events for a specific goal_id.
 """
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -61,10 +62,8 @@ class EventBus:
 
     def unsubscribe(self, goal_id: str, queue: asyncio.Queue[GoalEvent]) -> None:
         if goal_id in self._subscribers:
-            try:
+            with contextlib.suppress(ValueError):
                 self._subscribers[goal_id].remove(queue)
-            except ValueError:
-                pass
             if not self._subscribers[goal_id]:
                 del self._subscribers[goal_id]
 

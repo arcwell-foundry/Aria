@@ -218,7 +218,7 @@ async def goal_events(
                     yield f"data: {json.dumps(event.to_dict())}\n\n"
                     if event.event_type in ("goal.complete", "goal.error"):
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
         finally:
             event_bus.unsubscribe(goal_id, queue)

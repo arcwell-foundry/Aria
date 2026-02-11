@@ -160,9 +160,7 @@ async def _run_ooda_goal_checks() -> None:
                 state = OODAState(goal_id=goal_id)
                 state = await ooda.run_single_iteration(state, goal)
 
-                decision_action = (
-                    state.decision.get("action") if state.decision else None
-                )
+                decision_action = state.decision.get("action") if state.decision else None
 
                 if state.is_complete or decision_action == "complete":
                     await execution_service.complete_goal_with_retro(goal_id, user_id)

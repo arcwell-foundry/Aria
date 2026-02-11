@@ -1203,7 +1203,7 @@ class GoalExecutionService:
         self._active_tasks[goal_id] = task
 
         # Clean up reference when done
-        task.add_done_callback(lambda t: self._active_tasks.pop(goal_id, None))
+        task.add_done_callback(lambda _t: self._active_tasks.pop(goal_id, None))
 
         logger.info(
             "Goal async execution started",
@@ -1238,10 +1238,7 @@ class GoalExecutionService:
 
             if plan_result.data:
                 tasks_raw = plan_result.data.get("tasks", "[]")
-                if isinstance(tasks_raw, str):
-                    tasks = json.loads(tasks_raw)
-                else:
-                    tasks = tasks_raw
+                tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
             else:
                 # Auto-plan if no plan exists
                 plan = await self.plan_goal(goal_id, user_id)
@@ -1596,9 +1593,9 @@ class GoalExecutionService:
 
         # Update goal status
         now = datetime.now(UTC).isoformat()
-        self._db.table("goals").update(
-            {"status": "paused", "updated_at": now}
-        ).eq("id", goal_id).execute()
+        self._db.table("goals").update({"status": "paused", "updated_at": now}).eq(
+            "id", goal_id
+        ).execute()
 
         # Publish cancellation event
         event_bus = EventBus.get_instance()
