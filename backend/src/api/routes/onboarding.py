@@ -154,7 +154,7 @@ async def get_enrichment_status(
         .maybe_single()
         .execute()
     )
-    if not profile.data or not profile.data.get("company_id"):
+    if not profile or not profile.data or not profile.data.get("company_id"):
         return {"status": "no_company"}
 
     company = (
@@ -164,7 +164,7 @@ async def get_enrichment_status(
         .maybe_single()
         .execute()
     )
-    if not company.data:
+    if not company or not company.data:
         return {"status": "not_found"}
 
     company_settings = company.data.get("settings", {})
@@ -196,7 +196,7 @@ async def get_enrichment_delta(
         .maybe_single()
         .execute()
     )
-    if not state.data:
+    if not state or not state.data:
         return []
 
     step_data = state.data.get("step_data", {})
@@ -226,7 +226,7 @@ async def re_run_enrichment(
         .maybe_single()
         .execute()
     )
-    if not profile.data or not profile.data.get("company_id"):
+    if not profile or not profile.data or not profile.data.get("company_id"):
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     company_id = profile.data["company_id"]
@@ -329,7 +329,7 @@ async def upload_document(
         .maybe_single()
         .execute()
     )
-    if not profile.data or not profile.data.get("company_id"):
+    if not profile or not profile.data or not profile.data.get("company_id"):
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     company_id = profile.data["company_id"]
@@ -368,7 +368,7 @@ async def get_documents(
         .maybe_single()
         .execute()
     )
-    if not profile.data or not profile.data.get("company_id"):
+    if not profile or not profile.data or not profile.data.get("company_id"):
         return []
 
     doc_service = _get_doc_service()
@@ -390,7 +390,7 @@ async def get_document_status(
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Document not found")
     return result.data
 
@@ -618,7 +618,7 @@ async def get_email_preferences(
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         return {}
 
     integrations = result.data.get("integrations", {})
@@ -1288,7 +1288,7 @@ async def answer_injected_question(
         .maybe_single()
         .execute()
     )
-    if not state.data:
+    if not state or not state.data:
         raise HTTPException(status_code=404, detail="No onboarding state found")
 
     step_data = state.data.get("step_data", {})

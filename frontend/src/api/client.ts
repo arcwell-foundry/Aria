@@ -83,6 +83,31 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Flag to prevent concurrent token refresh attempts
+let isRefreshing = false;
+// Flag to prevent redirect loops
+let isRedirectingToLogin = false;
+
+/**
+ * Clear auth tokens and redirect to login without a full page reload.
+ * Uses replaceState + dispatch to avoid remounting the entire app which
+ * would re-trigger the same 401 cycle.
+ */
+function redirectToLogin() {
+  if (isRedirectingToLogin) return;
+  // Already on login page — nothing to do
+  if (window.location.pathname === "/login") return;
+
+  isRedirectingToLogin = true;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+
+  // Use a full navigation so React Router picks up the new location.
+  // This is intentionally a single redirect; the isRedirectingToLogin
+  // flag prevents it from firing again before the page settles.
+  window.location.href = "/login";
+}
+
 // Response interceptor for token refresh and retry logic
 apiClient.interceptors.response.use(
   (response) => response,
@@ -93,8 +118,20 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
+      // If already on login page, don't attempt refresh or redirect
+      if (window.location.pathname === "/login") {
+        return Promise.reject(error);
+      }
+
+      // If another request is already refreshing, wait for it rather than
+      // firing a second refresh call.
+      if (isRefreshing) {
+        return Promise.reject(error);
+      }
+
       const refreshToken = localStorage.getItem("refresh_token");
       if (refreshToken) {
+        isRefreshing = true;
         try {
           const response = await axios.post(
             `${API_BASE_URL}/api/v1/auth/refresh`,
@@ -110,14 +147,14 @@ apiClient.interceptors.response.use(
           return apiClient(originalRequest);
         } catch {
           // Refresh failed, clear tokens and redirect to login
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
           showError(
             "auth",
             "Session expired",
             "Please log in again to continue."
           );
-          window.location.href = "/login";
+          redirectToLogin();
+        } finally {
+          isRefreshing = false;
         }
       } else {
         // No refresh token, redirect to login
@@ -126,7 +163,7 @@ apiClient.interceptors.response.use(
           "Authentication required",
           "Please log in to continue."
         );
-        window.location.href = "/login";
+        redirectToLogin();
       }
       return Promise.reject(error);
     }

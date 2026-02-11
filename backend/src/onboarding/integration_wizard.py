@@ -262,7 +262,7 @@ class IntegrationWizardService:
                 .execute()
             )
 
-            if not result.data:
+            if not result or not result.data:
                 return {
                     "status": "error",
                     "message": "Integration not connected",
@@ -330,7 +330,7 @@ class IntegrationWizardService:
             .maybe_single()
             .execute()
         )
-        merged_integrations = existing.data.get("integrations", {}) if existing.data else {}
+        merged_integrations = existing.data.get("integrations", {}) if existing and existing.data else {}
         merged_integrations["slack_channels"] = preferences.slack_channels
         merged_integrations["notification_enabled"] = preferences.notification_enabled
         merged_integrations["sync_frequency_hours"] = preferences.sync_frequency_hours
@@ -464,7 +464,7 @@ class IntegrationWizardService:
             .execute()
         )
 
-        if result.data and result.data.get("integrations"):
+        if result and result.data and result.data.get("integrations"):
             integrations = result.data["integrations"]
             return IntegrationPreferences(
                 slack_channels=integrations.get("slack_channels", []),

@@ -8,6 +8,7 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useAuth } from "@/hooks/useAuth";
 import {
   AccountsPage,
   ActionQueuePage,
@@ -60,14 +61,16 @@ const queryClient = new QueryClient({
 // Inner component with router context
 function AppContent() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
 
-  // Fetch recent items on mount
+  // Fetch recent items only when authenticated
   useEffect(() => {
+    if (!isAuthenticated) return;
     getRecentItems().then(setRecentItems).catch(() => setRecentItems([]));
-  }, []);
+  }, [isAuthenticated]);
 
   // Handle search
   const handleSearch = useCallback(async (query: string) => {

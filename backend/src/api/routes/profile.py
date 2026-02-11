@@ -92,6 +92,10 @@ async def get_profile(
 ) -> dict[str, Any]:
     """Get full profile: user details + company + integrations.
 
+    Returns the full profile if a user_profiles row exists, otherwise returns
+    a skeleton profile from the auth token so the frontend can render without
+    errors for freshly-created users who haven't completed onboarding.
+
     Args:
         current_user: The authenticated user.
 
@@ -101,13 +105,46 @@ async def get_profile(
     try:
         service = _get_service()
         return await service.get_full_profile(current_user.id)
-    except NotFoundError as e:
-        logger.exception("Profile not found")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=sanitize_error(e),
-        ) from e
     except Exception as e:
+        # If the profile row simply doesn't exist yet, return a skeleton
+        # so the frontend can proceed (e.g. redirect to onboarding).
+        # The error chain may be: PGRST116 → DatabaseError → ARIAException,
+        # so check the full cause chain for the original error.
+        err_chain = str(e).lower()
+        cause = e.__cause__
+        while cause:
+            err_chain += " " + str(cause).lower()
+            cause = cause.__cause__
+        if (
+            isinstance(e, NotFoundError)
+            or "not found" in err_chain
+            or "pgrst116" in err_chain
+        ):
+            user_meta = getattr(current_user, "user_metadata", {}) or {}
+            logger.info(
+                "No user_profiles row, returning skeleton profile",
+                extra={"user_id": current_user.id},
+            )
+            return {
+                "user": {
+                    "id": current_user.id,
+                    "full_name": user_meta.get("full_name"),
+                    "title": None,
+                    "department": None,
+                    "linkedin_url": None,
+                    "avatar_url": None,
+                    "company_id": None,
+                    "role": "user",
+                    "communication_preferences": {},
+                    "privacy_exclusions": [],
+                    "default_tone": "friendly",
+                    "tracked_competitors": [],
+                    "created_at": None,
+                    "updated_at": None,
+                },
+                "company": None,
+                "integrations": [],
+            }
         logger.exception("Error fetching profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
