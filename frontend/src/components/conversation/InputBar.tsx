@@ -6,9 +6,10 @@ import { useConversationStore } from '@/stores/conversationStore';
 interface InputBarProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
-export function InputBar({ onSend, disabled = false }: InputBarProps) {
+export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA anything...' }: InputBarProps) {
   const inputValue = useConversationStore((s) => s.inputValue);
   const setInputValue = useConversationStore((s) => s.setInputValue);
   const isStreaming = useConversationStore((s) => s.isStreaming);
@@ -63,7 +64,7 @@ export function InputBar({ onSend, disabled = false }: InputBarProps) {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask ARIA anything..."
+          placeholder={placeholder}
           rows={1}
           disabled={disabled}
           className="flex-1 resize-none bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none min-h-[36px] max-h-[120px] py-1.5"
