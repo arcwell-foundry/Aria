@@ -84,7 +84,7 @@ class EmailIntegrationService:
             oauth_client = get_oauth_client()
 
             # Map provider to Composio integration type
-            integration_type = "GMAIL" if provider == "google" else "OUTLOOK365"
+            integration_type = "GMAIL" if provider == "google" else "OUTLOOK"
             redirect_uri = f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)

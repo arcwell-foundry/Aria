@@ -60,7 +60,14 @@ class ComposioOAuthClient:
 
         result = await asyncio.to_thread(_list_configs)
 
-        if not result.items:
+        # Filter to configs that actually match the requested toolkit.
+        # Composio returns ALL configs when the slug doesn't match anything,
+        # so we must filter client-side to avoid picking an unrelated config.
+        matching = [
+            item for item in result.items if item.toolkit.slug == toolkit_slug
+        ]
+
+        if not matching:
             logger.debug("No auth configs found for %s", toolkit_slug)
             raise ValueError(
                 f"No auth config found for '{toolkit_slug}'. "
@@ -68,7 +75,7 @@ class ComposioOAuthClient:
                 f"select '{toolkit_slug}' toolkit and configure OAuth credentials."
             )
 
-        auth_config_id: str = result.items[0].id
+        auth_config_id: str = matching[0].id
         self._auth_config_cache[toolkit_slug] = auth_config_id
         logger.debug("Resolved %s → auth_config_id=%s", toolkit_slug, auth_config_id)
         return auth_config_id
