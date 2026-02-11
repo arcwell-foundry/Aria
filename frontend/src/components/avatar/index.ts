@@ -5,3 +5,4 @@ export { TranscriptPanel } from './TranscriptPanel';
 export { BriefingControls } from './BriefingControls';
 export { DialogueHeader } from './DialogueHeader';
 export { DialogueMode } from './DialogueMode';
+export { CompactAvatar } from './CompactAvatar';
