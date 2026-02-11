@@ -2,9 +2,9 @@
  * IntelPanel - ARIA Intelligence Panel (right column)
  *
  * The context-adaptive right panel in ARIA's three-column layout.
- * Displays route-specific intelligence, alerts, and agent status.
- * Width: 320px (w-80). Always renders content — visibility is
- * controlled by the parent (AppShell).
+ * Renders route-specific modules with realistic intelligence data.
+ * Supports ARIA-driven content overrides via update_intel_panel UICommand.
+ * Width: 320px (w-80). Visibility controlled by parent (AppShell).
  *
  * Design System:
  * - Background: var(--bg-elevated)
@@ -14,9 +14,26 @@
  * - Data labels: JetBrains Mono (font-mono)
  */
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MoreHorizontal } from 'lucide-react';
+import { useIntelPanel } from '@/hooks/useIntelPanel';
+import {
+  AlertsModule,
+  BuyingSignalsModule,
+  CompetitiveIntelModule,
+  NewsAlertsModule,
+  WhyIWroteThisModule,
+  ToneModule,
+  AnalysisModule,
+  NextBestActionModule,
+  StrategicAdviceModule,
+  ObjectionsModule,
+  NextStepsModule,
+  AgentStatusModule,
+  CRMSnapshotModule,
+  ChatInputModule,
+} from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
   /** Additional CSS classes from parent for positioning */
@@ -25,81 +42,93 @@ interface IntelPanelProps {
 
 interface PanelConfig {
   title: string;
-  description: string;
-  items: string[];
+  modules: ReactNode[];
+  chatContext?: string;
 }
 
 function getPanelConfig(pathname: string): PanelConfig {
+  // Lead detail view (e.g., /pipeline/leads/abc-123)
+  if (/^\/pipeline\/leads\/.+/.test(pathname)) {
+    return {
+      title: 'Lead Intelligence',
+      modules: [
+        <StrategicAdviceModule key="advice" />,
+        <ObjectionsModule key="objections" />,
+        <NextStepsModule key="steps" />,
+        <CRMSnapshotModule key="crm" />,
+      ],
+      chatContext: 'lead-detail',
+    };
+  }
+
   if (pathname.startsWith('/pipeline')) {
     return {
       title: 'Pipeline Alerts',
-      description:
-        'Real-time signals and risk indicators across your active pipeline.',
-      items: [
-        'Deal velocity changes detected by Scout',
-        'Stalled opportunities flagged by Analyst',
-        'Competitive signals from Hunter',
+      modules: [
+        <AlertsModule key="alerts" />,
+        <BuyingSignalsModule key="signals" />,
+        <CRMSnapshotModule key="crm" />,
       ],
+      chatContext: 'pipeline',
     };
   }
 
   if (pathname.startsWith('/intelligence')) {
     return {
       title: 'ARIA Intel',
-      description:
-        'Curated intelligence from across your connected data sources.',
-      items: [
-        'Market signals and competitor movements',
-        'Account-level insights from Analyst',
-        'Relationship mapping updates from Scout',
+      modules: [
+        <CompetitiveIntelModule key="competitive" />,
+        <NewsAlertsModule key="news" />,
+        <NextBestActionModule key="action" />,
       ],
+      chatContext: 'intelligence',
     };
   }
 
   if (pathname.startsWith('/communications')) {
     return {
       title: 'ARIA Insights',
-      description:
-        'Contextual suggestions for your outreach and follow-ups.',
-      items: [
-        'Optimal send-time recommendations',
-        'Tone and messaging guidance from Scribe',
-        'Follow-up priority scoring',
+      modules: [
+        <WhyIWroteThisModule key="why" />,
+        <ToneModule key="tone" />,
+        <AnalysisModule key="analysis" />,
       ],
+      chatContext: 'communications',
     };
   }
 
   if (pathname.startsWith('/actions')) {
     return {
       title: 'Agent Status',
-      description: 'Live status of ARIA\'s six core agents and active tasks.',
-      items: [
-        'Hunter, Analyst, Strategist activity',
-        'Scribe, Operator, Scout task queues',
-        'Pending approvals and completions',
+      modules: [
+        <AgentStatusModule key="agents" />,
+        <NextBestActionModule key="action" />,
       ],
+      chatContext: 'actions',
     };
   }
 
+  // Default: briefing, settings, etc.
   return {
     title: 'ARIA Intelligence',
-    description:
-      'Contextual intelligence that updates based on your current focus.',
-    items: [
-      'Signals will appear as ARIA detects them',
-      'Agent activity and goal progress',
-      'Proactive recommendations',
+    modules: [
+      <AlertsModule key="alerts" />,
+      <NextBestActionModule key="action" />,
     ],
+    chatContext: 'general',
   };
 }
 
 export function IntelPanel({ className }: IntelPanelProps) {
   const location = useLocation();
+  const { state: panelState } = useIntelPanel();
 
   const config = useMemo(
     () => getPanelConfig(location.pathname),
-    [location.pathname]
+    [location.pathname],
   );
+
+  const title = panelState.titleOverride || config.title;
 
   return (
     <aside
@@ -119,7 +148,7 @@ export function IntelPanel({ className }: IntelPanelProps) {
           className="font-display text-[18px] leading-tight italic"
           style={{ color: 'var(--text-primary)' }}
         >
-          {config.title}
+          {title}
         </h2>
         <button
           className="p-1.5 rounded-md transition-colors duration-150 cursor-pointer"
@@ -138,49 +167,21 @@ export function IntelPanel({ className }: IntelPanelProps) {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {/* Description */}
-        <p
-          className="font-sans text-[13px] leading-[1.6] mb-6"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {config.description}
-        </p>
-
-        {/* Placeholder items */}
-        <div className="space-y-3">
-          {config.items.map((item, index) => (
-            <div
-              key={index}
-              className="rounded-lg p-3 border"
-              style={{
-                borderColor: 'var(--border)',
-                backgroundColor: 'var(--bg-subtle)',
-              }}
-            >
-              <div className="flex items-start gap-2.5">
-                {/* Status dot */}
-                <div
-                  className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0"
-                  style={{ backgroundColor: 'var(--accent)' }}
-                />
-                <p
-                  className="font-sans text-[13px] leading-[1.5]"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  {item}
-                </p>
-              </div>
-            </div>
-          ))}
+        {/* Route-based modules */}
+        <div className="space-y-6">
+          {config.modules}
         </div>
 
-        {/* Timestamp placeholder */}
+        {/* Timestamp */}
         <p
           className="font-mono text-[11px] mt-6"
           style={{ color: 'var(--text-secondary)' }}
         >
           Last updated: just now
         </p>
+
+        {/* Contextual chat input */}
+        <ChatInputModule context={config.chatContext} />
       </div>
     </aside>
   );

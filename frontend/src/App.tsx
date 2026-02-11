@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SessionProvider } from "@/contexts/SessionContext";
+import { IntelPanelProvider } from "@/contexts/IntelPanelContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
@@ -59,7 +60,9 @@ function AppContent() {
     <>
       <ThemeProvider>
         <SessionProvider>
-          <AppRoutes />
+          <IntelPanelProvider>
+            <AppRoutes />
+          </IntelPanelProvider>
         </SessionProvider>
       </ThemeProvider>
 

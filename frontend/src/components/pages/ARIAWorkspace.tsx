@@ -5,9 +5,10 @@ import { SuggestionChips } from '@/components/conversation/SuggestionChips';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
-import type { AriaMessagePayload, AriaThinkingPayload } from '@/types/chat';
+import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } from '@/types/chat';
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
+import { useUICommands } from '@/hooks/useUICommands';
 
 export function ARIAWorkspace() {
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -20,6 +21,7 @@ export function ARIAWorkspace() {
 
   const { session } = useSession();
   const { user } = useAuth();
+  useUICommands();
 
   const streamingIdRef = useRef<string | null>(null);
 
@@ -98,13 +100,8 @@ export function ARIAWorkspace() {
     const handleMetadata = (payload: unknown) => {
       const data = payload as {
         message_id: string;
-        rich_content: Array<{ type: string; data: Record<string, unknown> }>;
-        ui_commands: Array<{
-          action: string;
-          route?: string;
-          element?: string;
-          content?: Record<string, unknown>;
-        }>;
+        rich_content: RichContent[];
+        ui_commands: UICommand[];
         suggestions: string[];
       };
 

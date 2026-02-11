@@ -5,55 +5,70 @@
  * 1. Route changes (auto-selects appropriate modules)
  * 2. ARIA via update_intel_panel UICommand
  * 3. Direct programmatic updates
+ *
+ * ARIA content overrides are scoped to the route where they were set.
+ * Navigating to a different page automatically clears the override
+ * (the ariaContent is ignored when currentRoute !== the route it was set on).
  */
 
-import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from 'react';
+import { createContext, useState, useCallback, useMemo, useEffect, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { uiCommandExecutor } from '@/core/UICommandExecutor';
 
-export interface IntelPanelState {
-  /** Current panel title override (null = use route default) */
+interface InternalState {
   titleOverride: string | null;
-  /** Custom content pushed by ARIA via update_intel_panel */
   ariaContent: Record<string, unknown> | null;
-  /** Timestamp of last ARIA update */
+  lastAriaUpdate: string | null;
+  /** The route on which the ARIA content was pushed */
+  setOnRoute: string | null;
+}
+
+export interface IntelPanelState {
+  titleOverride: string | null;
+  ariaContent: Record<string, unknown> | null;
   lastAriaUpdate: string | null;
 }
 
-interface IntelPanelContextValue {
+export interface IntelPanelContextValue {
   state: IntelPanelState;
-  /** Push custom content from ARIA */
   updateFromAria: (content: Record<string, unknown>) => void;
-  /** Clear ARIA override and revert to route-based defaults */
   clearAriaContent: () => void;
-  /** Get the current route for module selection */
   currentRoute: string;
 }
 
-const IntelPanelCtx = createContext<IntelPanelContextValue | null>(null);
+const EMPTY_INTERNAL: InternalState = {
+  titleOverride: null,
+  ariaContent: null,
+  lastAriaUpdate: null,
+  setOnRoute: null,
+};
+
+const EMPTY_STATE: IntelPanelState = {
+  titleOverride: null,
+  ariaContent: null,
+  lastAriaUpdate: null,
+};
+
+export const IntelPanelCtx = createContext<IntelPanelContextValue | null>(null);
 
 export function IntelPanelProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const [state, setState] = useState<IntelPanelState>({
-    titleOverride: null,
-    ariaContent: null,
-    lastAriaUpdate: null,
-  });
+  const [internal, setInternal] = useState<InternalState>(EMPTY_INTERNAL);
 
-  const updateFromAria = useCallback((content: Record<string, unknown>) => {
-    setState({
-      titleOverride: typeof content.title === 'string' ? content.title : null,
-      ariaContent: content,
-      lastAriaUpdate: new Date().toISOString(),
-    });
-  }, []);
+  const updateFromAria = useCallback(
+    (content: Record<string, unknown>) => {
+      setInternal({
+        titleOverride: typeof content.title === 'string' ? content.title : null,
+        ariaContent: content,
+        lastAriaUpdate: new Date().toISOString(),
+        setOnRoute: location.pathname,
+      });
+    },
+    [location.pathname],
+  );
 
   const clearAriaContent = useCallback(() => {
-    setState({
-      titleOverride: null,
-      ariaContent: null,
-      lastAriaUpdate: null,
-    });
+    setInternal(EMPTY_INTERNAL);
   }, []);
 
   // Register the handler on the UICommandExecutor
@@ -61,10 +76,17 @@ export function IntelPanelProvider({ children }: { children: ReactNode }) {
     uiCommandExecutor.setIntelPanelHandler(updateFromAria);
   }, [updateFromAria]);
 
-  // Clear ARIA content on route change so route defaults take over
-  useEffect(() => {
-    clearAriaContent();
-  }, [location.pathname, clearAriaContent]);
+  // Derive the effective state: ARIA content only applies on the route it was set on
+  const state: IntelPanelState = useMemo(() => {
+    if (internal.ariaContent && internal.setOnRoute === location.pathname) {
+      return {
+        titleOverride: internal.titleOverride,
+        ariaContent: internal.ariaContent,
+        lastAriaUpdate: internal.lastAriaUpdate,
+      };
+    }
+    return EMPTY_STATE;
+  }, [internal, location.pathname]);
 
   const value = useMemo(
     () => ({
@@ -77,12 +99,4 @@ export function IntelPanelProvider({ children }: { children: ReactNode }) {
   );
 
   return <IntelPanelCtx.Provider value={value}>{children}</IntelPanelCtx.Provider>;
-}
-
-export function useIntelPanel(): IntelPanelContextValue {
-  const ctx = useContext(IntelPanelCtx);
-  if (!ctx) {
-    throw new Error('useIntelPanel must be used within IntelPanelProvider');
-  }
-  return ctx;
 }
