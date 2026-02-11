@@ -5,13 +5,13 @@ import { LoginPage } from '@/_deprecated/pages/Login';
 import { SignupPage } from '@/_deprecated/pages/Signup';
 import {
   ARIAWorkspace,
-  BriefingPage,
   PipelinePage,
   IntelligencePage,
   CommunicationsPage,
   ActionsPage,
   SettingsPage,
 } from '@/components/pages';
+import { DialogueMode } from '@/components/avatar';
 
 export function AppRoutes() {
   return (
@@ -29,7 +29,8 @@ export function AppRoutes() {
         }
       >
         <Route index element={<ARIAWorkspace />} />
-        <Route path="briefing" element={<BriefingPage />} />
+        <Route path="dialogue" element={<DialogueMode />} />
+        <Route path="briefing" element={<DialogueMode sessionType="briefing" />} />
         <Route path="pipeline" element={<PipelinePage />} />
         <Route path="pipeline/leads/:leadId" element={<PipelinePage />} />
         <Route path="intelligence" element={<IntelligencePage />} />

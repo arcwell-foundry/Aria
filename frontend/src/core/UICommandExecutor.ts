@@ -11,6 +11,7 @@
 import type { UICommand, HighlightEffect } from '@/api/chat';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { useNotificationsStore } from '@/stores/notificationsStore';
+import { modalityController } from './ModalityController';
 
 type NavigateFunction = (to: string) => void;
 
@@ -119,17 +120,20 @@ class UICommandExecutorImpl {
   }
 
   private handleSwitchMode(cmd: UICommand): void {
-    if (!cmd.mode || !this.navigateFn) return;
+    if (!cmd.mode) return;
 
-    const modeRoutes: Record<string, string> = {
-      workspace: '/',
-      dialogue: '/dialogue',
-      compact_avatar: '/',
-    };
-    const route = modeRoutes[cmd.mode];
-    if (route) {
-      this.navigateFn(route);
-      useNavigationStore.getState().setCurrentRoute(route);
+    switch (cmd.mode) {
+      case 'workspace':
+        modalityController.switchTo('text');
+        break;
+      case 'dialogue':
+        modalityController.switchTo('avatar');
+        break;
+      case 'compact_avatar':
+        modalityController.switchTo('text');
+        break;
+      default:
+        console.warn(`[UICommandExecutor] Unknown mode: ${cmd.mode}`);
     }
   }
 

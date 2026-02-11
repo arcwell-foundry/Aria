@@ -12,11 +12,12 @@
  * Full viewport height; children scroll internally.
  */
 
-import { useMemo } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/shell/Sidebar';
 import { IntelPanel } from '@/components/shell/IntelPanel';
 import { useNavigationStore, type NavigationState } from '@/stores/navigationStore';
+import { modalityController } from '@/core/ModalityController';
 
 /**
  * Routes where the right IntelPanel should be hidden.
@@ -33,9 +34,14 @@ function shouldShowPanel(pathname: string): boolean {
 
 export function AppShell() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const setIntelPanelVisible = useNavigationStore(
     (s: NavigationState) => s.setIntelPanelVisible,
   );
+
+  useEffect(() => {
+    modalityController.setNavigate(navigate);
+  }, [navigate]);
 
   const showPanel = useMemo(() => {
     const visible = shouldShowPanel(pathname);

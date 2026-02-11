@@ -1,9 +1,11 @@
 import { useEffect, useCallback, useRef } from 'react';
+import { Video } from 'lucide-react';
 import { ConversationThread } from '@/components/conversation/ConversationThread';
 import { InputBar } from '@/components/conversation/InputBar';
 import { SuggestionChips } from '@/components/conversation/SuggestionChips';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
+import { modalityController } from '@/core/ModalityController';
 import { WS_EVENTS } from '@/types/chat';
 import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } from '@/types/chat';
 import { useSession } from '@/contexts/SessionContext';
@@ -159,6 +161,17 @@ export function ARIAWorkspace() {
       style={{ backgroundColor: '#0A0A0B' }}
       data-aria-id="aria-workspace"
     >
+      {/* Header with avatar toggle */}
+      <div className="flex items-center justify-end px-6 py-2">
+        <button
+          onClick={() => modalityController.switchTo('avatar')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-[#2E66FF] hover:bg-[#2E66FF]/10 transition-colors"
+          aria-label="Switch to Dialogue Mode"
+        >
+          <Video size={14} />
+          <span className="text-xs">Avatar</span>
+        </button>
+      </div>
       <ConversationThread />
       <SuggestionChips onSelect={handleSend} />
       <InputBar onSend={handleSend} />
