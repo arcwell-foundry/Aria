@@ -7,6 +7,7 @@ skill-aware agent base for skills.sh integration.
 
 from src.agents.analyst import AnalystAgent
 from src.agents.base import AgentResult, AgentStatus, BaseAgent
+from src.agents.dynamic_factory import DynamicAgentFactory, DynamicAgentSpec
 from src.agents.hunter import HunterAgent
 from src.agents.operator import OperatorAgent
 from src.agents.orchestrator import (
@@ -27,6 +28,8 @@ __all__ = [
     "AgentStatus",
     "AnalystAgent",
     "BaseAgent",
+    "DynamicAgentFactory",
+    "DynamicAgentSpec",
     "ExecutionMode",
     "HunterAgent",
     "OperatorAgent",
