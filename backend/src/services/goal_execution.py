@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
 from src.services.activity_service import ActivityService
 
@@ -78,6 +79,12 @@ class GoalExecutionService:
             {"status": "active", "started_at": now, "updated_at": now}
         ).eq("id", goal_id).execute()
 
+        # Notify frontend that ARIA is processing
+        try:
+            await ws_manager.send_thinking(user_id)
+        except Exception:
+            logger.warning("Failed to send thinking event", extra={"user_id": user_id})
+
         # Gather context for agent execution
         context = await self._gather_execution_context(user_id)
 
@@ -94,17 +101,52 @@ class GoalExecutionService:
                 context=context,
             )
             results.append(result)
+
+            # Notify frontend of agent completion
+            try:
+                await ws_manager.send_progress_update(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    progress=100,
+                    status="active",
+                    agent_name=agent_type,
+                    message=f"{agent_type.title()} analysis complete",
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send progress event",
+                    extra={"user_id": user_id, "goal_id": goal_id},
+                )
         else:
             # Multi-agent goal: run each assigned agent
-            for agent in goal.get("goal_agents", []):
+            agents_list = goal.get("goal_agents", [])
+            for idx, agent in enumerate(agents_list):
+                a_type = agent.get("agent_type", "")
                 result = await self._execute_agent(
                     user_id=user_id,
                     goal=goal,
-                    agent_type=agent.get("agent_type", ""),
+                    agent_type=a_type,
                     context=context,
                     goal_agent_id=agent.get("id"),
                 )
                 results.append(result)
+
+                # Notify frontend of agent completion
+                try:
+                    pct = int(((idx + 1) / len(agents_list)) * 100)
+                    await ws_manager.send_progress_update(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        progress=pct,
+                        status="active",
+                        agent_name=a_type,
+                        message=f"{a_type.title()} analysis complete",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to send progress event",
+                        extra={"user_id": user_id, "goal_id": goal_id},
+                    )
 
         # Update goal status to complete
         now = datetime.now(UTC).isoformat()
@@ -116,6 +158,23 @@ class GoalExecutionService:
                 "updated_at": now,
             }
         ).eq("id", goal_id).execute()
+
+        # Notify frontend that goal is complete
+        success_count = sum(1 for r in results if r.get("success"))
+        try:
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=f"Goal \"{goal.get('title', goal_id)}\" complete — {success_count} of {len(results)} agents succeeded.",
+                ui_commands=[
+                    {"action": "navigate", "route": f"/goals/{goal_id}"},
+                ],
+                suggestions=["Show me the results", "What should I focus on next?"],
+            )
+        except Exception:
+            logger.warning(
+                "Failed to send goal completion message",
+                extra={"user_id": user_id, "goal_id": goal_id},
+            )
 
         logger.info(
             "Goal execution complete",
