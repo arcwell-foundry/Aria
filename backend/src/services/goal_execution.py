@@ -41,8 +41,11 @@ class GoalExecutionService:
         self._llm = LLMClient()
         self._activity = ActivityService()
 
-    async def execute_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
-        """Execute a single goal by running all assigned agents.
+    async def execute_goal_sync(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Execute a single goal synchronously by running all assigned agents.
+
+        This is the original synchronous execution path. For async background
+        execution, use execute_goal_async() instead.
 
         Args:
             goal_id: The goal to execute.
@@ -173,7 +176,7 @@ class GoalExecutionService:
 
         for goal in activation_goals:
             try:
-                result = await self.execute_goal(goal["id"], user_id)
+                result = await self.execute_goal_sync(goal["id"], user_id)
                 all_results.append(result)
             except Exception as e:
                 logger.error(
