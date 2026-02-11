@@ -10,11 +10,13 @@ This service handles chat interactions by:
 import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
 from src.core.llm import LLMClient
+from src.memory.episodic import Episode, EpisodicMemory
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
@@ -107,6 +109,7 @@ class ChatService:
             salience_service=SalienceService(db_client=db),
             db_client=db,
         )
+        self._episodic_memory = EpisodicMemory()
 
         # Skill detection — lazily initialized on first use
         self._skill_registry: Any = None
@@ -727,6 +730,26 @@ class ChatService:
                 "Information extraction failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
+
+        # Store conversation turn as episodic memory
+        try:
+            episode = Episode(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                event_type="conversation",
+                content=f"User asked: {message}\nARIA responded: {response_text[:500]}",
+                participants=[user_id, "aria"],
+                occurred_at=datetime.now(UTC),
+                recorded_at=datetime.now(UTC),
+                context={
+                    "conversation_id": conversation_id,
+                    "memory_count": len(memories),
+                    "had_skill_execution": skill_result is not None,
+                },
+            )
+            await self._episodic_memory.store_episode(episode)
+        except Exception as e:
+            logger.warning("Failed to store episodic memory: %s", e)
 
         # Update conversation metadata for sidebar
         await self._update_conversation_metadata(user_id, conversation_id, message)
