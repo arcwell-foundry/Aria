@@ -20,6 +20,12 @@
   --interactive: #7B8EAA;
   --interactive-hover: #95A5BD;
 
+  /* Accent — Electric Blue */
+  --accent: #2E66FF;
+  --accent-hover: #4A7AFF;
+  --accent-muted: rgba(46, 102, 255, 0.15);
+  --accent-glow: rgba(46, 102, 255, 0.4);
+
   /* Semantic Colors — Dark Mode */
   --success: #6B8F71;
   --warning: #B8956A;
@@ -47,6 +53,12 @@
   --text-secondary: #6B7280;
   --interactive: #5B6E8A;
   --interactive-hover: #4A5D79;
+
+  /* Accent — Light Mode Blue */
+  --accent: #2563EB;
+  --accent-hover: #3B76FF;
+  --accent-muted: rgba(37, 99, 235, 0.08);
+  --accent-glow: rgba(37, 99, 235, 0.3);
 
   /* Semantic Colors — Light Mode */
   --success: #5A7D60;
@@ -76,6 +88,11 @@
   --color-secondary: var(--text-secondary);
   --color-interactive: var(--interactive);
   --color-interactive-hover: var(--interactive-hover);
+
+  /* Accent — use bg-accent, text-accent, border-accent */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-muted: var(--accent-muted);
 
   /* Border — use border-border */
   --color-border: var(--border);
@@ -180,6 +197,22 @@ body {
 
 .animate-skill-step-complete {
   animation: skill-step-complete 0.3s ease-out;
+}
+
+/* ARIA Sidebar Pulse — subtle activity indicator */
+@keyframes aria-pulse-dot {
+  0%, 100% {
+    opacity: 0.3;
+    box-shadow: 0 0 4px rgba(46, 102, 255, 0.2);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 8px rgba(46, 102, 255, 0.5);
+  }
+}
+
+.aria-pulse-dot {
+  animation: aria-pulse-dot 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* ARIA Ambient Presence Mark — "light moving through water" */

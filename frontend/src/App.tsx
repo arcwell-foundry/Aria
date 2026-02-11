@@ -1,51 +1,16 @@
 import { useState, useCallback, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { SessionProvider } from "@/contexts/SessionContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
-import { CommandPalette } from "@/components/CommandPalette";
+import { CommandPalette } from "@/_deprecated/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  AccountsPage,
-  ActionQueuePage,
-  ActivityFeedPage,
-  AdminAuditLogPage,
-  AdminTeamPage,
-  AdminBillingPage,
-  ARIAConfigPage,
-  AriaChatPage,
-  BattleCardsPage,
-  ChangelogPage,
-  DeepSyncPage,
-  EmailDraftsPage,
-  ExecutionReplayPage,
-  HelpPage,
-  IntegrationsCallbackPage,
-  IntegrationsSettingsPage,
-  LeadDetailPage,
-  LeadGenPage,
-  LeadsPage,
-  LoginPage,
-  MeetingBriefPage,
-  NotificationsPage,
-  OnboardingPage,
-  PreferencesSettingsPage,
-  ROIDashboardPage,
-  SignupPage,
-  DashboardPage,
-  GoalsPage,
-  SkillsPage,
-  SocialPage,
-  SettingsAccountPage,
-  SettingsPrivacyPage,
-  SettingsProfilePage,
-  WorkflowsPage,
-} from "@/pages";
-import { PostAuthRouter } from "@/components/PostAuthRouter";
+import { AppRoutes } from "@/app/routes";
 import type { SearchResult, RecentItem } from "@/api/search";
 import { globalSearch, getRecentItems } from "@/api/search";
 
@@ -58,7 +23,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Inner component with router context
 function AppContent() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
@@ -66,13 +30,11 @@ function AppContent() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
 
-  // Fetch recent items only when authenticated
   useEffect(() => {
     if (!isAuthenticated) return;
     getRecentItems().then(setRecentItems).catch(() => setRecentItems([]));
   }, [isAuthenticated]);
 
-  // Handle search
   const handleSearch = useCallback(async (query: string) => {
     if (query.trim()) {
       try {
@@ -86,7 +48,6 @@ function AppContent() {
     }
   }, []);
 
-  // Keyboard shortcuts
   useKeyboardShortcuts({
     onCommandPalette: () => setIsCommandPaletteOpen(true),
     onNavigate: (path) => navigate(path),
@@ -96,275 +57,11 @@ function AppContent() {
 
   return (
     <>
-      <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
-      <Route
-        path="/onboarding"
-        element={
-          <ProtectedRoute>
-            <OnboardingPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <DashboardPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/aria"
-        element={
-          <ProtectedRoute>
-            <AriaChatPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/goals"
-        element={
-          <ProtectedRoute>
-            <GoalsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/accounts"
-        element={
-          <ProtectedRoute>
-            <AccountsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/actions"
-        element={
-          <ProtectedRoute>
-            <ActionQueuePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/activity"
-        element={
-          <ProtectedRoute>
-            <ActivityFeedPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/leads"
-        element={
-          <ProtectedRoute>
-            <LeadGenPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/leads"
-        element={
-          <ProtectedRoute>
-            <LeadsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/leads/:id"
-        element={
-          <ProtectedRoute>
-            <LeadDetailPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/meetings/:id/brief"
-        element={
-          <ProtectedRoute>
-            <MeetingBriefPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/battlecards"
-        element={
-          <ProtectedRoute>
-            <BattleCardsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/drafts"
-        element={
-          <ProtectedRoute>
-            <EmailDraftsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/social"
-        element={
-          <ProtectedRoute>
-            <SocialPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/skills"
-        element={
-          <ProtectedRoute>
-            <SkillsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/skills/audit/:executionId"
-        element={
-          <ProtectedRoute>
-            <ExecutionReplayPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/workflows"
-        element={
-          <ProtectedRoute>
-            <WorkflowsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dashboard/roi"
-        element={
-          <ProtectedRoute>
-            <ROIDashboardPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/integrations"
-        element={
-          <ProtectedRoute>
-            <IntegrationsSettingsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/integrations/callback"
-        element={
-          <ProtectedRoute>
-            <IntegrationsCallbackPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/preferences"
-        element={
-          <ProtectedRoute>
-            <PreferencesSettingsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/aria-config"
-        element={
-          <ProtectedRoute>
-            <ARIAConfigPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/profile"
-        element={
-          <ProtectedRoute>
-            <SettingsProfilePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/account"
-        element={
-          <ProtectedRoute>
-            <SettingsAccountPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/privacy"
-        element={
-          <ProtectedRoute>
-            <SettingsPrivacyPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings/deep-sync"
-        element={
-          <ProtectedRoute>
-            <DeepSyncPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/team"
-        element={
-          <ProtectedRoute>
-            <AdminTeamPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/billing"
-        element={
-          <ProtectedRoute>
-            <AdminBillingPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/audit-log"
-        element={
-          <ProtectedRoute>
-            <AdminAuditLogPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/notifications"
-        element={
-          <ProtectedRoute>
-            <NotificationsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/help"
-        element={
-          <ProtectedRoute>
-            <HelpPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/changelog"
-        element={
-          <ProtectedRoute>
-            <ChangelogPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <PostAuthRouter />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+      <ThemeProvider>
+        <SessionProvider>
+          <AppRoutes />
+        </SessionProvider>
+      </ThemeProvider>
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}
