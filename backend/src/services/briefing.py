@@ -49,11 +49,40 @@ class BriefingService:
             extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
         )
 
-        # Gather data for briefing
-        calendar_data = await self._get_calendar_data(user_id, briefing_date)
-        lead_data = await self._get_lead_data(user_id)
-        signal_data = await self._get_signal_data(user_id)
-        task_data = await self._get_task_data(user_id)
+        # Gather data for briefing — each step isolated so one failure
+        # doesn't prevent the entire briefing from generating
+        empty_calendar: dict[str, Any] = {"meeting_count": 0, "key_meetings": []}
+        empty_leads: dict[str, Any] = {"hot_leads": [], "needs_attention": [], "recently_active": []}
+        empty_signals: dict[str, Any] = {
+            "company_news": [],
+            "market_trends": [],
+            "competitive_intel": [],
+        }
+        empty_tasks: dict[str, Any] = {"overdue": [], "due_today": []}
+
+        try:
+            calendar_data = await self._get_calendar_data(user_id, briefing_date)
+        except Exception:
+            logger.warning("Failed to gather calendar data", extra={"user_id": user_id}, exc_info=True)
+            calendar_data = empty_calendar
+
+        try:
+            lead_data = await self._get_lead_data(user_id)
+        except Exception:
+            logger.warning("Failed to gather lead data", extra={"user_id": user_id}, exc_info=True)
+            lead_data = empty_leads
+
+        try:
+            signal_data = await self._get_signal_data(user_id)
+        except Exception:
+            logger.warning("Failed to gather signal data", extra={"user_id": user_id}, exc_info=True)
+            signal_data = empty_signals
+
+        try:
+            task_data = await self._get_task_data(user_id)
+        except Exception:
+            logger.warning("Failed to gather task data", extra={"user_id": user_id}, exc_info=True)
+            task_data = empty_tasks
 
         # Generate summary using LLM
         summary = await self._generate_summary(calendar_data, lead_data, signal_data, task_data)
@@ -68,14 +97,21 @@ class BriefingService:
         }
 
         # Store briefing
-        self._db.table("daily_briefings").upsert(
-            {
-                "user_id": user_id,
-                "briefing_date": briefing_date.isoformat(),
-                "content": content,
-                "generated_at": datetime.now(UTC).isoformat(),
-            }
-        ).execute()
+        try:
+            self._db.table("daily_briefings").upsert(
+                {
+                    "user_id": user_id,
+                    "briefing_date": briefing_date.isoformat(),
+                    "content": content,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
+        except Exception:
+            logger.warning(
+                "Failed to store briefing, returning content without persistence",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
 
         logger.info(
             "Daily briefing generated",
@@ -180,11 +216,11 @@ class BriefingService:
             .eq("user_id", user_id)
             .eq("provider", "google_calendar")
             .eq("status", "active")
-            .single()
+            .maybe_single()
             .execute()
         )
 
-        if not integration_result.data:
+        if not integration_result or not integration_result.data:
             logger.debug(
                 "No calendar integration for user",
                 extra={"user_id": user_id},
@@ -415,12 +451,27 @@ class BriefingService:
         Returns:
             Generated summary string.
         """
-        prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
+        meeting_count = calendar.get("meeting_count", 0)
+        attention_count = len(leads.get("needs_attention", []))
+        signal_count = len(signals.get("company_news", []))
+        overdue_count = len(tasks.get("overdue", []))
+        total_activity = meeting_count + attention_count + signal_count + overdue_count
 
-Calendar: {calendar["meeting_count"]} meetings today
-Leads needing attention: {len(leads.get("needs_attention", []))}
-New signals: {len(signals.get("company_news", []))}
-Overdue tasks: {len(tasks.get("overdue", []))}
+        if total_activity == 0:
+            prompt = (
+                "Generate a brief, friendly morning briefing summary (2-3 sentences) "
+                "for a new user who just started using the platform. They have no meetings, "
+                "leads, signals, or tasks yet. Welcome them warmly and encourage them to "
+                "explore the platform — add leads, connect their calendar, set goals. "
+                'Start with "Good morning!"'
+            )
+        else:
+            prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
+
+Calendar: {meeting_count} meetings today
+Leads needing attention: {attention_count}
+New signals: {signal_count}
+Overdue tasks: {overdue_count}
 
 Be concise and actionable. Start with "Good morning!"
 """
