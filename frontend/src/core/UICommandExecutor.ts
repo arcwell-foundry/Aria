@@ -50,33 +50,37 @@ class UICommandExecutorImpl {
   }
 
   private async executeCommand(cmd: UICommand): Promise<void> {
-    switch (cmd.action) {
-      case 'navigate':
-        this.handleNavigate(cmd);
-        break;
-      case 'highlight':
-        this.handleHighlight(cmd);
-        break;
-      case 'update_intel_panel':
-        this.handleUpdateIntelPanel(cmd);
-        break;
-      case 'scroll_to':
-        this.handleScrollTo(cmd);
-        break;
-      case 'switch_mode':
-        this.handleSwitchMode(cmd);
-        break;
-      case 'show_notification':
-        this.handleShowNotification(cmd);
-        break;
-      case 'update_sidebar_badge':
-        this.handleUpdateSidebarBadge(cmd);
-        break;
-      case 'open_modal':
-        this.handleOpenModal(cmd);
-        break;
-      default:
-        console.warn(`[UICommandExecutor] Unknown command action: ${(cmd as UICommand).action}`);
+    try {
+      switch (cmd.action) {
+        case 'navigate':
+          this.handleNavigate(cmd);
+          break;
+        case 'highlight':
+          this.handleHighlight(cmd);
+          break;
+        case 'update_intel_panel':
+          this.handleUpdateIntelPanel(cmd);
+          break;
+        case 'scroll_to':
+          this.handleScrollTo(cmd);
+          break;
+        case 'switch_mode':
+          this.handleSwitchMode(cmd);
+          break;
+        case 'show_notification':
+          this.handleShowNotification(cmd);
+          break;
+        case 'update_sidebar_badge':
+          this.handleUpdateSidebarBadge(cmd);
+          break;
+        case 'open_modal':
+          this.handleOpenModal(cmd);
+          break;
+        default:
+          console.warn(`[UICommandExecutor] Unknown command action: ${(cmd as UICommand).action}`);
+      }
+    } catch (err) {
+      console.warn(`[UICommandExecutor] Failed to execute ${cmd.action}:`, err);
     }
   }
 

@@ -6,7 +6,7 @@
  * Also exposes executeUICommands() for manual execution.
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uiCommandExecutor } from '@/core/UICommandExecutor';
 import { wsManager } from '@/core/WebSocketManager';
@@ -15,14 +15,10 @@ import type { AriaMessagePayload } from '@/types/chat';
 
 export function useUICommands() {
   const navigate = useNavigate();
-  const initializedRef = useRef(false);
 
-  // Initialize executor with navigate function
+  // Keep executor's navigate function in sync with React Router
   useEffect(() => {
-    if (!initializedRef.current) {
-      uiCommandExecutor.setNavigate(navigate);
-      initializedRef.current = true;
-    }
+    uiCommandExecutor.setNavigate(navigate);
   }, [navigate]);
 
   // Listen for aria.message events and auto-execute ui_commands

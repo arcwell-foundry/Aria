@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
+import { useConversationStore } from '@/stores/conversationStore';
 
 export interface ChatInputModuleProps {
   context?: string;
@@ -18,8 +19,21 @@ export function ChatInputModule({
     const trimmed = value.trim();
     if (!trimmed) return;
 
+    const store = useConversationStore.getState();
+
+    // Add message to conversation thread so it's visible
+    store.addMessage({
+      role: 'user',
+      content: trimmed,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+
+    // Send via WebSocket with conversation context
     wsManager.send(WS_EVENTS.USER_MESSAGE, {
       message: trimmed,
+      conversation_id: store.activeConversationId,
       context_hint: context,
     });
     setValue('');
