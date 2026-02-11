@@ -1,0 +1,91 @@
+"""WebSocket event models for ARIA real-time communication."""
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class WSEventType(str, Enum):
+    """WebSocket event types matching frontend expectations."""
+
+    ARIA_MESSAGE = "aria.message"
+    THINKING = "aria.thinking"
+    ACTION_PENDING = "action.pending"
+    PROGRESS_UPDATE = "progress.update"
+    SIGNAL_DETECTED = "signal.detected"
+    CONNECTED = "connected"
+    PONG = "pong"
+
+
+class WSEvent(BaseModel):
+    """Base WebSocket event."""
+
+    type: WSEventType
+
+    def to_ws_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON WebSocket transmission."""
+        return self.model_dump(mode="json")
+
+
+class AriaMessageEvent(WSEvent):
+    """ARIA sends a message with optional rich content and UI commands."""
+
+    type: WSEventType = WSEventType.ARIA_MESSAGE
+    message: str
+    rich_content: list[dict[str, Any]] = Field(default_factory=list)
+    ui_commands: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class ThinkingEvent(WSEvent):
+    """ARIA is processing/thinking indicator."""
+
+    type: WSEventType = WSEventType.THINKING
+
+
+class ActionPendingEvent(WSEvent):
+    """An action requires user approval."""
+
+    type: WSEventType = WSEventType.ACTION_PENDING
+    action_id: str
+    title: str
+    agent: str
+    risk_level: str
+    description: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProgressUpdateEvent(WSEvent):
+    """Goal progress update from agent execution."""
+
+    type: WSEventType = WSEventType.PROGRESS_UPDATE
+    goal_id: str
+    progress: int
+    status: str
+    agent_name: str | None = None
+    message: str | None = None
+
+
+class SignalEvent(WSEvent):
+    """Intelligence signal detected."""
+
+    type: WSEventType = WSEventType.SIGNAL_DETECTED
+    signal_type: str
+    title: str
+    severity: str = "medium"
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConnectedEvent(WSEvent):
+    """Connection established confirmation."""
+
+    type: WSEventType = WSEventType.CONNECTED
+    user_id: str
+    session_id: str | None = None
+
+
+class PongEvent(WSEvent):
+    """Heartbeat pong response."""
+
+    type: WSEventType = WSEventType.PONG
