@@ -49,6 +49,9 @@ from src.api.routes import (
     social,
     workflows,
 )
+from src.api.routes import (
+    websocket as ws_route,
+)
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
 
@@ -186,6 +189,9 @@ app.include_router(workflows.router, prefix="/api/v1")
 
 # US-942: Deep sync routes
 app.include_router(deep_sync.router, prefix="/api/v1")
+
+# WebSocket endpoint (no /api/v1 prefix — connects at /ws/{user_id})
+app.include_router(ws_route.router)
 
 
 @app.get("/health", tags=["system"])
