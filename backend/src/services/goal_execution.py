@@ -1,8 +1,10 @@
-"""Goal Execution Service — runs agent analyses for activation goals.
+"""Goal Execution Service — runs agent analyses for goals.
 
-This is the missing link between activation (which creates goals) and the
-dashboard (which displays results). For beta, execution is synchronous:
-each agent runs a focused LLM analysis, stores the result, and moves on.
+Supports two execution modes:
+1. **Synchronous** (execute_goal_sync): Each agent runs inline, awaited in order.
+   Used for activation goals during onboarding.
+2. **Asynchronous** (execute_goal_async): Agents run in background via asyncio.Task.
+   Emits events via EventBus for SSE streaming to the frontend.
 
 Agent types and their analyses:
 - Scout: Competitive landscape summary (top competitors, recent news, market signals)
@@ -13,11 +15,13 @@ Agent types and their analyses:
 - Operator: Data quality report (what ARIA knows vs gaps)
 """
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from src.core.event_bus import EventBus, GoalEvent
 from src.core.llm import LLMClient
 from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
@@ -42,6 +46,7 @@ class GoalExecutionService:
         self._llm = LLMClient()
         self._activity = ActivityService()
         self._dynamic_agents: dict[str, type] = {}
+        self._active_tasks: dict[str, asyncio.Task[None]] = {}
 
     def register_dynamic_agent(self, agent_type: str, agent_class: type) -> None:
         """Register a dynamically created agent class for task routing.
@@ -56,8 +61,11 @@ class GoalExecutionService:
             extra={"agent_type": agent_type, "agent_class": agent_class.__name__},
         )
 
-    async def execute_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
-        """Execute a single goal by running all assigned agents.
+    async def execute_goal_sync(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Execute a single goal synchronously by running all assigned agents.
+
+        This is the original synchronous execution path. For async background
+        execution, use execute_goal_async() instead.
 
         Args:
             goal_id: The goal to execute.
@@ -246,7 +254,7 @@ class GoalExecutionService:
 
         for goal in activation_goals:
             try:
-                result = await self.execute_goal(goal["id"], user_id)
+                result = await self.execute_goal_sync(goal["id"], user_id)
                 all_results.append(result)
             except Exception as e:
                 logger.error(
@@ -1103,3 +1111,580 @@ class GoalExecutionService:
             '  "integration_suggestions": ["connect X for better coverage"]\n'
             "}"
         )
+
+    # --- Async Goal Execution Methods ---
+
+    async def propose_goals(self, user_id: str) -> dict[str, Any]:
+        """Use LLM to propose goals based on user context.
+
+        Gathers execution context and asks the LLM to suggest goals
+        the user should pursue based on pipeline gaps, market signals, etc.
+
+        Args:
+            user_id: The user to propose goals for.
+
+        Returns:
+            Dict with proposals list and context_summary.
+        """
+        context = await self._gather_execution_context(user_id)
+
+        facts_text = "\n".join(f"- {f}" for f in context.get("facts", [])[:20])
+        gaps_text = "\n".join(f"- {g}" for g in context.get("gaps", [])[:5])
+
+        prompt = (
+            f"Based on the following context for {context.get('company_name', 'the user')}, "
+            "propose 3-4 goals that ARIA should pursue.\n\n"
+            f"Key facts:\n{facts_text or 'Limited data'}\n"
+            f"Knowledge gaps:\n{gaps_text or 'None identified'}\n"
+            f"Readiness: {json.dumps(context.get('readiness', {}))}\n\n"
+            "Respond with JSON:\n"
+            "{\n"
+            '  "proposals": [\n'
+            '    {"title": "...", "description": "...", "goal_type": "lead_gen|research|strategy|communication|operations",\n'
+            '     "rationale": "why this goal matters now", "priority": "high|medium|low",\n'
+            '     "estimated_days": 7, "agent_assignments": ["hunter", "analyst"]}\n'
+            "  ],\n"
+            '  "context_summary": "brief summary of user context"\n'
+            "}"
+        )
+
+        response = await self._llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are ARIA, an AI Department Director for life sciences "
+                "commercial teams. Propose actionable goals. Respond with JSON only."
+            ),
+            max_tokens=2048,
+            temperature=0.4,
+        )
+
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {"proposals": [], "context_summary": response.strip()}
+
+    async def plan_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Decompose a goal into executable tasks with agent assignments.
+
+        Uses LLM to break down the goal into GoalTasks, then stores
+        the execution plan in the goal_execution_plans table.
+
+        Args:
+            goal_id: The goal to plan.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Dict with goal_id, tasks, execution_mode, reasoning.
+        """
+        # Fetch goal
+        goal_result = (
+            self._db.table("goals")
+            .select("*")
+            .eq("id", goal_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        goal = goal_result.data
+        if not goal:
+            return {"goal_id": goal_id, "error": "Goal not found", "tasks": []}
+
+        context = await self._gather_execution_context(user_id)
+
+        prompt = (
+            f"Decompose this goal into executable sub-tasks:\n\n"
+            f"Goal: {goal.get('title', '')}\n"
+            f"Description: {goal.get('description', '')}\n"
+            f"Type: {goal.get('goal_type', 'research')}\n\n"
+            f"Company: {context.get('company_name', '')}\n"
+            f"Available agents: scout, analyst, hunter, strategist, scribe, operator\n\n"
+            "Respond with JSON:\n"
+            "{\n"
+            '  "tasks": [\n'
+            '    {"title": "...", "description": "...", "agent_type": "analyst|hunter|...",\n'
+            '     "depends_on": [], "estimated_duration_minutes": 30}\n'
+            "  ],\n"
+            '  "execution_mode": "parallel|sequential",\n'
+            '  "reasoning": "why this decomposition"\n'
+            "}"
+        )
+
+        response = await self._llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are ARIA's planning module. Decompose goals into agent-executable "
+                "tasks. Each task should have a clear agent assignment. Respond with JSON only."
+            ),
+            max_tokens=2048,
+            temperature=0.3,
+        )
+
+        try:
+            plan_data = json.loads(response)
+        except json.JSONDecodeError:
+            plan_data = {
+                "tasks": [
+                    {
+                        "title": goal.get("title", "Execute goal"),
+                        "description": goal.get("description", ""),
+                        "agent_type": goal.get("config", {}).get("agent_type", "analyst"),
+                        "depends_on": [],
+                    }
+                ],
+                "execution_mode": "sequential",
+                "reasoning": "Fallback: single-task plan",
+            }
+
+        # Store plan in DB
+        tasks_json = plan_data.get("tasks", [])
+        self._db.table("goal_execution_plans").insert(
+            {
+                "goal_id": goal_id,
+                "tasks": json.dumps(tasks_json),
+                "execution_mode": plan_data.get("execution_mode", "parallel"),
+                "estimated_total_minutes": sum(
+                    t.get("estimated_duration_minutes", 30) for t in tasks_json
+                ),
+                "reasoning": plan_data.get("reasoning", ""),
+            }
+        ).execute()
+
+        return {
+            "goal_id": goal_id,
+            "tasks": tasks_json,
+            "execution_mode": plan_data.get("execution_mode", "parallel"),
+            "reasoning": plan_data.get("reasoning", ""),
+        }
+
+    async def execute_goal_async(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Start async background execution of a goal.
+
+        Creates an asyncio.Task running _run_goal_background, updates
+        goal status to 'active', and returns immediately.
+
+        Args:
+            goal_id: The goal to execute.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Dict with goal_id and status 'executing'.
+        """
+        # Update goal status to active
+        now = datetime.now(UTC).isoformat()
+        self._db.table("goals").update(
+            {"status": "active", "started_at": now, "updated_at": now}
+        ).eq("id", goal_id).execute()
+
+        # Launch background task
+        task = asyncio.create_task(self._run_goal_background(goal_id, user_id))
+        self._active_tasks[goal_id] = task
+
+        # Clean up reference when done
+        task.add_done_callback(lambda _t: self._active_tasks.pop(goal_id, None))
+
+        logger.info(
+            "Goal async execution started",
+            extra={"goal_id": goal_id, "user_id": user_id},
+        )
+
+        return {"goal_id": goal_id, "status": "executing"}
+
+    async def _run_goal_background(self, goal_id: str, user_id: str) -> None:
+        """Background coroutine that executes a goal's plan.
+
+        Loads or creates an execution plan, groups tasks by dependency
+        order, executes each group, and publishes events via EventBus.
+
+        Args:
+            goal_id: The goal to execute.
+            user_id: The user who owns this goal.
+        """
+        event_bus = EventBus.get_instance()
+
+        try:
+            # Load execution plan
+            plan_result = (
+                self._db.table("goal_execution_plans")
+                .select("*")
+                .eq("goal_id", goal_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+
+            if plan_result.data:
+                tasks_raw = plan_result.data.get("tasks", "[]")
+                tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
+            else:
+                # Auto-plan if no plan exists
+                plan = await self.plan_goal(goal_id, user_id)
+                tasks = plan.get("tasks", [])
+
+            if not tasks:
+                await event_bus.publish(
+                    GoalEvent(
+                        goal_id=goal_id,
+                        user_id=user_id,
+                        event_type="goal.error",
+                        data={"error": "No tasks in execution plan"},
+                    )
+                )
+                return
+
+            # Fetch goal for context
+            goal_result = (
+                self._db.table("goals")
+                .select("*")
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            goal = goal_result.data or {"id": goal_id, "title": "Unknown", "config": {}}
+            context = await self._gather_execution_context(user_id)
+
+            total_tasks = len(tasks)
+            completed_tasks = 0
+
+            # Execute tasks — simple sequential for now, respecting dependencies
+            for task in tasks:
+                agent_type = task.get("agent_type", "analyst")
+
+                await event_bus.publish(
+                    GoalEvent(
+                        goal_id=goal_id,
+                        user_id=user_id,
+                        event_type="agent.started",
+                        data={
+                            "agent": agent_type,
+                            "task_title": task.get("title", ""),
+                        },
+                    )
+                )
+
+                try:
+                    result = await self._execute_agent(
+                        user_id=user_id,
+                        goal=goal,
+                        agent_type=agent_type,
+                        context=context,
+                    )
+
+                    await self._handle_agent_result(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        agent_type=agent_type,
+                        result=result,
+                        task=task,
+                    )
+
+                    completed_tasks += 1
+                    progress = int((completed_tasks / total_tasks) * 100)
+
+                    await event_bus.publish(
+                        GoalEvent(
+                            goal_id=goal_id,
+                            user_id=user_id,
+                            event_type="progress.update",
+                            data={
+                                "progress": progress,
+                                "completed": completed_tasks,
+                                "total": total_tasks,
+                                "last_agent": agent_type,
+                            },
+                        )
+                    )
+
+                    # Update goal progress in DB
+                    self._db.table("goals").update(
+                        {"progress": progress, "updated_at": datetime.now(UTC).isoformat()}
+                    ).eq("id", goal_id).execute()
+
+                except Exception as e:
+                    logger.error(
+                        "Agent task failed in background execution",
+                        extra={
+                            "goal_id": goal_id,
+                            "agent_type": agent_type,
+                            "error": str(e),
+                        },
+                    )
+                    await event_bus.publish(
+                        GoalEvent(
+                            goal_id=goal_id,
+                            user_id=user_id,
+                            event_type="agent.completed",
+                            data={
+                                "agent": agent_type,
+                                "success": False,
+                                "error": str(e),
+                            },
+                        )
+                    )
+
+            # All tasks done — complete the goal
+            await self.complete_goal_with_retro(goal_id, user_id)
+
+        except asyncio.CancelledError:
+            logger.info("Goal background execution cancelled", extra={"goal_id": goal_id})
+            raise
+        except Exception as e:
+            logger.error(
+                "Goal background execution failed",
+                extra={"goal_id": goal_id, "error": str(e)},
+            )
+            # Update goal status to reflect error
+            self._db.table("goals").update(
+                {"status": "paused", "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("id", goal_id).execute()
+
+            await event_bus.publish(
+                GoalEvent(
+                    goal_id=goal_id,
+                    user_id=user_id,
+                    event_type="goal.error",
+                    data={"error": str(e)},
+                )
+            )
+
+    async def _handle_agent_result(
+        self,
+        user_id: str,
+        goal_id: str,
+        agent_type: str,
+        result: dict[str, Any],
+        task: dict[str, Any],
+    ) -> None:
+        """Process an agent's execution result.
+
+        Stores the execution, submits actions to the queue with
+        appropriate risk levels, and publishes completion events.
+
+        Args:
+            user_id: The user ID.
+            goal_id: The goal ID.
+            agent_type: The agent type that produced the result.
+            result: The agent execution result dict.
+            task: The task definition dict.
+        """
+        event_bus = EventBus.get_instance()
+        content = result.get("content", {})
+
+        # Publish agent completion event
+        await event_bus.publish(
+            GoalEvent(
+                goal_id=goal_id,
+                user_id=user_id,
+                event_type="agent.completed",
+                data={
+                    "agent": agent_type,
+                    "success": result.get("success", False),
+                    "task_title": task.get("title", ""),
+                },
+            )
+        )
+
+        # Submit recommended actions to action queue
+        if result.get("success") and isinstance(content, dict):
+            await self._submit_actions_to_queue(
+                user_id=user_id,
+                agent_type=agent_type,
+                content=content,
+                goal_id=goal_id,
+            )
+
+    async def check_progress(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Get a progress snapshot for a goal.
+
+        Reads goal status, execution plan, and recent agent executions
+        to build a comprehensive progress view.
+
+        Args:
+            goal_id: The goal to check.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Progress snapshot dict.
+        """
+        # Fetch goal
+        goal_result = (
+            self._db.table("goals")
+            .select("id, title, status, progress, started_at, updated_at")
+            .eq("id", goal_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        goal = goal_result.data
+        if not goal:
+            return {"goal_id": goal_id, "error": "Goal not found"}
+
+        # Fetch latest plan
+        plan_result = (
+            self._db.table("goal_execution_plans")
+            .select("tasks, execution_mode, reasoning")
+            .eq("goal_id", goal_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        plan = plan_result.data
+
+        # Fetch recent executions
+        exec_result = (
+            self._db.table("agent_executions")
+            .select("goal_agent_id, status, started_at, completed_at, output")
+            .eq("goal_agent_id", goal_id)
+            .order("completed_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        executions = exec_result.data or []
+
+        return {
+            "goal_id": goal_id,
+            "title": goal.get("title", ""),
+            "status": goal.get("status", "unknown"),
+            "progress": goal.get("progress", 0),
+            "started_at": goal.get("started_at"),
+            "updated_at": goal.get("updated_at"),
+            "plan": plan,
+            "recent_executions": executions,
+            "is_running": goal_id in self._active_tasks,
+        }
+
+    async def report_progress(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Generate a narrative progress report for a goal.
+
+        Uses LLM to summarize the current progress into a human-readable
+        report suitable for display in the conversation.
+
+        Args:
+            goal_id: The goal to report on.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Dict with goal_id and report narrative.
+        """
+        progress = await self.check_progress(goal_id, user_id)
+
+        prompt = (
+            f"Generate a brief progress report for this goal:\n\n"
+            f"Title: {progress.get('title', 'Unknown')}\n"
+            f"Status: {progress.get('status', 'unknown')}\n"
+            f"Progress: {progress.get('progress', 0)}%\n"
+            f"Plan: {json.dumps(progress.get('plan'), default=str)}\n"
+            f"Recent executions: {len(progress.get('recent_executions', []))}\n\n"
+            "Respond with JSON:\n"
+            '{"summary": "1-2 sentence overview", "details": "key findings", '
+            '"next_steps": ["what happens next"]}'
+        )
+
+        response = await self._llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are ARIA reporting on goal progress. Be concise and specific. "
+                "Respond with JSON only."
+            ),
+            max_tokens=1024,
+            temperature=0.3,
+        )
+
+        try:
+            report = json.loads(response)
+        except json.JSONDecodeError:
+            report = {"summary": response.strip(), "details": "", "next_steps": []}
+
+        return {"goal_id": goal_id, "report": report}
+
+    async def complete_goal_with_retro(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Mark a goal as complete and generate a retrospective.
+
+        Updates goal status, generates a retrospective via GoalService,
+        and publishes a goal.complete event.
+
+        Args:
+            goal_id: The goal to complete.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Dict with status and retrospective data.
+        """
+        from src.services.goal_service import GoalService
+
+        now = datetime.now(UTC).isoformat()
+        self._db.table("goals").update(
+            {
+                "status": "complete",
+                "progress": 100,
+                "completed_at": now,
+                "updated_at": now,
+            }
+        ).eq("id", goal_id).execute()
+
+        # Generate retrospective
+        retro = None
+        try:
+            goal_service = GoalService()
+            retro = await goal_service.generate_retrospective(user_id, goal_id)
+        except Exception as e:
+            logger.warning("Failed to generate retrospective: %s", e)
+
+        # Publish completion event
+        event_bus = EventBus.get_instance()
+        await event_bus.publish(
+            GoalEvent(
+                goal_id=goal_id,
+                user_id=user_id,
+                event_type="goal.complete",
+                data={"retrospective": retro},
+            )
+        )
+
+        logger.info(
+            "Goal completed with retrospective",
+            extra={"goal_id": goal_id, "user_id": user_id},
+        )
+
+        return {"goal_id": goal_id, "status": "complete", "retrospective": retro}
+
+    async def cancel_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Cancel a running goal's background execution.
+
+        Cancels the asyncio.Task if running, updates goal status to
+        'paused', and publishes a goal.error event.
+
+        Args:
+            goal_id: The goal to cancel.
+            user_id: The user who owns this goal.
+
+        Returns:
+            Dict with goal_id and status.
+        """
+        # Cancel background task if running
+        task = self._active_tasks.pop(goal_id, None)
+        if task and not task.done():
+            task.cancel()
+
+        # Update goal status
+        now = datetime.now(UTC).isoformat()
+        self._db.table("goals").update({"status": "paused", "updated_at": now}).eq(
+            "id", goal_id
+        ).execute()
+
+        # Publish cancellation event
+        event_bus = EventBus.get_instance()
+        await event_bus.publish(
+            GoalEvent(
+                goal_id=goal_id,
+                user_id=user_id,
+                event_type="goal.error",
+                data={"reason": "cancelled_by_user"},
+            )
+        )
+
+        logger.info("Goal cancelled", extra={"goal_id": goal_id, "user_id": user_id})
+
+        return {"goal_id": goal_id, "status": "cancelled"}

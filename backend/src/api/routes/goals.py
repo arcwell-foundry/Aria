@@ -4,12 +4,16 @@ This module provides endpoints for:
 - Creating and querying goals
 - Managing goal lifecycle (start, pause, complete)
 - Tracking goal progress
+- Async goal execution (propose, plan, execute, events, cancel, report)
 """
 
+import asyncio
+import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
@@ -133,6 +137,127 @@ async def get_templates(
     """
     service = _get_service()
     return await service.get_templates(role)
+
+
+# --- Async Goal Execution Endpoints (must precede /{goal_id}) ---
+
+
+def _get_execution_service():  # type: ignore[no-untyped-def]
+    """Get goal execution service instance."""
+    from src.services.goal_execution import GoalExecutionService
+
+    return GoalExecutionService()
+
+
+@router.post("/propose")
+async def propose_goals(current_user: CurrentUser) -> dict[str, Any]:
+    """Propose goals for the user based on context.
+
+    Uses LLM to analyze user's pipeline, knowledge gaps, and market
+    signals to suggest actionable goals ARIA should pursue.
+    """
+    service = _get_execution_service()
+    result = await service.propose_goals(current_user.id)
+    logger.info("Goals proposed via API", extra={"user_id": current_user.id})
+    return result
+
+
+@router.post("/{goal_id}/plan")
+async def plan_goal(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Create an execution plan for a goal.
+
+    Decomposes the goal into sub-tasks with agent assignments and
+    dependency ordering. Stores the plan in the database.
+    """
+    service = _get_execution_service()
+    result = await service.plan_goal(goal_id, current_user.id)
+    logger.info("Goal planned via API", extra={"goal_id": goal_id})
+    return result
+
+
+@router.post("/{goal_id}/execute")
+async def execute_goal(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Start async background execution of a goal.
+
+    Launches agents in background and returns immediately.
+    Use the /events endpoint to stream progress updates.
+    """
+    service = _get_execution_service()
+    result = await service.execute_goal_async(goal_id, current_user.id)
+    logger.info("Goal execution started via API", extra={"goal_id": goal_id})
+    return result
+
+
+@router.get("/{goal_id}/events")
+async def goal_events(
+    goal_id: str,
+    current_user: CurrentUser,  # noqa: ARG001
+) -> StreamingResponse:
+    """Stream goal execution events via SSE.
+
+    Returns a Server-Sent Events stream of GoalEvents for real-time
+    monitoring of background goal execution. Stream ends when goal
+    completes or errors.
+    """
+    from src.core.event_bus import EventBus
+
+    event_bus = EventBus.get_instance()
+
+    async def event_stream():  # type: ignore[no-untyped-def]
+        queue = event_bus.subscribe(goal_id)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event.to_dict())}\n\n"
+                    if event.event_type in ("goal.complete", "goal.error"):
+                        break
+                except TimeoutError:
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        finally:
+            event_bus.unsubscribe(goal_id, queue)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/{goal_id}/cancel")
+async def cancel_goal_execution(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Cancel background execution of a goal.
+
+    Stops any running background tasks and updates goal status to paused.
+    """
+    service = _get_execution_service()
+    result = await service.cancel_goal(goal_id, current_user.id)
+    logger.info("Goal cancelled via API", extra={"goal_id": goal_id})
+    return result
+
+
+@router.get("/{goal_id}/report")
+async def goal_report(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get a narrative progress report for a goal.
+
+    Uses LLM to summarize current progress into a human-readable
+    report suitable for the conversation UI.
+    """
+    service = _get_execution_service()
+    result = await service.report_progress(goal_id, current_user.id)
+    logger.info("Goal report generated via API", extra={"goal_id": goal_id})
+    return result
+
+
+# --- Standard Goal CRUD Endpoints ---
 
 
 @router.get("/{goal_id}")

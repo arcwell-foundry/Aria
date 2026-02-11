@@ -105,6 +105,98 @@ async def _run_calendar_meeting_checks() -> None:
         logger.exception("Calendar meeting check scheduler run failed")
 
 
+async def _run_ooda_goal_checks() -> None:
+    """Run a single OODA iteration for each active goal.
+
+    Queries all goals with status='active', creates an OODALoop for each,
+    and runs one monitoring iteration. If the OODA decides 'complete',
+    triggers goal completion with retrospective.
+    """
+    try:
+        from src.core.llm import LLMClient
+        from src.core.ooda import OODAConfig, OODALoop, OODAState
+        from src.db.supabase import SupabaseClient
+        from src.memory.episodic import EpisodicMemory
+        from src.memory.semantic import SemanticMemory
+        from src.memory.working import WorkingMemory
+        from src.services.goal_execution import GoalExecutionService
+
+        db = SupabaseClient.get_client()
+
+        # Find active goals
+        result = (
+            db.table("goals")
+            .select("id, user_id, title, description, goal_type, config, progress")
+            .eq("status", "active")
+            .execute()
+        )
+
+        goals = result.data or []
+        logger.info("OODA goal check: processing %d active goals", len(goals))
+
+        llm = LLMClient()
+        execution_service = GoalExecutionService()
+
+        for goal in goals:
+            try:
+                user_id = goal["user_id"]
+                goal_id = goal["id"]
+
+                # Create memory services for this user
+                episodic = EpisodicMemory(user_id=user_id)
+                semantic = SemanticMemory(user_id=user_id)
+                working = WorkingMemory(user_id=user_id)
+
+                # Create OODA loop with single-iteration config
+                ooda_config = OODAConfig(max_iterations=1)
+                ooda = OODALoop(
+                    llm_client=llm,
+                    episodic_memory=episodic,
+                    semantic_memory=semantic,
+                    working_memory=working,
+                    config=ooda_config,
+                )
+
+                state = OODAState(goal_id=goal_id)
+                state = await ooda.run_single_iteration(state, goal)
+
+                decision_action = state.decision.get("action") if state.decision else None
+
+                if state.is_complete or decision_action == "complete":
+                    await execution_service.complete_goal_with_retro(goal_id, user_id)
+                    logger.info(
+                        "OODA decided goal complete",
+                        extra={"goal_id": goal_id},
+                    )
+                elif state.is_blocked:
+                    db.table("goals").update(
+                        {
+                            "config": {
+                                **goal.get("config", {}),
+                                "health": "blocked",
+                                "blocked_reason": state.blocked_reason,
+                            }
+                        }
+                    ).eq("id", goal_id).execute()
+                    logger.warning(
+                        "OODA detected blocked goal",
+                        extra={
+                            "goal_id": goal_id,
+                            "reason": state.blocked_reason,
+                        },
+                    )
+
+            except Exception:
+                logger.warning(
+                    "OODA goal check failed for goal %s",
+                    goal.get("id"),
+                    exc_info=True,
+                )
+
+    except Exception:
+        logger.exception("OODA goal checks scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -142,11 +234,19 @@ async def start_scheduler() -> None:
             name="Predictive pre-executor (Enhancement 9)",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_ooda_goal_checks,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="ooda_goal_monitoring",
+            name="OODA goal monitoring",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "Background scheduler started — ambient gaps at 06:00 daily, "
             "calendar meeting checks every 30 min, "
-            "predictive pre-executor every 30 min"
+            "predictive pre-executor every 30 min, "
+            "OODA goal monitoring every 30 min"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
