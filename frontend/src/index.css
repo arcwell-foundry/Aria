@@ -26,6 +26,15 @@
   --critical: #A66B6B;
   --info: #6B7FA3;
   --new-intelligence: #8B92A5;
+
+  /* Focus & Ring — Dark Mode */
+  --ring: rgba(123, 142, 170, 0.4);
+  --ring-offset: #0F1117;
+
+  /* Shadows — Dark Mode */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
 }
 
 .light {
@@ -45,6 +54,15 @@
   --critical: #945A5A;
   --info: #5B6E8A;
   --new-intelligence: #7B8EAA;
+
+  /* Focus & Ring — Light Mode */
+  --ring: rgba(91, 110, 138, 0.3);
+  --ring-offset: #FAFAF9;
+
+  /* Shadows — Light Mode */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 }
 
 @theme {
