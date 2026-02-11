@@ -49,28 +49,36 @@ class GenerateBriefingRequest(BaseModel):
     briefing_date: str | None = Field(None, description="ISO date string (e.g., 2026-02-01)")
 
 
-@router.get("/today", response_model=BriefingContent)
+@router.get("/today")
 async def get_today_briefing(
     current_user: CurrentUser,
     regenerate: bool = Query(False, description="Force regenerate briefing"),
-) -> BriefingContent:
+) -> dict[str, Any]:
     """Get today's briefing, generating if needed.
 
     Returns the daily briefing content for the current user.
-    If regenerate=true, forces generation of a new briefing.
+    If no briefing exists yet and regenerate is not requested,
+    returns a not_generated status so the dashboard can show
+    an empty state.
     """
     service = BriefingService()
+
     if regenerate:
         content = await service.generate_briefing(current_user.id)
-    else:
-        content = await service.get_or_generate_briefing(current_user.id)
+        return {"briefing": content, "status": "ready"}
 
+    existing = await service.get_briefing(current_user.id)
+    if existing:
+        content = existing.get("content")
+        if isinstance(content, dict):
+            return {"briefing": content, "status": "ready"}
+
+    # No briefing yet — return empty default instead of generating
     logger.info(
-        "Today's briefing retrieved",
-        extra={"user_id": current_user.id, "regenerate": regenerate},
+        "No briefing available for user",
+        extra={"user_id": current_user.id},
     )
-
-    return BriefingContent(**content)
+    return {"briefing": None, "status": "not_generated"}
 
 
 @router.get("", response_model=list[BriefingListResponse])

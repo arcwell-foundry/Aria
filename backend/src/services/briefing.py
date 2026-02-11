@@ -110,12 +110,13 @@ class BriefingService:
             .select("*")
             .eq("user_id", user_id)
             .eq("briefing_date", briefing_date.isoformat())
-            .single()
+            .maybe_single()
             .execute()
         )
 
-        data = result.data
-        return data if data and isinstance(data, dict) else None
+        if not result or not result.data:
+            return None
+        return result.data if isinstance(result.data, dict) else None
 
     async def get_or_generate_briefing(
         self, user_id: str, briefing_date: date | None = None
