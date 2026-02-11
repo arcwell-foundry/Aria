@@ -737,6 +737,9 @@ class ChatService:
             "message": response_text,
             "citations": citations,
             "conversation_id": conversation_id,
+            "rich_content": [],
+            "ui_commands": [],
+            "suggestions": [],
             "timing": {
                 "memory_query_ms": round(memory_ms, 2),
                 "proactive_query_ms": round(proactive_ms, 2),

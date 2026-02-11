@@ -44,6 +44,18 @@ export interface UpdateConversationTitleRequest {
   title: string;
 }
 
+export interface UICommand {
+  action: string;
+  route?: string;
+  element?: string;
+  content?: Record<string, unknown>;
+}
+
+export interface RichContent {
+  type: string;
+  data: Record<string, unknown>;
+}
+
 export interface SendMessageRequest {
   message: string;
   conversation_id?: string;
@@ -53,6 +65,9 @@ export interface SendMessageResponse {
   message: string;
   citations: Citation[];
   conversation_id: string;
+  rich_content: RichContent[];
+  ui_commands: UICommand[];
+  suggestions: string[];
 }
 
 // API functions
@@ -168,6 +183,8 @@ export function streamMessage(
                 clearTimeout(streamTimeout);
                 onError(new Error(event.content));
                 return;
+              } else if (event.type === "complete") {
+                // Envelope data available for future UI command processing
               }
             } catch {
               // Ignore parse errors for incomplete chunks

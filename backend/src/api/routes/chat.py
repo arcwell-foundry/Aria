@@ -57,12 +57,31 @@ class CognitiveLoadInfo(BaseModel):
     recommendation: str
 
 
+class UICommand(BaseModel):
+    """A UI command ARIA can issue to control the frontend."""
+
+    action: str
+    route: str | None = None
+    element: str | None = None
+    content: dict | None = None
+
+
+class RichContent(BaseModel):
+    """A rich content component in ARIA's response."""
+
+    type: str
+    data: dict
+
+
 class ChatResponse(BaseModel):
     """Response from chat endpoint."""
 
     message: str
-    citations: list[Citation]
+    citations: list[Citation] = []
     conversation_id: str
+    rich_content: list[RichContent] = []
+    ui_commands: list[UICommand] = []
+    suggestions: list[str] = []
     timing: Timing | None = None
     cognitive_load: CognitiveLoadInfo | None = None
 
@@ -144,6 +163,9 @@ async def chat(
         message=result["message"],
         citations=[Citation(**c) for c in result.get("citations", [])],
         conversation_id=result["conversation_id"],
+        rich_content=[],
+        ui_commands=[],
+        suggestions=result.get("suggestions", []),
         timing=Timing(**result["timing"]) if result.get("timing") else None,
         cognitive_load=CognitiveLoadInfo(**result["cognitive_load"])
         if result.get("cognitive_load")
@@ -308,6 +330,15 @@ async def chat_stream(
                 "total_ms": round(total_ms, 2),
             },
         )
+
+        # Emit completion metadata with envelope fields
+        complete_event = {
+            "type": "complete",
+            "rich_content": [],
+            "ui_commands": [],
+            "suggestions": [],
+        }
+        yield f"data: {json.dumps(complete_event)}\n\n"
 
         yield "data: [DONE]\n\n"
 
