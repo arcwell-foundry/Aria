@@ -332,11 +332,14 @@ async def chat_stream(
         )
 
         # Emit completion metadata with envelope fields
+        ui_commands = _analyze_ui_commands(full_content)
+        suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
+
         complete_event = {
             "type": "complete",
             "rich_content": [],
-            "ui_commands": [],
-            "suggestions": [],
+            "ui_commands": ui_commands,
+            "suggestions": suggestions,
         }
         yield f"data: {json.dumps(complete_event)}\n\n"
 
@@ -530,3 +533,94 @@ async def delete_conversation(
     )
 
     return {"status": "deleted", "id": conversation_id}
+
+
+# --- Envelope field generators ---
+
+# Navigation keywords mapped to routes
+_ROUTE_KEYWORDS: dict[str, str] = {
+    "pipeline": "/pipeline",
+    "intelligence": "/intelligence",
+    "battle card": "/intelligence/battle-cards",
+    "communication": "/communications",
+    "action": "/actions",
+    "briefing": "/briefing",
+    "settings": "/settings",
+}
+
+
+def _analyze_ui_commands(response: str) -> list[dict]:
+    """Analyze ARIA's response for UI navigation or highlight intents.
+
+    Scans for route-related keywords and generates navigate commands.
+    This is a heuristic approach; the LLM can also produce explicit
+    ui_commands in structured responses.
+
+    Args:
+        response: The assistant's text response.
+
+    Returns:
+        List of UICommand dicts.
+    """
+    commands: list[dict] = []
+    response_lower = response.lower()
+
+    for keyword, route in _ROUTE_KEYWORDS.items():
+        if keyword in response_lower:
+            commands.append({"action": "navigate", "route": route})
+            break  # Only one navigation per response
+
+    return commands
+
+
+def _generate_suggestions(
+    response: str,
+    conversation: list[dict],
+) -> list[str]:
+    """Generate contextual follow-up suggestions.
+
+    Uses simple heuristics based on the response content and
+    conversation history. Returns 2-3 follow-up prompts.
+
+    Args:
+        response: The assistant's latest response text.
+        conversation: Recent conversation messages.
+
+    Returns:
+        List of 2-3 suggestion strings.
+    """
+    suggestions: list[str] = []
+    response_lower = response.lower()
+
+    # Conversation history available for future multi-turn heuristics
+    _history_len = len(conversation)
+
+    # Context-aware suggestions based on keywords
+    if "battle card" in response_lower:
+        suggestions.extend([
+            "Compare with other competitors",
+            "Draft outreach based on this",
+        ])
+    elif "pipeline" in response_lower:
+        suggestions.extend([
+            "Which deals need attention?",
+            "Show me the forecast",
+        ])
+    elif "analysis" in response_lower or "landscape" in response_lower:
+        suggestions.extend([
+            "What are the key risks?",
+            "Recommend next steps",
+        ])
+    elif "email" in response_lower or "draft" in response_lower:
+        suggestions.extend([
+            "Make it more concise",
+            "Adjust the tone",
+        ])
+
+    # Always add a generic follow-up if we have fewer than 2
+    if len(suggestions) < 2:
+        suggestions.append("What should I focus on today?")
+    if len(suggestions) < 2:
+        suggestions.append("Show me my briefing")
+
+    return suggestions[:4]
