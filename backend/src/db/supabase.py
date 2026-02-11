@@ -70,10 +70,17 @@ class SupabaseClient:
             _supabase_circuit_breaker.record_success()
             return cast(dict[str, Any], response.data)
         except NotFoundError:
+            # Not-found is not a service failure — don't trip the breaker.
+            _supabase_circuit_breaker.record_success()
             raise
         except CircuitBreakerOpen:
             raise
         except Exception as e:
+            # PGRST116 means 0 rows from .single() — treat as not-found,
+            # not a service failure.
+            if "PGRST116" in str(e):
+                _supabase_circuit_breaker.record_success()
+                raise NotFoundError("User", user_id) from e
             _supabase_circuit_breaker.record_failure()
             logger.exception("Error fetching user", extra={"user_id": user_id})
             raise DatabaseError(f"Failed to fetch user: {e}") from e

@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import Any, cast
 
+from src.core.circuit_breaker import CircuitBreakerOpen
 from src.core.exceptions import ARIAException, NotFoundError
 from src.db.supabase import SupabaseClient
 from src.memory.profile_merge import ProfileMergeService
@@ -144,6 +145,8 @@ class ProfileService:
 
         except NotFoundError:
             raise
+        except CircuitBreakerOpen:
+            raise
         except Exception as e:
             logger.exception("Error fetching full profile", extra={"user_id": user_id})
             raise ARIAException(
@@ -181,11 +184,17 @@ class ProfileService:
                 return profile["user"]
 
             # Snapshot old data for US-922 diff detection
-            old_profile = await SupabaseClient.get_user_by_id(user_id)
-            old_data = {k: old_profile.get(k) for k in update_data}
+            try:
+                old_profile = await SupabaseClient.get_user_by_id(user_id)
+                old_data = {k: old_profile.get(k) for k in update_data}
+            except (NotFoundError, CircuitBreakerOpen):
+                # Profile doesn't exist yet — create it via upsert.
+                old_profile = {}
+                old_data = {}
 
+            upsert_data = {**update_data, "id": user_id}
             response = (
-                self.db.table("user_profiles").update(update_data).eq("id", user_id).execute()
+                self.db.table("user_profiles").upsert(upsert_data).execute()
             )
 
             if not response.data:

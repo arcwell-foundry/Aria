@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.deps import CurrentUser
+from src.core.circuit_breaker import CircuitBreakerOpen
 from src.core.exceptions import ARIAException, NotFoundError, sanitize_error
 from src.services.profile_service import ProfileService
 
@@ -105,46 +106,35 @@ async def get_profile(
     try:
         service = _get_service()
         return await service.get_full_profile(current_user.id)
-    except Exception as e:
-        # If the profile row simply doesn't exist yet, return a skeleton
+    except (NotFoundError, CircuitBreakerOpen):
+        # No profile row yet, or circuit breaker tripped — return a skeleton
         # so the frontend can proceed (e.g. redirect to onboarding).
-        # The error chain may be: PGRST116 → DatabaseError → ARIAException,
-        # so check the full cause chain for the original error.
-        err_chain = str(e).lower()
-        cause = e.__cause__
-        while cause:
-            err_chain += " " + str(cause).lower()
-            cause = cause.__cause__
-        if (
-            isinstance(e, NotFoundError)
-            or "not found" in err_chain
-            or "pgrst116" in err_chain
-        ):
-            user_meta = getattr(current_user, "user_metadata", {}) or {}
-            logger.info(
-                "No user_profiles row, returning skeleton profile",
-                extra={"user_id": current_user.id},
-            )
-            return {
-                "user": {
-                    "id": current_user.id,
-                    "full_name": user_meta.get("full_name"),
-                    "title": None,
-                    "department": None,
-                    "linkedin_url": None,
-                    "avatar_url": None,
-                    "company_id": None,
-                    "role": "user",
-                    "communication_preferences": {},
-                    "privacy_exclusions": [],
-                    "default_tone": "friendly",
-                    "tracked_competitors": [],
-                    "created_at": None,
-                    "updated_at": None,
-                },
-                "company": None,
-                "integrations": [],
-            }
+        user_meta = getattr(current_user, "user_metadata", {}) or {}
+        logger.info(
+            "No user_profiles row, returning skeleton profile",
+            extra={"user_id": current_user.id},
+        )
+        return {
+            "user": {
+                "id": current_user.id,
+                "full_name": user_meta.get("full_name"),
+                "title": None,
+                "department": None,
+                "linkedin_url": None,
+                "avatar_url": None,
+                "company_id": None,
+                "role": "user",
+                "communication_preferences": {},
+                "privacy_exclusions": [],
+                "default_tone": "friendly",
+                "tracked_competitors": [],
+                "created_at": None,
+                "updated_at": None,
+            },
+            "company": None,
+            "integrations": [],
+        }
+    except Exception as e:
         logger.exception("Error fetching profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
+from src.core.circuit_breaker import CircuitBreakerOpen
 from src.core.exceptions import NotFoundError, sanitize_error
 from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.db.supabase import SupabaseClient
@@ -365,23 +366,23 @@ async def get_current_user_profile(current_user: CurrentUser) -> dict[str, Any]:
             "avatar_url": profile.get("avatar_url"),
         }
 
-    except (NotFoundError, Exception) as e:
-        if isinstance(e, NotFoundError) or "not found" in str(e).lower() or "PGRST116" in str(e):
-            # No profile row yet — return basic info from auth token.
-            # This is normal for users created via admin API or before onboarding.
-            user_meta = getattr(current_user, "user_metadata", {}) or {}
-            logger.info(
-                "No user_profiles row for user, returning auth-only data",
-                extra={"user_id": current_user.id},
-            )
-            return {
-                "id": current_user.id,
-                "email": current_user.email or "",
-                "full_name": user_meta.get("full_name"),
-                "company_id": None,
-                "role": "user",
-                "avatar_url": None,
-            }
+    except (NotFoundError, CircuitBreakerOpen) as e:
+        # No profile row yet, or circuit breaker tripped from prior errors.
+        # Return basic info from the auth token so the frontend can proceed.
+        user_meta = getattr(current_user, "user_metadata", {}) or {}
+        logger.info(
+            "No user_profiles row for user (or circuit open), returning auth-only data",
+            extra={"user_id": current_user.id, "error": type(e).__name__},
+        )
+        return {
+            "id": current_user.id,
+            "email": current_user.email or "",
+            "full_name": user_meta.get("full_name"),
+            "company_id": None,
+            "role": "user",
+            "avatar_url": None,
+        }
+    except Exception as e:
         logger.exception("Error fetching user profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
