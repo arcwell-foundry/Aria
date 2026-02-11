@@ -252,6 +252,29 @@ async def chat_stream(
         # Add assistant response to working memory
         working_memory.add_message("assistant", full_content)
 
+        # Persist both messages to the messages table
+        try:
+            db = get_supabase_client()
+            conv_svc = ConversationService(db_client=db)
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=request.message,
+            )
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=full_content,
+            )
+        except Exception as e:
+            logger.warning(
+                "Message persistence failed during stream",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                },
+            )
+
         # Update conversation metadata
         await service._update_conversation_metadata(
             current_user.id, conversation_id, request.message

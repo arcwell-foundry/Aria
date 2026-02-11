@@ -688,6 +688,31 @@ class ChatService:
             assistant_metadata["skill_status"] = skill_result.get("status")
         working_memory.add_message("assistant", response_text, metadata=assistant_metadata)
 
+        # Persist both messages to the messages table
+        try:
+            from src.services.conversations import ConversationService as _ConvService
+
+            conv_svc = _ConvService(db_client=get_supabase_client())
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+            )
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=response_text,
+                metadata=assistant_metadata if assistant_metadata else None,
+            )
+        except Exception as e:
+            logger.warning(
+                "Message persistence failed",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                },
+            )
+
         # Build citations from used memories
         citations = self._build_citations(memories)
 

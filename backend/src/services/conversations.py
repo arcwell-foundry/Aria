@@ -11,6 +11,7 @@ Provides:
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -153,6 +154,45 @@ class ConversationService:
 
         return [Conversation.from_dict(conv) for conv in result.data]
 
+    async def save_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Insert a message row into the messages table.
+
+        Args:
+            conversation_id: The conversation this message belongs to.
+            role: Message role ('user', 'assistant', or 'system').
+            content: The message text content.
+            metadata: Optional JSONB metadata to attach.
+
+        Returns:
+            The UUID string of the newly created message.
+        """
+        message_id = str(uuid.uuid4())
+        row = {
+            "id": message_id,
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "metadata": metadata or {},
+        }
+
+        self.db.table("messages").insert(row).execute()
+
+        logger.debug(
+            "Message saved",
+            extra={
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "role": role,
+            },
+        )
+        return message_id
+
     async def get_conversation_messages(
         self,
         user_id: str,
@@ -168,7 +208,7 @@ class ConversationService:
             List of ConversationMessage objects in chronological order.
 
         Raises:
-            ValueError: If conversation doesn't belong to user.
+            NotFoundError: If conversation doesn't belong to user.
         """
         # Verify ownership
         conv = (
@@ -183,28 +223,19 @@ class ConversationService:
         if not conv.data:
             raise NotFoundError(resource="Conversation", resource_id=conversation_id)
 
-        # Get messages from working memory (for now)
-        # In production, these would be stored in a messages table
-        from src.memory.working import WorkingMemoryManager
-
-        memory_manager = WorkingMemoryManager()
-        working_memory = memory_manager.get_or_create(
-            conversation_id=conversation_id,
-            user_id=user_id,
+        # Read persisted messages from the messages table
+        result = (
+            self.db.table("messages")
+            .select("*")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=False)
+            .execute()
         )
 
-        messages = working_memory.messages
+        if not result.data:
+            return []
 
-        return [
-            ConversationMessage(
-                id=f"{conversation_id}-{idx}",
-                conversation_id=conversation_id,
-                role=msg["role"],
-                content=msg["content"],
-                created_at=msg.get("created_at", datetime.now(UTC)),
-            )
-            for idx, msg in enumerate(messages)
-        ]
+        return [ConversationMessage.from_dict(row) for row in result.data]
 
     async def update_conversation_title(
         self,
