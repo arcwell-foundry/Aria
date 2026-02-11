@@ -285,6 +285,46 @@ body {
   animation: aria-settle 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
+/* === ARIA Highlight Effects (UICommandExecutor) === */
+
+@keyframes aria-highlight-glow-anim {
+  0% { box-shadow: 0 0 0 0 rgba(46, 102, 255, 0); }
+  20% { box-shadow: 0 0 20px 4px rgba(46, 102, 255, 0.4); }
+  80% { box-shadow: 0 0 20px 4px rgba(46, 102, 255, 0.4); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 102, 255, 0); }
+}
+
+@keyframes aria-highlight-pulse-anim {
+  0% { transform: scale(1); }
+  15% { transform: scale(1.02); }
+  30% { transform: scale(1); }
+  45% { transform: scale(1.02); }
+  60% { transform: scale(1); }
+  100% { transform: scale(1); }
+}
+
+@keyframes aria-highlight-outline-anim {
+  0% { outline-color: transparent; }
+  20% { outline-color: rgba(46, 102, 255, 0.8); }
+  80% { outline-color: rgba(46, 102, 255, 0.8); }
+  100% { outline-color: transparent; }
+}
+
+.aria-highlight-glow {
+  animation: aria-highlight-glow-anim 3s ease-out forwards;
+  border-radius: inherit;
+}
+
+.aria-highlight-pulse {
+  animation: aria-highlight-pulse-anim 3s ease-in-out forwards;
+}
+
+.aria-highlight-outline {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  animation: aria-highlight-outline-anim 3s ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aria-breathe,
   .aria-drift,
@@ -296,6 +336,11 @@ body {
   }
   .animate-skill-auto-approve,
   .animate-skill-step-complete {
+    animation: none;
+  }
+  .aria-highlight-glow,
+  .aria-highlight-pulse,
+  .aria-highlight-outline {
     animation: none;
   }
 }

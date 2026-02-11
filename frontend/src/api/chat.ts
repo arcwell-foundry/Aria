@@ -44,11 +44,32 @@ export interface UpdateConversationTitleRequest {
   title: string;
 }
 
+export type UICommandAction =
+  | 'navigate'
+  | 'highlight'
+  | 'update_intel_panel'
+  | 'scroll_to'
+  | 'switch_mode'
+  | 'show_notification'
+  | 'update_sidebar_badge'
+  | 'open_modal';
+
+export type HighlightEffect = 'glow' | 'pulse' | 'outline';
+
 export interface UICommand {
-  action: string;
+  action: UICommandAction;
   route?: string;
   element?: string;
+  effect?: HighlightEffect;
+  duration?: number;
   content?: Record<string, unknown>;
+  mode?: 'workspace' | 'dialogue' | 'compact_avatar';
+  badge_count?: number;
+  sidebar_item?: string;
+  notification_type?: 'signal' | 'alert' | 'success' | 'info';
+  notification_message?: string;
+  modal_id?: string;
+  modal_data?: Record<string, unknown>;
 }
 
 export interface RichContent {
