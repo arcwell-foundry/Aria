@@ -113,6 +113,20 @@ class EnrichmentResult(BaseModel):
     research_sources_used: list[str] = []
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """Strip markdown code fences from LLM JSON responses.
+
+    LLMs sometimes wrap JSON output in ```json ... ``` fences even when
+    instructed not to. This helper strips them so json.loads() works.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+    return cleaned
+
+
 class CompanyEnrichmentEngine:
     """Deep company research engine for onboarding.
 
@@ -389,13 +403,7 @@ Respond ONLY with the JSON object, no additional text."""
             temperature=0.3,
         )
         try:
-            # Strip markdown code fences if present (LLM sometimes wraps JSON)
-            cleaned = response.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
-                if cleaned.endswith("```"):
-                    cleaned = cleaned[:-3].strip()
-            data = json.loads(cleaned)
+            data = json.loads(_strip_markdown_fences(response))
             return CompanyClassification(**data)
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Classification parse failed: {e}")
@@ -722,7 +730,7 @@ Respond ONLY with the JSON array, no additional text."""
             temperature=0.3,
         )
         try:
-            facts_data = json.loads(response)
+            facts_data = json.loads(_strip_markdown_fences(response))
             return [DiscoveredFact(**f) for f in facts_data]
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Fact extraction parse failed: {e}")
@@ -784,7 +792,7 @@ Respond ONLY with the JSON array, no additional text."""
             temperature=0.5,
         )
         try:
-            hyp_data = json.loads(response)
+            hyp_data = json.loads(_strip_markdown_fences(response))
             return [
                 CausalHypothesis(
                     premise=h["premise"],
