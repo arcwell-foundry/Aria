@@ -41,6 +41,20 @@ class GoalExecutionService:
         self._db = SupabaseClient.get_client()
         self._llm = LLMClient()
         self._activity = ActivityService()
+        self._dynamic_agents: dict[str, type] = {}
+
+    def register_dynamic_agent(self, agent_type: str, agent_class: type) -> None:
+        """Register a dynamically created agent class for task routing.
+
+        Args:
+            agent_type: The type key to use for dispatch.
+            agent_class: The agent class (must extend BaseAgent).
+        """
+        self._dynamic_agents[agent_type] = agent_class
+        logger.info(
+            "Registered dynamic agent",
+            extra={"agent_type": agent_type, "agent_class": agent_class.__name__},
+        )
 
     async def execute_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
         """Execute a single goal by running all assigned agents.
@@ -300,6 +314,10 @@ class GoalExecutionService:
 
             agent_cls = agent_classes.get(agent_type)
             if agent_cls is None:
+                # Check dynamic agents
+                dynamic_cls = self._dynamic_agents.get(agent_type)
+                if dynamic_cls is not None:
+                    return dynamic_cls(llm_client=self._llm, user_id=user_id)
                 return None
 
             # Initialize skill infrastructure (best-effort)
