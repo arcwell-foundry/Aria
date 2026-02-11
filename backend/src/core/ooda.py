@@ -204,6 +204,7 @@ class OODALoop:
         semantic_memory: "SemanticMemory",
         working_memory: "WorkingMemory",
         config: OODAConfig | None = None,
+        agent_executor: Any | None = None,
     ) -> None:
         """Initialize OODA loop.
 
@@ -213,12 +214,15 @@ class OODALoop:
             semantic_memory: Semantic memory service.
             working_memory: Working memory for current context.
             config: Optional configuration for budgets.
+            agent_executor: Optional callable for dispatching agent actions.
+                Signature: async (action, agent, parameters, goal) -> dict
         """
         self.llm = llm_client
         self.episodic = episodic_memory
         self.semantic = semantic_memory
         self.working = working_memory
         self.config = config or OODAConfig()
+        self.agent_executor = agent_executor
 
     async def observe(
         self,
@@ -803,6 +807,59 @@ Select the best action to make progress toward the goal."""
                     "tokens_used": state.total_tokens_used,
                 },
             )
+
+    async def run_single_iteration(
+        self,
+        state: OODAState,
+        goal: dict[str, Any],
+    ) -> OODAState:
+        """Run exactly one OODA cycle (observe → orient → decide → act).
+
+        Used by the scheduler to monitor goals at intervals without
+        running the full loop. Returns updated state for the caller
+        to interpret and act upon.
+
+        Args:
+            state: Current OODA state (may be from a previous iteration).
+            goal: The goal dict being monitored.
+
+        Returns:
+            Updated OODAState after one full cycle.
+        """
+        logger.info(
+            "OODA single iteration starting",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+            },
+        )
+
+        state = await self.observe(state, goal)
+        self._update_token_count(state)
+
+        state = await self.orient(state, goal)
+        self._update_token_count(state)
+
+        state = await self.decide(state, goal)
+        self._update_token_count(state)
+
+        # Only act if not complete/blocked
+        if not state.is_complete and not state.is_blocked:
+            state = await self.act(state, goal)
+            self._update_token_count(state)
+
+        logger.info(
+            "OODA single iteration complete",
+            extra={
+                "goal_id": state.goal_id,
+                "iteration": state.iteration,
+                "is_complete": state.is_complete,
+                "is_blocked": state.is_blocked,
+                "decision": state.decision.get("action") if state.decision else None,
+            },
+        )
+
+        return state
 
     def _update_token_count(self, state: OODAState) -> None:
         """Update total token count from phase logs.
