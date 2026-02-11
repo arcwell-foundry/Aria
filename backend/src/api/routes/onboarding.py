@@ -597,6 +597,32 @@ async def save_email_privacy(
     return await service.save_privacy_config(current_user.id, body)
 
 
+@router.post("/email/disconnect")
+async def disconnect_email(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Disconnect email integration and remove connection row.
+
+    Deletes the user_integrations row for gmail or outlook so the user
+    can re-connect with the correct provider.
+
+    Returns:
+        Dict with disconnected status.
+    """
+    db = SupabaseClient.get_client()
+    # Delete both gmail and outlook rows for this user
+    for itype in ("gmail", "outlook"):
+        db.table("user_integrations").delete().eq(
+            "user_id", current_user.id
+        ).eq("integration_type", itype).execute()
+
+    logger.info(
+        "Email integration disconnected",
+        extra={"user_id": current_user.id},
+    )
+    return {"status": "disconnected"}
+
+
 @router.get("/email/preferences")
 async def get_email_preferences(
     current_user: CurrentUser,

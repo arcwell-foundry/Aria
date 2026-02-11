@@ -186,7 +186,7 @@ class EmailIntegrationService:
             .maybe_single()
             .execute()
         )
-        merged_integrations = existing.data.get("integrations", {}) if existing.data else {}
+        merged_integrations = existing.data.get("integrations", {}) if existing and existing.data else {}
         merged_integrations["email"] = {
             "provider": config.provider,
             "privacy_exclusions": [e.model_dump() for e in config.privacy_exclusions],

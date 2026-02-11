@@ -7,9 +7,11 @@ import {
   Loader2,
   Plus,
   ChevronDown,
+  Unplug,
 } from "lucide-react";
 import {
   connectEmail,
+  disconnectEmail,
   getEmailStatus,
   getEmailPreferences,
   saveEmailPrivacy,
@@ -46,6 +48,7 @@ export function EmailIntegrationStep({
   const [currentProvider, setCurrentProvider] = useState<EmailProvider | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [bootstrapStatus, setBootstrapStatus] = useState<BootstrapStatus | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
     loadEmailStatus();
@@ -86,6 +89,19 @@ export function EmailIntegrationStep({
       console.error("Failed to load email status:", error);
     } finally {
       setLoadingStatus(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await disconnectEmail();
+      setCurrentProvider(null);
+      setBootstrapStatus(null);
+    } catch (error) {
+      console.error("Failed to disconnect email:", error);
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -276,11 +292,26 @@ export function EmailIntegrationStep({
       {/* Privacy Controls - shown after connection */}
       {isConnected && (
         <>
-          <div className="flex items-center gap-2 bg-success/10 border border-success rounded-lg px-4 py-2.5">
-            <Check size={16} strokeWidth={1.5} className="text-success" />
-            <span className="font-sans text-[13px] font-medium text-success">
-              Connected to {currentProvider === "google" ? "Google Workspace" : "Microsoft 365"}
-            </span>
+          <div className="flex items-center justify-between bg-success/10 border border-success rounded-lg px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Check size={16} strokeWidth={1.5} className="text-success" />
+              <span className="font-sans text-[13px] font-medium text-success">
+                Connected to {currentProvider === "google" ? "Google Workspace" : "Microsoft 365"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="flex items-center gap-1.5 text-secondary hover:text-content font-sans text-[13px] transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-1 focus:ring-interactive rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {disconnecting ? (
+                <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />
+              ) : (
+                <Unplug size={14} strokeWidth={1.5} />
+              )}
+              Disconnect
+            </button>
           </div>
 
           {/* Bootstrap Progress */}

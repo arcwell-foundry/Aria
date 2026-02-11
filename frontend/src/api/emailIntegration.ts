@@ -89,6 +89,13 @@ export interface SavedEmailPreferences {
   attachment_ingestion?: boolean;
 }
 
+export async function disconnectEmail(): Promise<{ status: string }> {
+  const response = await apiClient.post<{ status: string }>(
+    "/onboarding/email/disconnect"
+  );
+  return response.data;
+}
+
 export async function getEmailPreferences(): Promise<SavedEmailPreferences> {
   const response = await apiClient.get<SavedEmailPreferences>(
     "/onboarding/email/preferences"
