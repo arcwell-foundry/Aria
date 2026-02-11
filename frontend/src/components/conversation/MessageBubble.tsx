@@ -1,8 +1,10 @@
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/types/chat';
+import { MessageAvatar } from './MessageAvatar';
 
 interface MessageBubbleProps {
   message: Message;
+  isFirstInGroup?: boolean;
 }
 
 function formatTime(timestamp: string): string {
@@ -10,13 +12,19 @@ function formatTime(timestamp: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleProps) {
   const isAria = message.role === 'aria';
 
   if (isAria) {
     return (
-      <div className="flex justify-start animate-in" data-aria-id="message-aria">
-        <div className="max-w-[85%] border-l-2 border-accent pl-4 py-2">
+      <div
+        className="group flex items-start gap-3 justify-start motion-safe:animate-[slideInLeft_200ms_ease-out]"
+        data-aria-id="message-aria"
+        data-message-id={message.id}
+      >
+        <MessageAvatar role="aria" visible={isFirstInGroup} />
+
+        <div className="relative max-w-[85%] border-l-2 border-accent pl-4 py-2">
           <div className="prose-aria">
             <ReactMarkdown
               components={{
@@ -90,7 +98,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
 
-          <span className="block mt-2 font-mono text-[10px] text-[var(--text-secondary)] opacity-60">
+          {/* Hover timestamp tooltip */}
+          <span className="absolute -bottom-5 left-4 hidden group-hover:block font-mono text-[11px] text-[#555770] bg-[#111318] px-2 py-1 rounded whitespace-nowrap z-10">
             {formatTime(message.timestamp)}
           </span>
         </div>
@@ -99,13 +108,21 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className="flex justify-end animate-in" data-aria-id="message-user">
-      <div className="max-w-[75%] bg-[var(--bg-elevated)] rounded-2xl rounded-br-md px-4 py-3">
+    <div
+      className="group flex items-start gap-3 justify-end motion-safe:animate-[slideInRight_200ms_ease-out]"
+      data-aria-id="message-user"
+      data-message-id={message.id}
+    >
+      <div className="relative max-w-[75%] bg-[var(--bg-elevated)] rounded-2xl rounded-br-md px-4 py-3">
         <p className="text-sm text-[var(--text-primary)]">{message.content}</p>
-        <span className="block mt-1.5 font-mono text-[10px] text-[var(--text-secondary)] opacity-60 text-right">
+
+        {/* Hover timestamp tooltip */}
+        <span className="absolute -bottom-5 right-4 hidden group-hover:block font-mono text-[11px] text-[#555770] bg-[#111318] px-2 py-1 rounded whitespace-nowrap z-10">
           {formatTime(message.timestamp)}
         </span>
       </div>
+
+      <MessageAvatar role="user" visible={isFirstInGroup} />
     </div>
   );
 }

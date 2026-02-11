@@ -1,6 +1,28 @@
 import { useEffect, useRef } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { MessageBubble } from './MessageBubble';
+import { TimeDivider } from './TimeDivider';
+import { TypingIndicator } from './TypingIndicator';
+import { UnreadIndicator } from './UnreadIndicator';
+import type { Message } from '@/types/chat';
+
+const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+
+function shouldShowTimeDivider(prev: Message | undefined, current: Message): boolean {
+  if (!prev) return false;
+  const prevTime = new Date(prev.timestamp).getTime();
+  const currTime = new Date(current.timestamp).getTime();
+  return currTime - prevTime >= THIRTY_MINUTES_MS;
+}
+
+function isFirstInGroup(messages: Message[], index: number): boolean {
+  if (index === 0) return true;
+  const prev = messages[index - 1];
+  const curr = messages[index];
+  if (prev.role !== curr.role) return true;
+  const gap = new Date(curr.timestamp).getTime() - new Date(prev.timestamp).getTime();
+  return gap >= THIRTY_MINUTES_MS;
+}
 
 export function ConversationThread() {
   const messages = useConversationStore((s) => s.messages);
@@ -16,6 +38,8 @@ export function ConversationThread() {
       className="flex-1 overflow-y-auto px-6 py-4 space-y-4"
       data-aria-id="conversation-thread"
     >
+      <UnreadIndicator />
+
       {messages.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full opacity-60">
           <div className="w-12 h-12 rounded-full bg-[var(--accent-muted)] flex items-center justify-center mb-4">
@@ -26,21 +50,19 @@ export function ConversationThread() {
         </div>
       )}
 
-      {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+      {messages.map((message, index) => (
+        <div key={message.id}>
+          {shouldShowTimeDivider(messages[index - 1], message) && (
+            <TimeDivider timestamp={message.timestamp} />
+          )}
+          <MessageBubble
+            message={message}
+            isFirstInGroup={isFirstInGroup(messages, index)}
+          />
+        </div>
       ))}
 
-      {isStreaming && (
-        <div className="flex justify-start" data-aria-id="streaming-indicator">
-          <div className="border-l-2 border-accent pl-4 py-2">
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce [animation-delay:0ms]" />
-              <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce [animation-delay:150ms]" />
-              <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce [animation-delay:300ms]" />
-            </div>
-          </div>
-        </div>
-      )}
+      {isStreaming && <TypingIndicator />}
 
       <div ref={bottomRef} />
     </div>
