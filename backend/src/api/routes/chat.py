@@ -213,9 +213,16 @@ async def chat_stream(
         # Load Digital Twin personality calibration
         personality = await service._get_personality_calibration(current_user.id)
 
-        # Build system prompt
+        # Fetch Digital Twin writing style fingerprint
+        style_guidelines = await service._get_style_guidelines(current_user.id)
+
+        # Prime conversation with recent episodes, open threads, salient facts
+        priming_context = await service._get_priming_context(current_user.id, request.message)
+
+        # Build system prompt with all context layers
         system_prompt = service._build_system_prompt(
-            memories, load_state, proactive_insights, personality
+            memories, load_state, proactive_insights, personality,
+            style_guidelines, priming_context,
         )
 
         # Send metadata event
