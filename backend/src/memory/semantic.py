@@ -9,10 +9,11 @@ Semantic memory stores factual knowledge with:
 - Contradiction detection
 
 Facts are stored in Graphiti (Neo4j) for semantic search and
-temporal querying capabilities.
+temporal querying capabilities, with Supabase as a durable fallback.
 """
 
 import contextlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -173,11 +174,11 @@ class SemanticFact:
 
 
 class SemanticMemory:
-    """Service for storing and querying semantic facts in Graphiti.
+    """Service for storing and querying semantic facts.
 
     Provides async methods for CRUD operations, contradiction detection,
-    and various query patterns on factual knowledge stored in the
-    temporal knowledge graph.
+    and various query patterns on factual knowledge. Uses Graphiti (Neo4j)
+    for semantic search with Supabase as a durable fallback.
     """
 
     async def _get_graphiti_client(self) -> "Graphiti":
@@ -406,11 +407,140 @@ class SemanticMemory:
             reason=reason,
         )
 
+    # ── Supabase fallback helpers ────────────────────────────────
+
+    def _store_to_supabase(self, fact: SemanticFact) -> str:
+        """Store a fact to the Supabase memory_semantic table.
+
+        This is the durable write path: every fact is persisted here
+        regardless of whether Graphiti succeeds.
+
+        Args:
+            fact: The SemanticFact instance to store.
+
+        Returns:
+            The fact ID.
+        """
+        from src.db.supabase import SupabaseClient
+
+        row = {
+            "id": fact.id,
+            "user_id": fact.user_id,
+            "fact": f"{fact.subject} {fact.predicate} {fact.object}",
+            "confidence": fact.confidence,
+            "source": fact.source.value,
+            "metadata": json.dumps(fact.to_dict()),
+            "created_at": fact.valid_from.isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        SupabaseClient.get_client().table("memory_semantic").upsert(row).execute()
+        return fact.id
+
+    def _query_from_supabase(
+        self,
+        user_id: str,
+        query_text: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 50,
+    ) -> list[SemanticFact]:
+        """Query facts from the Supabase memory_semantic table.
+
+        Used as a fallback when Graphiti is unavailable.
+
+        Args:
+            user_id: The user ID to filter by.
+            query_text: Optional text to search in the fact column.
+            min_confidence: Minimum confidence threshold (0.0 means no filter).
+            limit: Maximum rows to return.
+
+        Returns:
+            List of SemanticFact instances parsed from Supabase rows.
+        """
+        from src.db.supabase import SupabaseClient
+
+        query = (
+            SupabaseClient.get_client().table("memory_semantic").select("*").eq("user_id", user_id)
+        )
+
+        if query_text:
+            query = query.ilike("fact", f"%{query_text}%")
+        if min_confidence > 0:
+            query = query.gte("confidence", min_confidence)
+
+        query = query.order("created_at", desc=True).limit(limit)
+        response = query.execute()
+
+        facts: list[SemanticFact] = []
+        for row in response.data or []:
+            fact = self._parse_supabase_row(row)
+            if fact:
+                facts.append(fact)
+        return facts
+
+    def _parse_supabase_row(self, row: dict[str, Any]) -> SemanticFact | None:
+        """Parse a Supabase row into a SemanticFact.
+
+        Prefers the full metadata JSONB blob when available, falling
+        back to top-level columns.
+
+        Args:
+            row: A dictionary representing a row from memory_semantic.
+
+        Returns:
+            SemanticFact if parsing succeeds, None otherwise.
+        """
+        try:
+            metadata_raw = row.get("metadata")
+            if metadata_raw:
+                if isinstance(metadata_raw, str):
+                    metadata = json.loads(metadata_raw)
+                else:
+                    metadata = metadata_raw
+                # metadata should contain the full fact dict
+                if "id" in metadata and "user_id" in metadata and "subject" in metadata:
+                    return SemanticFact.from_dict(metadata)
+
+            # Fallback: reconstruct from top-level columns
+            created_at_str = row.get("created_at", "")
+            created_at = (
+                datetime.fromisoformat(created_at_str) if created_at_str else datetime.now(UTC)
+            )
+
+            # The fact column stores "subject predicate object" as a single string
+            fact_str = row.get("fact", "")
+            parts = fact_str.split(" ", 2)
+            subject = parts[0] if len(parts) > 0 else ""
+            predicate = parts[1] if len(parts) > 1 else ""
+            obj = parts[2] if len(parts) > 2 else ""
+
+            source_str = row.get("source", "extracted")
+            try:
+                source = FactSource(source_str)
+            except ValueError:
+                source = FactSource.EXTRACTED
+
+            return SemanticFact(
+                id=row["id"],
+                user_id=row["user_id"],
+                subject=subject,
+                predicate=predicate,
+                object=obj,
+                confidence=row.get("confidence", 0.5),
+                source=source,
+                valid_from=created_at,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse Supabase row to fact: {e}")
+            return None
+
+    # ── Public API ───────────────────────────────────────────────
+
     async def add_fact(self, fact: SemanticFact) -> str:
         """Add a new fact to semantic memory.
 
-        Checks for contradicting facts and invalidates them before
-        storing the new fact.
+        Always writes to Supabase first (durable), then attempts
+        Graphiti for semantic search and contradiction detection.
+        If Graphiti fails the fact is still safely persisted in Supabase.
 
         Args:
             fact: The fact to add.
@@ -419,31 +549,60 @@ class SemanticMemory:
             The ID of the stored fact.
 
         Raises:
-            SemanticMemoryError: If storage fails.
+            SemanticMemoryError: If Supabase storage fails.
         """
         try:
             # Generate ID if not provided
             fact_id = fact.id if fact.id else str(uuid.uuid4())
+            fact.id = fact_id
 
-            # Get Graphiti client
-            client = await self._get_graphiti_client()
+            # ── Step 1: Always store to Supabase (durable) ──
+            supabase_ok = False
+            try:
+                self._store_to_supabase(fact)
+                supabase_ok = True
+            except Exception as sb_err:
+                logger.warning(
+                    "Supabase store failed, will try Graphiti",
+                    extra={"fact_id": fact_id, "error": str(sb_err)},
+                )
 
-            # Check for contradicting facts and invalidate them
-            await self._check_and_invalidate_contradictions(client, fact)
+            # ── Step 2: Try to also store in Graphiti ──
+            graphiti_ok = False
+            try:
+                client = await self._get_graphiti_client()
 
-            # Build fact body
-            fact_body = self._build_fact_body(fact)
+                # Check for contradicting facts and invalidate them
+                await self._check_and_invalidate_contradictions(client, fact)
 
-            # Store in Graphiti
-            from graphiti_core.nodes import EpisodeType
+                # Build fact body
+                fact_body = self._build_fact_body(fact)
 
-            await client.add_episode(
-                name=f"fact:{fact_id}",
-                episode_body=fact_body,
-                source=EpisodeType.text,
-                source_description=f"semantic_memory:{fact.user_id}:{fact.predicate}",
-                reference_time=fact.valid_from,
-            )
+                # Store in Graphiti
+                from graphiti_core.nodes import EpisodeType
+
+                await client.add_episode(
+                    name=f"fact:{fact_id}",
+                    episode_body=fact_body,
+                    source=EpisodeType.text,
+                    source_description=f"semantic_memory:{fact.user_id}:{fact.predicate}",
+                    reference_time=fact.valid_from,
+                )
+                graphiti_ok = True
+            except Exception as graphiti_err:
+                logger.warning(
+                    "Graphiti store failed for fact",
+                    extra={
+                        "fact_id": fact_id,
+                        "user_id": fact.user_id,
+                        "error": str(graphiti_err),
+                    },
+                )
+
+            if not supabase_ok and not graphiti_ok:
+                raise SemanticMemoryError(
+                    f"Failed to store fact {fact_id}: both Supabase and Graphiti failed"
+                )
 
             logger.info(
                 "Stored fact",
@@ -476,6 +635,9 @@ class SemanticMemory:
     async def get_fact(self, user_id: str, fact_id: str) -> SemanticFact:
         """Retrieve a specific fact by ID.
 
+        Tries Graphiti first for richer data, falls back to Supabase
+        if Graphiti is unavailable.
+
         Args:
             user_id: The user who owns the fact.
             fact_id: The fact ID.
@@ -484,13 +646,13 @@ class SemanticMemory:
             The requested SemanticFact.
 
         Raises:
-            FactNotFoundError: If fact doesn't exist.
+            FactNotFoundError: If fact doesn't exist in either store.
             SemanticMemoryError: If retrieval fails.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
 
-            # Query for specific fact by name
             query = """
             MATCH (e:Episode)
             WHERE e.name = $fact_name
@@ -506,51 +668,71 @@ class SemanticMemory:
 
             records = result[0] if result else []
 
-            if not records:
-                raise FactNotFoundError(fact_id)
-
-            # Parse the node into a SemanticFact
-            node = records[0]["e"]
-            content = getattr(node, "content", "") or node.get("content", "")
-            created_at = getattr(node, "created_at", None) or node.get("created_at")
-            invalidated_at_str = getattr(node, "invalidated_at", None) or node.get("invalidated_at")
-            invalidation_reason = getattr(node, "invalidation_reason", None) or node.get(
-                "invalidation_reason"
-            )
-
-            if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at)
-            elif created_at is None:
-                created_at = datetime.now(UTC)
-
-            fact = self._parse_content_to_fact(
-                fact_id=fact_id,
-                content=content,
-                user_id=user_id,
-                created_at=created_at,
-            )
-
-            if fact is None:
-                raise FactNotFoundError(fact_id)
-
-            # Add invalidation info if present
-            if invalidated_at_str:
-                fact.invalidated_at = (
-                    datetime.fromisoformat(invalidated_at_str)
-                    if isinstance(invalidated_at_str, str)
-                    else invalidated_at_str
+            if records:
+                node = records[0]["e"]
+                content = getattr(node, "content", "") or node.get("content", "")
+                created_at = getattr(node, "created_at", None) or node.get("created_at")
+                invalidated_at_str = getattr(node, "invalidated_at", None) or node.get(
+                    "invalidated_at"
                 )
-                fact.invalidation_reason = invalidation_reason
+                invalidation_reason = getattr(node, "invalidation_reason", None) or node.get(
+                    "invalidation_reason"
+                )
 
-            return fact
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at)
+                elif created_at is None:
+                    created_at = datetime.now(UTC)
 
-        except FactNotFoundError:
-            raise
-        except SemanticMemoryError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to get fact", extra={"fact_id": fact_id})
-            raise SemanticMemoryError(f"Failed to get fact: {e}") from e
+                fact = self._parse_content_to_fact(
+                    fact_id=fact_id,
+                    content=content,
+                    user_id=user_id,
+                    created_at=created_at,
+                )
+
+                if fact is not None:
+                    # Add invalidation info if present
+                    if invalidated_at_str:
+                        fact.invalidated_at = (
+                            datetime.fromisoformat(invalidated_at_str)
+                            if isinstance(invalidated_at_str, str)
+                            else invalidated_at_str
+                        )
+                        fact.invalidation_reason = invalidation_reason
+                    return fact
+
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti get_fact failed, falling back to Supabase",
+                extra={"fact_id": fact_id, "error": str(graphiti_err)},
+            )
+
+        # ── Fall back to Supabase ──
+        try:
+            from src.db.supabase import SupabaseClient
+
+            response = (
+                SupabaseClient.get_client()
+                .table("memory_semantic")
+                .select("*")
+                .eq("id", fact_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+
+            if response.data:
+                fact = self._parse_supabase_row(response.data[0])
+                if fact is not None:
+                    return fact
+        except Exception as sb_err:
+            logger.warning(
+                "Supabase get_fact also failed",
+                extra={"fact_id": fact_id, "error": str(sb_err)},
+            )
+
+        raise FactNotFoundError(fact_id)
 
     async def get_facts_about(
         self,
@@ -560,6 +742,9 @@ class SemanticMemory:
         include_invalidated: bool = False,
     ) -> list[SemanticFact]:
         """Get all facts about a specific subject.
+
+        Tries Graphiti first for semantic search, falls back to
+        Supabase text search on the fact column.
 
         Args:
             user_id: The user whose facts to query.
@@ -571,17 +756,15 @@ class SemanticMemory:
             List of facts about the subject.
 
         Raises:
-            SemanticMemoryError: If query fails.
+            SemanticMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
 
-            # Build query for facts about the subject
             query = f"facts about {subject} for user {user_id}"
-
             results = await client.search(query)
 
-            # Parse results and filter
             check_time = as_of or datetime.now(UTC)
             facts = []
 
@@ -601,11 +784,26 @@ class SemanticMemory:
                 facts.append(fact)
 
             return facts
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti get_facts_about failed, falling back to Supabase",
+                extra={"user_id": user_id, "subject": subject, "error": str(graphiti_err)},
+            )
 
-        except SemanticMemoryError:
-            raise
+        # ── Fall back to Supabase ──
+        try:
+            all_facts = self._query_from_supabase(user_id, query_text=subject)
+            check_time = as_of or datetime.now(UTC)
+            filtered: list[SemanticFact] = []
+            for fact in all_facts:
+                if subject.lower() not in fact.subject.lower():
+                    continue
+                if not include_invalidated and not fact.is_valid(as_of=check_time):
+                    continue
+                filtered.append(fact)
+            return filtered
         except Exception as e:
-            logger.exception("Failed to get facts about subject", extra={"subject": subject})
+            logger.exception("Supabase fallback also failed for get_facts_about")
             raise SemanticMemoryError(f"Failed to get facts: {e}") from e
 
     async def search_facts(
@@ -618,6 +816,9 @@ class SemanticMemory:
     ) -> list[SemanticFact]:
         """Search facts using semantic similarity.
 
+        Tries Graphiti first for true semantic search, falls back to
+        Supabase text search with confidence filtering.
+
         Args:
             user_id: The user whose facts to search.
             query: Natural language search query.
@@ -629,28 +830,24 @@ class SemanticMemory:
             List of relevant facts, ordered by relevance.
 
         Raises:
-            SemanticMemoryError: If search fails.
+            SemanticMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
 
-            # Build semantic query with user context
             search_query = f"{query} (user: {user_id})"
-
             results = await client.search(search_query)
 
-            # Parse results and filter by confidence
             facts = []
             for edge in results[: limit * 2]:  # Get extra to account for filtering
                 fact = self._parse_edge_to_fact(edge, user_id)
                 if fact is None:
                     continue
 
-                # Filter by minimum confidence
                 if fact.confidence < min_confidence:
                     continue
 
-                # Only include valid facts (check validity at as_of time or now)
                 if not fact.is_valid(as_of=as_of):
                     continue
 
@@ -660,11 +857,30 @@ class SemanticMemory:
                     break
 
             return facts
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti search_facts failed, falling back to Supabase",
+                extra={"user_id": user_id, "query": query, "error": str(graphiti_err)},
+            )
 
-        except SemanticMemoryError:
-            raise
+        # ── Fall back to Supabase ──
+        try:
+            all_facts = self._query_from_supabase(
+                user_id,
+                query_text=query,
+                min_confidence=min_confidence,
+                limit=limit * 2,
+            )
+            valid_facts: list[SemanticFact] = []
+            for fact in all_facts:
+                if not fact.is_valid(as_of=as_of):
+                    continue
+                valid_facts.append(fact)
+                if len(valid_facts) >= limit:
+                    break
+            return valid_facts
         except Exception as e:
-            logger.exception("Failed to search facts", extra={"query": query})
+            logger.exception("Supabase fallback also failed for search_facts")
             raise SemanticMemoryError(f"Failed to search facts: {e}") from e
 
     async def invalidate_fact(
@@ -675,8 +891,8 @@ class SemanticMemory:
     ) -> None:
         """Invalidate a fact (soft delete).
 
-        Preserves history by marking the fact as invalidated rather
-        than deleting it.
+        Always updates Supabase, then attempts Graphiti. Preserves
+        history by marking the fact as invalidated rather than deleting it.
 
         Args:
             user_id: The user who owns the fact.
@@ -684,13 +900,56 @@ class SemanticMemory:
             reason: Reason for invalidation.
 
         Raises:
-            FactNotFoundError: If fact doesn't exist.
+            FactNotFoundError: If fact doesn't exist in either store.
             SemanticMemoryError: If invalidation fails.
         """
+        supabase_updated = False
+        graphiti_updated = False
+        now = datetime.now(UTC)
+
+        # ── Always update Supabase ──
+        try:
+            from src.db.supabase import SupabaseClient
+
+            # Read existing row to get current metadata
+            read_resp = (
+                SupabaseClient.get_client()
+                .table("memory_semantic")
+                .select("metadata")
+                .eq("id", fact_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+
+            if read_resp.data:
+                metadata_raw = read_resp.data[0].get("metadata")
+                if metadata_raw:
+                    metadata = (
+                        json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+                    )
+                else:
+                    metadata = {}
+                metadata["invalidated_at"] = now.isoformat()
+                metadata["invalidation_reason"] = reason
+
+                SupabaseClient.get_client().table("memory_semantic").update(
+                    {
+                        "metadata": json.dumps(metadata),
+                        "updated_at": now.isoformat(),
+                    }
+                ).eq("id", fact_id).eq("user_id", user_id).execute()
+                supabase_updated = True
+        except Exception as sb_err:
+            logger.warning(
+                "Supabase invalidate_fact failed",
+                extra={"fact_id": fact_id, "error": str(sb_err)},
+            )
+
+        # ── Try Graphiti too ──
         try:
             client = await self._get_graphiti_client()
 
-            now = datetime.now(UTC)
             query = """
             MATCH (e:Episode)
             WHERE e.name = $fact_name
@@ -710,48 +969,73 @@ class SemanticMemory:
 
             records = result[0] if result else []
             updated_count = records[0]["updated"] if records else 0
-
-            if updated_count == 0:
-                raise FactNotFoundError(fact_id)
-
-            logger.info(
-                "Invalidated fact",
-                extra={"fact_id": fact_id, "user_id": user_id, "reason": reason},
+            if updated_count > 0:
+                graphiti_updated = True
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti invalidate_fact failed",
+                extra={"fact_id": fact_id, "error": str(graphiti_err)},
             )
 
-            # Audit log the invalidation
-            await log_memory_operation(
-                user_id=user_id,
-                operation=MemoryOperation.INVALIDATE,
-                memory_type=MemoryType.SEMANTIC,
-                memory_id=fact_id,
-                metadata={"reason": reason},
-                suppress_errors=True,
-            )
+        if not supabase_updated and not graphiti_updated:
+            raise FactNotFoundError(fact_id)
 
-        except FactNotFoundError:
-            raise
-        except SemanticMemoryError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to invalidate fact", extra={"fact_id": fact_id})
-            raise SemanticMemoryError(f"Failed to invalidate fact: {e}") from e
+        logger.info(
+            "Invalidated fact",
+            extra={"fact_id": fact_id, "user_id": user_id, "reason": reason},
+        )
+
+        # Audit log the invalidation
+        await log_memory_operation(
+            user_id=user_id,
+            operation=MemoryOperation.INVALIDATE,
+            memory_type=MemoryType.SEMANTIC,
+            memory_id=fact_id,
+            metadata={"reason": reason},
+            suppress_errors=True,
+        )
 
     async def delete_fact(self, user_id: str, fact_id: str) -> None:
-        """Permanently delete a fact.
+        """Permanently delete a fact from both stores.
+
+        Always deletes from Supabase. Also attempts Graphiti deletion;
+        a Graphiti failure is logged but does not raise.
 
         Args:
             user_id: The user who owns the fact.
             fact_id: The fact ID to delete.
 
         Raises:
-            FactNotFoundError: If fact doesn't exist.
+            FactNotFoundError: If fact doesn't exist in either store.
             SemanticMemoryError: If deletion fails.
         """
+        supabase_deleted = False
+        graphiti_deleted = False
+
+        # ── Always delete from Supabase ──
+        try:
+            from src.db.supabase import SupabaseClient
+
+            response = (
+                SupabaseClient.get_client()
+                .table("memory_semantic")
+                .delete()
+                .eq("id", fact_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if response.data:
+                supabase_deleted = True
+        except Exception as sb_err:
+            logger.warning(
+                "Supabase delete_fact failed",
+                extra={"fact_id": fact_id, "error": str(sb_err)},
+            )
+
+        # ── Try to delete from Graphiti too ──
         try:
             client = await self._get_graphiti_client()
 
-            # Delete fact node by name
             query = """
             MATCH (e:Episode)
             WHERE e.name = $fact_name
@@ -768,31 +1052,30 @@ class SemanticMemory:
 
             records = result[0] if result else []
             deleted_count = records[0]["deleted"] if records else 0
-
-            if deleted_count == 0:
-                raise FactNotFoundError(fact_id)
-
-            logger.info(
-                "Deleted fact",
-                extra={"fact_id": fact_id, "user_id": user_id},
+            if deleted_count > 0:
+                graphiti_deleted = True
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti delete_fact failed",
+                extra={"fact_id": fact_id, "error": str(graphiti_err)},
             )
 
-            # Audit log the deletion
-            await log_memory_operation(
-                user_id=user_id,
-                operation=MemoryOperation.DELETE,
-                memory_type=MemoryType.SEMANTIC,
-                memory_id=fact_id,
-                suppress_errors=True,
-            )
+        if not supabase_deleted and not graphiti_deleted:
+            raise FactNotFoundError(fact_id)
 
-        except FactNotFoundError:
-            raise
-        except SemanticMemoryError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to delete fact", extra={"fact_id": fact_id})
-            raise SemanticMemoryError(f"Failed to delete fact: {e}") from e
+        logger.info(
+            "Deleted fact",
+            extra={"fact_id": fact_id, "user_id": user_id},
+        )
+
+        # Audit log the deletion
+        await log_memory_operation(
+            user_id=user_id,
+            operation=MemoryOperation.DELETE,
+            memory_type=MemoryType.SEMANTIC,
+            memory_id=fact_id,
+            suppress_errors=True,
+        )
 
     async def confirm_fact(
         self,
@@ -802,8 +1085,9 @@ class SemanticMemory:
     ) -> None:
         """Confirm a fact, updating last_confirmed_at and adding corroboration.
 
-        This method is used when an external source corroborates an existing fact.
-        It refreshes the decay clock and adds the source to corroborating_sources.
+        Always updates Supabase, then attempts Graphiti. This method is used
+        when an external source corroborates an existing fact. It refreshes
+        the decay clock and adds the source to corroborating_sources.
 
         Args:
             user_id: The user who owns the fact.
@@ -815,7 +1099,7 @@ class SemanticMemory:
             SemanticMemoryError: If confirmation fails.
         """
         try:
-            # Get existing fact
+            # Get existing fact (uses Graphiti-first with Supabase fallback)
             fact = await self.get_fact(user_id, fact_id)
 
             # Update confirmation timestamp
@@ -827,24 +1111,39 @@ class SemanticMemory:
             if confirming_source not in fact.corroborating_sources:
                 fact.corroborating_sources.append(confirming_source)
 
-            # Re-store the updated fact
-            client = await self._get_graphiti_client()
+            # ── Try to update Supabase ──
+            try:
+                self._store_to_supabase(fact)
+            except Exception as sb_err:
+                logger.warning(
+                    "Supabase confirm_fact failed, will try Graphiti",
+                    extra={"fact_id": fact_id, "error": str(sb_err)},
+                )
 
-            # Delete old version
-            await self._delete_episode(client, fact_id)
+            # ── Try to re-store in Graphiti too ──
+            try:
+                client = await self._get_graphiti_client()
 
-            # Store updated version
-            fact_body = self._build_fact_body(fact)
+                # Delete old version
+                await self._delete_episode(client, fact_id)
 
-            from graphiti_core.nodes import EpisodeType
+                # Store updated version
+                fact_body = self._build_fact_body(fact)
 
-            await client.add_episode(
-                name=f"fact:{fact_id}",
-                episode_body=fact_body,
-                source=EpisodeType.text,
-                source_description=f"semantic_memory:{user_id}:{fact.predicate}:confirmed",
-                reference_time=fact.valid_from,
-            )
+                from graphiti_core.nodes import EpisodeType
+
+                await client.add_episode(
+                    name=f"fact:{fact_id}",
+                    episode_body=fact_body,
+                    source=EpisodeType.text,
+                    source_description=f"semantic_memory:{user_id}:{fact.predicate}:confirmed",
+                    reference_time=fact.valid_from,
+                )
+            except Exception as graphiti_err:
+                logger.warning(
+                    "Graphiti confirm_fact failed, Supabase updated",
+                    extra={"fact_id": fact_id, "error": str(graphiti_err)},
+                )
 
             logger.info(
                 "Confirmed fact",

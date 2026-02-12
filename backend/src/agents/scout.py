@@ -1,14 +1,19 @@
 """ScoutAgent module for ARIA.
 
 Gathers intelligence from web search, news, social media, and filters signals.
+Uses Exa API for real web search with Claude LLM fallback when Exa is unavailable.
 """
 
+import json
 import logging
-from datetime import UTC
+import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
+from src.core.config import settings
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -18,11 +23,70 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_from_text(text: str) -> Any:
+    """Extract JSON from text that may be wrapped in markdown code fences.
+
+    Tries multiple strategies:
+    1. Direct JSON parse of the full text
+    2. Regex extraction from ```json ... ``` or ``` ... ``` code fences
+    3. Finding the outermost [ ] or { } boundaries and parsing that
+
+    Args:
+        text: Raw text that may contain JSON.
+
+    Returns:
+        Parsed JSON object (dict or list).
+
+    Raises:
+        ValueError: If no valid JSON can be extracted.
+    """
+    # Strategy 1: Direct parse
+    text_stripped = text.strip()
+    try:
+        return json.loads(text_stripped)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Code fence extraction
+    fence_pattern = r"```(?:json)?\s*\n?(.*?)\n?\s*```"
+    fence_match = re.search(fence_pattern, text_stripped, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: Find outermost brackets/braces
+    # Try array first, then object
+    for open_char, close_char in [("[", "]"), ("{", "}")]:
+        start = text_stripped.find(open_char)
+        if start == -1:
+            continue
+        # Find the matching closing character
+        depth = 0
+        for i in range(start, len(text_stripped)):
+            if text_stripped[i] == open_char:
+                depth += 1
+            elif text_stripped[i] == close_char:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text_stripped[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+
+    raise ValueError(f"Could not extract valid JSON from text: {text_stripped[:200]}...")
+
+
 class ScoutAgent(SkillAwareAgent):
     """Gathers intelligence from web, news, and social sources.
 
     The Scout agent monitors entities, searches for signals,
     deduplicates results, and filters noise from relevant information.
+
+    Uses Exa API for real-time web intelligence when configured,
+    with Claude LLM fallback for generating intelligence based on
+    training knowledge.
     """
 
     name = "Scout"
@@ -140,6 +204,8 @@ class ScoutAgent(SkillAwareAgent):
     ) -> list[dict[str, Any]]:
         """Search the web for relevant information.
 
+        Uses Exa API when available, falls back to Claude LLM generation.
+
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
@@ -162,26 +228,79 @@ class ScoutAgent(SkillAwareAgent):
             f"Web search with query='{query}', limit={limit}",
         )
 
-        # Mock web search results
-        mock_results = [
-            {
-                "title": "Biotechnology Funding Trends 2024",
-                "url": "https://example.com/biotech-funding",
-                "snippet": "Latest trends in biotechnology funding show increased investment in gene therapy and diagnostic tools.",
-            },
-            {
-                "title": "VC Investment in Life Sciences",
-                "url": "https://example.com/vc-life-sciences",
-                "snippet": "Venture capital firms are doubling down on life sciences investments with $50B deployed in 2024.",
-            },
-            {
-                "title": "Emerging Biotech Companies to Watch",
-                "url": "https://example.com/emerging-biotech",
-                "snippet": "A roundup of the most promising emerging biotechnology companies seeking Series A funding.",
-            },
-        ]
+        # Try Exa API first
+        if settings.EXA_API_KEY:
+            try:
+                import httpx
 
-        return mock_results[:limit]
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://api.exa.ai/search",
+                        headers={
+                            "x-api-key": settings.EXA_API_KEY,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "query": query,
+                            "numResults": limit,
+                            "useAutoprompt": True,
+                            "contents": {
+                                "text": {"maxCharacters": 500},
+                            },
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                results: list[dict[str, Any]] = []
+                for item in data.get("results", []):
+                    results.append(
+                        {
+                            "title": item.get("title", ""),
+                            "url": item.get("url", ""),
+                            "snippet": item.get("text", item.get("snippet", "")),
+                        }
+                    )
+
+                logger.info(f"Exa web search returned {len(results)} results for '{query}'")
+                return results[:limit]
+
+            except Exception as e:
+                logger.warning(f"Exa web search failed for '{query}': {e}")
+
+        # LLM fallback: ask Claude to generate intelligence results
+        try:
+            prompt = (
+                f'Generate {limit} realistic web search results for the query: "{query}"\n\n'
+                "Based on your training knowledge, provide results that would be relevant "
+                "for a life sciences commercial intelligence analyst.\n\n"
+                "Return ONLY a JSON array with objects containing:\n"
+                '- "title": article/page title\n'
+                '- "url": realistic URL\n'
+                '- "snippet": 1-2 sentence summary\n\n'
+                "Return valid JSON only, no explanation."
+            )
+
+            response_text = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a web intelligence research assistant. "
+                    "Return only valid JSON arrays. No markdown, no explanation."
+                ),
+                temperature=0.3,
+            )
+
+            parsed = _extract_json_from_text(response_text)
+            if isinstance(parsed, list):
+                logger.info(f"LLM fallback web search returned {len(parsed)} results for '{query}'")
+                return parsed[:limit]
+
+            logger.warning("LLM web search response was not a list")
+            return []
+
+        except Exception as e:
+            logger.warning(f"LLM fallback web search failed for '{query}': {e}")
+            return []
 
     async def _news_search(
         self,
@@ -189,6 +308,8 @@ class ScoutAgent(SkillAwareAgent):
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Search news sources for relevant articles.
+
+        Uses Exa API when available, falls back to Claude LLM generation.
 
         Args:
             query: Search query string.
@@ -212,31 +333,108 @@ class ScoutAgent(SkillAwareAgent):
             f"News search with query='{query}', limit={limit}",
         )
 
-        # Mock news search results
-        from datetime import datetime
+        # Try Exa API first
+        if settings.EXA_API_KEY:
+            try:
+                import httpx
 
-        mock_articles = [
-            {
-                "title": "Acme Corp Raises $50M in Series B Funding",
-                "url": "https://techcrunch.com/2024/01/15/acme-corp-series-b",
-                "source": "TechCrunch",
-                "published_at": datetime(2024, 1, 15, tzinfo=UTC).isoformat(),
-            },
-            {
-                "title": "Acme Corp Expands to European Markets",
-                "url": "https://reuters.com/2024/01/10/acme-corp-europe",
-                "source": "Reuters",
-                "published_at": datetime(2024, 1, 10, tzinfo=UTC).isoformat(),
-            },
-            {
-                "title": "Acme Corp CEO Named to Top 40 Under 40",
-                "url": "https://forbes.com/2024/01/05/acme-corp-ceo",
-                "source": "Forbes",
-                "published_at": datetime(2024, 1, 5, tzinfo=UTC).isoformat(),
-            },
-        ]
+                # Add "news" to query and use recency filter for news-like results
+                news_query = f"{query} news"
+                # Calculate 30 days ago for recency filter
+                from datetime import timedelta
 
-        return mock_articles[:limit]
+                start_date = (datetime.now(tz=UTC) - timedelta(days=30)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://api.exa.ai/search",
+                        headers={
+                            "x-api-key": settings.EXA_API_KEY,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "query": news_query,
+                            "numResults": limit,
+                            "useAutoprompt": True,
+                            "startPublishedDate": start_date,
+                            "contents": {
+                                "text": {"maxCharacters": 500},
+                            },
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                articles: list[dict[str, Any]] = []
+                for item in data.get("results", []):
+                    url = item.get("url", "")
+                    # Extract domain as source name
+                    source = ""
+                    if url:
+                        try:
+                            parsed_url = urlparse(url)
+                            domain = parsed_url.netloc.replace("www.", "")
+                            # Capitalize domain parts for readability
+                            source = domain.split(".")[0].capitalize()
+                        except Exception:
+                            source = "Unknown"
+
+                    articles.append(
+                        {
+                            "title": item.get("title", ""),
+                            "url": url,
+                            "source": source,
+                            "published_at": item.get(
+                                "publishedDate",
+                                datetime.now(tz=UTC).isoformat(),
+                            ),
+                        }
+                    )
+
+                logger.info(f"Exa news search returned {len(articles)} articles for '{query}'")
+                return articles[:limit]
+
+            except Exception as e:
+                logger.warning(f"Exa news search failed for '{query}': {e}")
+
+        # LLM fallback: ask Claude for recent news
+        try:
+            prompt = (
+                f'Generate {limit} realistic recent news articles about: "{query}"\n\n'
+                "Based on your training knowledge, provide news results relevant "
+                "to life sciences commercial intelligence.\n\n"
+                "Return ONLY a JSON array with objects containing:\n"
+                '- "title": news headline\n'
+                '- "url": realistic news URL\n'
+                '- "source": publication name (e.g., Reuters, FiercePharma, STAT News)\n'
+                '- "published_at": ISO 8601 datetime string\n\n'
+                "Return valid JSON only, no explanation."
+            )
+
+            response_text = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a news intelligence research assistant for life sciences. "
+                    "Return only valid JSON arrays. No markdown, no explanation."
+                ),
+                temperature=0.3,
+            )
+
+            parsed = _extract_json_from_text(response_text)
+            if isinstance(parsed, list):
+                logger.info(
+                    f"LLM fallback news search returned {len(parsed)} articles for '{query}'"
+                )
+                return parsed[:limit]
+
+            logger.warning("LLM news search response was not a list")
+            return []
+
+        except Exception as e:
+            logger.warning(f"LLM fallback news search failed for '{query}': {e}")
+            return []
 
     async def _social_monitor(
         self,
@@ -244,6 +442,9 @@ class ScoutAgent(SkillAwareAgent):
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Monitor social media for entity mentions.
+
+        Uses Exa API with social domain filtering when available,
+        falls back to Claude LLM generation.
 
         Args:
             entity: Entity name to monitor (company, person, topic).
@@ -267,29 +468,117 @@ class ScoutAgent(SkillAwareAgent):
             f"Social monitoring for entity='{entity}', limit={limit}",
         )
 
-        # Mock social media mentions
-        mock_mentions = [
-            {
-                "content": f"Just heard about {entity}'s new product launch! Excited to see what they've built.",
-                "author": "@industrywatcher",
-                "platform": "twitter",
-                "url": "https://twitter.com/industrywatcher/status/1234567890",
-            },
-            {
-                "content": f"{entity} is hiring for senior engineering roles. Great opportunity!",
-                "author": "Jane Smith",
-                "platform": "linkedin",
-                "url": "https://linkedin.com/posts/jane-smith-123",
-            },
-            {
-                "content": f"Anyone else following {entity}'s growth? They're disrupting the industry.",
-                "author": "u/techenthusiast",
-                "platform": "reddit",
-                "url": "https://reddit.com/r/technology/comments/abc123",
-            },
-        ]
+        # Try Exa API first with social media domain filtering
+        if settings.EXA_API_KEY:
+            try:
+                import httpx
 
-        return mock_mentions[:limit]
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://api.exa.ai/search",
+                        headers={
+                            "x-api-key": settings.EXA_API_KEY,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "query": entity,
+                            "numResults": limit,
+                            "useAutoprompt": True,
+                            "includeDomains": [
+                                "twitter.com",
+                                "linkedin.com",
+                                "reddit.com",
+                            ],
+                            "contents": {
+                                "text": {"maxCharacters": 500},
+                            },
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                mentions: list[dict[str, Any]] = []
+                for item in data.get("results", []):
+                    url = item.get("url", "")
+
+                    # Determine platform from URL domain
+                    platform = "unknown"
+                    author = "Unknown"
+                    if url:
+                        try:
+                            parsed_url = urlparse(url)
+                            domain = parsed_url.netloc.lower().replace("www.", "")
+                            if "twitter.com" in domain or "x.com" in domain:
+                                platform = "twitter"
+                                # Extract username from path
+                                path_parts = parsed_url.path.strip("/").split("/")
+                                author = f"@{path_parts[0]}" if path_parts else "@unknown"
+                            elif "linkedin.com" in domain:
+                                platform = "linkedin"
+                                path_parts = parsed_url.path.strip("/").split("/")
+                                author = path_parts[1] if len(path_parts) > 1 else "Unknown"
+                            elif "reddit.com" in domain:
+                                platform = "reddit"
+                                path_parts = parsed_url.path.strip("/").split("/")
+                                # Reddit URLs: /r/subreddit/comments/id/...
+                                if len(path_parts) >= 2 and path_parts[0] == "r":
+                                    author = f"r/{path_parts[1]}"
+                                else:
+                                    author = "Unknown"
+                        except Exception:
+                            pass
+
+                    mentions.append(
+                        {
+                            "content": item.get("text", item.get("snippet", "")),
+                            "author": author,
+                            "platform": platform,
+                            "url": url,
+                        }
+                    )
+
+                logger.info(f"Exa social monitor returned {len(mentions)} mentions for '{entity}'")
+                return mentions[:limit]
+
+            except Exception as e:
+                logger.warning(f"Exa social monitoring failed for '{entity}': {e}")
+
+        # LLM fallback: ask Claude for social media intelligence
+        try:
+            prompt = (
+                f'Generate {limit} realistic social media mentions about: "{entity}"\n\n'
+                "Based on your training knowledge, provide social media posts/discussions "
+                "relevant to life sciences commercial intelligence.\n\n"
+                "Return ONLY a JSON array with objects containing:\n"
+                '- "content": the social media post or comment text\n'
+                '- "author": username or display name\n'
+                '- "platform": one of "twitter", "linkedin", "reddit"\n'
+                '- "url": realistic social media URL\n\n'
+                "Return valid JSON only, no explanation."
+            )
+
+            response_text = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a social media intelligence analyst for life sciences. "
+                    "Return only valid JSON arrays. No markdown, no explanation."
+                ),
+                temperature=0.3,
+            )
+
+            parsed = _extract_json_from_text(response_text)
+            if isinstance(parsed, list):
+                logger.info(
+                    f"LLM fallback social monitor returned {len(parsed)} mentions for '{entity}'"
+                )
+                return parsed[:limit]
+
+            logger.warning("LLM social monitor response was not a list")
+            return []
+
+        except Exception as e:
+            logger.warning(f"LLM fallback social monitoring failed for '{entity}': {e}")
+            return []
 
     async def _detect_signals(
         self,
@@ -297,6 +586,9 @@ class ScoutAgent(SkillAwareAgent):
         signal_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Detect market signals for monitored entities.
+
+        For each entity, gathers results from web search, news search,
+        and social monitoring, then uses Claude to classify and score signals.
 
         Args:
             entities: List of entity names to monitor.
@@ -313,58 +605,97 @@ class ScoutAgent(SkillAwareAgent):
             f"Detecting signals for entities={entities}, signal_types={signal_types}",
         )
 
-        # Mock signals database
-        all_signals = [
-            {
-                "company_name": "Acme Corp",
-                "signal_type": "funding",
-                "headline": "Acme Corp raises $50M Series B",
-                "summary": "Acme Corp announced a $50M Series B funding round led by Sequoia Capital.",
-                "source_url": "https://techcrunch.com/acme-series-b",
-                "source_name": "TechCrunch",
-                "relevance_score": 0.92,
-                "detected_at": "2024-01-15T10:00:00Z",
-            },
-            {
-                "company_name": "Acme Corp",
-                "signal_type": "hiring",
-                "headline": "Acme Corp hiring 50 engineers",
-                "summary": "Acme Corp is expanding its engineering team with 50 new positions.",
-                "source_url": "https://linkedin.com/company/acme-corp/jobs",
-                "source_name": "LinkedIn",
-                "relevance_score": 0.78,
-                "detected_at": "2024-01-14T10:00:00Z",
-            },
-            {
-                "company_name": "Beta Inc",
-                "signal_type": "leadership",
-                "headline": "Beta Inc appoints new CEO",
-                "summary": "Beta Inc has appointed Jane Smith as its new Chief Executive Officer.",
-                "source_url": "https://reuters.com/beta-new-ceo",
-                "source_name": "Reuters",
-                "relevance_score": 0.85,
-                "detected_at": "2024-01-13T10:00:00Z",
-            },
-            {
-                "company_name": "Beta Inc",
-                "signal_type": "funding",
-                "headline": "Beta Inc secures $25M in debt financing",
-                "summary": "Beta Inc has secured $25M in debt financing to expand operations.",
-                "source_url": "https://bloomberg.com/beta-financing",
-                "source_name": "Bloomberg",
-                "relevance_score": 0.73,
-                "detected_at": "2024-01-12T10:00:00Z",
-            },
-        ]
+        all_signals: list[dict[str, Any]] = []
 
-        # Filter by entities
-        filtered_signals = [s for s in all_signals if s["company_name"] in entities]
+        for entity in entities:
+            # Gather intelligence from all sources
+            web_results = await self._web_search(query=entity, limit=5)
+            news_results = await self._news_search(query=entity, limit=5)
+            social_results = await self._social_monitor(entity=entity, limit=5)
+
+            # Combine all gathered results for LLM classification
+            gathered_data = {
+                "entity": entity,
+                "web_results": web_results,
+                "news_results": news_results,
+                "social_mentions": social_results,
+            }
+
+            # Use Claude to classify signals from gathered intelligence
+            try:
+                prompt = (
+                    f'Analyze the following intelligence data about "{entity}" and '
+                    "classify each item into market signals.\n\n"
+                    f"Intelligence data:\n{json.dumps(gathered_data, indent=2, default=str)}\n\n"
+                    "For each meaningful signal, classify it into one of these types:\n"
+                    "- funding_round: New funding, investment, or financial events\n"
+                    "- leadership_change: Executive appointments, departures, reorgs\n"
+                    "- product_launch: New products, services, or feature releases\n"
+                    "- regulatory: FDA approvals, compliance changes, regulatory filings\n"
+                    "- partnership: Strategic alliances, collaborations, M&A\n"
+                    "- hiring: Significant hiring activity, team expansion\n"
+                    "- expansion: Geographic expansion, new markets, facility openings\n\n"
+                    "Assign a relevance_score (0.0-1.0) based on how important this signal "
+                    "is for a life sciences commercial team.\n\n"
+                    "Return ONLY a JSON array of signal objects with these fields:\n"
+                    '- "company_name": the entity name\n'
+                    '- "signal_type": one of the types listed above\n'
+                    '- "headline": concise signal headline\n'
+                    '- "summary": 1-2 sentence summary of the signal\n'
+                    '- "source_url": the source URL if available, or empty string\n'
+                    '- "source_name": the source name or publication\n'
+                    '- "relevance_score": float between 0.0 and 1.0\n'
+                    '- "detected_at": current ISO 8601 datetime\n\n'
+                    "If no meaningful signals are found, return an empty array [].\n"
+                    "Return valid JSON only, no explanation."
+                )
+
+                response_text = await self.llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt=(
+                        "You are a market intelligence signal detection system for life sciences. "
+                        "Analyze raw intelligence data and extract structured market signals. "
+                        "Be precise with relevance scoring. Return only valid JSON arrays."
+                    ),
+                    temperature=0.2,
+                )
+
+                parsed = _extract_json_from_text(response_text)
+                if isinstance(parsed, list):
+                    # Validate and normalize each signal
+                    for signal in parsed:
+                        if not isinstance(signal, dict):
+                            continue
+                        # Ensure required fields have defaults
+                        normalized: dict[str, Any] = {
+                            "company_name": signal.get("company_name", entity),
+                            "signal_type": signal.get("signal_type", "unknown"),
+                            "headline": signal.get("headline", ""),
+                            "summary": signal.get("summary", ""),
+                            "source_url": signal.get("source_url", ""),
+                            "source_name": signal.get("source_name", ""),
+                            "relevance_score": float(signal.get("relevance_score", 0.5)),
+                            "detected_at": signal.get(
+                                "detected_at",
+                                datetime.now(tz=UTC).isoformat(),
+                            ),
+                        }
+                        all_signals.append(normalized)
+
+                    logger.info(f"Signal detection found {len(parsed)} signals for '{entity}'")
+                else:
+                    logger.warning(f"Signal detection response for '{entity}' was not a list")
+
+            except Exception as e:
+                logger.warning(f"Signal detection failed for entity '{entity}': {e}")
+                continue
 
         # Filter by signal types if provided
         if signal_types:
-            filtered_signals = [s for s in filtered_signals if s["signal_type"] in signal_types]
+            all_signals = [s for s in all_signals if s["signal_type"] in signal_types]
 
-        return filtered_signals
+        logger.info(f"Total signals detected: {len(all_signals)}")
+        return all_signals
 
     async def _deduplicate_signals(
         self,

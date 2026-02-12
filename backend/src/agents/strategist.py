@@ -4,7 +4,9 @@ Provides strategic planning and pursuit orchestration capabilities,
 creating actionable strategies with phases, milestones, and agent tasks.
 """
 
+import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -18,6 +20,76 @@ if TYPE_CHECKING:
     from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json_from_text(text: str) -> Any:
+    """Extract JSON from text that Claude may wrap in markdown code fences.
+
+    Tries multiple strategies in order:
+    1. Direct json.loads() on the full text
+    2. Regex extraction from ```json ... ``` or ``` ... ``` code fences
+    3. Bracket/brace boundary detection (finds first { or [ and its match)
+
+    Args:
+        text: Raw text potentially containing JSON.
+
+    Returns:
+        Parsed JSON object (dict or list).
+
+    Raises:
+        ValueError: If no valid JSON can be extracted from the text.
+    """
+    # Strategy 1: Try direct parse
+    stripped = text.strip()
+    try:
+        return json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategy 2: Extract from markdown code fences
+    fence_pattern = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+    fence_match = fence_pattern.search(text)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strategy 3: Bracket/brace boundary detection
+    for open_char, close_char in [("{", "}"), ("[", "]")]:
+        start_idx = text.find(open_char)
+        if start_idx == -1:
+            continue
+
+        # Walk forward to find the matching closing character
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start_idx, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == open_char:
+                depth += 1
+            elif ch == close_char:
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start_idx : i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except (json.JSONDecodeError, ValueError):
+                        break
+
+    raise ValueError(f"No valid JSON found in text: {text[:200]}...")
 
 
 class StrategistAgent(SkillAwareAgent):
@@ -257,6 +329,74 @@ class StrategistAgent(SkillAwareAgent):
             goal_type, analysis["opportunities"], analysis["challenges"]
         )
 
+        # --- LLM Enhancement: Layer strategic reasoning on top of algorithmic analysis ---
+        try:
+            llm_prompt = (
+                f"You are a senior life sciences commercial strategist.\n\n"
+                f"I have an algorithmic analysis for a '{goal_type}' pursuit "
+                f"targeting '{target_company}'. Review it and enhance with your "
+                f"strategic reasoning.\n\n"
+                f"Goal: {json.dumps(goal, default=str)}\n\n"
+                f"Current analysis:\n{json.dumps(analysis, default=str)}\n\n"
+                f"Provide ONLY a JSON object with these fields:\n"
+                f'{{"strategic_insights": ["insight1", "insight2", ...], '
+                f'"additional_opportunities": ["opp1", ...], '
+                f'"additional_challenges": ["challenge1", ...], '
+                f'"enhanced_recommendation": "A nuanced 1-3 sentence recommendation"}}\n\n'
+                f"Focus on:\n"
+                f"- Non-obvious opportunities specific to life sciences\n"
+                f"- Competitive dynamics and stakeholder psychology\n"
+                f"- Timing and sequencing considerations\n"
+                f"Return ONLY the JSON object, no other text."
+            )
+
+            llm_response = await self.llm_client.generate_response(
+                messages=[{"role": "user", "content": llm_prompt}],
+                system_prompt=(
+                    "You are a senior life sciences commercial strategist with deep "
+                    "expertise in pharma, biotech, and CDMO sales. Return only valid "
+                    "JSON. No markdown, no explanation."
+                ),
+                temperature=0.5,
+            )
+
+            enhancements = _extract_json_from_text(llm_response)
+
+            # Merge LLM insights into the algorithmic analysis (additive only)
+            if isinstance(enhancements, dict):
+                if "strategic_insights" in enhancements and isinstance(
+                    enhancements["strategic_insights"], list
+                ):
+                    analysis["strategic_insights"] = enhancements["strategic_insights"]
+
+                if "additional_opportunities" in enhancements and isinstance(
+                    enhancements["additional_opportunities"], list
+                ):
+                    analysis["opportunities"].extend(enhancements["additional_opportunities"])
+
+                if "additional_challenges" in enhancements and isinstance(
+                    enhancements["additional_challenges"], list
+                ):
+                    analysis["challenges"].extend(enhancements["additional_challenges"])
+
+                if "enhanced_recommendation" in enhancements and isinstance(
+                    enhancements["enhanced_recommendation"], str
+                ):
+                    analysis["recommendation"] = enhancements["enhanced_recommendation"]
+
+                logger.info(
+                    "LLM enhanced account analysis",
+                    extra={
+                        "insights_added": len(enhancements.get("strategic_insights", [])),
+                        "opps_added": len(enhancements.get("additional_opportunities", [])),
+                    },
+                )
+        except Exception:
+            logger.warning(
+                "LLM enhancement failed for account analysis, using algorithmic output",
+                exc_info=True,
+            )
+
         return analysis
 
     def _analyze_competitive(
@@ -316,6 +456,9 @@ class StrategistAgent(SkillAwareAgent):
         challenges: list[str],
     ) -> str:
         """Generate strategic recommendation.
+
+        Uses simple algorithmic logic as the baseline. The LLM enhancement
+        in _analyze_account may later replace this with a nuanced recommendation.
 
         Args:
             goal_type: Type of goal.
@@ -390,7 +533,7 @@ class StrategistAgent(SkillAwareAgent):
             "has_compliance_notes": "compliance_notes" in constraints,
         }
 
-        return {
+        strategy: dict[str, Any] = {
             "goal_type": goal_type,
             "phases": phases,
             "agent_tasks": agent_tasks,
@@ -399,6 +542,91 @@ class StrategistAgent(SkillAwareAgent):
             "summary": summary,
             "constraints_applied": constraints_applied,
         }
+
+        # --- LLM Enhancement: Layer strategic reasoning on top of algorithmic strategy ---
+        try:
+            llm_prompt = (
+                f"You are a senior life sciences commercial strategist.\n\n"
+                f"I have generated an algorithmic pursuit strategy. Review it and "
+                f"provide tactical enhancements.\n\n"
+                f"Goal: {json.dumps(goal, default=str)}\n\n"
+                f"Strategy:\n{json.dumps(strategy, default=str)}\n\n"
+                f"Provide ONLY a JSON object with these fields:\n"
+                f'{{"phase_refinements": [{{"phase_number": 1, '
+                f'"refined_objectives": ["obj1", ...], '
+                f'"tactical_actions": ["action1", ...]}}], '
+                f'"battle_card": {{"how_to_win": ["point1", ...], '
+                f'"objection_handling": [{{"objection": "...", "response": "..."}}], '
+                f'"key_differentiators": ["diff1", ...]}}, '
+                f'"strategic_positioning": "A concise positioning statement"}}\n\n'
+                f"Focus on:\n"
+                f"- Concrete tactical actions for each phase\n"
+                f"- Realistic objection handling for life sciences sales\n"
+                f"- Competitive differentiation specific to the goal\n"
+                f"Return ONLY the JSON object, no other text."
+            )
+
+            llm_response = await self.llm_client.generate_response(
+                messages=[{"role": "user", "content": llm_prompt}],
+                system_prompt=(
+                    "You are a senior life sciences commercial strategist with deep "
+                    "expertise in pharma, biotech, and CDMO sales. Return only valid "
+                    "JSON. No markdown, no explanation."
+                ),
+                temperature=0.5,
+            )
+
+            enhancements = _extract_json_from_text(llm_response)
+
+            # Merge LLM enhancements into the algorithmic strategy (additive only)
+            if isinstance(enhancements, dict):
+                # Merge phase refinements — add tactical_actions to matching phases
+                phase_refinements = enhancements.get("phase_refinements", [])
+                if isinstance(phase_refinements, list):
+                    for refinement in phase_refinements:
+                        if not isinstance(refinement, dict):
+                            continue
+                        phase_num = refinement.get("phase_number")
+                        for phase in strategy["phases"]:
+                            if phase.get("phase_number") == phase_num:
+                                if "tactical_actions" in refinement and isinstance(
+                                    refinement["tactical_actions"], list
+                                ):
+                                    phase["tactical_actions"] = refinement["tactical_actions"]
+                                if "refined_objectives" in refinement and isinstance(
+                                    refinement["refined_objectives"], list
+                                ):
+                                    # Extend objectives, don't replace
+                                    existing = set(phase.get("objectives", []))
+                                    for obj in refinement["refined_objectives"]:
+                                        if obj not in existing:
+                                            phase.setdefault("objectives", []).append(obj)
+                                break
+
+                # Add battle card
+                battle_card = enhancements.get("battle_card")
+                if isinstance(battle_card, dict):
+                    strategy["battle_card"] = battle_card
+
+                # Add strategic positioning
+                positioning = enhancements.get("strategic_positioning")
+                if isinstance(positioning, str):
+                    strategy["strategic_positioning"] = positioning
+
+                logger.info(
+                    "LLM enhanced strategy generation",
+                    extra={
+                        "refinements": len(phase_refinements),
+                        "has_battle_card": "battle_card" in enhancements,
+                    },
+                )
+        except Exception:
+            logger.warning(
+                "LLM enhancement failed for strategy generation, using algorithmic output",
+                exc_info=True,
+            )
+
+        return strategy
 
     def _generate_phases(
         self,

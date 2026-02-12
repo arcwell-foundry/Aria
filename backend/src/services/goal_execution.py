@@ -186,7 +186,7 @@ class GoalExecutionService:
         try:
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=f"Goal \"{goal.get('title', goal_id)}\" complete — {success_count} of {len(results)} agents succeeded.",
+                message=f'Goal "{goal.get("title", goal_id)}" complete — {success_count} of {len(results)} agents succeeded.',
                 ui_commands=[
                     {"action": "navigate", "route": f"/goals/{goal_id}"},
                 ],
@@ -1189,6 +1189,62 @@ class GoalExecutionService:
         if not goal:
             return {"goal_id": goal_id, "error": "Goal not found", "tasks": []}
 
+        # Try procedural memory first for matching workflows
+        try:
+            from src.memory.procedural import ProceduralMemory
+
+            procedural = ProceduralMemory()
+            matching = await procedural.find_matching_workflow(
+                user_id=user_id,
+                context={
+                    "goal_type": goal.get("goal_type", ""),
+                    "title": goal.get("title", ""),
+                },
+            )
+            if matching and matching.success_rate > 0.7:
+                logger.info(
+                    "Reusing procedural memory workflow for goal %s (success_rate=%.2f)",
+                    goal_id,
+                    matching.success_rate,
+                )
+                # Convert workflow steps to task format
+                tasks: list[dict[str, Any]] = []
+                for i, step in enumerate(matching.steps):
+                    tasks.append(
+                        {
+                            "title": step.get("title", f"Step {i + 1}"),
+                            "description": step.get("description", ""),
+                            "agent_type": step.get("agent_type", "analyst"),
+                            "depends_on": step.get("depends_on", []),
+                            "estimated_duration_minutes": step.get(
+                                "estimated_duration_minutes", 30
+                            ),
+                        }
+                    )
+                # Store the plan
+                plan: dict[str, Any] = {
+                    "goal_id": goal_id,
+                    "tasks": tasks,
+                    "execution_mode": "reused_workflow",
+                    "reasoning": (
+                        f"Reused successful workflow pattern "
+                        f"(success rate: {matching.success_rate:.0%})"
+                    ),
+                    "workflow_id": matching.id,
+                }
+                # Save to goal_execution_plans table
+                self._db.table("goal_execution_plans").upsert(
+                    {
+                        "goal_id": goal_id,
+                        "user_id": user_id,
+                        "plan": json.dumps(plan),
+                        "created_at": datetime.now(UTC).isoformat(),
+                    }
+                ).execute()
+                return plan
+        except Exception as e:
+            logger.debug("Procedural memory lookup failed, proceeding with LLM planning: %s", e)
+
         context = await self._gather_execution_context(user_id)
 
         prompt = (
@@ -1631,6 +1687,63 @@ class GoalExecutionService:
             retro = await goal_service.generate_retrospective(user_id, goal_id)
         except Exception as e:
             logger.warning("Failed to generate retrospective: %s", e)
+
+        # Store executed plan as procedural memory workflow
+        try:
+            import uuid as uuid_mod
+
+            from src.memory.procedural import ProceduralMemory, Workflow
+
+            procedural = ProceduralMemory()
+            # Get the execution plan for this goal
+            plan_result = (
+                self._db.table("goal_execution_plans")
+                .select("plan, tasks")
+                .eq("goal_id", goal_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            if plan_result and plan_result.data:
+                # Try 'plan' column first, then 'tasks' column
+                plan_raw = plan_result.data.get("plan") or plan_result.data.get("tasks", "[]")
+                plan_data = json.loads(plan_raw) if isinstance(plan_raw, str) else plan_raw
+
+                # Extract tasks list — could be in plan_data.tasks or plan_data itself
+                steps = (
+                    plan_data.get("tasks", plan_data) if isinstance(plan_data, dict) else plan_data
+                )
+
+                # Fetch goal info for trigger conditions
+                goal_result = (
+                    self._db.table("goals")
+                    .select("goal_type, title")
+                    .eq("id", goal_id)
+                    .maybe_single()
+                    .execute()
+                )
+                goal_info = goal_result.data if goal_result and goal_result.data else {}
+
+                workflow = Workflow(
+                    id=str(uuid_mod.uuid4()),
+                    user_id=user_id,
+                    workflow_name=f"Workflow for goal: {goal_id}",
+                    description=goal_info.get("title", ""),
+                    trigger_conditions={
+                        "goal_type": goal_info.get("goal_type", ""),
+                    },
+                    steps=steps if isinstance(steps, list) else [],
+                    success_count=1,
+                    failure_count=0,
+                    is_shared=False,
+                    version=1,
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+                await procedural.create_workflow(workflow)
+        except Exception as e:
+            logger.debug("Failed to store procedural memory: %s", e)
 
         # Publish completion event
         event_bus = EventBus.get_instance()

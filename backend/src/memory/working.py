@@ -254,9 +254,11 @@ class WorkingMemoryManager:
             from src.db.supabase import get_supabase_client
 
             db = get_supabase_client()
-            db.table("conversations").update({
-                "working_memory": memory.to_dict(),
-            }).eq("id", conversation_id).execute()
+            db.table("conversations").update(
+                {
+                    "working_memory": memory.to_dict(),
+                }
+            ).eq("id", conversation_id).execute()
         except Exception as e:
             logger.warning("Working memory persist failed: %s", e)
 
@@ -308,6 +310,26 @@ class WorkingMemoryManager:
     def clear_all(self) -> None:
         """Clear all sessions."""
         self._sessions.clear()
+
+    async def persist_all_sessions(self) -> int:
+        """Persist all active working memory sessions to Supabase.
+
+        Iterates over every in-memory session and calls ``persist_session()``
+        for each. Used by the 30-second sync scheduler job to ensure working
+        memory survives server restarts.
+
+        Returns:
+            Number of sessions successfully persisted.
+        """
+        session_ids = list(self._sessions.keys())
+        persisted = 0
+        for conversation_id in session_ids:
+            try:
+                await self.persist_session(conversation_id)
+                persisted += 1
+            except Exception as e:
+                logger.warning("Failed to persist session %s: %s", conversation_id, e)
+        return persisted
 
     def list_sessions(self) -> list[str]:
         """List all active session IDs.

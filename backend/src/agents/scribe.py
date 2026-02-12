@@ -1,9 +1,13 @@
 """ScribeAgent module for ARIA.
 
 Drafts emails and documents with style matching using Digital Twin.
+Uses LLM generation as the primary drafting method with template-based
+fallback for resilience.
 """
 
+import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult
@@ -17,12 +21,83 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_from_text(text: str) -> Any:
+    """Extract JSON from text that Claude may wrap in markdown code fences.
+
+    Tries multiple strategies in order:
+    1. Direct json.loads() on the full text
+    2. Regex extraction from ```json ... ``` or ``` ... ``` code fences
+    3. Bracket/brace boundary detection (finds first { or [ and its match)
+
+    Args:
+        text: Raw text potentially containing JSON.
+
+    Returns:
+        Parsed JSON object (dict or list).
+
+    Raises:
+        ValueError: If no valid JSON can be extracted from the text.
+    """
+    # Strategy 1: Try direct parse
+    stripped = text.strip()
+    try:
+        return json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategy 2: Extract from markdown code fences
+    fence_pattern = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+    fence_match = fence_pattern.search(text)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strategy 3: Bracket/brace boundary detection
+    for open_char, close_char in [("{", "}"), ("[", "]")]:
+        start_idx = text.find(open_char)
+        if start_idx == -1:
+            continue
+
+        # Walk forward to find the matching closing character
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start_idx, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == open_char:
+                depth += 1
+            elif ch == close_char:
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start_idx : i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except (json.JSONDecodeError, ValueError):
+                        break
+
+    raise ValueError(f"No valid JSON found in text: {text[:200]}...")
+
+
 class ScribeAgent(SkillAwareAgent):
     """Drafts emails and documents with style matching.
 
     The Scribe agent creates communications tailored to the user's
     writing style using Digital Twin, with support for multiple
-    tones and templates.
+    tones and templates. Uses LLM generation as the primary drafting
+    method with template-based fallback.
     """
 
     name = "Scribe"
@@ -217,6 +292,7 @@ class ScribeAgent(SkillAwareAgent):
                             context=context,
                             goal=goal,
                             tone=tone,
+                            style=style,
                         )
                 else:
                     content = await self._draft_email(
@@ -224,6 +300,7 @@ class ScribeAgent(SkillAwareAgent):
                         context=context,
                         goal=goal,
                         tone=tone,
+                        style=style,
                     )
 
                 draft_type = "email"
@@ -236,6 +313,7 @@ class ScribeAgent(SkillAwareAgent):
                     context=context,
                     goal=goal,
                     tone=tone,
+                    style=style,
                 )
                 draft_type = "document"
 
@@ -246,6 +324,7 @@ class ScribeAgent(SkillAwareAgent):
                     context=context,
                     goal=goal,
                     tone=tone,
+                    style=style,
                 )
                 draft_type = "email"
 
@@ -286,26 +365,31 @@ class ScribeAgent(SkillAwareAgent):
         context: str = "",
         goal: str = "",
         tone: str = "formal",
+        style: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Draft an email.
+        """Draft an email using LLM generation with template fallback.
 
-        This is a mock implementation that generates template-based emails.
-        In production, this would use the LLM with Digital Twin style.
+        Builds a detailed prompt for Claude to generate a professional email
+        tailored to the life sciences commercial context. Falls back to
+        template-based generation if the LLM call fails.
 
         Args:
             recipient: Recipient information with name, title, company.
             context: Background context for the email.
             goal: What this email should achieve.
             tone: Tone of the email (formal, friendly, urgent).
+            style: Optional Digital Twin style hints for the LLM.
 
         Returns:
             Drafted email with subject, body, and metadata.
         """
         recipient_name = "there"
         recipient_company = ""
+        recipient_title = ""
         if recipient:
             recipient_name = recipient.get("name", "there")
             recipient_company = recipient.get("company", "")
+            recipient_title = recipient.get("title", "")
 
         logger.info(
             f"Drafting email to {recipient_name}",
@@ -316,6 +400,139 @@ class ScribeAgent(SkillAwareAgent):
             },
         )
 
+        # Build LLM prompt
+        recipient_info_parts = [f"Name: {recipient_name}"]
+        if recipient_title:
+            recipient_info_parts.append(f"Title: {recipient_title}")
+        if recipient_company:
+            recipient_info_parts.append(f"Company: {recipient_company}")
+        recipient_info = "\n".join(recipient_info_parts)
+
+        style_hints = ""
+        if style:
+            style_parts = []
+            if "preferred_greeting" in style:
+                style_parts.append(f"- Use greeting style: {style['preferred_greeting']}")
+            if "formality" in style:
+                style_parts.append(f"- Formality level: {style['formality']}")
+            if "signature" in style:
+                style_parts.append(f"- Include signature: {style['signature']}")
+            if style_parts:
+                style_hints = "\n\nWriting style preferences:\n" + "\n".join(style_parts)
+
+        prompt = (
+            f"Draft a professional email for a life sciences commercial team member.\n\n"
+            f"Recipient:\n{recipient_info}\n\n"
+            f"Context: {context}\n\n"
+            f"Goal: {goal}\n\n"
+            f"Tone: {tone}\n"
+            f"{style_hints}\n\n"
+            f"Requirements:\n"
+            f"- Keep the email concise and professional\n"
+            f"- Include a clear call to action\n"
+            f"- Match the requested tone ({tone})\n"
+            f"- Do NOT use emojis\n"
+            f"- Use specific details from the context, not generic placeholders\n\n"
+            f"Respond with JSON only:\n"
+            f'{{"subject": "email subject line", "body": "full email body text", '
+            f'"tone_notes": "brief note on tone choices made"}}'
+        )
+
+        system_prompt = (
+            "You are a professional email writer for life sciences commercial teams. "
+            "You write clear, persuasive, and appropriately-toned emails that drive "
+            "action. Your emails are concise, avoid jargon overload, and always include "
+            "a clear next step or call to action. Respond with valid JSON only."
+        )
+
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=system_prompt,
+                max_tokens=1024,
+                temperature=0.7,
+            )
+
+            parsed = _extract_json_from_text(response)
+
+            subject = parsed.get("subject", goal[:60] if goal else "Follow-up")
+            body = parsed.get("body", "")
+
+            if not body:
+                raise ValueError("LLM returned empty email body")
+
+            word_count = len(body.split())
+
+            # Detect call to action heuristically
+            cta_indicators = [
+                "let me know",
+                "schedule",
+                "call",
+                "meeting",
+                "reply",
+                "respond",
+                "reach out",
+                "follow up",
+                "available",
+                "discuss",
+                "connect",
+                "touch base",
+                "your thoughts",
+            ]
+            body_lower = body.lower()
+            has_cta = any(indicator in body_lower for indicator in cta_indicators)
+
+            logger.info(
+                "Email drafted via LLM",
+                extra={"word_count": word_count, "tone": tone},
+            )
+
+            return {
+                "subject": subject,
+                "body": body,
+                "recipient_name": recipient_name if recipient else None,
+                "recipient_company": recipient_company if recipient_company else None,
+                "tone": tone,
+                "word_count": word_count,
+                "has_call_to_action": has_cta,
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"LLM email generation failed, falling back to template: {e}",
+                extra={"error": str(e)},
+            )
+            return self._draft_email_fallback(
+                recipient=recipient,
+                recipient_name=recipient_name,
+                recipient_company=recipient_company,
+                context=context,
+                goal=goal,
+                tone=tone,
+            )
+
+    def _draft_email_fallback(
+        self,
+        recipient: dict[str, Any] | None = None,
+        recipient_name: str = "there",
+        recipient_company: str = "",
+        context: str = "",
+        goal: str = "",
+        tone: str = "formal",
+    ) -> dict[str, Any]:
+        """Template-based email fallback when LLM generation fails.
+
+        Args:
+            recipient: Original recipient dict.
+            recipient_name: Extracted recipient name.
+            recipient_company: Extracted recipient company.
+            context: Background context for the email.
+            goal: What this email should achieve.
+            tone: Tone of the email (formal, friendly, urgent).
+
+        Returns:
+            Drafted email with subject, body, and metadata.
+        """
         # Generate greeting based on tone
         if tone == "formal":
             greeting = f"Dear {recipient_name},"
@@ -371,17 +588,20 @@ class ScribeAgent(SkillAwareAgent):
         context: str = "",
         goal: str = "",
         tone: str = "formal",
+        style: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Draft a document.
+        """Draft a document using LLM generation with template fallback.
 
-        This is a mock implementation that generates template-based documents.
-        In production, this would use the LLM with Digital Twin style.
+        Builds a detailed prompt for Claude to generate a complete document
+        with structured sections. Falls back to template-based generation
+        if the LLM call fails.
 
         Args:
             document_type: Type of document (brief, report, proposal).
             context: Background context for the document.
             goal: What this document should achieve.
             tone: Tone of the document.
+            style: Optional Digital Twin style hints for the LLM.
 
         Returns:
             Drafted document with title, body, sections, and metadata.
@@ -395,6 +615,143 @@ class ScribeAgent(SkillAwareAgent):
             },
         )
 
+        # Build section guidance based on document type
+        if document_type == "brief":
+            section_guidance = (
+                "Create a concise brief with 2-3 sections. Suggested sections: "
+                "Summary, Key Points, and optionally Recommendations. "
+                "Keep it under 300 words total."
+            )
+        elif document_type == "report":
+            section_guidance = (
+                "Create a detailed report with 3-5 sections. Suggested sections: "
+                "Executive Summary, Background, Analysis, Findings, and Recommendations. "
+                "Be thorough but focused."
+            )
+        elif document_type == "proposal":
+            section_guidance = (
+                "Create a persuasive proposal with 3-5 sections. Suggested sections: "
+                "Introduction, Proposed Solution, Benefits, Implementation Plan, and Next Steps. "
+                "Focus on value and feasibility."
+            )
+        else:
+            section_guidance = (
+                f"Create a {document_type} document with appropriate sections. "
+                "Use clear headings and structured content."
+            )
+
+        style_hints = ""
+        if style:
+            style_parts = []
+            if "formality" in style:
+                style_parts.append(f"- Formality level: {style['formality']}")
+            if style_parts:
+                style_hints = "\n\nWriting style preferences:\n" + "\n".join(style_parts)
+
+        prompt = (
+            f"Create a {document_type} document for a life sciences commercial team.\n\n"
+            f"Context: {context}\n\n"
+            f"Goal/Purpose: {goal}\n\n"
+            f"Tone: {tone}\n\n"
+            f"Document structure guidance:\n{section_guidance}\n"
+            f"{style_hints}\n\n"
+            f"Requirements:\n"
+            f"- Use specific details from the context provided\n"
+            f"- Do NOT use placeholder text or generic filler\n"
+            f"- Do NOT use emojis\n"
+            f"- Write in a professional life sciences commercial voice\n\n"
+            f"Respond with JSON only:\n"
+            f'{{"title": "document title", "body": "full document body as markdown text", '
+            f'"sections": [{{"heading": "Section Title", "content": "section content"}}]}}'
+        )
+
+        system_prompt = (
+            "You are a professional document writer for life sciences commercial teams. "
+            "You create clear, well-structured documents that inform and drive decisions. "
+            "Your writing is precise, evidence-based, and uses appropriate industry terminology "
+            "without being overly jargon-heavy. Respond with valid JSON only."
+        )
+
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=system_prompt,
+                max_tokens=2048,
+                temperature=0.7,
+            )
+
+            parsed = _extract_json_from_text(response)
+
+            title = parsed.get("title", goal if goal else f"{document_type.capitalize()} Document")
+            sections = parsed.get("sections", [])
+            body = parsed.get("body", "")
+
+            if not sections and not body:
+                raise ValueError("LLM returned empty document")
+
+            # If we have sections but no body, build body from sections
+            if sections and not body:
+                body_parts = []
+                for section in sections:
+                    heading = section.get("heading", "Section")
+                    section_content = section.get("content", "")
+                    body_parts.append(f"## {heading}\n\n{section_content}")
+                body = "\n\n".join(body_parts)
+
+            # If we have body but no sections, it's still valid
+            if not sections and body:
+                sections = [{"heading": "Content", "content": body}]
+
+            word_count = len(body.split())
+
+            logger.info(
+                "Document drafted via LLM",
+                extra={
+                    "document_type": document_type,
+                    "word_count": word_count,
+                    "section_count": len(sections),
+                },
+            )
+
+            return {
+                "title": title,
+                "body": body,
+                "sections": sections,
+                "document_type": document_type,
+                "word_count": word_count,
+                "tone": tone,
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"LLM document generation failed, falling back to template: {e}",
+                extra={"error": str(e)},
+            )
+            return self._draft_document_fallback(
+                document_type=document_type,
+                context=context,
+                goal=goal,
+                tone=tone,
+            )
+
+    def _draft_document_fallback(
+        self,
+        document_type: str = "brief",
+        context: str = "",
+        goal: str = "",
+        tone: str = "formal",
+    ) -> dict[str, Any]:
+        """Template-based document fallback when LLM generation fails.
+
+        Args:
+            document_type: Type of document (brief, report, proposal).
+            context: Background context for the document.
+            goal: What this document should achieve.
+            tone: Tone of the document.
+
+        Returns:
+            Drafted document with title, body, sections, and metadata.
+        """
         # Generate title from goal
         title = goal if goal else f"{document_type.capitalize()} Document"
 
@@ -402,7 +759,7 @@ class ScribeAgent(SkillAwareAgent):
         if document_type == "brief":
             sections = [
                 {"heading": "Summary", "content": context if context else "Summary content here."},
-                {"heading": "Key Points", "content": "• Point 1\n• Point 2\n• Point 3"},
+                {"heading": "Key Points", "content": "- Point 1\n- Point 2\n- Point 3"},
             ]
         elif document_type == "report":
             sections = [

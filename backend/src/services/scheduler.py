@@ -224,9 +224,14 @@ async def _run_ooda_goal_checks() -> None:
                                 agent_type=agent or "analyst",
                                 context={"action": action, **parameters},
                             )
-                            return result if isinstance(result, dict) else {"success": True, "result": result}
+                            return (
+                                result
+                                if isinstance(result, dict)
+                                else {"success": True, "result": result}
+                            )
                         except Exception as exc:
                             return {"success": False, "error": str(exc)}
+
                     return _executor
 
                 agent_executor = _make_executor(user_id)
@@ -282,6 +287,112 @@ async def _run_ooda_goal_checks() -> None:
         logger.exception("OODA goal checks scheduler run failed")
 
 
+async def _run_prospective_memory_checks() -> None:
+    """Check upcoming and overdue prospective memory tasks for all active users."""
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.memory.prospective import ProspectiveMemory
+
+        db = SupabaseClient.get_client()
+        prospective = ProspectiveMemory()
+
+        # Find active users
+        result = (
+            db.table("onboarding_state")
+            .select("user_id")
+            .not_.is_("completed_at", "null")
+            .execute()
+        )
+        user_ids = [row["user_id"] for row in (result.data or [])]
+        logger.info("Prospective memory check: processing %d users", len(user_ids))
+
+        for user_id in user_ids:
+            try:
+                # Check upcoming tasks (due in next 10 min)
+                upcoming = await prospective.get_upcoming_tasks(user_id, limit=20)
+                for task in upcoming:
+                    # Check if due within 10 minutes via trigger_config
+                    due_at_str = task.trigger_config.get("due_at")
+                    if due_at_str:
+                        from datetime import UTC, datetime, timedelta
+
+                        now = datetime.now(UTC)
+                        try:
+                            due_at = datetime.fromisoformat(due_at_str)
+                            if due_at <= now + timedelta(minutes=10):
+                                # Send WebSocket notification
+                                try:
+                                    from src.api.routes.websocket import ws_manager
+
+                                    await ws_manager.send_to_user(
+                                        user_id,
+                                        {
+                                            "type": "prospective.task_due",
+                                            "data": {
+                                                "task_id": task.id,
+                                                "title": task.task,
+                                                "description": task.description,
+                                                "priority": task.priority.value,
+                                                "due_at": due_at_str,
+                                            },
+                                        },
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "WebSocket notification skipped for user %s",
+                                        user_id,
+                                    )
+                        except (ValueError, TypeError):
+                            pass
+
+                # Check overdue tasks
+                overdue = await prospective.get_overdue_tasks(user_id)
+                for task in overdue:
+                    try:
+                        from src.api.routes.websocket import ws_manager
+
+                        await ws_manager.send_to_user(
+                            user_id,
+                            {
+                                "type": "prospective.task_overdue",
+                                "data": {
+                                    "task_id": task.id,
+                                    "title": task.task,
+                                    "description": task.description,
+                                    "priority": task.priority.value,
+                                },
+                            },
+                        )
+                    except Exception:
+                        logger.debug(
+                            "WebSocket notification skipped for user %s",
+                            user_id,
+                        )
+
+            except Exception:
+                logger.warning(
+                    "Prospective memory check failed for user %s",
+                    user_id,
+                    exc_info=True,
+                )
+
+    except Exception:
+        logger.exception("Prospective memory check scheduler run failed")
+
+
+async def _run_working_memory_sync() -> None:
+    """Persist all active working memory sessions to Supabase."""
+    try:
+        from src.memory.working import WorkingMemoryManager
+
+        manager = WorkingMemoryManager()
+        count = await manager.persist_all_sessions()
+        if count > 0:
+            logger.info("Working memory sync: persisted %d sessions", count)
+    except Exception:
+        logger.exception("Working memory sync failed")
+
+
 _scheduler: Any = None
 
 
@@ -333,13 +444,32 @@ async def start_scheduler() -> None:
             name="Medium action 30-min auto-approve timeout",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_prospective_memory_checks,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="prospective_memory_checks",
+            name="Prospective memory task trigger checks",
+            replace_existing=True,
+        )
+
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        _scheduler.add_job(
+            _run_working_memory_sync,
+            trigger=IntervalTrigger(seconds=30),
+            id="working_memory_sync",
+            name="Working memory 30-second persistence sync",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "Background scheduler started — ambient gaps at 06:00 daily, "
             "calendar meeting checks every 30 min, "
             "predictive pre-executor every 30 min, "
             "OODA goal monitoring every 30 min, "
-            "medium action timeout every 5 min"
+            "medium action timeout every 5 min, "
+            "prospective memory checks every 5 min, "
+            "working memory sync every 30 sec"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")

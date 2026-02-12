@@ -7,10 +7,11 @@ Episodic memory stores events that happened in the past, with:
 - Rich context metadata
 
 Episodes are stored in Graphiti (Neo4j) for temporal querying and
-semantic search capabilities.
+semantic search capabilities, with Supabase as a durable fallback.
 """
 
 import contextlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -87,7 +88,8 @@ class EpisodicMemory:
 
     Provides async interface for storing, retrieving, and querying
     episodic memories. Uses Graphiti (Neo4j) as the underlying storage
-    for temporal querying and semantic search capabilities.
+    for temporal querying and semantic search capabilities, with
+    Supabase as a durable fallback for writes and reads.
     """
 
     async def _get_graphiti_client(self) -> "Graphiti":
@@ -248,8 +250,134 @@ class EpisodicMemory:
             logger.warning(f"Failed to parse episode content: {e}")
             return None
 
+    # ── Supabase fallback helpers ────────────────────────────────
+
+    def _store_to_supabase(self, episode: Episode) -> str:
+        """Store an episode to the Supabase episodic_memories table.
+
+        This is the durable write path: every episode is persisted here
+        regardless of whether Graphiti succeeds.
+
+        Args:
+            episode: The Episode instance to store.
+
+        Returns:
+            The episode ID.
+        """
+        from src.db.supabase import SupabaseClient
+
+        row = {
+            "id": episode.id,
+            "user_id": episode.user_id,
+            "event_type": episode.event_type,
+            "content": episode.content,
+            "metadata": json.dumps(episode.to_dict()),
+            "created_at": episode.occurred_at.isoformat(),
+        }
+        SupabaseClient.get_client().table("episodic_memories").upsert(row).execute()
+        return episode.id
+
+    def _query_from_supabase(
+        self,
+        user_id: str,
+        filters: dict[str, Any] | None = None,
+        limit: int = 50,
+    ) -> list[Episode]:
+        """Query episodes from the Supabase episodic_memories table.
+
+        Used as a fallback when Graphiti is unavailable.
+
+        Args:
+            user_id: The user ID to filter by.
+            filters: Optional filters. Supported keys:
+                - event_type: exact match on event_type column
+                - content_search: text search on content column
+                - start: ISO datetime string for created_at >= filter
+                - end: ISO datetime string for created_at <= filter
+            limit: Maximum rows to return.
+
+        Returns:
+            List of Episode instances parsed from Supabase rows.
+        """
+        from src.db.supabase import SupabaseClient
+
+        query = (
+            SupabaseClient.get_client()
+            .table("episodic_memories")
+            .select("*")
+            .eq("user_id", user_id)
+        )
+
+        if filters:
+            if "event_type" in filters:
+                query = query.eq("event_type", filters["event_type"])
+            if "content_search" in filters:
+                query = query.ilike("content", f"%{filters['content_search']}%")
+            if "start" in filters:
+                query = query.gte("created_at", filters["start"])
+            if "end" in filters:
+                query = query.lte("created_at", filters["end"])
+
+        query = query.order("created_at", desc=True).limit(limit)
+        response = query.execute()
+
+        episodes: list[Episode] = []
+        for row in response.data or []:
+            episode = self._parse_supabase_row(row)
+            if episode:
+                episodes.append(episode)
+        return episodes
+
+    def _parse_supabase_row(self, row: dict[str, Any]) -> Episode | None:
+        """Parse a Supabase row into an Episode.
+
+        Prefers the full metadata JSONB blob when available, falling
+        back to top-level columns.
+
+        Args:
+            row: A dictionary representing a row from episodic_memories.
+
+        Returns:
+            Episode if parsing succeeds, None otherwise.
+        """
+        try:
+            metadata_raw = row.get("metadata")
+            if metadata_raw:
+                if isinstance(metadata_raw, str):
+                    metadata = json.loads(metadata_raw)
+                else:
+                    metadata = metadata_raw
+                # metadata should contain the full episode dict
+                if "id" in metadata and "user_id" in metadata:
+                    return Episode.from_dict(metadata)
+
+            # Fallback: reconstruct from top-level columns
+            created_at_str = row.get("created_at", "")
+            created_at = (
+                datetime.fromisoformat(created_at_str) if created_at_str else datetime.now(UTC)
+            )
+            return Episode(
+                id=row["id"],
+                user_id=row["user_id"],
+                event_type=row.get("event_type", "unknown"),
+                content=row.get("content", ""),
+                participants=[],
+                occurred_at=created_at,
+                recorded_at=datetime.now(UTC),
+                context={},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse Supabase row to episode: {e}")
+            return None
+
+    # ── Public API ───────────────────────────────────────────────
+
     async def store_episode(self, episode: Episode) -> str:
         """Store an episode in memory.
+
+        Always writes to Supabase first (durable), then attempts
+        Graphiti for semantic search capabilities. If Graphiti fails
+        the episode is still safely persisted in Supabase.
 
         Args:
             episode: The Episode instance to store.
@@ -258,28 +386,54 @@ class EpisodicMemory:
             The ID of the stored episode.
 
         Raises:
-            EpisodicMemoryError: If storage fails.
+            EpisodicMemoryError: If Supabase storage fails.
         """
         try:
             # Generate ID if not provided
             episode_id = episode.id if episode.id else str(uuid.uuid4())
+            episode.id = episode_id
 
-            # Get Graphiti client
-            client = await self._get_graphiti_client()
+            # ── Step 1: Always store to Supabase (durable) ──
+            supabase_ok = False
+            try:
+                self._store_to_supabase(episode)
+                supabase_ok = True
+            except Exception as sb_err:
+                logger.warning(
+                    "Supabase store failed, will try Graphiti",
+                    extra={"episode_id": episode_id, "error": str(sb_err)},
+                )
 
-            # Build episode body
-            episode_body = self._build_episode_body(episode)
+            # ── Step 2: Try to also store in Graphiti ──
+            graphiti_ok = False
+            try:
+                client = await self._get_graphiti_client()
+                episode_body = self._build_episode_body(episode)
 
-            # Store in Graphiti
-            from graphiti_core.nodes import EpisodeType
+                from graphiti_core.nodes import EpisodeType
 
-            await client.add_episode(
-                name=episode_id,
-                episode_body=episode_body,
-                source=EpisodeType.text,
-                source_description=f"episodic_memory:{episode.user_id}",
-                reference_time=episode.occurred_at,
-            )
+                await client.add_episode(
+                    name=episode_id,
+                    episode_body=episode_body,
+                    source=EpisodeType.text,
+                    source_description=f"episodic_memory:{episode.user_id}",
+                    reference_time=episode.occurred_at,
+                )
+                graphiti_ok = True
+            except Exception as graphiti_err:
+                logger.warning(
+                    "Graphiti store failed for episode",
+                    extra={
+                        "episode_id": episode_id,
+                        "user_id": episode.user_id,
+                        "error": str(graphiti_err),
+                    },
+                )
+
+            if not supabase_ok and not graphiti_ok:
+                raise EpisodicMemoryError(
+                    f"Failed to store episode {episode_id}: both Supabase and Graphiti failed"
+                )
 
             logger.info(f"Stored episode {episode_id} for user {episode.user_id}")
 
@@ -304,6 +458,9 @@ class EpisodicMemory:
     async def get_episode(self, user_id: str, episode_id: str) -> Episode:
         """Retrieve a specific episode by ID.
 
+        Tries Graphiti first for richer data, falls back to Supabase
+        if Graphiti is unavailable.
+
         Args:
             user_id: The user who owns the episode.
             episode_id: The episode ID.
@@ -312,13 +469,13 @@ class EpisodicMemory:
             The requested Episode.
 
         Raises:
-            EpisodeNotFoundError: If episode doesn't exist.
+            EpisodeNotFoundError: If episode doesn't exist in either store.
             EpisodicMemoryError: If retrieval fails.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
 
-            # Query for specific episode by name
             query = """
             MATCH (e:Episode)
             WHERE e.name = $episode_name
@@ -334,38 +491,57 @@ class EpisodicMemory:
 
             records = result[0] if result else []
 
-            if not records:
-                raise EpisodeNotFoundError(episode_id)
+            if records:
+                node = records[0]["e"]
+                content = getattr(node, "content", "") or node.get("content", "")
+                created_at = getattr(node, "created_at", None) or node.get("created_at")
 
-            # Parse the node into an Episode
-            node = records[0]["e"]
-            content = getattr(node, "content", "") or node.get("content", "")
-            created_at = getattr(node, "created_at", None) or node.get("created_at")
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at)
+                elif created_at is None:
+                    created_at = datetime.now(UTC)
 
-            if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at)
-            elif created_at is None:
-                created_at = datetime.now(UTC)
+                episode = self._parse_content_to_episode(
+                    episode_id=episode_id,
+                    content=content,
+                    user_id=user_id,
+                    created_at=created_at,
+                )
 
-            episode = self._parse_content_to_episode(
-                episode_id=episode_id,
-                content=content,
-                user_id=user_id,
-                created_at=created_at,
+                if episode is not None:
+                    return episode
+
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti get_episode failed, falling back to Supabase",
+                extra={"episode_id": episode_id, "error": str(graphiti_err)},
             )
 
-            if episode is None:
-                raise EpisodeNotFoundError(episode_id)
+        # ── Fall back to Supabase ──
+        try:
+            from src.db.supabase import SupabaseClient
 
-            return episode
+            response = (
+                SupabaseClient.get_client()
+                .table("episodic_memories")
+                .select("*")
+                .eq("id", episode_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
 
-        except EpisodeNotFoundError:
-            raise
-        except EpisodicMemoryError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to get episode", extra={"episode_id": episode_id})
-            raise EpisodicMemoryError(f"Failed to get episode: {e}") from e
+            if response.data:
+                episode = self._parse_supabase_row(response.data[0])
+                if episode is not None:
+                    return episode
+        except Exception as sb_err:
+            logger.warning(
+                "Supabase get_episode also failed",
+                extra={"episode_id": episode_id, "error": str(sb_err)},
+            )
+
+        raise EpisodeNotFoundError(episode_id)
 
     def _extract_recorded_at_from_fact(self, fact: str) -> datetime | None:
         """Extract recorded_at timestamp from a fact string.
@@ -395,6 +571,9 @@ class EpisodicMemory:
     ) -> list[Episode]:
         """Query episodes within a time range.
 
+        Tries Graphiti first for semantic-aware results, falls back
+        to Supabase SQL filtering on created_at.
+
         Args:
             user_id: The user ID to query episodes for.
             start: Start of the time range (inclusive).
@@ -407,8 +586,9 @@ class EpisodicMemory:
             List of Episode instances within the time range.
 
         Raises:
-            EpisodicMemoryError: If the query fails.
+            EpisodicMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
             query = f"episodes for user {user_id} between {start.isoformat()} and {end.isoformat()}"
@@ -416,22 +596,31 @@ class EpisodicMemory:
 
             episodes = []
             for edge in results[:limit]:
-                # Apply as_of filter if provided
                 if as_of is not None:
                     fact = getattr(edge, "fact", "")
                     recorded_at = self._extract_recorded_at_from_fact(fact)
                     if recorded_at is not None and recorded_at > as_of:
-                        # Skip episodes recorded after the as_of date
                         continue
 
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode:
                     episodes.append(episode)
             return episodes
-        except EpisodicMemoryError:
-            raise
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti query_by_time_range failed, falling back to Supabase",
+                extra={"user_id": user_id, "error": str(graphiti_err)},
+            )
+
+        # ── Fall back to Supabase ──
+        try:
+            filters: dict[str, Any] = {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            }
+            return self._query_from_supabase(user_id, filters=filters, limit=limit)
         except Exception as e:
-            logger.exception("Failed to query episodes by time range")
+            logger.exception("Supabase fallback also failed for query_by_time_range")
             raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_event_type(
@@ -442,6 +631,9 @@ class EpisodicMemory:
         as_of: datetime | None = None,
     ) -> list[Episode]:
         """Query episodes by event type.
+
+        Tries Graphiti first, falls back to Supabase with event_type
+        SQL filter.
 
         Args:
             user_id: The user ID to query episodes for.
@@ -454,8 +646,9 @@ class EpisodicMemory:
             List of Episode instances matching the event type.
 
         Raises:
-            EpisodicMemoryError: If the query fails.
+            EpisodicMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
             query = f"{event_type} events for user {user_id}"
@@ -463,22 +656,28 @@ class EpisodicMemory:
 
             episodes = []
             for edge in results[:limit]:
-                # Apply as_of filter if provided
                 if as_of is not None:
                     fact = getattr(edge, "fact", "")
                     recorded_at = self._extract_recorded_at_from_fact(fact)
                     if recorded_at is not None and recorded_at > as_of:
-                        # Skip episodes recorded after the as_of date
                         continue
 
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode and episode.event_type == event_type:
                     episodes.append(episode)
             return episodes
-        except EpisodicMemoryError:
-            raise
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti query_by_event_type failed, falling back to Supabase",
+                extra={"user_id": user_id, "error": str(graphiti_err)},
+            )
+
+        # ── Fall back to Supabase ──
+        try:
+            filters: dict[str, Any] = {"event_type": event_type}
+            return self._query_from_supabase(user_id, filters=filters, limit=limit)
         except Exception as e:
-            logger.exception("Failed to query episodes by event type")
+            logger.exception("Supabase fallback also failed for query_by_event_type")
             raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def query_by_participant(
@@ -489,6 +688,9 @@ class EpisodicMemory:
         as_of: datetime | None = None,
     ) -> list[Episode]:
         """Query episodes by participant.
+
+        Tries Graphiti first, falls back to Supabase with text search
+        on content.
 
         Args:
             user_id: The user ID to query episodes for.
@@ -501,8 +703,9 @@ class EpisodicMemory:
             List of Episode instances involving the participant.
 
         Raises:
-            EpisodicMemoryError: If the query fails.
+            EpisodicMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
             query = f"interactions with {participant} for user {user_id}"
@@ -511,12 +714,10 @@ class EpisodicMemory:
             episodes = []
             participant_lower = participant.lower()
             for edge in results[:limit]:
-                # Apply as_of filter if provided
                 if as_of is not None:
                     fact = getattr(edge, "fact", "")
                     recorded_at = self._extract_recorded_at_from_fact(fact)
                     if recorded_at is not None and recorded_at > as_of:
-                        # Skip episodes recorded after the as_of date
                         continue
 
                 episode = self._parse_edge_to_episode(edge, user_id)
@@ -526,10 +727,18 @@ class EpisodicMemory:
                 ):
                     episodes.append(episode)
             return episodes
-        except EpisodicMemoryError:
-            raise
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti query_by_participant failed, falling back to Supabase",
+                extra={"user_id": user_id, "error": str(graphiti_err)},
+            )
+
+        # ── Fall back to Supabase ──
+        try:
+            filters: dict[str, Any] = {"content_search": participant}
+            return self._query_from_supabase(user_id, filters=filters, limit=limit)
         except Exception as e:
-            logger.exception("Failed to query episodes by participant")
+            logger.exception("Supabase fallback also failed for query_by_participant")
             raise EpisodicMemoryError(f"Failed to query episodes: {e}") from e
 
     async def semantic_search(
@@ -540,6 +749,9 @@ class EpisodicMemory:
         as_of: datetime | None = None,
     ) -> list[Episode]:
         """Search episodes using semantic similarity.
+
+        Tries Graphiti first (best semantic search), falls back to
+        Supabase text search on content.
 
         Args:
             user_id: The user ID to search episodes for.
@@ -552,8 +764,9 @@ class EpisodicMemory:
             List of Episode instances semantically similar to the query.
 
         Raises:
-            EpisodicMemoryError: If the search fails.
+            EpisodicMemoryError: If both stores fail.
         """
+        # ── Try Graphiti first ──
         try:
             client = await self._get_graphiti_client()
             search_query = f"{query} (user: {user_id})"
@@ -561,39 +774,71 @@ class EpisodicMemory:
 
             episodes = []
             for edge in results[:limit]:
-                # Apply as_of filter if provided
                 if as_of is not None:
                     fact = getattr(edge, "fact", "")
                     recorded_at = self._extract_recorded_at_from_fact(fact)
                     if recorded_at is not None and recorded_at > as_of:
-                        # Skip episodes recorded after the as_of date
                         continue
 
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode:
                     episodes.append(episode)
             return episodes
-        except EpisodicMemoryError:
-            raise
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti semantic_search failed, falling back to Supabase",
+                extra={"user_id": user_id, "error": str(graphiti_err)},
+            )
+
+        # ── Fall back to Supabase ──
+        try:
+            filters: dict[str, Any] = {"content_search": query}
+            return self._query_from_supabase(user_id, filters=filters, limit=limit)
         except Exception as e:
-            logger.exception("Failed to perform semantic search")
+            logger.exception("Supabase fallback also failed for semantic_search")
             raise EpisodicMemoryError(f"Failed to search episodes: {e}") from e
 
     async def delete_episode(self, user_id: str, episode_id: str) -> None:
-        """Delete an episode.
+        """Delete an episode from both stores.
+
+        Always deletes from Supabase. Also attempts Graphiti deletion;
+        a Graphiti failure is logged but does not raise.
 
         Args:
             user_id: The user who owns the episode.
             episode_id: The episode ID to delete.
 
         Raises:
-            EpisodeNotFoundError: If episode doesn't exist.
-            EpisodicMemoryError: If deletion fails.
+            EpisodeNotFoundError: If episode doesn't exist in either store.
+            EpisodicMemoryError: If deletion fails in Supabase.
         """
+        supabase_deleted = False
+        graphiti_deleted = False
+
+        # ── Always delete from Supabase ──
+        try:
+            from src.db.supabase import SupabaseClient
+
+            response = (
+                SupabaseClient.get_client()
+                .table("episodic_memories")
+                .delete()
+                .eq("id", episode_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if response.data:
+                supabase_deleted = True
+        except Exception as sb_err:
+            logger.warning(
+                "Supabase delete_episode failed",
+                extra={"episode_id": episode_id, "error": str(sb_err)},
+            )
+
+        # ── Try to delete from Graphiti too ──
         try:
             client = await self._get_graphiti_client()
 
-            # Delete episode node by name
             query = """
             MATCH (e:Episode)
             WHERE e.name = $episode_name
@@ -601,26 +846,24 @@ class EpisodicMemory:
             RETURN count(e) as deleted
             """
 
-            episode_name = episode_id  # Use episode_id directly as name
+            episode_name = episode_id
 
             result = await client.driver.execute_query(
                 query,
                 episode_name=episode_name,
             )
 
-            # Check if episode was found and deleted
             records = result[0] if result else []
             deleted_count = records[0]["deleted"] if records else 0
+            if deleted_count > 0:
+                graphiti_deleted = True
+        except Exception as graphiti_err:
+            logger.warning(
+                "Graphiti delete_episode failed",
+                extra={"episode_id": episode_id, "error": str(graphiti_err)},
+            )
 
-            if deleted_count == 0:
-                raise EpisodeNotFoundError(episode_id)
+        if not supabase_deleted and not graphiti_deleted:
+            raise EpisodeNotFoundError(episode_id)
 
-            logger.info("Deleted episode", extra={"episode_id": episode_id, "user_id": user_id})
-
-        except EpisodeNotFoundError:
-            raise
-        except EpisodicMemoryError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to delete episode", extra={"episode_id": episode_id})
-            raise EpisodicMemoryError(f"Failed to delete episode: {e}") from e
+        logger.info("Deleted episode", extra={"episode_id": episode_id, "user_id": user_id})

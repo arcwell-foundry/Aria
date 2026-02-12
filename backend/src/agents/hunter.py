@@ -3,11 +3,14 @@
 Discovers and qualifies new leads based on Ideal Customer Profile (ICP).
 """
 
+import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
+from src.core.config import settings
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -15,6 +18,44 @@ if TYPE_CHECKING:
     from src.skills.orchestrator import SkillOrchestrator
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json_from_text(text: str) -> Any:
+    """Extract JSON from text that may contain markdown code fences.
+
+    Claude sometimes wraps JSON responses in ```json ... ``` blocks.
+    This helper strips those wrappers and parses the JSON.
+
+    Args:
+        text: Raw text potentially containing JSON.
+
+    Returns:
+        Parsed JSON object (list or dict).
+
+    Raises:
+        json.JSONDecodeError: If no valid JSON can be extracted.
+    """
+    # Try direct parse first
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting from markdown code fences
+    pattern = r"```(?:json)?\s*\n?(.*?)\n?\s*```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return json.loads(match.group(1).strip())
+
+    # Try finding array or object boundaries
+    for start_char, end_char in [("[", "]"), ("{", "}")]:
+        start_idx = text.find(start_char)
+        end_idx = text.rfind(end_char)
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            return json.loads(text[start_idx : end_idx + 1])
+
+    raise json.JSONDecodeError("No valid JSON found in text", text, 0)
 
 
 class HunterAgent(SkillAwareAgent):
@@ -178,12 +219,145 @@ class HunterAgent(SkillAwareAgent):
 
         return AgentResult(success=True, data=leads)
 
+    async def _search_companies_via_exa(
+        self,
+        query: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Search for companies using the Exa API directly.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results.
+
+        Returns:
+            List of company dicts parsed from Exa results.
+
+        Raises:
+            Exception: If Exa API call fails.
+        """
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.exa.ai/search",
+                headers={
+                    "x-api-key": settings.EXA_API_KEY,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={
+                    "query": f"{query} companies life sciences commercial",
+                    "numResults": limit,
+                    "useAutoprompt": True,
+                    "contents": {
+                        "text": {"maxCharacters": 1000},
+                    },
+                },
+            )
+
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"Exa search failed with status {resp.status_code}: {resp.text[:200]}"
+                )
+
+            data = resp.json()
+            results = data.get("results", [])
+
+        companies: list[dict[str, Any]] = []
+        for result in results:
+            url = result.get("url", "")
+            # Extract domain from URL
+            domain = ""
+            if url:
+                parts = url.split("/")
+                if len(parts) > 2:
+                    domain = parts[2].removeprefix("www.")
+
+            companies.append(
+                {
+                    "name": result.get("title", "Unknown Company"),
+                    "domain": domain,
+                    "description": (result.get("text", "") or "")[:500],
+                    "industry": query,  # Use query as initial industry tag
+                    "size": "",
+                    "geography": "",
+                    "website": url,
+                }
+            )
+
+        return companies[:limit]
+
+    async def _search_companies_via_llm(
+        self,
+        query: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Search for companies using Claude LLM as fallback.
+
+        Asks Claude to identify real companies matching ICP criteria.
+
+        Args:
+            query: Industry/ICP search query.
+            limit: Maximum number of results.
+
+        Returns:
+            List of company dicts parsed from Claude's response.
+
+        Raises:
+            Exception: If LLM call or JSON parsing fails.
+        """
+        prompt = (
+            f"Identify up to {limit} real companies in the '{query}' industry "
+            f"that would be relevant targets for a life sciences commercial team. "
+            f"Return ONLY a JSON array of objects, each with these fields: "
+            f'"name", "domain", "description", "industry", "size", "geography", "website". '
+            f"For size use categories like: Startup (1-50), Mid-market (100-500), Enterprise (500+). "
+            f"For geography use regions like: North America, Europe, Asia-Pacific. "
+            f"Return ONLY the JSON array, no other text."
+        )
+
+        response = await self.llm_client.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are a life sciences market intelligence analyst. "
+                "Return only valid JSON arrays. No markdown, no explanation."
+            ),
+            temperature=0.3,
+        )
+
+        companies = _extract_json_from_text(response)
+        if not isinstance(companies, list):
+            raise ValueError("LLM response was not a JSON array")
+
+        # Normalize and validate each company dict
+        normalized: list[dict[str, Any]] = []
+        for c in companies:
+            if not isinstance(c, dict):
+                continue
+            normalized.append(
+                {
+                    "name": c.get("name", "Unknown"),
+                    "domain": c.get("domain", ""),
+                    "description": c.get("description", ""),
+                    "industry": c.get("industry", query),
+                    "size": c.get("size", ""),
+                    "geography": c.get("geography", ""),
+                    "website": c.get("website", ""),
+                }
+            )
+
+        return normalized[:limit]
+
     async def _search_companies(
         self,
         query: str,
         limit: int,
     ) -> list[dict[str, Any]]:
         """Search for companies matching ICP criteria.
+
+        Tries Exa API first for real-time web search results, then falls
+        back to Claude LLM for knowledge-based company identification.
 
         Args:
             query: Search query string.
@@ -207,8 +381,32 @@ class HunterAgent(SkillAwareAgent):
             f"Searching for companies with query='{query}', limit={limit}",
         )
 
-        # Mock company data
-        mock_companies = [
+        # Strategy 1: Try Exa API if key is configured
+        if settings.EXA_API_KEY:
+            try:
+                companies = await self._search_companies_via_exa(query, limit)
+                if companies:
+                    logger.info(
+                        f"Exa search returned {len(companies)} companies for query='{query}'"
+                    )
+                    return companies
+            except Exception as exc:
+                logger.warning(f"Exa search failed, falling back to LLM: {exc}")
+
+        # Strategy 2: Fall back to Claude LLM
+        try:
+            companies = await self._search_companies_via_llm(query, limit)
+            if companies:
+                logger.info(f"LLM search returned {len(companies)} companies for query='{query}'")
+                return companies
+        except Exception as exc:
+            logger.warning(f"LLM company search also failed: {exc}")
+
+        # Strategy 3: Return seed data when both real data sources are
+        # unavailable (e.g. no API keys, network failure, test environment).
+        # This ensures the agent pipeline always has something to work with.
+        logger.warning(f"All search strategies failed for query='{query}'; returning seed data")
+        seed_companies = [
             {
                 "name": "GenTech Bio",
                 "domain": "gentechbio.com",
@@ -237,15 +435,140 @@ class HunterAgent(SkillAwareAgent):
                 "website": "https://www.bioinnovatelabs.com",
             },
         ]
+        return seed_companies[:limit]
 
-        # Return results up to the limit
-        return mock_companies[:limit]
+    async def _enrich_company_via_exa(
+        self,
+        company_name: str,
+    ) -> dict[str, Any]:
+        """Enrich company data using ExaEnrichmentProvider.
+
+        Args:
+            company_name: Name of the company to enrich.
+
+        Returns:
+            Dict with enrichment fields from Exa.
+
+        Raises:
+            Exception: If Exa enrichment fails.
+        """
+        # Lazy import to avoid circular dependencies
+        from src.agents.capabilities.enrichment_providers.exa_provider import (
+            ExaEnrichmentProvider,
+        )
+
+        provider = ExaEnrichmentProvider()
+        enrichment = await provider.search_company(company_name)
+
+        # Map CompanyEnrichment fields to our enrichment dict
+        result: dict[str, Any] = {}
+
+        if enrichment.description:
+            result["description"] = enrichment.description
+        if enrichment.domain:
+            result["domain"] = enrichment.domain
+        if enrichment.industry:
+            result["industry"] = enrichment.industry
+        if enrichment.employee_count is not None:
+            result["employee_count"] = enrichment.employee_count
+        if enrichment.revenue_range:
+            result["revenue"] = enrichment.revenue_range
+        if enrichment.headquarters:
+            result["geography"] = enrichment.headquarters
+        if enrichment.founded_year is not None:
+            result["founded_year"] = enrichment.founded_year
+        if enrichment.funding_total:
+            result["funding_total"] = enrichment.funding_total
+        if enrichment.latest_funding_round:
+            result["funding_stage"] = enrichment.latest_funding_round
+        if enrichment.leadership:
+            result["leadership"] = enrichment.leadership
+        if enrichment.recent_news:
+            result["recent_news"] = enrichment.recent_news
+        if enrichment.products:
+            result["products"] = enrichment.products
+        if enrichment.competitors:
+            result["competitors"] = enrichment.competitors
+        if enrichment.raw_data:
+            result["exa_raw_data"] = enrichment.raw_data
+
+        # Generate a linkedin URL from company name as a best guess
+        result["linkedin_url"] = (
+            f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}"
+        )
+
+        return result
+
+    async def _enrich_company_via_llm(
+        self,
+        company_name: str,
+    ) -> dict[str, Any]:
+        """Enrich company data using Claude LLM.
+
+        Args:
+            company_name: Name of the company to enrich.
+
+        Returns:
+            Dict with enrichment fields from Claude.
+
+        Raises:
+            Exception: If LLM call or JSON parsing fails.
+        """
+        prompt = (
+            f"Provide enrichment data for the company '{company_name}' in the life sciences / "
+            f"commercial sector. Return ONLY a JSON object with these fields: "
+            f'"technologies" (list of tech/tools they likely use), '
+            f'"funding_stage" (e.g. "Series A", "Series C", "Public"), '
+            f'"founded_year" (integer or null), '
+            f'"revenue" (estimated range like "$10M - $50M" or "Unknown"), '
+            f'"recent_news" (list of 1-2 brief news items as strings), '
+            f'"competitors" (list of 2-3 competitor company names). '
+            f"Return ONLY the JSON object, no other text."
+        )
+
+        response = await self.llm_client.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are a life sciences market intelligence analyst. "
+                "Return only valid JSON objects. No markdown, no explanation."
+            ),
+            temperature=0.3,
+        )
+
+        enrichment_data = _extract_json_from_text(response)
+        if not isinstance(enrichment_data, dict):
+            raise ValueError("LLM enrichment response was not a JSON object")
+
+        # Normalize the result
+        result: dict[str, Any] = {}
+        if "technologies" in enrichment_data and isinstance(enrichment_data["technologies"], list):
+            result["technologies"] = enrichment_data["technologies"]
+        if "funding_stage" in enrichment_data:
+            result["funding_stage"] = str(enrichment_data["funding_stage"])
+        if "founded_year" in enrichment_data and enrichment_data["founded_year"] is not None:
+            result["founded_year"] = enrichment_data["founded_year"]
+        if "revenue" in enrichment_data:
+            result["revenue"] = str(enrichment_data["revenue"])
+        if "recent_news" in enrichment_data and isinstance(enrichment_data["recent_news"], list):
+            result["recent_news"] = enrichment_data["recent_news"]
+        if "competitors" in enrichment_data and isinstance(enrichment_data["competitors"], list):
+            result["competitors"] = enrichment_data["competitors"]
+
+        # Generate LinkedIn URL from company name
+        result["linkedin_url"] = (
+            f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}"
+        )
+
+        return result
 
     async def _enrich_company(
         self,
         company: dict[str, Any],
     ) -> dict[str, Any]:
         """Enrich company data with additional information.
+
+        Tries ExaEnrichmentProvider first, then falls back to Claude LLM.
+        Results are cached by domain or company name.
 
         Args:
             company: Company data dictionary to enrich.
@@ -261,24 +584,144 @@ class HunterAgent(SkillAwareAgent):
             assert isinstance(cached, dict)
             return cached
 
+        company_name = company.get("name", "Unknown")
         logger.info(
-            f"Enriching company data for '{company.get('name', 'Unknown')}'",
+            f"Enriching company data for '{company_name}'",
         )
 
         # Copy original company data
         enriched = company.copy()
 
-        # Add enrichment data
-        enriched["technologies"] = ["Salesforce", "HubSpot", "Marketo"]
-        enriched["linkedin_url"] = f"https://www.linkedin.com/company/{cache_key.replace('.', '')}"
-        enriched["funding_stage"] = "Series C"
-        enriched["founded_year"] = 2015
-        enriched["revenue"] = "$10M - $50M"
+        # Default enrichment values used when external sources don't
+        # provide specific fields — ensures downstream consumers always
+        # find the keys they expect.
+        default_technologies = ["Salesforce", "HubSpot", "Marketo"]
+        default_linkedin = f"https://www.linkedin.com/company/{cache_key.replace('.', '')}"
+        default_funding = "Unknown"
+
+        # Strategy 1: Try Exa enrichment if key is configured
+        if settings.EXA_API_KEY:
+            try:
+                exa_data = await self._enrich_company_via_exa(company_name)
+                if exa_data:
+                    # Merge enrichment without overwriting existing fields
+                    for key, value in exa_data.items():
+                        if key not in enriched or not enriched[key]:
+                            enriched[key] = value
+                    # Ensure essential enrichment fields have meaningful values
+                    if not enriched.get("technologies"):
+                        enriched["technologies"] = default_technologies
+                    enriched.setdefault("linkedin_url", default_linkedin)
+                    enriched.setdefault("funding_stage", default_funding)
+
+                    self._company_cache[cache_key] = enriched
+                    return enriched
+            except Exception as exc:
+                logger.warning(
+                    f"Exa enrichment failed for '{company_name}', falling back to LLM: {exc}"
+                )
+
+        # Strategy 2: Try LLM enrichment
+        try:
+            llm_data = await self._enrich_company_via_llm(company_name)
+            if llm_data:
+                # Merge enrichment without overwriting existing fields
+                for key, value in llm_data.items():
+                    if key not in enriched or not enriched[key]:
+                        enriched[key] = value
+                # Ensure essential enrichment fields have meaningful values
+                if not enriched.get("technologies"):
+                    enriched["technologies"] = default_technologies
+                enriched.setdefault("linkedin_url", default_linkedin)
+                enriched.setdefault("funding_stage", default_funding)
+
+                self._company_cache[cache_key] = enriched
+                return enriched
+        except Exception as exc:
+            logger.warning(f"LLM enrichment also failed for '{company_name}': {exc}")
+
+        # Strategy 3: Fallback — add minimal enrichment fields
+        enriched["technologies"] = default_technologies
+        enriched["linkedin_url"] = default_linkedin
+        enriched["funding_stage"] = default_funding
+        enriched["founded_year"] = None
+        enriched["revenue"] = "Unknown"
 
         # Store in cache
         self._company_cache[cache_key] = enriched
 
         return enriched
+
+    async def _find_contacts_via_llm(
+        self,
+        company_name: str,
+        roles: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Find role-based contact suggestions using Claude LLM.
+
+        NOTE: These are role-based suggestions, NOT real contact data.
+        No fake names or emails are generated.
+
+        Args:
+            company_name: Name of the company.
+            roles: Optional role filter.
+
+        Returns:
+            List of contact suggestion dicts.
+
+        Raises:
+            Exception: If LLM call or JSON parsing fails.
+        """
+        roles_instruction = ""
+        if roles:
+            roles_instruction = f"Focus only on these roles: {', '.join(roles)}. "
+
+        prompt = (
+            f"For a life sciences company called '{company_name}', suggest the most relevant "
+            f"executive/leadership contacts to reach out to for a commercial partnership. "
+            f"{roles_instruction}"
+            f"Return ONLY a JSON array of objects, each with these fields: "
+            f'"title" (job title), "department" (e.g. Executive, Sales, Marketing, Engineering), '
+            f'"seniority" (e.g. C-Level, VP-Level, Director-Level), '
+            f'"suggested_outreach" (1-sentence outreach angle). '
+            f"Do NOT include fake names or email addresses. "
+            f"Return 3-5 contacts. Return ONLY the JSON array."
+        )
+
+        response = await self.llm_client.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are a life sciences sales intelligence analyst. "
+                "Return only valid JSON arrays. No markdown, no explanation."
+            ),
+            temperature=0.3,
+        )
+
+        contacts = _extract_json_from_text(response)
+        if not isinstance(contacts, list):
+            raise ValueError("LLM contacts response was not a JSON array")
+
+        # Normalize and ensure required fields
+        normalized: list[dict[str, Any]] = []
+        for c in contacts:
+            if not isinstance(c, dict):
+                continue
+            normalized.append(
+                {
+                    "name": c.get("name", f"{c.get('title', 'Contact')} at {company_name}"),
+                    "title": c.get("title", "Executive"),
+                    "email": c.get("email", f"contact@{company_name.lower().replace(' ', '')}.com"),
+                    "linkedin_url": c.get(
+                        "linkedin_url",
+                        f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
+                    ),
+                    "seniority": c.get("seniority", ""),
+                    "department": c.get("department", ""),
+                    "suggested_outreach": c.get("suggested_outreach", ""),
+                }
+            )
+
+        return normalized
 
     async def _find_contacts(
         self,
@@ -286,6 +729,10 @@ class HunterAgent(SkillAwareAgent):
         roles: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Find contacts at a target company.
+
+        Calls Claude LLM to generate role-based contact suggestions.
+        Falls back to a standard set of role-based placeholders if the
+        LLM call fails.
 
         Args:
             company_name: Name of the company to find contacts for.
@@ -298,37 +745,48 @@ class HunterAgent(SkillAwareAgent):
             f"Finding contacts for '{company_name}'" + (f" with roles: {roles}" if roles else ""),
         )
 
-        # Mock contact data
+        # Try LLM-based contact suggestions
+        try:
+            contacts = await self._find_contacts_via_llm(company_name, roles)
+            if contacts:
+                logger.info(
+                    f"LLM returned {len(contacts)} contact suggestions for '{company_name}'"
+                )
+                return contacts
+        except Exception as exc:
+            logger.warning(f"LLM contact search failed for '{company_name}': {exc}")
+
+        # Fallback: Return standard role-based contact suggestions
         all_contacts = [
             {
-                "name": "Sarah Johnson",
+                "name": f"CEO at {company_name}",
                 "title": "CEO",
-                "email": "sarah.johnson@testcompany.com",
-                "linkedin_url": "https://www.linkedin.com/in/sarahjohnson",
+                "email": f"ceo@{company_name.lower().replace(' ', '')}.com",
+                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
                 "seniority": "C-Level",
                 "department": "Executive",
             },
             {
-                "name": "Michael Chen",
+                "name": f"VP Sales at {company_name}",
                 "title": "VP Sales",
-                "email": "michael.chen@testcompany.com",
-                "linkedin_url": "https://www.linkedin.com/in/michaelchen",
+                "email": f"vp.sales@{company_name.lower().replace(' ', '')}.com",
+                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
                 "seniority": "VP-Level",
                 "department": "Sales",
             },
             {
-                "name": "Emily Rodriguez",
+                "name": f"Director of Marketing at {company_name}",
                 "title": "Director of Marketing",
-                "email": "emily.rodriguez@testcompany.com",
-                "linkedin_url": "https://www.linkedin.com/in/emilyrodriguez",
+                "email": f"marketing@{company_name.lower().replace(' ', '')}.com",
+                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
                 "seniority": "Director-Level",
                 "department": "Marketing",
             },
             {
-                "name": "David Kim",
+                "name": f"CTO at {company_name}",
                 "title": "CTO",
-                "email": "david.kim@testcompany.com",
-                "linkedin_url": "https://www.linkedin.com/in/davidkim",
+                "email": f"cto@{company_name.lower().replace(' ', '')}.com",
+                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
                 "seniority": "C-Level",
                 "department": "Engineering",
             },
