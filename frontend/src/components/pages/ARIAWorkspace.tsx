@@ -11,6 +11,8 @@ import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } 
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
+import { useEmotionDetection } from '@/hooks/useEmotionDetection';
+import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 
 export function ARIAWorkspace() {
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -24,6 +26,7 @@ export function ARIAWorkspace() {
   const { session } = useSession();
   const { user } = useAuth();
   useUICommands();
+  useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
 
@@ -162,7 +165,8 @@ export function ARIAWorkspace() {
       data-aria-id="aria-workspace"
     >
       {/* Header with avatar toggle */}
-      <div className="flex items-center justify-end px-6 py-2">
+      <div className="flex items-center justify-end gap-3 px-6 py-2">
+        <EmotionIndicator />
         <button
           onClick={() => modalityController.switchTo('avatar')}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-[#2E66FF] hover:bg-[#2E66FF]/10 transition-colors"

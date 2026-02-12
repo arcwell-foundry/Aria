@@ -1,6 +1,7 @@
 import { Video, VideoOff } from 'lucide-react';
 import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
+import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 
 export function DialogueHeader() {
   const tavusSession = useModalityStore((s) => s.tavusSession);
@@ -31,6 +32,8 @@ export function DialogueHeader() {
           </span>
         </div>
       </div>
+
+      <EmotionIndicator />
 
       {(isActive || tavusSession.status === 'connecting') && (
         <button

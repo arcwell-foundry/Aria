@@ -7,6 +7,7 @@ import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } 
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
+import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { AvatarContainer } from './AvatarContainer';
 import { TranscriptPanel } from './TranscriptPanel';
 import { DialogueHeader } from './DialogueHeader';
@@ -30,6 +31,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const { session } = useSession();
   const { user } = useAuth();
   useUICommands();
+  useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
 
