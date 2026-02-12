@@ -230,6 +230,50 @@ class SupabaseClient:
             raise DatabaseError(f"Failed to create user settings: {e}") from e
 
     @classmethod
+    async def create_onboarding_state(cls, user_id: str) -> dict[str, Any]:
+        """Create initial onboarding state for a new user.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            Created onboarding state data.
+
+        Raises:
+            DatabaseError: If database operation fails.
+        """
+        try:
+            _supabase_circuit_breaker.check()
+            client = cls.get_client()
+            data: dict[str, Any] = {
+                "user_id": user_id,
+                "current_step": "company_discovery",
+                "step_data": {},
+                "completed_steps": [],
+                "skipped_steps": [],
+                "readiness_scores": {
+                    "corporate_memory": 0,
+                    "digital_twin": 0,
+                    "relationship_graph": 0,
+                    "integrations": 0,
+                    "goal_clarity": 0,
+                },
+            }
+            response = client.table("onboarding_state").insert(data).execute()
+            if response.data and len(response.data) > 0:
+                _supabase_circuit_breaker.record_success()
+                return cast(dict[str, Any], response.data[0])
+            raise DatabaseError("Failed to create onboarding state")
+        except DatabaseError:
+            raise
+        except CircuitBreakerOpen:
+            raise
+        except Exception as e:
+            _supabase_circuit_breaker.record_failure()
+            logger.exception("Error creating onboarding state", extra={"user_id": user_id})
+            raise DatabaseError(f"Failed to create onboarding state: {e}") from e
+
+    @classmethod
     async def create_company(cls, name: str, domain: str | None = None) -> dict[str, Any]:
         """Create a new company.
 

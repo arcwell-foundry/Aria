@@ -92,7 +92,10 @@ def _get_client_ip(request: Request) -> str | None:
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 @rate_limit(RateLimitConfig(requests=5, window_seconds=60))
 async def signup(request: Request, signup_request: SignupRequest) -> TokenResponse:  # noqa: ARG001
-    """Create a new user account.
+    """Create a new user account with atomic database setup.
+
+    Creates auth user, company, user_profile, user_settings, and onboarding_state
+    as an atomic operation. If any step fails, the auth user is deleted.
 
     Args:
         request: Signup request with email, password, and profile info.
@@ -103,10 +106,12 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
     Raises:
         HTTPException: If signup fails.
     """
+    user_id: str | None = None
+
     try:
         client = SupabaseClient.get_client()
 
-        # Create auth user
+        # Step 1: Create auth user
         auth_response = client.auth.sign_up(
             {
                 "email": signup_request.email,
@@ -122,21 +127,24 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
 
         user_id = auth_response.user.id
 
-        # Create company if provided
+        # Step 2: Create company if provided
         company_id: str | None = None
         if signup_request.company_name:
             company = await SupabaseClient.create_company(name=signup_request.company_name)
             company_id = company["id"]
 
-        # Create user profile
+        # Step 3: Create user profile
         await SupabaseClient.create_user_profile(
             user_id=user_id,
             full_name=signup_request.full_name,
             company_id=company_id,
         )
 
-        # Create default user settings
+        # Step 4: Create default user settings
         await SupabaseClient.create_user_settings(user_id=user_id)
+
+        # Step 5: Create initial onboarding state
+        await SupabaseClient.create_onboarding_state(user_id=user_id)
 
         logger.info("User signed up successfully", extra={"user_id": user_id})
 
@@ -150,6 +158,17 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
         raise
     except Exception as e:
         logger.exception("Error during signup")
+        # Cleanup: Delete orphaned auth user if created
+        if user_id:
+            try:
+                admin_client = SupabaseClient.get_client().auth.admin
+                admin_client.delete_user(user_id)
+                logger.info("Cleaned up orphaned auth user", extra={"user_id": user_id})
+            except Exception as cleanup_error:
+                logger.error(
+                    "Failed to cleanup orphaned auth user",
+                    extra={"user_id": user_id, "error": str(cleanup_error)},
+                )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=sanitize_error(e),

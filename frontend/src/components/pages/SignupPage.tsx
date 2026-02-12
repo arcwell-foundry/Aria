@@ -53,7 +53,7 @@ export function SignupPage() {
         full_name: fullName,
         company_name: companyName || undefined,
       });
-      navigate('/');
+      navigate('/onboarding');
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
