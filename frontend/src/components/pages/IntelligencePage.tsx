@@ -10,7 +10,7 @@
  *
  * Routes:
  * - /intelligence -> IntelligenceOverview
- * - /intelligence/battle-cards/:competitorId -> BattleCardDetail (placeholder)
+ * - /intelligence/battle-cards/:competitorId -> BattleCardDetail
  */
 
 import { useParams } from 'react-router-dom';
@@ -19,6 +19,7 @@ import { cn } from '@/utils/cn';
 import { useBattleCards } from '@/hooks/useBattleCards';
 import { BattleCardPreview, BattleCardPreviewSkeleton } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
+import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
 import type { BattleCard } from '@/api/battleCards';
 
 // Mock data for market cap gaps (would come from enhanced API in future)
@@ -80,46 +81,6 @@ function IntelligenceSkeleton() {
   );
 }
 
-// Placeholder for Battle Card Detail view
-function BattleCardDetailPlaceholder({ competitorId }: { competitorId: string }) {
-  const decodedName = decodeURIComponent(competitorId);
-
-  return (
-    <div className="flex-1 overflow-y-auto p-8">
-      {/* Header with back indicator */}
-      <div className="mb-6">
-        <button
-          onClick={() => window.history.back()}
-          className="text-sm mb-4 hover:underline"
-          style={{ color: 'var(--accent)' }}
-        >
-          Back to Intelligence
-        </button>
-        <h1
-          className="font-display text-2xl italic mb-1"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          {decodedName}
-        </h1>
-        <p
-          className="text-sm"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          Battle Card Detail view will be implemented in Task 5
-        </p>
-      </div>
-
-      <div
-        className="rounded-xl p-8 border border-[var(--border)] bg-[var(--bg-elevated)]"
-      >
-        <p style={{ color: 'var(--text-secondary)' }}>
-          Full battle card detail with strengths, weaknesses, pricing,
-          differentiation, and objection handlers coming soon.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 // Intelligence Overview Component
 function IntelligenceOverview() {
@@ -246,14 +207,7 @@ export function IntelligencePage() {
 
   // Show detail view if competitorId is present
   if (competitorId) {
-    return (
-      <div
-        className="flex-1 flex flex-col h-full"
-        style={{ backgroundColor: 'var(--bg-primary)' }}
-      >
-        <BattleCardDetailPlaceholder competitorId={competitorId} />
-      </div>
-    );
+    return <BattleCardDetail competitorId={competitorId} />;
   }
 
   // Show overview
