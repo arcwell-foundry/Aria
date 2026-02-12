@@ -10,16 +10,17 @@
  *
  * Routes:
  * - /pipeline -> PipelineOverview
- * - /pipeline/leads/:leadId -> LeadDetailView (placeholder for Task 3)
+ * - /pipeline/leads/:leadId -> LeadDetailPage
  */
 
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Search, Filter, ArrowLeft } from 'lucide-react';
+import { Search, Filter } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadTable } from '@/components/pipeline';
 import { EmptyState } from '@/components/common/EmptyState';
+import { LeadDetailPage } from './LeadDetailPage';
 import type { LeadStatus, LifecycleStage } from '@/api/leads';
 
 // Filter chip options
@@ -86,57 +87,6 @@ function PipelineSkeleton() {
             <div className="w-20 h-2 bg-[var(--border)] rounded-full" />
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-// Placeholder for Lead Detail View (Task 3)
-function LeadDetailView({ leadId }: { leadId: string }) {
-  const { data: lead, isLoading } = useLeads({ limit: 100 });
-  const leadData = lead?.find((l) => l.id === leadId);
-
-  if (isLoading) {
-    return <PipelineSkeleton />;
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto">
-      {/* Back button */}
-      <button
-        onClick={() => window.history.back()}
-        className={cn(
-          'flex items-center gap-2 mb-6',
-          'text-sm font-medium transition-colors',
-          'hover:text-[var(--accent)]'
-        )}
-        style={{ color: 'var(--text-secondary)' }}
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Pipeline
-      </button>
-
-      {/* Placeholder content */}
-      <div className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl p-6">
-        <h2
-          className="font-display text-2xl mb-2"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          {leadData?.company_name || 'Lead Detail'}
-        </h2>
-        <p
-          className="text-sm mb-4"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          Lead ID: {leadId}
-        </p>
-        <p
-          className="text-sm"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          This detailed view will be implemented in Task 3 with stakeholder list,
-          activity timeline, and lead insights.
-        </p>
       </div>
     </div>
   );
@@ -324,14 +274,7 @@ export function PipelinePage() {
 
   // Show detail view if leadId is present
   if (leadId) {
-    return (
-      <div
-        className="flex-1 flex flex-col h-full"
-        style={{ backgroundColor: 'var(--bg-primary)' }}
-      >
-        <LeadDetailView leadId={leadId} />
-      </div>
-    );
+    return <LeadDetailPage leadId={leadId} />;
   }
 
   // Show overview
