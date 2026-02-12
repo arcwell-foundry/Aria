@@ -72,12 +72,16 @@ class WebSocketManagerImpl {
     this.listeners.get(event)?.delete(handler);
   }
 
+  private buildWsUrl(userId: string, sessionId: string): string {
+    const apiUrl = new URL(import.meta.env.VITE_API_URL || 'http://localhost:8000');
+    const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${apiUrl.host}/ws/${userId}?session_id=${sessionId}`;
+  }
+
   private attemptWebSocket(): void {
     if (!this.config) return;
 
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    const wsUrl = baseUrl.replace(/^http/, 'ws');
-    const url = `${wsUrl}/ws/${this.config.userId}?session_id=${this.config.sessionId}`;
+    const url = this.buildWsUrl(this.config.userId, this.config.sessionId);
     const token = localStorage.getItem('access_token');
 
     try {
@@ -250,9 +254,7 @@ class WebSocketManagerImpl {
     this.stopWSUpgradeRetry();
     this.wsUpgradeTimer = setInterval(() => {
       if (this._transport === 'sse' && !this.intentionalDisconnect) {
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const wsUrl = baseUrl.replace(/^http/, 'ws');
-        const url = `${wsUrl}/ws/${this.config?.userId}?session_id=${this.config?.sessionId}`;
+        const url = this.buildWsUrl(this.config?.userId || '', this.config?.sessionId || '');
         const probe = new WebSocket(url);
         const timeout = setTimeout(() => probe.close(), 3_000);
 
