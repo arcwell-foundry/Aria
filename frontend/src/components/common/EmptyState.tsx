@@ -18,7 +18,6 @@
 
 import { type ReactNode } from 'react';
 import { Inbox } from 'lucide-react';
-import { Button } from '../primitives';
 
 export interface EmptyStateProps {
   /** Title text */
@@ -86,13 +85,16 @@ export function EmptyState({
 
       {/* Suggestion Button */}
       {suggestion && onSuggestion && (
-        <Button
-          variant="primary"
-          size="md"
+        <button
           onClick={onSuggestion}
+          className="px-4 py-2 rounded-lg font-sans text-sm font-medium transition-all duration-200 hover:opacity-90"
+          style={{
+            backgroundColor: 'var(--accent)',
+            color: 'white',
+          }}
         >
           {suggestion}
-        </Button>
+        </button>
       )}
     </div>
   );
