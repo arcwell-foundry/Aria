@@ -1372,10 +1372,19 @@ class GoalExecutionService:
             if plan_result.data:
                 tasks_raw = plan_result.data.get("tasks", "[]")
                 tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
+                # Extract execution_mode from stored plan or plan JSON
+                execution_mode = plan_result.data.get("execution_mode", "sequential")
+                if not execution_mode or execution_mode == "sequential":
+                    # Check inside the plan JSON blob (reused_workflow stores it there)
+                    plan_blob = plan_result.data.get("plan")
+                    if plan_blob:
+                        parsed = json.loads(plan_blob) if isinstance(plan_blob, str) else plan_blob
+                        execution_mode = parsed.get("execution_mode", execution_mode)
             else:
                 # Auto-plan if no plan exists
                 plan = await self.plan_goal(goal_id, user_id)
                 tasks = plan.get("tasks", [])
+                execution_mode = plan.get("execution_mode", "sequential")
 
             if not tasks:
                 await event_bus.publish(
@@ -1403,36 +1412,68 @@ class GoalExecutionService:
             total_tasks = len(tasks)
             completed_tasks = 0
 
-            # Execute tasks — simple sequential for now, respecting dependencies
-            for task in tasks:
-                agent_type = task.get("agent_type", "analyst")
+            if execution_mode in ("parallel", "reused_workflow"):
+                # Parallel execution: group tasks by dependency layers
+                layers = self._build_dependency_layers(tasks)
 
-                await event_bus.publish(
-                    GoalEvent(
-                        goal_id=goal_id,
-                        user_id=user_id,
-                        event_type="agent.started",
-                        data={
-                            "agent": agent_type,
-                            "task_title": task.get("title", ""),
-                        },
+                for layer in layers:
+                    # Execute all tasks in this layer concurrently
+                    layer_results = await asyncio.gather(
+                        *[
+                            self._execute_task_with_events(
+                                task=t,
+                                goal_id=goal_id,
+                                user_id=user_id,
+                                goal=goal,
+                                context=context,
+                            )
+                            for t in layer
+                        ],
+                        return_exceptions=True,
                     )
-                )
 
-                try:
-                    result = await self._execute_agent(
+                    # Process results from this layer
+                    for lr in layer_results:
+                        if isinstance(lr, BaseException):
+                            logger.error(
+                                "Unexpected exception in parallel task",
+                                extra={"goal_id": goal_id, "error": str(lr)},
+                            )
+                        else:
+                            completed_tasks += 1
+
+                            progress = int((completed_tasks / total_tasks) * 100)
+                            await event_bus.publish(
+                                GoalEvent(
+                                    goal_id=goal_id,
+                                    user_id=user_id,
+                                    event_type="progress.update",
+                                    data={
+                                        "progress": progress,
+                                        "completed": completed_tasks,
+                                        "total": total_tasks,
+                                        "last_agent": lr.get("agent_type", ""),
+                                    },
+                                )
+                            )
+
+                    # Update goal progress in DB once per layer
+                    layer_progress = int((completed_tasks / total_tasks) * 100)
+                    self._db.table("goals").update(
+                        {
+                            "progress": layer_progress,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    ).eq("id", goal_id).execute()
+            else:
+                # Sequential execution: one task at a time
+                for task in tasks:
+                    task_result = await self._execute_task_with_events(
+                        task=task,
+                        goal_id=goal_id,
                         user_id=user_id,
                         goal=goal,
-                        agent_type=agent_type,
                         context=context,
-                    )
-
-                    await self._handle_agent_result(
-                        user_id=user_id,
-                        goal_id=goal_id,
-                        agent_type=agent_type,
-                        result=result,
-                        task=task,
                     )
 
                     completed_tasks += 1
@@ -1447,7 +1488,7 @@ class GoalExecutionService:
                                 "progress": progress,
                                 "completed": completed_tasks,
                                 "total": total_tasks,
-                                "last_agent": agent_type,
+                                "last_agent": task_result.get("agent_type", ""),
                             },
                         )
                     )
@@ -1456,28 +1497,6 @@ class GoalExecutionService:
                     self._db.table("goals").update(
                         {"progress": progress, "updated_at": datetime.now(UTC).isoformat()}
                     ).eq("id", goal_id).execute()
-
-                except Exception as e:
-                    logger.error(
-                        "Agent task failed in background execution",
-                        extra={
-                            "goal_id": goal_id,
-                            "agent_type": agent_type,
-                            "error": str(e),
-                        },
-                    )
-                    await event_bus.publish(
-                        GoalEvent(
-                            goal_id=goal_id,
-                            user_id=user_id,
-                            event_type="agent.completed",
-                            data={
-                                "agent": agent_type,
-                                "success": False,
-                                "error": str(e),
-                            },
-                        )
-                    )
 
             # All tasks done — complete the goal
             await self.complete_goal_with_retro(goal_id, user_id)
@@ -1549,6 +1568,153 @@ class GoalExecutionService:
                 content=content,
                 goal_id=goal_id,
             )
+
+    @staticmethod
+    def _build_dependency_layers(tasks: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Group tasks into dependency layers for parallel execution.
+
+        Uses topological sort to order tasks by dependencies:
+        - Layer 0: tasks with no depends_on
+        - Layer 1: tasks whose dependencies are all in layer 0
+        - And so on...
+
+        Circular dependencies are force-placed into a final layer with a
+        safety cap to prevent infinite loops.
+
+        Args:
+            tasks: List of task dicts, each with "title" and optional "depends_on".
+
+        Returns:
+            List of layers, where each layer is a list of task dicts that
+            can execute in parallel.
+        """
+        if not tasks:
+            return []
+
+        # Build lookup by title
+        task_by_title: dict[str, dict[str, Any]] = {}
+        for t in tasks:
+            title = t.get("title", "")
+            task_by_title[title] = t
+
+        placed: set[str] = set()
+        layers: list[list[dict[str, Any]]] = []
+        remaining = list(tasks)
+
+        # Safety cap: at most len(tasks) iterations to handle circular deps
+        max_iterations = len(tasks)
+        iteration = 0
+
+        while remaining and iteration < max_iterations:
+            iteration += 1
+            layer: list[dict[str, Any]] = []
+
+            for t in remaining:
+                deps = t.get("depends_on", []) or []
+                # A task is ready if all its dependencies are already placed
+                if all(d in placed for d in deps):
+                    layer.append(t)
+
+            if not layer:
+                # All remaining tasks have unresolved deps (circular).
+                # Force-place them all into a final layer.
+                layers.append(remaining)
+                break
+
+            layers.append(layer)
+            for t in layer:
+                placed.add(t.get("title", ""))
+            remaining = [t for t in remaining if t.get("title", "") not in placed]
+
+        return layers
+
+    async def _execute_task_with_events(
+        self,
+        task: dict[str, Any],
+        goal_id: str,
+        user_id: str,
+        goal: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute a single task and publish lifecycle events.
+
+        Publishes agent.started before execution, calls _execute_agent and
+        _handle_agent_result, and catches exceptions to publish failure events.
+
+        Args:
+            task: The task dict with title, agent_type, etc.
+            goal_id: The goal ID.
+            user_id: The user ID.
+            goal: The full goal dict.
+            context: Gathered execution context.
+
+        Returns:
+            Dict with task_title, agent_type, success, and optional error.
+        """
+        event_bus = EventBus.get_instance()
+        agent_type = task.get("agent_type", "analyst")
+
+        await event_bus.publish(
+            GoalEvent(
+                goal_id=goal_id,
+                user_id=user_id,
+                event_type="agent.started",
+                data={
+                    "agent": agent_type,
+                    "task_title": task.get("title", ""),
+                },
+            )
+        )
+
+        try:
+            result = await self._execute_agent(
+                user_id=user_id,
+                goal=goal,
+                agent_type=agent_type,
+                context=context,
+            )
+
+            await self._handle_agent_result(
+                user_id=user_id,
+                goal_id=goal_id,
+                agent_type=agent_type,
+                result=result,
+                task=task,
+            )
+
+            return {
+                "task_title": task.get("title", ""),
+                "agent_type": agent_type,
+                "success": result.get("success", False),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Agent task failed in background execution",
+                extra={
+                    "goal_id": goal_id,
+                    "agent_type": agent_type,
+                    "error": str(e),
+                },
+            )
+            await event_bus.publish(
+                GoalEvent(
+                    goal_id=goal_id,
+                    user_id=user_id,
+                    event_type="agent.completed",
+                    data={
+                        "agent": agent_type,
+                        "success": False,
+                        "error": str(e),
+                    },
+                )
+            )
+            return {
+                "task_title": task.get("title", ""),
+                "agent_type": agent_type,
+                "success": False,
+                "error": str(e),
+            }
 
     async def check_progress(self, goal_id: str, user_id: str) -> dict[str, Any]:
         """Get a progress snapshot for a goal.

@@ -92,9 +92,7 @@ async def test_plan_goal_stores_plan():
     )
 
     # Mock plan storage
-    mock_db.table.return_value.insert.return_value.execute.return_value.data = [
-        {"id": "plan-1"}
-    ]
+    mock_db.table.return_value.insert.return_value.execute.return_value.data = [{"id": "plan-1"}]
 
     result = await service.plan_goal("goal-1", "user-1")
     assert result["goal_id"] == "goal-1"
@@ -205,9 +203,7 @@ async def test_complete_goal_with_retro():
     with patch("src.services.goal_service.GoalService") as mock_goal_svc_cls:
         mock_goal_svc = MagicMock()
         mock_goal_svc_cls.return_value = mock_goal_svc
-        mock_goal_svc.generate_retrospective = AsyncMock(
-            return_value={"summary": "Good work"}
-        )
+        mock_goal_svc.generate_retrospective = AsyncMock(return_value={"summary": "Good work"})
 
         # Patch EventBus singleton
         with patch("src.core.event_bus.EventBus.get_instance") as mock_get_instance:
@@ -218,3 +214,247 @@ async def test_complete_goal_with_retro():
             result = await service.complete_goal_with_retro("goal-1", "user-1")
             assert result["status"] == "complete"
             mock_bus.publish.assert_called_once()
+
+
+# --- Dependency Layer Tests ---
+
+
+def test_build_dependency_layers_independent():
+    """3 independent tasks → 1 layer with all 3."""
+    service, _ = _make_service()
+    tasks = [
+        {"title": "A", "agent_type": "scout", "depends_on": []},
+        {"title": "B", "agent_type": "analyst", "depends_on": []},
+        {"title": "C", "agent_type": "hunter", "depends_on": []},
+    ]
+    layers = service._build_dependency_layers(tasks)
+    assert len(layers) == 1
+    titles = {t["title"] for t in layers[0]}
+    assert titles == {"A", "B", "C"}
+
+
+def test_build_dependency_layers_chain():
+    """A→B→C linear chain → 3 layers."""
+    service, _ = _make_service()
+    tasks = [
+        {"title": "A", "agent_type": "scout", "depends_on": []},
+        {"title": "B", "agent_type": "analyst", "depends_on": ["A"]},
+        {"title": "C", "agent_type": "hunter", "depends_on": ["B"]},
+    ]
+    layers = service._build_dependency_layers(tasks)
+    assert len(layers) == 3
+    assert layers[0][0]["title"] == "A"
+    assert layers[1][0]["title"] == "B"
+    assert layers[2][0]["title"] == "C"
+
+
+def test_build_dependency_layers_diamond():
+    """A→(B,C)→D diamond pattern → 3 layers: [A], [B,C], [D]."""
+    service, _ = _make_service()
+    tasks = [
+        {"title": "A", "agent_type": "scout", "depends_on": []},
+        {"title": "B", "agent_type": "analyst", "depends_on": ["A"]},
+        {"title": "C", "agent_type": "hunter", "depends_on": ["A"]},
+        {"title": "D", "agent_type": "strategist", "depends_on": ["B", "C"]},
+    ]
+    layers = service._build_dependency_layers(tasks)
+    assert len(layers) == 3
+    assert layers[0][0]["title"] == "A"
+    layer1_titles = {t["title"] for t in layers[1]}
+    assert layer1_titles == {"B", "C"}
+    assert layers[2][0]["title"] == "D"
+
+
+def test_build_dependency_layers_circular():
+    """Circular deps → force-placed, no infinite loop."""
+    service, _ = _make_service()
+    tasks = [
+        {"title": "A", "agent_type": "scout", "depends_on": ["B"]},
+        {"title": "B", "agent_type": "analyst", "depends_on": ["A"]},
+    ]
+    layers = service._build_dependency_layers(tasks)
+    # Both tasks should end up placed (force-placed in final layer)
+    all_titles = {t["title"] for layer in layers for t in layer}
+    assert all_titles == {"A", "B"}
+
+
+def test_build_dependency_layers_empty():
+    """Empty task list → empty layers."""
+    service, _ = _make_service()
+    assert service._build_dependency_layers([]) == []
+
+
+@pytest.mark.asyncio
+async def test_run_goal_background_parallel():
+    """Parallel mode with 3 independent tasks → all 3 execute, events published."""
+    service, mock_db = _make_service()
+
+    # Mock plan fetch: 3 independent tasks, parallel mode
+    plan_mock = MagicMock()
+    plan_mock.data = {
+        "tasks": [
+            {"title": "Scan Market", "agent_type": "scout", "depends_on": []},
+            {"title": "Analyze Accounts", "agent_type": "analyst", "depends_on": []},
+            {"title": "Find Leads", "agent_type": "hunter", "depends_on": []},
+        ],
+        "execution_mode": "parallel",
+    }
+    mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = plan_mock
+
+    # Mock goal fetch
+    goal_mock = MagicMock()
+    goal_mock.data = {"id": "goal-1", "title": "Test Goal", "config": {}}
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = goal_mock
+
+    # Mock DB updates
+    mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+        MagicMock()
+    )
+
+    service._gather_execution_context = AsyncMock(
+        return_value={
+            "company_name": "Test",
+            "facts": [],
+            "gaps": [],
+            "readiness": {},
+            "profile": {},
+        }
+    )
+
+    # Track which agents were called
+    agents_called = []
+
+    async def mock_execute_agent(**kwargs):
+        agents_called.append(kwargs["agent_type"])
+        return {"agent_type": kwargs["agent_type"], "success": True, "content": {}}
+
+    service._execute_agent = mock_execute_agent
+    service._handle_agent_result = AsyncMock()
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+
+    with patch("src.services.goal_execution.EventBus") as mock_eb_cls:
+        mock_eb_cls.get_instance.return_value = mock_bus
+
+        service.complete_goal_with_retro = AsyncMock()
+
+        await service._run_goal_background("goal-1", "user-1")
+
+        # All 3 agents should have been called
+        assert set(agents_called) == {"scout", "analyst", "hunter"}
+
+        # Events should have been published (agent.started + progress.update per task)
+        assert mock_bus.publish.call_count >= 6  # 3 started + 3 progress
+
+
+@pytest.mark.asyncio
+async def test_run_goal_background_sequential_fallback():
+    """Sequential mode → tasks execute in order."""
+    service, mock_db = _make_service()
+
+    plan_mock = MagicMock()
+    plan_mock.data = {
+        "tasks": [
+            {"title": "Step 1", "agent_type": "scout", "depends_on": []},
+            {"title": "Step 2", "agent_type": "analyst", "depends_on": ["Step 1"]},
+        ],
+        "execution_mode": "sequential",
+    }
+    mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = plan_mock
+
+    goal_mock = MagicMock()
+    goal_mock.data = {"id": "goal-1", "title": "Test Goal", "config": {}}
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = goal_mock
+
+    mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+        MagicMock()
+    )
+
+    service._gather_execution_context = AsyncMock(
+        return_value={
+            "company_name": "Test",
+            "facts": [],
+            "gaps": [],
+            "readiness": {},
+            "profile": {},
+        }
+    )
+
+    execution_order = []
+
+    async def mock_execute_agent(**kwargs):
+        execution_order.append(kwargs["agent_type"])
+        return {"agent_type": kwargs["agent_type"], "success": True, "content": {}}
+
+    service._execute_agent = mock_execute_agent
+    service._handle_agent_result = AsyncMock()
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+
+    with patch("src.services.goal_execution.EventBus") as mock_eb_cls:
+        mock_eb_cls.get_instance.return_value = mock_bus
+
+        service.complete_goal_with_retro = AsyncMock()
+
+        await service._run_goal_background("goal-1", "user-1")
+
+        # Sequential: scout must come before analyst
+        assert execution_order == ["scout", "analyst"]
+
+
+@pytest.mark.asyncio
+async def test_parallel_individual_failure():
+    """1 of 3 parallel tasks fails → other 2 succeed, goal completes."""
+    service, mock_db = _make_service()
+
+    plan_mock = MagicMock()
+    plan_mock.data = {
+        "tasks": [
+            {"title": "Good 1", "agent_type": "scout", "depends_on": []},
+            {"title": "Bad", "agent_type": "analyst", "depends_on": []},
+            {"title": "Good 2", "agent_type": "hunter", "depends_on": []},
+        ],
+        "execution_mode": "parallel",
+    }
+    mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = plan_mock
+
+    goal_mock = MagicMock()
+    goal_mock.data = {"id": "goal-1", "title": "Test Goal", "config": {}}
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = goal_mock
+
+    mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+        MagicMock()
+    )
+
+    service._gather_execution_context = AsyncMock(
+        return_value={
+            "company_name": "Test",
+            "facts": [],
+            "gaps": [],
+            "readiness": {},
+            "profile": {},
+        }
+    )
+
+    async def mock_execute_agent(**kwargs):
+        if kwargs["agent_type"] == "analyst":
+            raise RuntimeError("Analyst failed")
+        return {"agent_type": kwargs["agent_type"], "success": True, "content": {}}
+
+    service._execute_agent = mock_execute_agent
+    service._handle_agent_result = AsyncMock()
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+
+    with patch("src.services.goal_execution.EventBus") as mock_eb_cls:
+        mock_eb_cls.get_instance.return_value = mock_bus
+
+        service.complete_goal_with_retro = AsyncMock()
+
+        await service._run_goal_background("goal-1", "user-1")
+
+        # Goal should still complete (complete_goal_with_retro called)
+        service.complete_goal_with_retro.assert_called_once_with("goal-1", "user-1")
