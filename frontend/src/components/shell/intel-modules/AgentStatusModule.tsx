@@ -1,4 +1,4 @@
-import { Bot } from 'lucide-react';
+import { AgentAvatar } from '@/components/common/AgentAvatar';
 
 interface AgentStatus {
   name: string;
@@ -43,12 +43,12 @@ export function AgentStatusModule({ agents = PLACEHOLDER_AGENTS }: AgentStatusMo
               backgroundColor: agent.status === 'active' ? 'var(--bg-subtle)' : 'transparent',
             }}
           >
-            <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+            <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5 relative">
+              <AgentAvatar agentKey={agent.name} size={18} />
               <div
-                className="w-1.5 h-1.5 rounded-full"
+                className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[var(--bg-primary)]"
                 style={{ backgroundColor: STATUS_COLORS[agent.status] }}
               />
-              <Bot size={12} style={{ color: 'var(--text-secondary)' }} />
             </div>
             <div className="min-w-0">
               <p className="font-mono text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>

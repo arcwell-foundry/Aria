@@ -13,3 +13,4 @@
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { CopyButton, type CopyButtonProps } from './CopyButton';
 export { SortableHeader, type SortableHeaderProps, type SortDirection } from './SortableHeader';
+export { AgentAvatar, type AgentAvatarProps } from './AgentAvatar';

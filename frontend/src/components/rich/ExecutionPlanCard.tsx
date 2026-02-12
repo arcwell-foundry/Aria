@@ -26,14 +26,8 @@ interface ExecutionPlanCardProps {
   data: ExecutionPlanData;
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  Hunter: '#2E66FF',
-  Analyst: '#8B5CF6',
-  Strategist: '#F59E0B',
-  Scribe: '#10B981',
-  Operator: '#EF4444',
-  Scout: '#06B6D4',
-};
+import { getAgentColor, resolveAgent } from '@/constants/agents';
+import { AgentAvatar } from '@/components/common/AgentAvatar';
 
 const PHASE_ICONS: Record<string, string> = {
   pending: '\u25CB',
@@ -143,19 +137,23 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
                   {phase.output}
                 </p>
                 {phase.agents.length > 0 && (
-                  <div className="flex gap-1 mt-1.5">
-                    {phase.agents.map((agent) => (
-                      <span
-                        key={agent}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider"
-                        style={{
-                          backgroundColor: `${AGENT_COLORS[agent] || '#6B7280'}15`,
-                          color: AGENT_COLORS[agent] || '#6B7280',
-                        }}
-                      >
-                        {agent}
-                      </span>
-                    ))}
+                  <div className="flex gap-1.5 mt-1.5 items-center">
+                    {phase.agents.map((agent) => {
+                      const color = getAgentColor(agent);
+                      return (
+                        <span
+                          key={agent}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider"
+                          style={{
+                            backgroundColor: `${color}15`,
+                            color,
+                          }}
+                        >
+                          <AgentAvatar agentKey={agent} size={14} />
+                          {resolveAgent(agent).name}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>

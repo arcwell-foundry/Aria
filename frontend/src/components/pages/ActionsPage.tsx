@@ -12,7 +12,6 @@
 import { useNavigate } from 'react-router-dom';
 import {
   Target,
-  Bot,
   CheckCircle,
   XCircle,
   Clock,
@@ -23,18 +22,11 @@ import { cn } from '@/utils/cn';
 import { useGoalDashboard } from '@/hooks/useGoals';
 import { useActions, useApproveAction, useRejectAction } from '@/hooks/useActionQueue';
 import { EmptyState } from '@/components/common/EmptyState';
+import { AgentAvatar } from '@/components/common/AgentAvatar';
+import { AGENT_REGISTRY, AGENT_TYPES, resolveAgent } from '@/constants/agents';
+import type { AgentType } from '@/constants/agents';
 import type { GoalStatus, GoalDashboard } from '@/api/goals';
-import type { Action, ActionAgent, ActionStatus, RiskLevel } from '@/api/actionQueue';
-
-// Agent info
-const AGENT_INFO: Record<ActionAgent, { name: string; description: string }> = {
-  scout: { name: 'Scout', description: 'Monitors news, social, job boards' },
-  analyst: { name: 'Analyst', description: 'Processes and enriches data' },
-  hunter: { name: 'Hunter', description: 'Identifies and qualifies leads' },
-  operator: { name: 'Operator', description: 'Executes approved actions' },
-  scribe: { name: 'Scribe', description: 'Drafts communications' },
-  strategist: { name: 'Strategist', description: 'Plans and coordinates goals' },
-};
+import type { Action, ActionStatus, RiskLevel } from '@/api/actionQueue';
 
 // Status colors
 const GOAL_STATUS_COLORS: Record<GoalStatus, string> = {
@@ -203,8 +195,8 @@ function GoalCard({ goal, onClick }: { goal: GoalDashboard; onClick?: () => void
 }
 
 // Agent Status Card Component
-function AgentCard({ agent }: { agent: ActionAgent }) {
-  const info = AGENT_INFO[agent];
+function AgentCard({ agent }: { agent: AgentType }) {
+  const info = AGENT_REGISTRY[agent];
 
   return (
     <div
@@ -214,11 +206,8 @@ function AgentCard({ agent }: { agent: ActionAgent }) {
         backgroundColor: 'var(--bg-elevated)',
       }}
     >
-      <div
-        className="w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center"
-        style={{ backgroundColor: 'var(--bg-subtle)' }}
-      >
-        <Bot className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+      <div className="mx-auto mb-2 w-10 h-10">
+        <AgentAvatar agentKey={agent} size={40} />
       </div>
       <p
         className="font-medium text-sm mb-1"
@@ -251,7 +240,7 @@ function ActionItem({
   isRejecting: boolean;
 }) {
   const riskColor = RISK_COLORS[action.risk_level];
-  const agentInfo = AGENT_INFO[action.agent];
+  const agentInfo = resolveAgent(action.agent);
 
   return (
     <div
@@ -263,11 +252,8 @@ function ActionItem({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: 'var(--bg-subtle)' }}
-          >
-            <Bot className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+          <div className="flex-shrink-0">
+            <AgentAvatar agentKey={action.agent} size={32} />
           </div>
           <div className="min-w-0 flex-1">
             <p
@@ -463,7 +449,7 @@ export function ActionsPage() {
           </h2>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {(Object.keys(AGENT_INFO) as ActionAgent[]).map((agent) => (
+            {AGENT_TYPES.map((agent) => (
               <AgentCard key={agent} agent={agent} />
             ))}
           </div>

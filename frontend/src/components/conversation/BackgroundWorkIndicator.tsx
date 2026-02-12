@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { wsManager } from '@/core/WebSocketManager';
+import { AgentAvatar } from '@/components/common/AgentAvatar';
 
 interface ActiveTask {
   id: string;
   description: string;
+  agent?: string;
 }
 
 const MAX_VISIBLE = 2;
@@ -15,7 +17,7 @@ export function BackgroundWorkIndicator() {
 
   useEffect(() => {
     const handleStarted = (payload: unknown) => {
-      const data = payload as { id: string; description?: string };
+      const data = payload as { id: string; description?: string; agent?: string };
       setTasks((prev) => {
         if (prev.some((t) => t.id === data.id)) return prev;
         return [
@@ -23,6 +25,7 @@ export function BackgroundWorkIndicator() {
           {
             id: data.id,
             description: data.description || 'Working on task...',
+            agent: data.agent,
           },
         ];
       });
@@ -57,7 +60,11 @@ export function BackgroundWorkIndicator() {
       <div className="space-y-1">
         {visible.map((task) => (
           <div key={task.id} className="flex items-center gap-2">
-            <span className="text-accent text-xs shrink-0">&#10022;</span>
+            {task.agent ? (
+              <AgentAvatar agentKey={task.agent} size={16} className="shrink-0" />
+            ) : (
+              <span className="text-accent text-xs shrink-0">&#10022;</span>
+            )}
             <span className="text-xs text-[#8B8FA3] truncate">
               {task.description}
             </span>

@@ -19,14 +19,8 @@ interface GoalPlanCardProps {
   data: GoalPlanData;
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  Hunter: '#2E66FF',
-  Analyst: '#8B5CF6',
-  Strategist: '#F59E0B',
-  Scribe: '#10B981',
-  Operator: '#EF4444',
-  Scout: '#06B6D4',
-};
+import { getAgentColor, resolveAgent } from '@/constants/agents';
+import { AgentAvatar } from '@/components/common/AgentAvatar';
 
 export function GoalPlanCard({ data }: GoalPlanCardProps) {
   const [status, setStatus] = useState(data.status);
@@ -124,18 +118,22 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
 
       <div className="px-4 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          {data.agents.map((agent) => (
-            <span
-              key={agent}
-              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider"
-              style={{
-                backgroundColor: `${AGENT_COLORS[agent] || '#6B7280'}20`,
-                color: AGENT_COLORS[agent] || '#6B7280',
-              }}
-            >
-              {agent}
-            </span>
-          ))}
+          {data.agents.map((agent) => {
+            const color = getAgentColor(agent);
+            return (
+              <span
+                key={agent}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider"
+                style={{
+                  backgroundColor: `${color}20`,
+                  color,
+                }}
+              >
+                <AgentAvatar agentKey={agent} size={16} />
+                {resolveAgent(agent).name}
+              </span>
+            );
+          })}
         </div>
         <span className="text-xs font-mono text-[var(--text-secondary)]">
           {data.timeline}
