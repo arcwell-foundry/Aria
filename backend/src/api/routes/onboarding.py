@@ -612,9 +612,9 @@ async def disconnect_email(
     db = SupabaseClient.get_client()
     # Delete both gmail and outlook rows for this user
     for itype in ("gmail", "outlook"):
-        db.table("user_integrations").delete().eq(
-            "user_id", current_user.id
-        ).eq("integration_type", itype).execute()
+        db.table("user_integrations").delete().eq("user_id", current_user.id).eq(
+            "integration_type", itype
+        ).execute()
 
     logger.info(
         "Email integration disconnected",
@@ -1073,11 +1073,7 @@ async def activate_aria(
 
     # Read current onboarding state
     result = (
-        db.table("onboarding_state")
-        .select("*")
-        .eq("user_id", user_id)
-        .maybe_single()
-        .execute()
+        db.table("onboarding_state").select("*").eq("user_id", user_id).maybe_single().execute()
     )
     if not result or not result.data:
         raise HTTPException(status_code=400, detail="No onboarding state found")
@@ -1194,6 +1190,26 @@ async def get_first_conversation(
 
     generator = FirstConversationGenerator()
     message = await generator.generate(current_user.id)
+
+    # Also deliver via WebSocket for real-time conversation experience
+    try:
+        from src.core.ws import ws_manager
+        from src.models.ws_events import AriaMessageEvent
+
+        event = AriaMessageEvent(
+            message=message.content,
+            rich_content=message.rich_content,
+            ui_commands=message.ui_commands,
+            suggestions=message.suggestions,
+        )
+        await ws_manager.send_to_user(current_user.id, event)
+        logger.info(
+            "First conversation delivered via WebSocket",
+            extra={"user_id": current_user.id},
+        )
+    except Exception as e:
+        logger.warning(f"WebSocket delivery failed (REST fallback): {e}")
+
     return message.model_dump()
 
 
