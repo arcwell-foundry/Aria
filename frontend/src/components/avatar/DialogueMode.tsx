@@ -3,7 +3,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useModalityStore } from '@/stores/modalityStore';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
-import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } from '@/types/chat';
+import type { AriaMessagePayload, AriaThinkingPayload, StreamErrorPayload, RichContent, UICommand } from '@/types/chat';
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
@@ -181,11 +181,32 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       setIsSpeaking(data.is_speaking);
     };
 
+    const handleStreamError = (payload: unknown) => {
+      const data = payload as StreamErrorPayload;
+      setStreaming(false);
+      setIsSpeaking(false);
+      streamingIdRef.current = null;
+
+      addMessage({
+        role: 'system',
+        content: data.error,
+        rich_content: [],
+        ui_commands: [],
+        suggestions: data.recoverable ? ['Try again'] : [],
+      });
+    };
+
+    const handleStreamComplete = () => {
+      // Positive signal that the LLM stream finished normally.
+    };
+
     wsManager.on(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
     wsManager.on(WS_EVENTS.ARIA_THINKING, handleThinking);
     wsManager.on(WS_EVENTS.ARIA_SPEAKING, handleSpeaking);
     wsManager.on('aria.token', handleToken);
     wsManager.on('aria.metadata', handleMetadata);
+    wsManager.on(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
+    wsManager.on(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
 
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
@@ -193,6 +214,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       wsManager.off(WS_EVENTS.ARIA_SPEAKING, handleSpeaking);
       wsManager.off('aria.token', handleToken);
       wsManager.off('aria.metadata', handleMetadata);
+      wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
+      wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
     };
   }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking]);
 

@@ -26,6 +26,8 @@ export const WS_EVENTS = {
   ARIA_MESSAGE: 'aria.message',
   ARIA_THINKING: 'aria.thinking',
   ARIA_SPEAKING: 'aria.speaking',
+  ARIA_STREAM_COMPLETE: 'aria.stream_complete',
+  ARIA_STREAM_ERROR: 'aria.stream_error',
   ACTION_PENDING: 'action.pending',
   ACTION_COMPLETED: 'action.completed',
   PROGRESS_UPDATE: 'progress.update',
@@ -64,6 +66,12 @@ export interface AriaThinkingPayload {
 export interface UserMessagePayload {
   message: string;
   conversation_id?: string;
+}
+
+export interface StreamErrorPayload {
+  error: string;
+  conversation_id?: string;
+  recoverable?: boolean;
 }
 
 export interface WSEnvelope {

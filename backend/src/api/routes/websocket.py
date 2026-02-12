@@ -250,15 +250,33 @@ async def _handle_user_message(
 
         # Stream LLM response
         full_content = ""
-        async for token in service._llm_client.stream_response(
-            messages=conversation_messages,
-            system_prompt=system_prompt,
-        ):
-            full_content += token
+        try:
+            async for token in service._llm_client.stream_response(
+                messages=conversation_messages,
+                system_prompt=system_prompt,
+            ):
+                full_content += token
+                await websocket.send_json({
+                    "type": "aria.token",
+                    "payload": {"content": token, "conversation_id": conversation_id},
+                })
+
+            # Stream completed successfully
             await websocket.send_json({
-                "type": "aria.token",
-                "payload": {"content": token, "conversation_id": conversation_id},
+                "type": "aria.stream_complete",
+                "payload": {"conversation_id": conversation_id},
             })
+        except Exception as stream_err:
+            logger.error("LLM stream failed: %s", stream_err)
+            await websocket.send_json({
+                "type": "aria.stream_error",
+                "payload": {
+                    "error": "I encountered an issue generating my response. Let me try again.",
+                    "conversation_id": conversation_id,
+                    "recoverable": True,
+                },
+            })
+            return
 
         # Add assistant response to working memory
         working_memory.add_message("assistant", full_content)

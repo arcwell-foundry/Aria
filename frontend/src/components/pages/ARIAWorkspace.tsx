@@ -7,7 +7,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
 import { modalityController } from '@/core/ModalityController';
 import { WS_EVENTS } from '@/types/chat';
-import type { AriaMessagePayload, AriaThinkingPayload, RichContent, UICommand } from '@/types/chat';
+import type { AriaMessagePayload, AriaThinkingPayload, StreamErrorPayload, RichContent, UICommand } from '@/types/chat';
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
@@ -119,16 +119,40 @@ export function ARIAWorkspace() {
       }
     };
 
+    const handleStreamError = (payload: unknown) => {
+      const data = payload as StreamErrorPayload;
+      setStreaming(false);
+      streamingIdRef.current = null;
+
+      addMessage({
+        role: 'system',
+        content: data.error,
+        rich_content: [],
+        ui_commands: [],
+        suggestions: data.recoverable ? ['Try again'] : [],
+      });
+    };
+
+    const handleStreamComplete = () => {
+      // Positive signal that the LLM stream finished normally.
+      // The final aria.message event handles setting streaming to false,
+      // so this is a no-op unless the aria.message is delayed.
+    };
+
     wsManager.on(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
     wsManager.on(WS_EVENTS.ARIA_THINKING, handleThinking);
     wsManager.on('aria.token', handleToken);
     wsManager.on('aria.metadata', handleMetadata);
+    wsManager.on(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
+    wsManager.on(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
 
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
       wsManager.off(WS_EVENTS.ARIA_THINKING, handleThinking);
       wsManager.off('aria.token', handleToken);
       wsManager.off('aria.metadata', handleMetadata);
+      wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
+      wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
     };
   }, [
     addMessage,
