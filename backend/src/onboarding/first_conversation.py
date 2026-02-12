@@ -20,7 +20,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
@@ -37,6 +37,9 @@ class FirstConversationMessage(BaseModel):
     suggested_next_action: str
     facts_referenced: int
     confidence_level: str  # "high", "moderate", "limited"
+    rich_content: list[dict[str, Any]] = Field(default_factory=list)
+    ui_commands: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
 
 
 class FirstConversationGenerator:
