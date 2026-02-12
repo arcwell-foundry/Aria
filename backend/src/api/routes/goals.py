@@ -257,6 +257,126 @@ async def goal_report(
     return result
 
 
+# --- Goal Proposal Approval ---
+
+
+class ApproveGoalProposalRequest(BaseModel):
+    """Request body for approving a goal proposal from ARIA's first conversation."""
+
+    title: str
+    description: str | None = None
+    goal_type: str = "custom"
+    rationale: str = ""
+    approach: str = ""
+    agents: list[str] = Field(default_factory=list)
+    timeline: str = ""
+
+
+@router.post("/approve-proposal")
+async def approve_goal_proposal(
+    data: ApproveGoalProposalRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Approve a goal proposal from ARIA's first conversation.
+
+    Takes a goal proposal (title, description, agents, timeline) and
+    creates it as an active goal. Returns the goal with an execution
+    plan card showing phases, agent assignments, and autonomy levels.
+    Also pushes a confirmation message via WebSocket.
+    """
+    from src.models.goal import GoalType
+
+    try:
+        goal_type = GoalType(data.goal_type)
+    except ValueError:
+        goal_type = GoalType.CUSTOM
+
+    service = _get_service()
+    goal_data = GoalCreate(
+        title=data.title,
+        description=data.description or data.rationale,
+        goal_type=goal_type,
+        config={
+            "source": "first_conversation_proposal",
+            "rationale": data.rationale,
+            "approach": data.approach,
+            "agents": data.agents,
+            "timeline": data.timeline,
+        },
+    )
+    result = await service.create_goal(current_user.id, goal_data)
+
+    execution_plan = {
+        "type": "execution_plan",
+        "data": {
+            "goal_id": result["id"],
+            "title": data.title,
+            "phases": [
+                {
+                    "name": "Discovery",
+                    "timeline": "Days 1-3",
+                    "agents": [a for a in data.agents if a in ("Hunter", "Scout", "Analyst")],
+                    "output": "Research report, lead list, or competitive data",
+                    "status": "pending",
+                },
+                {
+                    "name": "Analysis",
+                    "timeline": "Days 3-5",
+                    "agents": [a for a in data.agents if a in ("Analyst", "Strategist")],
+                    "output": "Strategic insights and recommendations",
+                    "status": "pending",
+                },
+                {
+                    "name": "Execution",
+                    "timeline": f"Days 5-{data.timeline or '14'}",
+                    "agents": [a for a in data.agents if a in ("Scribe", "Operator")],
+                    "output": "Drafts, outreach, or operational tasks",
+                    "status": "pending",
+                },
+            ],
+            "autonomy": {
+                "autonomous": "Research, data gathering, analysis, and report generation",
+                "requires_approval": "Sending emails, making calendar changes, contacting leads",
+            },
+        },
+    }
+
+    try:
+        from src.core.ws import ws_manager
+        from src.models.ws_events import AriaMessageEvent
+
+        confirmation = (
+            f"Great — I've created the goal **{data.title}**. "
+            f"Here's my execution plan. I'll start with discovery and "
+            f"keep you updated on progress."
+        )
+        event = AriaMessageEvent(
+            message=confirmation,
+            rich_content=[execution_plan],
+            ui_commands=[
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "actions",
+                    "badge_count": 1,
+                }
+            ],
+            suggestions=[
+                "Approve the plan",
+                "Adjust the timeline",
+                "Add more detail to phase 1",
+            ],
+        )
+        await ws_manager.send_to_user(current_user.id, event)
+    except Exception as e:
+        logger.warning(f"WebSocket delivery failed for goal approval: {e}")
+
+    logger.info(
+        "Goal proposal approved",
+        extra={"user_id": current_user.id, "goal_id": result["id"]},
+    )
+    return {**result, "execution_plan": execution_plan}
+
+
 # --- Standard Goal CRUD Endpoints ---
 
 
