@@ -44,6 +44,30 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
   }, [user?.id, session?.id]);
 
+  // Trigger briefing delivery when entering briefing mode
+  useEffect(() => {
+    if (sessionType !== 'briefing') return;
+
+    const deliverBriefing = async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        await fetch(`${baseUrl}/api/v1/briefings/deliver`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (err) {
+        // Briefing delivery failure handled by WebSocket fallback
+        console.warn('Briefing delivery request failed:', err);
+      }
+    };
+
+    deliverBriefing();
+  }, [sessionType]);
+
   // Wire up event listeners (same pattern as ARIAWorkspace + speaking events)
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
