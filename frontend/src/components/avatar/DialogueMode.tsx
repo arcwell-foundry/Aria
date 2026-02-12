@@ -8,6 +8,7 @@ import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
+import { apiClient } from '@/api/client';
 import { AvatarContainer } from './AvatarContainer';
 import { TranscriptPanel } from './TranscriptPanel';
 import { DialogueHeader } from './DialogueHeader';
@@ -50,15 +51,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
     const deliverBriefing = async () => {
       try {
-        const token = localStorage.getItem('access_token');
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        await fetch(`${baseUrl}/api/v1/briefings/deliver`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        await apiClient.post('/briefings/deliver');
       } catch (err) {
         // Briefing delivery failure handled by WebSocket fallback
         console.warn('Briefing delivery request failed:', err);

@@ -1,5 +1,8 @@
 import { useCallback, useState } from 'react';
 import { apiClient } from '@/api/client';
+import { wsManager } from '@/core/WebSocketManager';
+import { WS_EVENTS } from '@/types/chat';
+import { useConversationStore } from '@/stores/conversationStore';
 
 interface Phase {
   name: string;
@@ -41,6 +44,8 @@ const PHASE_ICONS: Record<string, string> = {
 export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
   const [isApproved, setIsApproved] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const addMessage = useConversationStore((s) => s.addMessage);
+  const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
@@ -53,6 +58,36 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
       setIsLoading(false);
     }
   }, [data.goal_id]);
+
+  const handleModify = useCallback(() => {
+    const message = `I'd like to adjust the execution plan for "${data.title}"`;
+    addMessage({
+      role: 'user',
+      content: message,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message,
+      conversation_id: activeConversationId,
+    });
+  }, [data.title, addMessage, activeConversationId]);
+
+  const handleDiscuss = useCallback(() => {
+    const message = `Tell me more about the execution plan for "${data.title}"`;
+    addMessage({
+      role: 'user',
+      content: message,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message,
+      conversation_id: activeConversationId,
+    });
+  }, [data.title, addMessage, activeConversationId]);
 
   return (
     <div
@@ -154,10 +189,16 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
           >
             {isLoading ? 'Starting...' : 'Approve Plan'}
           </button>
-          <button className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+          <button
+            onClick={handleModify}
+            className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          >
             Modify
           </button>
-          <button className="px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+          <button
+            onClick={handleDiscuss}
+            className="px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          >
             Discuss Further
           </button>
         </div>

@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
 import { useConversationStore } from '@/stores/conversationStore';
-import { apiClient } from '@/api/client';
+import { approveGoalProposal } from '@/api/goals';
 
 interface GoalPlanData {
   id: string;
@@ -37,7 +37,7 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
     try {
-      await apiClient.post('/goals/approve-proposal', {
+      await approveGoalProposal({
         title: data.title,
         description: data.rationale,
         goal_type: data.goal_type,
