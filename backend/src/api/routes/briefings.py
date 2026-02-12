@@ -23,7 +23,9 @@ class BriefingContent(BaseModel):
     leads: dict[str, Any] = Field(..., description="Lead status summary")
     signals: dict[str, Any] = Field(..., description="Market signals")
     tasks: dict[str, Any] = Field(..., description="Task status")
-    generated_at: str = Field(..., min_length=1, max_length=100, description="ISO timestamp of generation")
+    generated_at: str = Field(
+        ..., min_length=1, max_length=100, description="ISO timestamp of generation"
+    )
 
 
 class BriefingResponse(BaseModel):
@@ -31,7 +33,9 @@ class BriefingResponse(BaseModel):
 
     id: str = Field(..., min_length=1, max_length=50, description="Briefing ID")
     user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
-    briefing_date: str = Field(..., min_length=10, max_length=10, description="Briefing date (ISO format)")
+    briefing_date: str = Field(
+        ..., min_length=10, max_length=10, description="Briefing date (ISO format)"
+    )
     content: BriefingContent = Field(..., description="Briefing content")
 
 
@@ -167,3 +171,34 @@ async def regenerate_briefing(
     )
 
     return BriefingContent(**content)
+
+
+@router.post("/deliver")
+async def deliver_briefing(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Generate today's briefing and deliver via WebSocket.
+
+    Generates a fresh briefing and pushes it to the user's active
+    WebSocket connection as an AriaMessageEvent with rich content
+    cards, UI commands, and suggestions.
+    """
+    service = BriefingService()
+    content = await service.generate_briefing(current_user.id)
+
+    try:
+        from src.core.ws import ws_manager
+        from src.models.ws_events import AriaMessageEvent
+
+        event = AriaMessageEvent(
+            message=content.get("summary", ""),
+            rich_content=content.get("rich_content", []),
+            ui_commands=content.get("ui_commands", []),
+            suggestions=content.get("suggestions", []),
+        )
+        await ws_manager.send_to_user(current_user.id, event)
+        logger.info("Briefing delivered via WebSocket", extra={"user_id": current_user.id})
+        return {"briefing": content, "status": "delivered"}
+    except Exception as e:
+        logger.warning(f"WebSocket briefing delivery failed: {e}")
+        return {"briefing": content, "status": "generated_not_delivered"}
