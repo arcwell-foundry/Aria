@@ -12,7 +12,8 @@
  * <ProgressBar value={30} variant="warning" label="Storage used" />
  */
 
-import { type ReactNode } from "react";
+
+
 
 export interface ProgressBarProps {
   /** Current progress value (0-100) */

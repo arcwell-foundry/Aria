@@ -12,6 +12,8 @@ from src.integrations.deep_sync_domain import (
     PushStatus,
     SyncConfig,
     SyncDirection,
+)
+from src.integrations.deep_sync_domain import (
     SyncResult as DeepSyncResult,
 )
 from src.integrations.domain import (

@@ -73,20 +73,23 @@ export function ICPBuilder() {
   const [icpSaved, setIcpSaved] = useState(false);
 
   // Load existing ICP data
+  const icpData = icpResponse?.icp_data;
   useEffect(() => {
-    if (icpResponse?.icp_data) {
-      const icp = icpResponse.icp_data;
-      setIndustry(icp.industry);
-      setModalities(icp.modalities);
-      setTherapeuticAreas(icp.therapeutic_areas);
-      setGeographies(icp.geographies);
-      setSignals(icp.signals);
-      setExclusions(icp.exclusions);
-      setCompanySizeMin(icp.company_size.min);
-      setCompanySizeMax(icp.company_size.max);
-      setIcpSaved(true);
+    if (icpData) {
+      const applyIcp = () => {
+        setIndustry(icpData.industry);
+        setModalities(icpData.modalities);
+        setTherapeuticAreas(icpData.therapeutic_areas);
+        setGeographies(icpData.geographies);
+        setSignals(icpData.signals);
+        setExclusions(icpData.exclusions);
+        setCompanySizeMin(icpData.company_size.min);
+        setCompanySizeMax(icpData.company_size.max);
+        setIcpSaved(true);
+      };
+      applyIcp();
     }
-  }, [icpResponse]);
+  }, [icpData]);
 
   const buildICPDefinition = (): ICPDefinition => ({
     industry,

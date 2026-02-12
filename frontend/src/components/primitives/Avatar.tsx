@@ -11,7 +11,7 @@
  * <Avatar name="Jane" size="lg" status="online" />
  */
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export interface AvatarProps {
   /** Image source URL */
@@ -76,14 +76,17 @@ export function Avatar({
   showStatus = false,
   className = "",
 }: AvatarProps) {
-  const [imageError, setImageError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageState, setImageState] = useState({ src, error: false, loaded: false });
 
-  // Reset state when src changes
-  useEffect(() => {
-    setImageError(false);
-    setImageLoaded(false);
-  }, [src]);
+  // Reset state when src changes (React-recommended derived state pattern)
+  if (imageState.src !== src) {
+    setImageState({ src, error: false, loaded: false });
+  }
+
+  const imageError = imageState.error;
+  const imageLoaded = imageState.loaded;
+  const setImageError = (error: boolean) => setImageState((s) => ({ ...s, error }));
+  const setImageLoaded = (loaded: boolean) => setImageState((s) => ({ ...s, loaded }));
 
   const showImage = src && !imageError;
   const showFallback = !showImage || !imageLoaded;

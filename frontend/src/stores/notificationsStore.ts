@@ -39,7 +39,7 @@ export interface NotificationsState {
 }
 
 // Auto-dismiss timer
-let dismissTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+const dismissTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   // Initial state

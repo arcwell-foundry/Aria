@@ -298,7 +298,7 @@ async def submit_company_discovery(
         raise HTTPException(
             status_code=500,
             detail="Company discovery failed. Please try again.",
-        )
+        ) from None
 
 
 # Document upload endpoints (US-904)

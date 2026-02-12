@@ -1,7 +1,6 @@
 """Pydantic models for ROI (Return on Investment) metrics."""
 
-from pydantic import BaseModel, Field
-from pydantic import field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class TimeSavedBreakdown(BaseModel):

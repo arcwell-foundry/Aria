@@ -381,7 +381,6 @@ class ROIService:
 
                 # Calculate time saved
                 action_type = action.get("action_type")
-                minutes_saved = action.get("estimated_minutes_saved", 0)
 
                 if action_type in TIME_SAVED_MINUTES:
                     minutes = TIME_SAVED_MINUTES[action_type]
