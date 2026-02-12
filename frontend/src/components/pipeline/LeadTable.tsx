@@ -19,7 +19,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { SortableHeader, type SortDirection } from '@/components/common/SortableHeader';
+import { SortableHeader } from '@/components/common/SortableHeader';
 import { HealthBar } from './HealthBar';
 import { Avatar } from '@/components/primitives/Avatar';
 import type { Lead, Stakeholder } from '@/api/leads';
@@ -234,19 +234,21 @@ export function LeadTable({
         case 'health':
           comparison = a.health_score - b.health_score;
           break;
-        case 'last_activity':
+        case 'last_activity': {
           const aDate = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0;
           const bDate = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0;
           comparison = aDate - bDate;
           break;
+        }
         case 'value':
           comparison = (a.expected_value ?? 0) - (b.expected_value ?? 0);
           break;
-        case 'stakeholders':
+        case 'stakeholders': {
           const aCount = stakeholdersByLead[a.id]?.length ?? 0;
           const bCount = stakeholdersByLead[b.id]?.length ?? 0;
           comparison = aCount - bCount;
           break;
+        }
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
