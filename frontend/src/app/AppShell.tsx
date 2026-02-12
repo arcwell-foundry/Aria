@@ -24,7 +24,7 @@ import { modalityController } from '@/core/ModalityController';
 /**
  * Routes where the right IntelPanel should be hidden.
  */
-const PANEL_HIDDEN_ROUTES = ['/', '/briefing', '/dialogue'];
+const PANEL_HIDDEN_ROUTES = ['/', '/briefing', '/dialogue', '/settings'];
 
 function shouldShowPanel(pathname: string): boolean {
   if (PANEL_HIDDEN_ROUTES.includes(pathname)) return false;

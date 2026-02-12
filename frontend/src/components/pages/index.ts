@@ -5,5 +5,6 @@ export { LeadDetailPage } from './LeadDetailPage';
 export { IntelligencePage } from './IntelligencePage';
 export { BattleCardDetail } from './BattleCardDetail';
 export { CommunicationsPage } from './CommunicationsPage';
+export { DraftDetailPage } from './DraftDetailPage';
 export { ActionsPage } from './ActionsPage';
 export { SettingsPage } from './SettingsPage';

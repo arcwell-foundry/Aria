@@ -33,6 +33,7 @@ import {
   AgentStatusModule,
   CRMSnapshotModule,
   ChatInputModule,
+  SuggestedRefinementsModule,
 } from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
@@ -58,6 +59,21 @@ function getPanelConfig(pathname: string): PanelConfig {
         <CRMSnapshotModule key="crm" />,
       ],
       chatContext: 'lead-detail',
+    };
+  }
+
+  // Draft detail view (e.g., /communications/drafts/abc-123)
+  if (/^\/communications\/drafts\/.+/.test(pathname)) {
+    return {
+      title: 'ARIA Insights',
+      modules: [
+        <WhyIWroteThisModule key="why" />,
+        <ToneModule key="tone" />,
+        <AnalysisModule key="analysis" />,
+        <NextBestActionModule key="action" />,
+        <SuggestedRefinementsModule key="refinements" />,
+      ],
+      chatContext: 'draft-detail',
     };
   }
 

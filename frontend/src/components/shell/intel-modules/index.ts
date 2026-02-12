@@ -12,3 +12,4 @@ export { NextStepsModule } from './NextStepsModule';
 export { AgentStatusModule } from './AgentStatusModule';
 export { CRMSnapshotModule } from './CRMSnapshotModule';
 export { ChatInputModule } from './ChatInputModule';
+export { SuggestedRefinementsModule } from './SuggestedRefinementsModule';
