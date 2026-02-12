@@ -476,28 +476,40 @@ class MemoryQueryService:
         query: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Query procedural memory."""
+        """Query procedural memory.
+
+        Returns all workflows for the user, scored by text relevance.
+        Workflows are typically few and always useful as context, so we
+        include all of them with at least a baseline relevance score.
+        """
         from src.memory.procedural import ProceduralMemory
 
         memory = ProceduralMemory()
         workflows = await memory.list_workflows(user_id, include_shared=True)
 
         results = []
-        query_lower = query.lower()
         for workflow in workflows:
             text = f"{workflow.workflow_name} {workflow.description}"
-            if query_lower in text.lower():
-                relevance = self._calculate_text_relevance(query, text)
-                results.append(
-                    {
-                        "id": workflow.id,
-                        "memory_type": "procedural",
-                        "content": f"{workflow.workflow_name}: {workflow.description}",
-                        "relevance_score": relevance,
-                        "confidence": workflow.success_rate,
-                        "timestamp": workflow.created_at,
-                    }
-                )
+            relevance = self._calculate_text_relevance(query, text)
+            # Always include workflows as context, with a minimum relevance floor
+            relevance = max(relevance, 0.3)
+            steps_summary = ", ".join(
+                s.get("action", s.get("name", "step")) for s in workflow.steps[:5]
+            )
+            results.append(
+                {
+                    "id": workflow.id,
+                    "memory_type": "procedural",
+                    "content": (
+                        f"Workflow: {workflow.workflow_name} — {workflow.description}"
+                        f" | Steps: {steps_summary}"
+                        f" | Success rate: {workflow.success_rate:.0%}"
+                    ),
+                    "relevance_score": relevance,
+                    "confidence": workflow.success_rate,
+                    "timestamp": workflow.created_at,
+                }
+            )
 
         results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
@@ -508,29 +520,67 @@ class MemoryQueryService:
         query: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Query prospective memory."""
+        """Query prospective memory.
+
+        Fetches both upcoming and overdue tasks so ARIA is aware of
+        what's pending and what's past due. All pending/overdue tasks
+        are included with a relevance floor so they always surface.
+        """
         from src.memory.prospective import ProspectiveMemory
 
         memory = ProspectiveMemory()
-        # Fetch extra to allow for filtering (query matching reduces result count)
-        upcoming = await memory.get_upcoming_tasks(user_id, limit=limit * 2)
+        # Fetch upcoming time-based tasks and overdue tasks in parallel
+        upcoming_tasks, overdue_tasks = await asyncio.gather(
+            memory.get_upcoming_tasks(user_id, limit=limit * 2),
+            memory.get_overdue_tasks(user_id),
+            return_exceptions=True,
+        )
+
+        # Handle exceptions gracefully
+        if isinstance(upcoming_tasks, BaseException):
+            logger.warning("Failed to get upcoming tasks: %s", upcoming_tasks)
+            upcoming_tasks = []
+        if isinstance(overdue_tasks, BaseException):
+            logger.warning("Failed to get overdue tasks: %s", overdue_tasks)
+            overdue_tasks = []
+
+        # Combine and deduplicate by ID
+        seen_ids: set[str] = set()
+        all_tasks = []
+        # Overdue first (higher urgency)
+        for task in [*overdue_tasks, *upcoming_tasks]:
+            if task.id not in seen_ids:
+                seen_ids.add(task.id)
+                all_tasks.append(task)
 
         results = []
-        query_lower = query.lower()
-        for task in upcoming:
+        for task in all_tasks:
             text = f"{task.task} {task.description or ''}"
-            if query_lower in text.lower():
-                relevance = self._calculate_text_relevance(query, text)
-                results.append(
-                    {
-                        "id": task.id,
-                        "memory_type": "prospective",
-                        "content": f"[{task.status.value}] {task.task}",
-                        "relevance_score": relevance,
-                        "confidence": None,
-                        "timestamp": task.created_at,
-                    }
-                )
+            relevance = self._calculate_text_relevance(query, text)
+            # Overdue tasks get high relevance; pending tasks get a floor
+            if task.status.value == "overdue":
+                relevance = max(relevance, 0.7)
+            else:
+                relevance = max(relevance, 0.4)
+
+            due_info = ""
+            due_at = task.trigger_config.get("due_at")
+            if due_at:
+                due_info = f" | Due: {due_at}"
+
+            results.append(
+                {
+                    "id": task.id,
+                    "memory_type": "prospective",
+                    "content": (
+                        f"[{task.status.value}] [{task.priority.value}] {task.task}"
+                        f"{due_info}"
+                    ),
+                    "relevance_score": relevance,
+                    "confidence": None,
+                    "timestamp": task.created_at,
+                }
+            )
 
         results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
@@ -559,17 +609,11 @@ class MemoryQueryService:
 
         for lead in leads:
             company_lower = lead.company_name.lower()
-            contact_lower = (lead.contact_name or "").lower()
-            if company_lower in query_lower or query_lower in company_lower or (
-                contact_lower and contact_lower in query_lower
-            ):
+            if company_lower in query_lower or query_lower in company_lower:
                 relevant.append({
                     "id": lead.id,
                     "memory_type": "lead",
-                    "content": (
-                        f"Lead: {lead.company_name} | Stage: {lead.lifecycle_stage.value}"
-                        f" | Status: {lead.status.value} | Health: {lead.health_score}/100"
-                    ),
+                    "content": self._format_lead_content(lead, prefix="Lead"),
                     "relevance_score": 0.9,
                     "confidence": None,
                     "timestamp": lead.updated_at,
@@ -581,10 +625,7 @@ class MemoryQueryService:
                 relevant.append({
                     "id": lead.id,
                     "memory_type": "lead",
-                    "content": (
-                        f"Active lead: {lead.company_name} ({lead.lifecycle_stage.value})"
-                        f" - Health: {lead.health_score}/100"
-                    ),
+                    "content": self._format_lead_content(lead, prefix="Active lead"),
                     "relevance_score": 0.5,
                     "confidence": None,
                     "timestamp": lead.updated_at,
@@ -612,6 +653,31 @@ class MemoryQueryService:
 
         overlap = len(query_words & text_words)
         return min(1.0, overlap / len(query_words))
+
+    @staticmethod
+    def _format_lead_content(lead: Any, prefix: str = "Lead") -> str:
+        """Format a lead into a readable content string for the LLM.
+
+        Args:
+            lead: A LeadMemory instance.
+            prefix: Label prefix (e.g. "Lead" or "Active lead").
+
+        Returns:
+            Formatted lead summary string.
+        """
+        parts = [
+            f"{prefix}: {lead.company_name}",
+            f"Stage: {lead.lifecycle_stage.value}",
+            f"Status: {lead.status.value}",
+            f"Health: {lead.health_score}/100",
+        ]
+        if lead.expected_value:
+            parts.append(f"Value: ${lead.expected_value:,.0f}")
+        if lead.expected_close_date:
+            parts.append(f"Expected close: {lead.expected_close_date}")
+        if lead.last_activity_at:
+            parts.append(f"Last activity: {lead.last_activity_at.strftime('%Y-%m-%d')}")
+        return " | ".join(parts)
 
 
 @router.get("/query", response_model=MemoryQueryResponse)
@@ -654,7 +720,7 @@ async def query_memory(
         Paginated memory query results.
     """
     # Validate and filter memory types
-    valid_types = {"episodic", "semantic", "procedural", "prospective"}
+    valid_types = {"episodic", "semantic", "procedural", "prospective", "lead"}
     invalid_types = [t for t in types if t not in valid_types]
     if invalid_types:
         logger.warning(

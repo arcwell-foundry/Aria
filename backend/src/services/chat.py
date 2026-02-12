@@ -51,6 +51,24 @@ The following information may be relevant to this conversation:
 
 Use this context naturally in your response. If you reference specific facts, note the confidence level if it's below 0.8."""
 
+PROCEDURAL_CONTEXT_TEMPLATE = """## Learned Workflows
+
+You have access to these established workflow patterns. Reference them when the user asks about processes, past approaches, or how things were done:
+
+{workflows}"""
+
+PROSPECTIVE_CONTEXT_TEMPLATE = """## Upcoming Tasks & Reminders
+
+The user has these pending or overdue items. Proactively mention overdue items and upcoming deadlines when relevant:
+
+{tasks}"""
+
+LEAD_CONTEXT_TEMPLATE = """## Active Leads Context
+
+The user's current sales pipeline includes these leads. Reference specific leads, health scores, and stages when discussing pipeline, accounts, or sales activity:
+
+{leads}"""
+
 PROACTIVE_INSIGHTS_TEMPLATE = """## Relevant Context ARIA Can Mention
 
 The following insights may be worth volunteering to the user if relevant:
@@ -947,11 +965,29 @@ class ChatService:
         Returns:
             Formatted system prompt string.
         """
-        if not memories:
+        # Separate memories by type for dedicated prompt sections
+        general_memories = []
+        procedural_memories = []
+        prospective_memories = []
+        lead_memories = []
+
+        for mem in memories:
+            mt = mem.get("memory_type", "")
+            if mt == "procedural":
+                procedural_memories.append(mem)
+            elif mt == "prospective":
+                prospective_memories.append(mem)
+            elif mt == "lead":
+                lead_memories.append(mem)
+            else:
+                general_memories.append(mem)
+
+        # Build general memory context (episodic + semantic)
+        if not general_memories:
             memory_context = ""
         else:
             memory_lines = []
-            for mem in memories:
+            for mem in general_memories:
                 confidence_str = ""
                 if mem.get("confidence") is not None:
                     confidence_str = f" (confidence: {mem['confidence']:.0%})"
@@ -960,6 +996,27 @@ class ChatService:
             memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
 
         base_prompt = ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
+
+        # Add dedicated procedural memory section
+        if procedural_memories:
+            workflow_lines = [f"- {mem['content']}" for mem in procedural_memories]
+            base_prompt += "\n\n" + PROCEDURAL_CONTEXT_TEMPLATE.format(
+                workflows="\n".join(workflow_lines)
+            )
+
+        # Add dedicated prospective memory section
+        if prospective_memories:
+            task_lines = [f"- {mem['content']}" for mem in prospective_memories]
+            base_prompt += "\n\n" + PROSPECTIVE_CONTEXT_TEMPLATE.format(
+                tasks="\n".join(task_lines)
+            )
+
+        # Add dedicated lead memory section
+        if lead_memories:
+            lead_lines = [f"- {mem['content']}" for mem in lead_memories]
+            base_prompt += "\n\n" + LEAD_CONTEXT_TEMPLATE.format(
+                leads="\n".join(lead_lines)
+            )
 
         # Add personality calibration from Digital Twin
         if personality and personality.tone_guidance:
