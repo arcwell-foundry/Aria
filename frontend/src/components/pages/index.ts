@@ -1,7 +1,9 @@
 export { ARIAWorkspace } from './ARIAWorkspace';
 export { BriefingPage } from './BriefingPage';
 export { PipelinePage } from './PipelinePage';
+export { LeadDetailPage } from './LeadDetailPage';
 export { IntelligencePage } from './IntelligencePage';
+export { BattleCardDetail } from './BattleCardDetail';
 export { CommunicationsPage } from './CommunicationsPage';
 export { ActionsPage } from './ActionsPage';
 export { SettingsPage } from './SettingsPage';
