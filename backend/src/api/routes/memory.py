@@ -353,6 +353,8 @@ class MemoryQueryService:
             tasks.append(self._query_procedural(user_id, query, limit))
         if "prospective" in memory_types:
             tasks.append(self._query_prospective(user_id, query, limit))
+        if "lead" in memory_types:
+            tasks.append(self._query_lead(user_id, query, limit))
 
         # Execute all queries in parallel
         results_lists: list[list[dict[str, Any]] | BaseException] = await asyncio.gather(
@@ -532,6 +534,63 @@ class MemoryQueryService:
 
         results.sort(key=lambda x: cast(float, x["relevance_score"]), reverse=True)
         return results[:limit]
+
+    async def _query_lead(
+        self,
+        user_id: str,
+        query: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Query lead memory for relevant leads.
+
+        Returns leads whose company or contact name appears in the query,
+        or top active leads as general context when no name match is found.
+        """
+        from src.memory.lead_memory import LeadMemoryService
+
+        service = LeadMemoryService()
+        try:
+            leads = await service.list_by_user(user_id=user_id, limit=limit * 2)
+        except Exception:
+            return []
+
+        query_lower = query.lower()
+        relevant: list[dict[str, Any]] = []
+
+        for lead in leads:
+            company_lower = lead.company_name.lower()
+            contact_lower = (lead.contact_name or "").lower()
+            if company_lower in query_lower or query_lower in company_lower or (
+                contact_lower and contact_lower in query_lower
+            ):
+                relevant.append({
+                    "id": lead.id,
+                    "memory_type": "lead",
+                    "content": (
+                        f"Lead: {lead.company_name} | Stage: {lead.lifecycle_stage.value}"
+                        f" | Status: {lead.status.value} | Health: {lead.health_score}/100"
+                    ),
+                    "relevance_score": 0.9,
+                    "confidence": None,
+                    "timestamp": lead.updated_at,
+                })
+
+        # If no name match, return top active leads as general context
+        if not relevant and leads:
+            for lead in leads[:3]:
+                relevant.append({
+                    "id": lead.id,
+                    "memory_type": "lead",
+                    "content": (
+                        f"Active lead: {lead.company_name} ({lead.lifecycle_stage.value})"
+                        f" - Health: {lead.health_score}/100"
+                    ),
+                    "relevance_score": 0.5,
+                    "confidence": None,
+                    "timestamp": lead.updated_at,
+                })
+
+        return relevant[:limit]
 
     def _calculate_text_relevance(self, query: str, text: str) -> float:
         """Calculate simple text relevance score.

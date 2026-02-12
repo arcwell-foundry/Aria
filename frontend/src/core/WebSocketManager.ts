@@ -77,7 +77,7 @@ class WebSocketManagerImpl {
 
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const wsUrl = baseUrl.replace(/^http/, 'ws');
-    const url = `${wsUrl}/ws/${this.config.userId}?session=${this.config.sessionId}`;
+    const url = `${wsUrl}/ws/${this.config.userId}?session_id=${this.config.sessionId}`;
     const token = localStorage.getItem('access_token');
 
     try {
@@ -252,7 +252,7 @@ class WebSocketManagerImpl {
       if (this._transport === 'sse' && !this.intentionalDisconnect) {
         const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
         const wsUrl = baseUrl.replace(/^http/, 'ws');
-        const url = `${wsUrl}/ws/${this.config?.userId}?session=${this.config?.sessionId}`;
+        const url = `${wsUrl}/ws/${this.config?.userId}?session_id=${this.config?.sessionId}`;
         const probe = new WebSocket(url);
         const timeout = setTimeout(() => probe.close(), 3_000);
 

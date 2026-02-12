@@ -7,10 +7,13 @@ Working memory stores current conversation context in-memory, including:
 - Token count for context window management
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 import tiktoken
+
+logger = logging.getLogger(__name__)
 
 # Use cl100k_base encoding (used by Claude and GPT-4)
 _ENCODING = tiktoken.get_encoding("cl100k_base")
@@ -197,18 +200,22 @@ class WorkingMemoryManager:
     """Manages multiple working memory sessions.
 
     Singleton that tracks all active conversation sessions.
-    Sessions are keyed by conversation_id.
+    Sessions are keyed by conversation_id. Supports Supabase persistence
+    so sessions survive server restarts.
     """
 
     _sessions: dict[str, WorkingMemory] = {}
 
-    def get_or_create(
+    async def get_or_create(
         self,
         conversation_id: str,
         user_id: str,
         max_tokens: int = 100000,
     ) -> WorkingMemory:
         """Get existing session or create a new one.
+
+        Checks in-memory cache first, then attempts to restore from Supabase.
+        Creates a fresh session if neither source has data.
 
         Args:
             conversation_id: Unique conversation identifier.
@@ -219,12 +226,65 @@ class WorkingMemoryManager:
             WorkingMemory instance for the conversation.
         """
         if conversation_id not in self._sessions:
-            self._sessions[conversation_id] = WorkingMemory(
-                conversation_id=conversation_id,
-                user_id=user_id,
-                max_tokens=max_tokens,
-            )
+            # Try to restore from Supabase
+            restored = await self._load_from_db(conversation_id)
+            if restored:
+                self._sessions[conversation_id] = restored
+            else:
+                self._sessions[conversation_id] = WorkingMemory(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    max_tokens=max_tokens,
+                )
         return self._sessions[conversation_id]
+
+    async def persist_session(self, conversation_id: str) -> None:
+        """Persist a working memory session to Supabase.
+
+        Serializes the session via ``to_dict()`` and stores it in the
+        ``conversations`` table's ``working_memory`` JSONB column.
+
+        Args:
+            conversation_id: The conversation to persist.
+        """
+        memory = self._sessions.get(conversation_id)
+        if not memory:
+            return
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+            db.table("conversations").update({
+                "working_memory": memory.to_dict(),
+            }).eq("id", conversation_id).execute()
+        except Exception as e:
+            logger.warning("Working memory persist failed: %s", e)
+
+    async def _load_from_db(self, conversation_id: str) -> WorkingMemory | None:
+        """Attempt to restore a session from Supabase.
+
+        Args:
+            conversation_id: The conversation to restore.
+
+        Returns:
+            WorkingMemory if found in DB, None otherwise.
+        """
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+            result = (
+                db.table("conversations")
+                .select("working_memory")
+                .eq("id", conversation_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data and result.data.get("working_memory"):
+                return WorkingMemory.from_dict(result.data["working_memory"])
+        except Exception:
+            pass
+        return None
 
     def get(self, conversation_id: str) -> WorkingMemory | None:
         """Get an existing session.

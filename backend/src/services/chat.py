@@ -235,7 +235,7 @@ class ChatService:
             The plan_id to extend, or None if not a follow-on.
         """
         # Get working memory to check last response
-        working_memory = self._working_memory_manager.get_or_create(
+        working_memory = await self._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
             user_id=user_id,
         )
@@ -560,7 +560,7 @@ class ChatService:
             memory_types = ["episodic", "semantic", "procedural", "prospective"]
 
         # Get or create working memory for this conversation
-        working_memory = self._working_memory_manager.get_or_create(
+        working_memory = await self._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
             user_id=user_id,
         )

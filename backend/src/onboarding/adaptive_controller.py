@@ -68,7 +68,7 @@ class OnboardingOODAController:
         """
         # Create a working memory session for this OODA cycle
         session_id = f"ooda_{user_id}_{completed_step.value}"
-        wm = self._wm_manager.get_or_create(session_id, user_id)
+        wm = await self._wm_manager.get_or_create(session_id, user_id)
         wm.set_goal(
             "Adapt onboarding flow after step completion",
             {

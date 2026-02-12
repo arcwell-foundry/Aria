@@ -1512,7 +1512,7 @@ async def confirm_company_data(
     try:
         service = _get_cross_user_service()
 
-        result = service.confirm_company_data(
+        result = await service.confirm_company_data(
             company_id=body.company_id,
             user_id=current_user.id,
             corrections=body.corrections,

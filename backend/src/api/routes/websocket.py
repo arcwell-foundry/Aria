@@ -1,13 +1,15 @@
 """WebSocket endpoint for ARIA real-time communication."""
 
+import contextlib
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from src.core.ws import ws_manager
-from src.models.ws_events import ConnectedEvent, PongEvent
+from src.models.ws_events import AriaMessageEvent, ConnectedEvent, PongEvent, ThinkingEvent
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +96,30 @@ async def websocket_endpoint(
 
             msg_type = data.get("type")
 
-            if msg_type == "ping":
+            if msg_type == "ping" or msg_type == "heartbeat":
                 pong = PongEvent()
                 await websocket.send_json(pong.to_ws_dict())
+
+            elif msg_type == "user.message":
+                await _handle_user_message(websocket, data, user_id)
+
+            elif msg_type == "user.navigate":
+                payload = data.get("payload", {})
+                route = payload.get("route", "")
+                logger.info("User navigated", extra={"user_id": user_id, "route": route})
+
+            elif msg_type == "user.approve":
+                await _handle_action_approval(websocket, data, user_id)
+
+            elif msg_type == "user.reject":
+                await _handle_action_rejection(websocket, data, user_id)
+
+            elif msg_type == "modality.change":
+                payload = data.get("payload", {})
+                logger.info(
+                    "Modality changed",
+                    extra={"user_id": user_id, "modality": payload.get("modality")},
+                )
 
     except WebSocketDisconnect:
         logger.info(
@@ -110,3 +133,199 @@ async def websocket_endpoint(
         )
     finally:
         ws_manager.disconnect(user_id, websocket)
+
+
+async def _handle_user_message(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle an incoming user chat message over WebSocket.
+
+    Processes the message through ChatService (memory lookup, LLM streaming,
+    persistence) and sends back thinking indicators, token events, and a
+    final AriaMessageEvent.
+    """
+    from src.api.routes.chat import _analyze_ui_commands, _generate_suggestions
+    from src.db.supabase import get_supabase_client
+    from src.services.chat import ChatService
+    from src.services.conversations import ConversationService
+
+    payload = data.get("payload", {})
+    message_text = payload.get("message", "")
+    conversation_id = payload.get("conversation_id") or str(uuid.uuid4())
+
+    if not message_text:
+        return
+
+    # Send thinking indicator
+    thinking = ThinkingEvent()
+    await websocket.send_json(thinking.to_ws_dict())
+
+    try:
+        service = ChatService()
+        memory_types = ["episodic", "semantic", "procedural", "prospective", "lead"]
+
+        # Get or create working memory
+        working_memory = await service._working_memory_manager.get_or_create(
+            conversation_id=conversation_id,
+            user_id=user_id,
+        )
+
+        # Ensure conversation record
+        await service._ensure_conversation_record(user_id, conversation_id)
+
+        # Add user message to working memory
+        working_memory.add_message("user", message_text)
+
+        # Query relevant memories
+        memories = await service._query_relevant_memories(
+            user_id=user_id,
+            query=message_text,
+            memory_types=memory_types,
+        )
+
+        # Get conversation context
+        conversation_messages = working_memory.get_context_for_llm()
+
+        # Estimate cognitive load
+        load_state = await service._cognitive_monitor.estimate_load(
+            user_id=user_id,
+            recent_messages=conversation_messages[-5:],
+            session_id=conversation_id,
+        )
+
+        # Get proactive insights
+        proactive_insights = await service._get_proactive_insights(
+            user_id=user_id,
+            current_message=message_text,
+            conversation_messages=conversation_messages,
+        )
+
+        # Digital Twin personality & style
+        personality = await service._get_personality_calibration(user_id)
+        style_guidelines = await service._get_style_guidelines(user_id)
+        priming_context = await service._get_priming_context(user_id, message_text)
+
+        # Build system prompt
+        system_prompt = service._build_system_prompt(
+            memories,
+            load_state,
+            proactive_insights,
+            personality,
+            style_guidelines,
+            priming_context,
+        )
+
+        # Stream LLM response
+        full_content = ""
+        async for token in service._llm_client.stream_response(
+            messages=conversation_messages,
+            system_prompt=system_prompt,
+        ):
+            full_content += token
+            await websocket.send_json({
+                "type": "aria.token",
+                "payload": {"content": token, "conversation_id": conversation_id},
+            })
+
+        # Add assistant response to working memory
+        working_memory.add_message("assistant", full_content)
+
+        # Persist working memory state to Supabase
+        await service._working_memory_manager.persist_session(conversation_id)
+
+        # Persist messages
+        try:
+            db = get_supabase_client()
+            conv_svc = ConversationService(db_client=db)
+            await conv_svc.save_message(
+                conversation_id=conversation_id, role="user", content=message_text
+            )
+            await conv_svc.save_message(
+                conversation_id=conversation_id, role="assistant", content=full_content
+            )
+        except Exception as persist_err:
+            logger.warning("Message persistence failed: %s", persist_err)
+
+        # Update conversation metadata
+        await service._update_conversation_metadata(user_id, conversation_id, message_text)
+
+        # Extract and store new information
+        with contextlib.suppress(Exception):
+            await service._extraction_service.extract_and_store(
+                conversation=conversation_messages[-2:],
+                user_id=user_id,
+            )
+
+        # Send complete response
+        ui_commands = _analyze_ui_commands(full_content)
+        suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
+
+        response_event = AriaMessageEvent(
+            message=full_content,
+            rich_content=[],
+            ui_commands=ui_commands,
+            suggestions=suggestions,
+        )
+        await websocket.send_json({
+            **response_event.to_ws_dict(),
+            "conversation_id": conversation_id,
+        })
+
+    except Exception as chat_err:
+        logger.exception("WebSocket chat error: %s", chat_err)
+        await websocket.send_json({
+            "type": "aria.message",
+            "message": "I encountered an error processing your message. Please try again.",
+            "rich_content": [],
+            "ui_commands": [],
+            "suggestions": ["Try again", "What can you help with?"],
+            "conversation_id": conversation_id,
+        })
+
+
+async def _handle_action_approval(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle a user.approve event for action queue items."""
+    payload = data.get("payload", {})
+    action_id = payload.get("action_id")
+    if not action_id:
+        return
+    try:
+        from src.services.action_queue import ActionQueueService
+
+        svc = ActionQueueService()
+        await svc.approve_action(action_id=action_id, user_id=user_id)
+        await websocket.send_json({
+            "type": "action.completed",
+            "payload": {"action_id": action_id, "status": "approved"},
+        })
+    except Exception as e:
+        logger.warning("Action approval failed: %s", e)
+
+
+async def _handle_action_rejection(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle a user.reject event for action queue items."""
+    payload = data.get("payload", {})
+    action_id = payload.get("action_id")
+    if not action_id:
+        return
+    try:
+        from src.services.action_queue import ActionQueueService
+
+        svc = ActionQueueService()
+        await svc.reject_action(action_id=action_id, user_id=user_id)
+        await websocket.send_json({
+            "type": "action.completed",
+            "payload": {"action_id": action_id, "status": "rejected"},
+        })
+    except Exception as e:
+        logger.warning("Action rejection failed: %s", e)

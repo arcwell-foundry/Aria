@@ -212,6 +212,25 @@ async def _run_ooda_goal_checks() -> None:
                 semantic = SemanticMemory(user_id=user_id)
                 working = WorkingMemory(user_id=user_id)
 
+                # Create agent executor callback to bridge OODA → GoalExecutionService
+                def _make_executor(uid: str):  # noqa: E301
+                    async def _executor(
+                        action: str, agent: str, parameters: dict, goal_data: dict
+                    ) -> dict:
+                        try:
+                            result = await execution_service._execute_agent(
+                                user_id=uid,
+                                goal=goal_data,
+                                agent_type=agent or "analyst",
+                                context={"action": action, **parameters},
+                            )
+                            return result if isinstance(result, dict) else {"success": True, "result": result}
+                        except Exception as exc:
+                            return {"success": False, "error": str(exc)}
+                    return _executor
+
+                agent_executor = _make_executor(user_id)
+
                 # Create OODA loop with single-iteration config
                 ooda_config = OODAConfig(max_iterations=1)
                 ooda = OODALoop(
@@ -220,6 +239,7 @@ async def _run_ooda_goal_checks() -> None:
                     semantic_memory=semantic,
                     working_memory=working,
                     config=ooda_config,
+                    agent_executor=agent_executor,
                 )
 
                 state = OODAState(goal_id=goal_id)

@@ -205,10 +205,10 @@ async def chat_stream(
     async def event_stream():  # noqa: C901
         total_start = time.perf_counter()
 
-        memory_types = request.memory_types or ["episodic", "semantic", "procedural", "prospective"]
+        memory_types = request.memory_types or ["episodic", "semantic", "procedural", "prospective", "lead"]
 
         # Get or create working memory
-        working_memory = service._working_memory_manager.get_or_create(
+        working_memory = await service._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
             user_id=current_user.id,
         )
@@ -292,6 +292,9 @@ async def chat_stream(
 
         # Add assistant response to working memory
         working_memory.add_message("assistant", full_content)
+
+        # Persist working memory state to Supabase
+        await service._working_memory_manager.persist_session(conversation_id)
 
         # Persist both messages to the messages table
         try:

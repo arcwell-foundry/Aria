@@ -10,3 +10,4 @@ export { ActionsPage } from './ActionsPage';
 export { SettingsPage } from './SettingsPage';
 export { LoginPage } from './LoginPage';
 export { SignupPage } from './SignupPage';
+export { OnboardingPage } from './OnboardingPage';

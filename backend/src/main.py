@@ -46,6 +46,7 @@ from src.api.routes import (
     profile,
     search,
     signals,
+    skill_replay,
     skills,
     social,
     video,
@@ -186,6 +187,7 @@ app.include_router(preferences.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
+app.include_router(skill_replay.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(social.router, prefix="/api/v1")
 app.include_router(video.router, prefix="/api/v1")

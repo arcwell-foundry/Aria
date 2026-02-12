@@ -10,6 +10,7 @@ import {
   CommunicationsPage,
   ActionsPage,
   SettingsPage,
+  OnboardingPage,
 } from '@/components/pages';
 import { DialogueMode } from '@/components/avatar';
 
@@ -19,6 +20,14 @@ export function AppRoutes() {
       {/* Shell-less routes (no sidebar) */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <OnboardingPage />
+          </ProtectedRoute>
+        }
+      />
 
       {/* App shell routes */}
       <Route
