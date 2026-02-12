@@ -365,8 +365,8 @@ class FirstConversationGenerator:
         try:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=800,
-                temperature=0.5,
+                max_tokens=1500,
+                temperature=0.7,
             )
 
             # Parse JSON from response (handle markdown code blocks)
@@ -382,16 +382,20 @@ class FirstConversationGenerator:
 
             # Convert to rich_content format
             rich_content: list[dict[str, Any]] = []
-            for goal in goals[:3]:
+            for i, goal in enumerate(goals[:3]):
                 rich_content.append(
                     {
                         "type": "goal_plan",
-                        "title": goal.get("title", ""),
-                        "rationale": goal.get("rationale", ""),
-                        "approach": goal.get("approach", ""),
-                        "agents": goal.get("agents", []),
-                        "timeline": goal.get("timeline", ""),
-                        "goal_type": goal.get("goal_type", ""),
+                        "data": {
+                            "id": f"proposed-goal-{i + 1}",
+                            "title": goal.get("title", f"Goal {i + 1}"),
+                            "rationale": goal.get("rationale", ""),
+                            "approach": goal.get("approach", ""),
+                            "agents": goal.get("agents", []),
+                            "timeline": goal.get("timeline", "2 weeks"),
+                            "goal_type": goal.get("goal_type", "custom"),
+                            "status": "proposed",
+                        },
                     }
                 )
 
@@ -435,8 +439,8 @@ class FirstConversationGenerator:
             commands.append(
                 {
                     "action": "update_sidebar_badge",
-                    "target": "intelligence",
-                    "badge": competitor_count,
+                    "sidebar_item": "intelligence",
+                    "badge_count": competitor_count,
                 }
             )
 
@@ -445,8 +449,8 @@ class FirstConversationGenerator:
             commands.append(
                 {
                     "action": "update_sidebar_badge",
-                    "target": "pipeline",
-                    "badge": len(facts),
+                    "sidebar_item": "pipeline",
+                    "badge_count": len(facts),
                 }
             )
 
