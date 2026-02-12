@@ -145,7 +145,7 @@ export function BattleCardPreview({
     >
       {/* Competitor Name */}
       <h3
-        className="text-lg font-medium mb-4 truncate"
+        className="text-lg font-display mb-4 truncate"
         style={{ color: 'var(--text-primary)' }}
       >
         {card.competitor_name}
