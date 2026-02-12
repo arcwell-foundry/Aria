@@ -71,7 +71,7 @@ async def list_drafts(
         )
     except Exception as e:
         logger.exception("Failed to list drafts")
-        raise HTTPException(status_code=500, detail=f"Failed to list drafts: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list drafts. Please try again.") from e
 
     drafts = resp.data or []
 
@@ -143,7 +143,7 @@ async def approve_draft(
         ).eq("id", draft_id).execute()
     except Exception as e:
         logger.exception("Failed to approve draft")
-        raise HTTPException(status_code=500, detail=f"Failed to approve draft: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to approve draft. Please try again.") from e
 
     logger.info(
         "Draft approved",
@@ -202,7 +202,7 @@ async def reject_draft(
         ).eq("id", draft_id).execute()
     except Exception as e:
         logger.exception("Failed to reject draft")
-        raise HTTPException(status_code=500, detail=f"Failed to reject draft: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to reject draft. Please try again.") from e
 
     # Store feedback in procedural_memories for learning
     try:
@@ -309,7 +309,7 @@ async def schedule_draft(
         ).eq("id", draft_id).execute()
     except Exception as e:
         logger.exception("Failed to schedule draft")
-        raise HTTPException(status_code=500, detail=f"Failed to schedule draft: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to schedule draft. Please try again.") from e
 
     # Create a prospective memory to trigger publish at scheduled time
     try:
@@ -370,7 +370,7 @@ async def list_published(
         )
     except Exception as e:
         logger.exception("Failed to list published posts")
-        raise HTTPException(status_code=500, detail=f"Failed to list published posts: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list published posts. Please try again.") from e
 
     posts = resp.data or []
 
@@ -440,7 +440,7 @@ async def approve_reply(
         ).eq("id", reply_id).execute()
     except Exception as e:
         logger.exception("Failed to approve reply")
-        raise HTTPException(status_code=500, detail=f"Failed to approve reply: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to approve reply. Please try again.") from e
 
     logger.info(
         "Reply approved",
@@ -468,7 +468,7 @@ async def get_social_stats(
         )
     except Exception as e:
         logger.exception("Failed to fetch social stats")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to fetch stats. Please try again.") from e
 
     posts = resp.data or []
     total = len(posts)
