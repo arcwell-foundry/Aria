@@ -1,5 +1,4 @@
 export { ARIAWorkspace } from './ARIAWorkspace';
-export { BriefingPage } from './BriefingPage';
 export { PipelinePage } from './PipelinePage';
 export { LeadDetailPage } from './LeadDetailPage';
 export { IntelligencePage } from './IntelligencePage';
