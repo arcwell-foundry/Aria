@@ -15,6 +15,7 @@ The message:
 7. Suggests a concrete next step
 """
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -89,6 +90,29 @@ class FirstConversationGenerator:
             style=style,
             personality=personality,
         )
+
+        # Generate goal proposals as rich content
+        goal_proposals = await self._generate_goal_proposals(
+            user_profile=user_profile,
+            classification=classification,
+            facts=facts,
+            gaps=gaps,
+        )
+
+        # Build UI commands (sidebar badges)
+        ui_commands = self._build_ui_commands(facts, classification)
+
+        # Build suggestions
+        suggestion_list = [
+            "Tell me more about the first goal",
+            "What competitors did you find?",
+            "Start with the pipeline goal",
+        ]
+
+        # Attach to message
+        message.rich_content = goal_proposals
+        message.ui_commands = ui_commands
+        message.suggestions = suggestion_list
 
         # 4. Store as first message in conversation thread
         await self._store_first_message(user_id, message)
@@ -281,6 +305,152 @@ class FirstConversationGenerator:
             facts_referenced=min(fact_count, 15),
             confidence_level=confidence_level,
         )
+
+    async def _generate_goal_proposals(
+        self,
+        user_profile: dict[str, Any] | None,
+        classification: dict[str, Any] | None,
+        facts: list[dict[str, Any]],
+        gaps: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Generate 3 strategic goal proposals as rich_content GoalPlanCards.
+
+        Uses the LLM to propose goals specific to the user's company, role,
+        and the intelligence gathered during onboarding.
+
+        Args:
+            user_profile: User profile data (name, role, title).
+            classification: Company classification data.
+            facts: Top semantic facts from memory.
+            gaps: Critical knowledge gaps.
+
+        Returns:
+            List of rich_content dicts with type="goal_plan".
+        """
+        company_name = ""
+        role = ""
+        if user_profile:
+            company_name = user_profile.get("company_name", "")
+            role = user_profile.get("role", "")
+
+        company_type = ""
+        if classification:
+            company_type = classification.get("company_type", "")
+
+        facts_summary = "\n".join(f"- {f.get('fact', '')}" for f in facts[:10])
+        gaps_summary = "\n".join(f"- {g.get('task', '')}" for g in gaps[:3])
+
+        prompt = (
+            "You are ARIA, an AI Department Director for life sciences commercial teams.\n\n"
+            f"Company: {company_name}\n"
+            f"Company type: {company_type}\n"
+            f"User role: {role}\n\n"
+            f"Key facts gathered:\n{facts_summary or 'Limited data so far'}\n\n"
+            f"Knowledge gaps:\n{gaps_summary or 'None critical'}\n\n"
+            "Propose exactly 3 strategic goals that would deliver the most value "
+            "for this user in their first 30 days. Each goal should be specific "
+            "to their company and role, not generic.\n\n"
+            "Return a JSON array with exactly 3 objects, each having:\n"
+            '- "title": concise goal title (max 60 chars)\n'
+            '- "rationale": why this goal matters for them specifically (1 sentence)\n'
+            '- "approach": high-level approach ARIA will take (1-2 sentences)\n'
+            '- "agents": array of agent names that will work on this '
+            "(from: Hunter, Analyst, Strategist, Scribe, Operator, Scout)\n"
+            '- "timeline": estimated timeline (e.g. "1-2 weeks")\n'
+            '- "goal_type": one of "pipeline", "competitive_intel", '
+            '"account_strategy", "communication", "market_research"\n\n'
+            "Return ONLY the JSON array, no other text."
+        )
+
+        try:
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.5,
+            )
+
+            # Parse JSON from response (handle markdown code blocks)
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                # Remove markdown code fences
+                cleaned = cleaned.split("\n", 1)[-1]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[: -len("```")]
+                cleaned = cleaned.strip()
+
+            goals = json.loads(cleaned)
+
+            # Convert to rich_content format
+            rich_content: list[dict[str, Any]] = []
+            for goal in goals[:3]:
+                rich_content.append(
+                    {
+                        "type": "goal_plan",
+                        "title": goal.get("title", ""),
+                        "rationale": goal.get("rationale", ""),
+                        "approach": goal.get("approach", ""),
+                        "agents": goal.get("agents", []),
+                        "timeline": goal.get("timeline", ""),
+                        "goal_type": goal.get("goal_type", ""),
+                    }
+                )
+
+            return rich_content
+        except Exception as e:
+            logger.warning(f"Goal proposal generation failed: {e}")
+            return []
+
+    def _build_ui_commands(
+        self,
+        facts: list[dict[str, Any]],
+        classification: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Build UI commands for sidebar badges based on gathered intelligence.
+
+        Adds badge counts to sidebar items so the user sees ARIA has
+        already populated their workspace with intelligence.
+
+        Args:
+            facts: Top semantic facts from memory.
+            classification: Company classification data.
+
+        Returns:
+            List of ui_command dicts for sidebar badge updates.
+        """
+        commands: list[dict[str, Any]] = []
+
+        # Count competitor mentions in facts
+        competitor_count = 0
+        competitor_keywords = {"competitor", "competing", "rival", "versus", "vs"}
+        for fact in facts:
+            fact_text = fact.get("fact", "").lower()
+            if any(kw in fact_text for kw in competitor_keywords):
+                competitor_count += 1
+
+        # Also check classification for competitor data
+        if classification and classification.get("competitors"):
+            competitor_count = max(competitor_count, len(classification["competitors"]))
+
+        if competitor_count > 0:
+            commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "target": "intelligence",
+                    "badge": competitor_count,
+                }
+            )
+
+        # Add pipeline badge with facts count
+        if facts:
+            commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "target": "pipeline",
+                    "badge": len(facts),
+                }
+            )
+
+        return commands
 
     def _build_style_guidance(self, style: dict[str, Any] | None) -> str:
         """Build style guidance from Digital Twin writing style.
