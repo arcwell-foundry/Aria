@@ -12,7 +12,7 @@ interface Phase {
   status: 'pending' | 'active' | 'complete';
 }
 
-interface ExecutionPlanData {
+export interface ExecutionPlanData {
   goal_id: string;
   title: string;
   phases: Phase[];

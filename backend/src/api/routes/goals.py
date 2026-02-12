@@ -260,6 +260,113 @@ async def goal_report(
 # --- Goal Proposal Approval ---
 
 
+def _build_execution_plan(
+    goal_id: str,
+    title: str,
+    goal_type: str,
+    agents: list[str],
+    timeline: str,
+) -> dict[str, Any]:
+    """Build an ExecutionPlanCard rich content dict based on goal type.
+
+    Maps different goal types to tailored phase templates so the
+    execution plan reflects the actual work involved.
+
+    Args:
+        goal_id: Created goal's ID.
+        title: Goal title.
+        goal_type: Type of goal (lead_gen, research, competitive_intel, etc.).
+        agents: Assigned agent names.
+        timeline: User-facing timeline string.
+
+    Returns:
+        Rich content dict with type 'execution_plan'.
+    """
+    # Phase templates by goal type
+    phase_templates: dict[str, list[dict[str, Any]]] = {
+        "lead_gen": [
+            {"name": "Prospect Identification", "timeline": "Days 1-3",
+             "agent_filter": ("Hunter", "Scout"),
+             "output": "Qualified prospect list with company profiles"},
+            {"name": "Engagement Strategy", "timeline": "Days 3-5",
+             "agent_filter": ("Strategist", "Analyst"),
+             "output": "Personalized outreach strategy per prospect"},
+            {"name": "Outreach Execution", "timeline": f"Days 5-{timeline or '14'}",
+             "agent_filter": ("Scribe", "Operator"),
+             "output": "Email sequences, follow-up tasks, meeting requests"},
+        ],
+        "competitive_intel": [
+            {"name": "Intelligence Gathering", "timeline": "Days 1-3",
+             "agent_filter": ("Scout", "Hunter"),
+             "output": "Competitor product, pricing, and positioning data"},
+            {"name": "Battle Card Creation", "timeline": "Days 3-5",
+             "agent_filter": ("Analyst", "Strategist"),
+             "output": "Battle cards with feature gaps and objection handling"},
+            {"name": "Team Enablement", "timeline": f"Days 5-{timeline or '10'}",
+             "agent_filter": ("Scribe",),
+             "output": "Talking points, win/loss summaries, competitive alerts"},
+        ],
+        "research": [
+            {"name": "Data Collection", "timeline": "Days 1-4",
+             "agent_filter": ("Scout", "Hunter", "Analyst"),
+             "output": "Raw data from public sources, databases, and signals"},
+            {"name": "Synthesis & Insights", "timeline": "Days 4-7",
+             "agent_filter": ("Analyst", "Strategist"),
+             "output": "Research report with key findings and recommendations"},
+            {"name": "Deliverable", "timeline": f"Days 7-{timeline or '14'}",
+             "agent_filter": ("Scribe",),
+             "output": "Final report, executive summary, or presentation draft"},
+        ],
+        "outreach": [
+            {"name": "Audience Mapping", "timeline": "Days 1-2",
+             "agent_filter": ("Hunter", "Analyst"),
+             "output": "Target list with contact details and context"},
+            {"name": "Content Creation", "timeline": "Days 2-4",
+             "agent_filter": ("Scribe", "Strategist"),
+             "output": "Personalized email drafts and messaging sequences"},
+            {"name": "Campaign Execution", "timeline": f"Days 4-{timeline or '10'}",
+             "agent_filter": ("Operator", "Scribe"),
+             "output": "Sent messages, tracked responses, follow-up queue"},
+        ],
+    }
+
+    templates = phase_templates.get(goal_type, [
+        {"name": "Discovery", "timeline": "Days 1-3",
+         "agent_filter": ("Hunter", "Scout", "Analyst"),
+         "output": "Research report, lead list, or competitive data"},
+        {"name": "Analysis", "timeline": "Days 3-5",
+         "agent_filter": ("Analyst", "Strategist"),
+         "output": "Strategic insights and recommendations"},
+        {"name": "Execution", "timeline": f"Days 5-{timeline or '14'}",
+         "agent_filter": ("Scribe", "Operator"),
+         "output": "Drafts, outreach, or operational tasks"},
+    ])
+
+    phases = [
+        {
+            "name": t["name"],
+            "timeline": t["timeline"],
+            "agents": [a for a in agents if a in t["agent_filter"]],
+            "output": t["output"],
+            "status": "pending",
+        }
+        for t in templates
+    ]
+
+    return {
+        "type": "execution_plan",
+        "data": {
+            "goal_id": goal_id,
+            "title": title,
+            "phases": phases,
+            "autonomy": {
+                "autonomous": "Research, data gathering, analysis, and report generation",
+                "requires_approval": "Sending emails, making calendar changes, contacting leads",
+            },
+        },
+    }
+
+
 class ApproveGoalProposalRequest(BaseModel):
     """Request body for approving a goal proposal from ARIA's first conversation."""
 
@@ -306,40 +413,13 @@ async def approve_goal_proposal(
     )
     result = await service.create_goal(current_user.id, goal_data)
 
-    execution_plan = {
-        "type": "execution_plan",
-        "data": {
-            "goal_id": result["id"],
-            "title": data.title,
-            "phases": [
-                {
-                    "name": "Discovery",
-                    "timeline": "Days 1-3",
-                    "agents": [a for a in data.agents if a in ("Hunter", "Scout", "Analyst")],
-                    "output": "Research report, lead list, or competitive data",
-                    "status": "pending",
-                },
-                {
-                    "name": "Analysis",
-                    "timeline": "Days 3-5",
-                    "agents": [a for a in data.agents if a in ("Analyst", "Strategist")],
-                    "output": "Strategic insights and recommendations",
-                    "status": "pending",
-                },
-                {
-                    "name": "Execution",
-                    "timeline": f"Days 5-{data.timeline or '14'}",
-                    "agents": [a for a in data.agents if a in ("Scribe", "Operator")],
-                    "output": "Drafts, outreach, or operational tasks",
-                    "status": "pending",
-                },
-            ],
-            "autonomy": {
-                "autonomous": "Research, data gathering, analysis, and report generation",
-                "requires_approval": "Sending emails, making calendar changes, contacting leads",
-            },
-        },
-    }
+    execution_plan = _build_execution_plan(
+        goal_id=result["id"],
+        title=data.title,
+        goal_type=data.goal_type,
+        agents=data.agents,
+        timeline=data.timeline,
+    )
 
     try:
         from src.core.ws import ws_manager

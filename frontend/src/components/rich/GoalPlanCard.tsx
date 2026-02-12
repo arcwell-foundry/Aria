@@ -4,7 +4,7 @@ import { WS_EVENTS } from '@/types/chat';
 import { useConversationStore } from '@/stores/conversationStore';
 import { approveGoalProposal } from '@/api/goals';
 
-interface GoalPlanData {
+export interface GoalPlanData {
   id: string;
   title: string;
   rationale: string;
@@ -31,11 +31,13 @@ const AGENT_COLORS: Record<string, string> = {
 export function GoalPlanCard({ data }: GoalPlanCardProps) {
   const [status, setStatus] = useState(data.status);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       await approveGoalProposal({
         title: data.title,
@@ -48,7 +50,7 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
       });
       setStatus('approved');
     } catch {
-      // Error handled by WebSocket response
+      setError('Approval failed — try again');
     } finally {
       setIsLoading(false);
     }
@@ -139,6 +141,12 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
           {data.timeline}
         </span>
       </div>
+
+      {error && (
+        <div className="px-4 pb-2">
+          <p className="text-xs text-red-400">{error}</p>
+        </div>
+      )}
 
       {!isApproved && (
         <div className="border-t border-[var(--border)] px-4 py-3 flex items-center gap-2">

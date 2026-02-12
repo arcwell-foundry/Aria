@@ -1,9 +1,9 @@
 import type { RichContent } from '@/api/chat';
-import { GoalPlanCard } from './GoalPlanCard';
-import { ExecutionPlanCard } from './ExecutionPlanCard';
-import { MeetingCard } from './MeetingCard';
-import { SignalCard } from './SignalCard';
-import { AlertCard } from './AlertCard';
+import { GoalPlanCard, type GoalPlanData } from './GoalPlanCard';
+import { ExecutionPlanCard, type ExecutionPlanData } from './ExecutionPlanCard';
+import { MeetingCard, type MeetingCardData } from './MeetingCard';
+import { SignalCard, type SignalCardData } from './SignalCard';
+import { AlertCard, type AlertCardData } from './AlertCard';
 
 interface RichContentRendererProps {
   items: RichContent[];
@@ -24,15 +24,15 @@ export function RichContentRenderer({ items }: RichContentRendererProps) {
 function RichContentItem({ item }: { item: RichContent }) {
   switch (item.type) {
     case 'goal_plan':
-      return <GoalPlanCard data={item.data as never} />;
+      return <GoalPlanCard data={item.data as unknown as GoalPlanData} />;
     case 'execution_plan':
-      return <ExecutionPlanCard data={item.data as never} />;
+      return <ExecutionPlanCard data={item.data as unknown as ExecutionPlanData} />;
     case 'meeting_card':
-      return <MeetingCard data={item.data as never} />;
+      return <MeetingCard data={item.data as unknown as MeetingCardData} />;
     case 'signal_card':
-      return <SignalCard data={item.data as never} />;
+      return <SignalCard data={item.data as unknown as SignalCardData} />;
     case 'alert_card':
-      return <AlertCard data={item.data as never} />;
+      return <AlertCard data={item.data as unknown as AlertCardData} />;
     default:
       return (
         <div

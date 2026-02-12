@@ -72,8 +72,7 @@ class FirstConversationGenerator:
         classification = await self._get_classification(user_id)
         gaps = await self._get_critical_gaps(user_id)
         goal = await self._get_first_goal(user_id)
-        style = await self._get_writing_style(user_id)
-        personality = await self._get_personality_calibration(user_id)
+        style, personality = await self._get_digital_twin_config(user_id)
         user_profile = await self._get_user_profile(user_id)
 
         # 2. Find the most interesting/surprising finding
@@ -102,11 +101,14 @@ class FirstConversationGenerator:
         # Build UI commands (sidebar badges)
         ui_commands = self._build_ui_commands(facts, classification)
 
-        # Build suggestions
+        # Build suggestions referencing actual proposed goals
+        first_goal_title = ""
+        if goal_proposals:
+            first_goal_title = goal_proposals[0].get("data", {}).get("title", "")
         suggestion_list = [
-            "Tell me more about the first goal",
+            f'Tell me more about "{first_goal_title}"' if first_goal_title else "Tell me more about the first goal",
             "What competitors did you find?",
-            "Start with the pipeline goal",
+            f'Start with "{first_goal_title}"' if first_goal_title else "Start with the pipeline goal",
         ]
 
         # Attach to message
@@ -743,14 +745,19 @@ class FirstConversationGenerator:
         )
         return result.data
 
-    async def _get_writing_style(self, user_id: str) -> dict[str, Any] | None:
-        """Get Digital Twin writing style for tone calibration.
+    async def _get_digital_twin_config(
+        self, user_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Get Digital Twin writing style and personality calibration.
+
+        Single query that returns both writing style and personality
+        calibration from user_settings.preferences.digital_twin.
 
         Args:
             user_id: The user's ID.
 
         Returns:
-            Writing style dict or None.
+            Tuple of (writing_style, personality_calibration), either may be None.
         """
         result = (
             self._db.table("user_settings")
@@ -759,33 +766,14 @@ class FirstConversationGenerator:
             .maybe_single()
             .execute()
         )
-        if result.data:
-            return result.data.get("preferences", {}).get("digital_twin", {}).get("writing_style")
-        return None
+        if not result.data:
+            return None, None
 
-    async def _get_personality_calibration(self, user_id: str) -> dict[str, Any] | None:
-        """Get personality calibration from Digital Twin for tone matching.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            Personality calibration dict with tone_guidance, or None.
-        """
-        result = (
-            self._db.table("user_settings")
-            .select("preferences")
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
+        digital_twin = result.data.get("preferences", {}).get("digital_twin", {})
+        return (
+            digital_twin.get("writing_style"),
+            digital_twin.get("personality_calibration"),
         )
-        if result.data:
-            return (
-                result.data.get("preferences", {})
-                .get("digital_twin", {})
-                .get("personality_calibration")
-            )
-        return None
 
     async def _get_user_profile(self, user_id: str) -> dict[str, Any] | None:
         """Get the user's profile for personalization.

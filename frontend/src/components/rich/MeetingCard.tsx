@@ -1,4 +1,9 @@
-interface MeetingCardData {
+import { useCallback } from 'react';
+import { wsManager } from '@/core/WebSocketManager';
+import { WS_EVENTS } from '@/types/chat';
+import { useConversationStore } from '@/stores/conversationStore';
+
+export interface MeetingCardData {
   id: string;
   title: string;
   time: string;
@@ -12,9 +17,28 @@ interface MeetingCardProps {
 }
 
 export function MeetingCard({ data }: MeetingCardProps) {
+  const addMessage = useConversationStore((s) => s.addMessage);
+  const activeConversationId = useConversationStore((s) => s.activeConversationId);
+
   const formattedTime = data.time
     ? new Date(data.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '';
+
+  const handleViewBrief = useCallback(() => {
+    const label = data.company || data.title;
+    const message = `Show me the meeting brief for ${label}`;
+    addMessage({
+      role: 'user',
+      content: message,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message,
+      conversation_id: activeConversationId,
+    });
+  }, [data.company, data.title, addMessage, activeConversationId]);
 
   return (
     <div
@@ -36,7 +60,10 @@ export function MeetingCard({ data }: MeetingCardProps) {
         </p>
       </div>
       {data.has_brief && (
-        <button className="shrink-0 px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[rgba(46,102,255,0.3)] hover:bg-[rgba(46,102,255,0.1)] transition-colors">
+        <button
+          onClick={handleViewBrief}
+          className="shrink-0 px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[rgba(46,102,255,0.3)] hover:bg-[rgba(46,102,255,0.1)] transition-colors"
+        >
           View Brief
         </button>
       )}

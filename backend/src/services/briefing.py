@@ -12,9 +12,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-import anthropic
-
-from src.core.config import settings
+from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.services import notification_integration
 
@@ -27,7 +25,7 @@ class BriefingService:
     def __init__(self) -> None:
         """Initialize briefing service with dependencies."""
         self._db = SupabaseClient.get_client()
-        self._llm = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
+        self._llm = LLMClient()
 
     async def generate_briefing(
         self, user_id: str, briefing_date: date | None = None
@@ -642,15 +640,7 @@ Overdue tasks: {overdue_count}
 Be concise and actionable. Start with "Good morning!"
 """
 
-        response = self._llm.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=200,
+        return await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
         )
-
-        # Get text from first content block (TextBlock has text attribute)
-        content_block = response.content[0]
-        if hasattr(content_block, "text"):
-            return content_block.text
-        # Fallback for other block types
-        return str(content_block)
