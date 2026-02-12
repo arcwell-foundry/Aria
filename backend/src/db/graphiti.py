@@ -44,6 +44,11 @@ class GraphitiClient:
     @classmethod
     async def _initialize(cls) -> None:
         """Initialize the Graphiti client with Neo4j connection."""
+        if not settings.OPENAI_API_KEY.get_secret_value():
+            logger.warning(
+                "OPENAI_API_KEY not set — Graphiti/Neo4j embeddings will fail. Set this in .env"
+            )
+
         try:
             from graphiti_core import Graphiti
             from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig

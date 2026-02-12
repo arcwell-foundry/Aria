@@ -1,8 +1,8 @@
 """Background scheduler for periodic ARIA tasks (P2-36).
 
 Uses APScheduler to run the AmbientGapFiller daily for each active user.
-Controlled by the ENABLE_SCHEDULER env var (default False) so it doesn't
-run during tests or local development.
+Controlled by the ENABLE_SCHEDULER env var (default True).
+Set ENABLE_SCHEDULER=false to disable during tests or CI.
 
 Alternative: The ``POST /admin/run-ambient-gaps`` endpoint can be triggered
 by an external cron (Railway cron, Supabase pg_cron, etc.) if APScheduler
@@ -15,8 +15,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Feature flag — default off for dev/test
-ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "false").lower() in ("true", "1", "yes")
+# Feature flag — default on; set ENABLE_SCHEDULER=false to disable
+ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "true").lower() in ("true", "1", "yes")
+logger.info("Scheduler enabled: %s", ENABLE_SCHEDULER)
 
 
 async def _run_ambient_gap_checks() -> None:
