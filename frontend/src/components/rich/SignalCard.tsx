@@ -1,0 +1,47 @@
+interface SignalCardData {
+  id: string;
+  company_name: string;
+  signal_type: string;
+  headline: string;
+  health_score?: number;
+  lifecycle_stage?: string;
+}
+
+interface SignalCardProps {
+  data: SignalCardData;
+}
+
+const SIGNAL_TYPE_LABELS: Record<string, string> = {
+  buying_signal: 'BUYING SIGNAL',
+  engagement: 'ENGAGEMENT',
+  champion_activity: 'CHAMPION',
+};
+
+export function SignalCard({ data }: SignalCardProps) {
+  return (
+    <div
+      className="rounded-lg border border-[var(--border)] px-4 py-3"
+      style={{ backgroundColor: 'var(--bg-elevated)' }}
+      data-aria-id={`signal-card-${data.id}`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider bg-emerald-500/15 text-emerald-400">
+          {SIGNAL_TYPE_LABELS[data.signal_type] || data.signal_type.toUpperCase()}
+        </span>
+        {data.health_score != null && (
+          <span className="text-xs font-mono text-emerald-400">
+            +{data.health_score}pts
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-[var(--text-primary)] leading-relaxed">
+        {data.headline}
+      </p>
+      <div className="mt-2">
+        <button className="px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[rgba(46,102,255,0.3)] hover:bg-[rgba(46,102,255,0.1)] transition-colors">
+          Draft Outreach
+        </button>
+      </div>
+    </div>
+  );
+}
