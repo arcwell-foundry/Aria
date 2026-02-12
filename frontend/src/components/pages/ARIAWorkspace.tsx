@@ -142,6 +142,13 @@ export function ARIAWorkspace() {
 
   const handleSend = useCallback(
     (message: string) => {
+      // Ensure conversation_id exists before sending — prevents fragmentation
+      let conversationId = activeConversationId;
+      if (!conversationId) {
+        conversationId = crypto.randomUUID();
+        setActiveConversation(conversationId);
+      }
+
       addMessage({
         role: 'user',
         content: message,
@@ -152,10 +159,10 @@ export function ARIAWorkspace() {
 
       wsManager.send(WS_EVENTS.USER_MESSAGE, {
         message,
-        conversation_id: activeConversationId,
+        conversation_id: conversationId,
       });
     },
-    [addMessage, activeConversationId],
+    [addMessage, activeConversationId, setActiveConversation],
   );
 
   return (

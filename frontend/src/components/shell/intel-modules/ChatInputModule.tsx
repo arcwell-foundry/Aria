@@ -21,6 +21,13 @@ export function ChatInputModule({
 
     const store = useConversationStore.getState();
 
+    // Ensure conversation_id exists before sending — prevents fragmentation
+    let conversationId = store.activeConversationId;
+    if (!conversationId) {
+      conversationId = crypto.randomUUID();
+      store.setActiveConversation(conversationId);
+    }
+
     // Add message to conversation thread so it's visible
     store.addMessage({
       role: 'user',
@@ -33,7 +40,7 @@ export function ChatInputModule({
     // Send via WebSocket with conversation context
     wsManager.send(WS_EVENTS.USER_MESSAGE, {
       message: trimmed,
-      conversation_id: store.activeConversationId,
+      conversation_id: conversationId,
       context_hint: context,
     });
     setValue('');

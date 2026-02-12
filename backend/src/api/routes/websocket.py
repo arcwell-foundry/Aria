@@ -153,7 +153,38 @@ async def _handle_user_message(
 
     payload = data.get("payload", {})
     message_text = payload.get("message", "")
-    conversation_id = payload.get("conversation_id") or str(uuid.uuid4())
+    conversation_id = payload.get("conversation_id")
+
+    if not conversation_id:
+        # Try to find the user's most recent conversation before creating a new one
+        try:
+            db = get_supabase_client()
+            result = (
+                db.table("conversations")
+                .select("id")
+                .eq("user_id", user_id)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                conversation_id = result.data[0]["id"]
+                logger.info(
+                    "Resumed most recent conversation (frontend did not send conversation_id)",
+                    extra={"user_id": user_id, "conversation_id": conversation_id},
+                )
+            else:
+                conversation_id = str(uuid.uuid4())
+                logger.warning(
+                    "Created new conversation — frontend did not send conversation_id",
+                    extra={"user_id": user_id, "conversation_id": conversation_id},
+                )
+        except Exception:
+            conversation_id = str(uuid.uuid4())
+            logger.warning(
+                "Created new conversation — fallback lookup failed",
+                extra={"user_id": user_id, "conversation_id": conversation_id},
+            )
 
     if not message_text:
         return

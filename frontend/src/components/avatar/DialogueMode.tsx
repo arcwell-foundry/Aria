@@ -197,8 +197,17 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking]);
 
   // Briefing control handlers
+  // Ensure conversation_id exists before any send — prevents fragmentation
+  const ensureConversationId = useCallback(() => {
+    if (activeConversationId) return activeConversationId;
+    const id = crypto.randomUUID();
+    setActiveConversation(id);
+    return id;
+  }, [activeConversationId, setActiveConversation]);
+
   const handlePlayPause = useCallback(() => {
     setIsBriefingPlaying((prev) => {
+      const conversationId = ensureConversationId();
       if (prev) {
         // Pausing: stop progress and send interrupt to Tavus via WS
         if (briefingProgressRef.current) {
@@ -207,34 +216,34 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         }
         wsManager.send(WS_EVENTS.USER_MESSAGE, {
           message: '/briefing pause',
-          conversation_id: activeConversationId,
+          conversation_id: conversationId,
         });
       } else {
         // Resuming: send resume to Tavus via WS
         wsManager.send(WS_EVENTS.USER_MESSAGE, {
           message: '/briefing resume',
-          conversation_id: activeConversationId,
+          conversation_id: conversationId,
         });
       }
       return !prev;
     });
-  }, [activeConversationId]);
+  }, [ensureConversationId]);
 
   const handleRewind = useCallback(() => {
     // Cannot truly seek in a live Tavus stream; ask ARIA to repeat last point
     wsManager.send(WS_EVENTS.USER_MESSAGE, {
       message: '/briefing repeat',
-      conversation_id: activeConversationId,
+      conversation_id: ensureConversationId(),
     });
-  }, [activeConversationId]);
+  }, [ensureConversationId]);
 
   const handleForward = useCallback(() => {
     // Cannot truly seek in a live Tavus stream; ask ARIA to skip to next point
     wsManager.send(WS_EVENTS.USER_MESSAGE, {
       message: '/briefing next',
-      conversation_id: activeConversationId,
+      conversation_id: ensureConversationId(),
     });
-  }, [activeConversationId]);
+  }, [ensureConversationId]);
 
   const handleSend = useCallback(
     (message: string) => {
@@ -247,10 +256,10 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       });
       wsManager.send(WS_EVENTS.USER_MESSAGE, {
         message,
-        conversation_id: activeConversationId,
+        conversation_id: ensureConversationId(),
       });
     },
-    [addMessage, activeConversationId],
+    [addMessage, ensureConversationId],
   );
 
   return (
