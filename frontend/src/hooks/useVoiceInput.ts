@@ -33,7 +33,6 @@ interface UseVoiceInputOptions {
 export function useVoiceInput({ onTranscript }: UseVoiceInputOptions) {
   const isListening = useModalityStore((s) => s.isListening);
   const setIsListening = useModalityStore((s) => s.setIsListening);
-  const isStreaming = useConversationStore((s) => s.isStreaming);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const isSpaceHeldRef = useRef(false);
@@ -42,7 +41,7 @@ export function useVoiceInput({ onTranscript }: UseVoiceInputOptions) {
   const isSupported = typeof window !== 'undefined' && getSpeechRecognitionCtor() !== null;
 
   const startListening = useCallback(() => {
-    if (!isSupported || isStreaming || isListening) return;
+    if (!isSupported || useConversationStore.getState().isStreaming || useModalityStore.getState().isListening) return;
 
     const Ctor = getSpeechRecognitionCtor()!;
     const recognition = new Ctor();
@@ -81,7 +80,7 @@ export function useVoiceInput({ onTranscript }: UseVoiceInputOptions) {
     } catch {
       setIsListening(false);
     }
-  }, [isSupported, isStreaming, isListening, setIsListening]);
+  }, [isSupported, setIsListening]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
