@@ -1,6 +1,5 @@
 """WebSocket endpoint for ARIA real-time communication."""
 
-import contextlib
 import json
 import logging
 import uuid
@@ -149,7 +148,6 @@ async def _handle_user_message(
     from src.api.routes.chat import _analyze_ui_commands, _generate_suggestions
     from src.db.supabase import get_supabase_client
     from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
-    from src.services.conversations import ConversationService
 
     payload = data.get("payload", {})
     message_text = payload.get("message", "")
@@ -290,28 +288,14 @@ async def _handle_user_message(
         # Persist working memory state to Supabase
         await service._working_memory_manager.persist_session(conversation_id)
 
-        # Persist messages
-        try:
-            db = get_supabase_client()
-            conv_svc = ConversationService(db_client=db)
-            await conv_svc.save_message(
-                conversation_id=conversation_id, role="user", content=message_text
-            )
-            await conv_svc.save_message(
-                conversation_id=conversation_id, role="assistant", content=full_content
-            )
-        except Exception as persist_err:
-            logger.warning("Message persistence failed: %s", persist_err)
-
-        # Update conversation metadata
-        await service._update_conversation_metadata(user_id, conversation_id, message_text)
-
-        # Extract and store new information
-        with contextlib.suppress(Exception):
-            await service._extraction_service.extract_and_store(
-                conversation=conversation_messages[-2:],
-                user_id=user_id,
-            )
+        # Persist messages, update metadata, extract information
+        await service.persist_turn(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message_text,
+            assistant_message=full_content,
+            conversation_context=conversation_messages[-2:],
+        )
 
         # Send complete response
         ui_commands = _analyze_ui_commands(full_content)

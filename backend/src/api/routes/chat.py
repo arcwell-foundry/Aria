@@ -300,45 +300,14 @@ async def chat_stream(
         # Persist working memory state to Supabase
         await service._working_memory_manager.persist_session(conversation_id)
 
-        # Persist both messages to the messages table
-        try:
-            db = get_supabase_client()
-            conv_svc = ConversationService(db_client=db)
-            await conv_svc.save_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=request.message,
-            )
-            await conv_svc.save_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-            )
-        except Exception as e:
-            logger.warning(
-                "Message persistence failed during stream",
-                extra={
-                    "conversation_id": conversation_id,
-                    "error": str(e),
-                },
-            )
-
-        # Update conversation metadata
-        await service._update_conversation_metadata(
-            current_user.id, conversation_id, request.message
+        # Persist messages, update metadata, extract information
+        await service.persist_turn(
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            user_message=request.message,
+            assistant_message=full_content,
+            conversation_context=conversation_messages[-2:],
         )
-
-        # Extract and store new information (fire and forget)
-        try:
-            await service._extraction_service.extract_and_store(
-                conversation=conversation_messages[-2:],
-                user_id=current_user.id,
-            )
-        except Exception as e:
-            logger.warning(
-                "Information extraction failed during stream",
-                extra={"user_id": current_user.id, "error": str(e)},
-            )
 
         total_ms = (time.perf_counter() - total_start) * 1000
         logger.info(

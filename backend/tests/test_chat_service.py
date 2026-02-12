@@ -572,3 +572,199 @@ async def test_chat_service_returns_timing_metadata() -> None:
             assert "memory_query_ms" in result["timing"]
             assert "llm_response_ms" in result["timing"]
             assert "total_ms" in result["timing"]
+
+
+# --- persist_turn tests ---
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_saves_both_messages() -> None:
+    """Test that persist_turn saves both user and assistant messages."""
+    from src.services.chat import ChatService
+
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService"),
+            patch("src.services.chat.LLMClient"),
+            patch("src.services.chat.WorkingMemoryManager"),
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+
+            mock_conv_svc = AsyncMock()
+            with patch(
+                "src.services.chat.get_supabase_client",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "src.services.conversations.ConversationService",
+                    return_value=mock_conv_svc,
+                ):
+                    await service.persist_turn(
+                        user_id="user-1",
+                        conversation_id="conv-1",
+                        user_message="Hello",
+                        assistant_message="Hi there",
+                    )
+
+            assert mock_conv_svc.save_message.call_count == 2
+            user_call = mock_conv_svc.save_message.call_args_list[0]
+            assert user_call.kwargs["role"] == "user"
+            assert user_call.kwargs["content"] == "Hello"
+            assistant_call = mock_conv_svc.save_message.call_args_list[1]
+            assert assistant_call.kwargs["role"] == "assistant"
+            assert assistant_call.kwargs["content"] == "Hi there"
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_does_not_raise_on_failure() -> None:
+    """Test that persist_turn swallows exceptions from message persistence."""
+    from src.services.chat import ChatService
+
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService"),
+            patch("src.services.chat.LLMClient"),
+            patch("src.services.chat.WorkingMemoryManager"),
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(side_effect=RuntimeError("boom"))
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+
+            with patch(
+                "src.services.conversations.ConversationService",
+                side_effect=RuntimeError("db down"),
+            ):
+                # Should not raise
+                await service.persist_turn(
+                    user_id="user-1",
+                    conversation_id="conv-1",
+                    user_message="Hello",
+                    assistant_message="Hi there",
+                )
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_passes_assistant_metadata() -> None:
+    """Test that persist_turn forwards assistant_metadata correctly."""
+    from src.services.chat import ChatService
+
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService"),
+            patch("src.services.chat.LLMClient"),
+            patch("src.services.chat.WorkingMemoryManager"),
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+
+            mock_conv_svc = AsyncMock()
+            metadata = {"skill_plan_id": "plan-42", "skill_status": "completed"}
+            with patch(
+                "src.services.chat.get_supabase_client",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "src.services.conversations.ConversationService",
+                    return_value=mock_conv_svc,
+                ):
+                    await service.persist_turn(
+                        user_id="user-1",
+                        conversation_id="conv-1",
+                        user_message="Do something",
+                        assistant_message="Done",
+                        assistant_metadata=metadata,
+                    )
+
+            assistant_call = mock_conv_svc.save_message.call_args_list[1]
+            assert assistant_call.kwargs["metadata"] == metadata
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_calls_extraction() -> None:
+    """Test that persist_turn calls extract_and_store."""
+    from src.services.chat import ChatService
+
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService"),
+            patch("src.services.chat.LLMClient"),
+            patch("src.services.chat.WorkingMemoryManager"),
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+
+            mock_conv_svc = AsyncMock()
+            with patch(
+                "src.services.chat.get_supabase_client",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "src.services.conversations.ConversationService",
+                    return_value=mock_conv_svc,
+                ):
+                    await service.persist_turn(
+                        user_id="user-1",
+                        conversation_id="conv-1",
+                        user_message="Hello",
+                        assistant_message="Hi",
+                    )
+
+            mock_extract.extract_and_store.assert_called_once()
+            call_kwargs = mock_extract.extract_and_store.call_args.kwargs
+            assert call_kwargs["user_id"] == "user-1"
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_calls_update_metadata() -> None:
+    """Test that persist_turn calls _update_conversation_metadata."""
+    from src.services.chat import ChatService
+
+    with mock_cognitive_load_deps():
+        with (
+            patch("src.services.chat.MemoryQueryService"),
+            patch("src.services.chat.LLMClient"),
+            patch("src.services.chat.WorkingMemoryManager"),
+            patch("src.services.chat.ExtractionService") as mock_extract_class,
+        ):
+            mock_extract = AsyncMock()
+            mock_extract.extract_and_store = AsyncMock(return_value=[])
+            mock_extract_class.return_value = mock_extract
+
+            service = ChatService()
+            service._update_conversation_metadata = AsyncMock()
+
+            mock_conv_svc = AsyncMock()
+            with patch(
+                "src.services.chat.get_supabase_client",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "src.services.conversations.ConversationService",
+                    return_value=mock_conv_svc,
+                ):
+                    await service.persist_turn(
+                        user_id="user-1",
+                        conversation_id="conv-1",
+                        user_message="Hello",
+                        assistant_message="Hi",
+                    )
+
+            service._update_conversation_metadata.assert_called_once_with(
+                "user-1", "conv-1", "Hello"
+            )

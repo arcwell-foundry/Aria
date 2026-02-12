@@ -559,6 +559,62 @@ class ChatService:
                 },
             )
 
+    async def persist_turn(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+        assistant_metadata: dict[str, Any] | None = None,
+        conversation_context: list[dict[str, str]] | None = None,
+    ) -> None:
+        """Single source of truth for persisting a conversation turn.
+
+        Saves both messages, updates conversation metadata, and runs
+        information extraction. All errors are logged but not raised.
+        """
+        # 1. Save both messages
+        try:
+            from src.services.conversations import ConversationService as _ConvService
+
+            conv_svc = _ConvService(db_client=get_supabase_client())
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message,
+            )
+            await conv_svc.save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_message,
+                metadata=assistant_metadata,
+            )
+        except Exception as e:
+            logger.warning(
+                "Message persistence failed",
+                extra={"conversation_id": conversation_id, "error": str(e)},
+            )
+
+        # 2. Update conversation metadata (message_count, timestamps, preview)
+        await self._update_conversation_metadata(user_id, conversation_id, user_message)
+
+        # 3. Extract and store information (fire-and-forget)
+        try:
+            await self._extraction_service.extract_and_store(
+                conversation=conversation_context
+                or [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": assistant_message},
+                ],
+                user_id=user_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Information extraction failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
     async def process_message(
         self,
         user_id: str,
@@ -714,47 +770,20 @@ class ChatService:
             assistant_metadata["skill_status"] = skill_result.get("status")
         working_memory.add_message("assistant", response_text, metadata=assistant_metadata)
 
-        # Persist both messages to the messages table
-        try:
-            from src.services.conversations import ConversationService as _ConvService
-
-            conv_svc = _ConvService(db_client=get_supabase_client())
-            await conv_svc.save_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=message,
-            )
-            await conv_svc.save_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=response_text,
-                metadata=assistant_metadata if assistant_metadata else None,
-            )
-        except Exception as e:
-            logger.warning(
-                "Message persistence failed",
-                extra={
-                    "conversation_id": conversation_id,
-                    "error": str(e),
-                },
-            )
-
         # Build citations from used memories
         citations = self._build_citations(memories)
 
-        # Extract and store new information (fire and forget)
-        try:
-            await self._extraction_service.extract_and_store(
-                conversation=conversation_messages[-2:],
-                user_id=user_id,
-            )
-        except Exception as e:
-            logger.warning(
-                "Information extraction failed",
-                extra={"user_id": user_id, "error": str(e)},
-            )
+        # Persist messages, update metadata, extract information
+        await self.persist_turn(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message,
+            assistant_message=response_text,
+            assistant_metadata=assistant_metadata if assistant_metadata else None,
+            conversation_context=conversation_messages[-2:],
+        )
 
-        # Store conversation turn as episodic memory
+        # Store conversation turn as episodic memory (unique to non-streaming path)
         try:
             episode = Episode(
                 id=str(uuid.uuid4()),
@@ -773,9 +802,6 @@ class ChatService:
             await self._episodic_memory.store_episode(episode)
         except Exception as e:
             logger.warning("Failed to store episodic memory: %s", e)
-
-        # Update conversation metadata for sidebar
-        await self._update_conversation_metadata(user_id, conversation_id, message)
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
