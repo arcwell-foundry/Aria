@@ -34,6 +34,7 @@ export interface ModalityState {
   activeModality: Modality;
   tavusSession: TavusSession;
   isSpeaking: boolean;
+  isListening: boolean;
   isPipVisible: boolean;
   captionsEnabled: boolean;
   playbackSpeed: number;
@@ -43,6 +44,7 @@ export interface ModalityState {
   setTavusSession: (partial: Partial<TavusSession>) => void;
   clearTavusSession: () => void;
   setIsSpeaking: (isSpeaking: boolean) => void;
+  setIsListening: (isListening: boolean) => void;
   setIsPipVisible: (isPipVisible: boolean) => void;
   setCaptionsEnabled: (captionsEnabled: boolean) => void;
   setPlaybackSpeed: (playbackSpeed: number) => void;
@@ -53,6 +55,7 @@ export const useModalityStore = create<ModalityState>((set) => ({
   activeModality: 'text',
   tavusSession: { ...INITIAL_TAVUS_SESSION },
   isSpeaking: false,
+  isListening: false,
   isPipVisible: false,
   captionsEnabled: true,
   playbackSpeed: 1.0,
@@ -72,6 +75,8 @@ export const useModalityStore = create<ModalityState>((set) => ({
     }),
 
   setIsSpeaking: (isSpeaking) => set({ isSpeaking }),
+
+  setIsListening: (isListening) => set({ isListening }),
 
   setIsPipVisible: (isPipVisible) => set({ isPipVisible }),
 
