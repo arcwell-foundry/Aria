@@ -52,7 +52,11 @@ class BriefingService:
         # Gather data for briefing — each step isolated so one failure
         # doesn't prevent the entire briefing from generating
         empty_calendar: dict[str, Any] = {"meeting_count": 0, "key_meetings": []}
-        empty_leads: dict[str, Any] = {"hot_leads": [], "needs_attention": [], "recently_active": []}
+        empty_leads: dict[str, Any] = {
+            "hot_leads": [],
+            "needs_attention": [],
+            "recently_active": [],
+        }
         empty_signals: dict[str, Any] = {
             "company_news": [],
             "market_trends": [],
@@ -63,7 +67,9 @@ class BriefingService:
         try:
             calendar_data = await self._get_calendar_data(user_id, briefing_date)
         except Exception:
-            logger.warning("Failed to gather calendar data", extra={"user_id": user_id}, exc_info=True)
+            logger.warning(
+                "Failed to gather calendar data", extra={"user_id": user_id}, exc_info=True
+            )
             calendar_data = empty_calendar
 
         try:
@@ -75,7 +81,9 @@ class BriefingService:
         try:
             signal_data = await self._get_signal_data(user_id)
         except Exception:
-            logger.warning("Failed to gather signal data", extra={"user_id": user_id}, exc_info=True)
+            logger.warning(
+                "Failed to gather signal data", extra={"user_id": user_id}, exc_info=True
+            )
             signal_data = empty_signals
 
         try:
@@ -95,6 +103,20 @@ class BriefingService:
             "tasks": task_data,
             "generated_at": datetime.now(UTC).isoformat(),
         }
+
+        # Build rich content cards, UI commands, and suggestions
+        rich_content = self._build_rich_content(calendar_data, lead_data, signal_data, task_data)
+        briefing_ui_commands = self._build_briefing_ui_commands(
+            calendar_data, lead_data, signal_data
+        )
+        briefing_suggestions = [
+            "Focus on the critical meeting",
+            "Show me the buying signals",
+            "Update me on competitor activity",
+        ]
+        content["rich_content"] = rich_content
+        content["ui_commands"] = briefing_ui_commands
+        content["suggestions"] = briefing_suggestions
 
         # Store briefing
         try:
@@ -194,6 +216,150 @@ class BriefingService:
 
         data = result.data
         return [b for b in data if isinstance(b, dict)]
+
+    def _build_rich_content(
+        self,
+        calendar: dict[str, Any],
+        leads: dict[str, Any],
+        signals: dict[str, Any],
+        tasks: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build rich content cards from briefing data.
+
+        Creates MeetingCard, SignalCard, and AlertCard entries for
+        the frontend to render as interactive cards.
+
+        Args:
+            calendar: Calendar data with key_meetings.
+            leads: Lead data with hot_leads.
+            signals: Signal data with competitive_intel.
+            tasks: Task data with overdue items.
+
+        Returns:
+            List of rich content card dicts with type and data keys.
+        """
+        rich_content: list[dict[str, Any]] = []
+
+        # Meeting cards from calendar
+        for meeting in calendar.get("key_meetings", []):
+            rich_content.append(
+                {
+                    "type": "meeting_card",
+                    "data": {
+                        "id": meeting.get("id"),
+                        "title": meeting.get("title"),
+                        "time": meeting.get("time"),
+                        "attendees": meeting.get("attendees", []),
+                        "company": meeting.get("company"),
+                        "has_brief": meeting.get("has_brief", False),
+                    },
+                }
+            )
+
+        # Signal cards from hot leads (buying signals)
+        for lead in leads.get("hot_leads", [])[:3]:
+            rich_content.append(
+                {
+                    "type": "signal_card",
+                    "data": {
+                        "id": lead.get("id"),
+                        "company_name": lead.get("company_name"),
+                        "signal_type": "buying_signal",
+                        "headline": f"{lead.get('company_name', 'Unknown')} showing strong buying signals",
+                        "health_score": lead.get("health_score"),
+                        "lifecycle_stage": lead.get("lifecycle_stage"),
+                    },
+                }
+            )
+
+        # Alert cards from competitive intelligence
+        for signal in signals.get("competitive_intel", [])[:3]:
+            rich_content.append(
+                {
+                    "type": "alert_card",
+                    "data": {
+                        "id": signal.get("id"),
+                        "company_name": signal.get("company_name"),
+                        "headline": signal.get("headline", "Competitive activity detected"),
+                        "summary": signal.get("summary"),
+                        "severity": "medium",
+                    },
+                }
+            )
+
+        # Alert cards from overdue tasks
+        for task in tasks.get("overdue", [])[:2]:
+            rich_content.append(
+                {
+                    "type": "alert_card",
+                    "data": {
+                        "id": task.get("id"),
+                        "headline": f"Overdue: {task.get('task', 'Unknown task')}",
+                        "summary": f"Priority: {task.get('priority', 'normal')}. Due: {task.get('due_at', 'unknown')}",
+                        "severity": "high",
+                    },
+                }
+            )
+
+        return rich_content
+
+    def _build_briefing_ui_commands(
+        self,
+        calendar: dict[str, Any],
+        leads: dict[str, Any],
+        signals: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build UI commands for sidebar badges from briefing data.
+
+        Creates sidebar badge update commands so the frontend can
+        display notification counts on relevant navigation items.
+
+        Args:
+            calendar: Calendar data with meeting_count.
+            leads: Lead data with needs_attention list.
+            signals: Signal data with competitive_intel, company_news, market_trends.
+
+        Returns:
+            List of UI command dicts for sidebar badge updates.
+        """
+        meeting_count = calendar.get("meeting_count", 0)
+        needs_attention_count = len(leads.get("needs_attention", []))
+        signal_count = (
+            len(signals.get("competitive_intel", []))
+            + len(signals.get("company_news", []))
+            + len(signals.get("market_trends", []))
+        )
+
+        ui_commands: list[dict[str, Any]] = []
+
+        if meeting_count > 0:
+            ui_commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "briefing",
+                    "badge_count": meeting_count,
+                }
+            )
+
+        if needs_attention_count > 0:
+            ui_commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "pipeline",
+                    "badge_count": needs_attention_count,
+                }
+            )
+
+        if signal_count > 0:
+            ui_commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "intelligence",
+                    "badge_count": signal_count,
+                }
+            )
+
+        return ui_commands
 
     async def _get_calendar_data(
         self,
