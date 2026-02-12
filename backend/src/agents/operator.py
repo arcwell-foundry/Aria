@@ -4,8 +4,8 @@ Provides system operations capabilities including calendar management,
 CRM read/write operations, and third-party integration management.
 
 Integration status is checked against the user_integrations table in
-Supabase.  When a Composio client is not yet available the agent returns
-honest "not configured" messages instead of fabricated mock data.
+Supabase.  When connected, actions are executed via the Composio SDK
+through the ComposioOAuthClient.
 """
 
 import logging
@@ -25,6 +25,93 @@ logger = logging.getLogger(__name__)
 _CALENDAR_INTEGRATION_TYPES = ("google_calendar", "outlook_calendar", "outlook")
 _CRM_INTEGRATION_TYPES = ("salesforce", "hubspot")
 
+# ---------------------------------------------------------------------------
+# Composio action slug mappings per provider
+# ---------------------------------------------------------------------------
+
+_CALENDAR_READ_ACTIONS: dict[str, str] = {
+    "google_calendar": "GOOGLECALENDAR_FIND_EVENT",
+    "outlook_calendar": "OUTLOOK_CALENDAR_FIND_EVENTS",
+    "outlook": "OUTLOOK_CALENDAR_FIND_EVENTS",
+}
+
+_CALENDAR_WRITE_ACTIONS: dict[str, dict[str, str]] = {
+    "google_calendar": {
+        "create": "GOOGLECALENDAR_CREATE_EVENT",
+        "update": "GOOGLECALENDAR_UPDATE_EVENT",
+        "delete": "GOOGLECALENDAR_DELETE_EVENT",
+    },
+    "outlook_calendar": {
+        "create": "OUTLOOK_CALENDAR_CREATE_EVENT",
+        "update": "OUTLOOK_CALENDAR_UPDATE_EVENT",
+        "delete": "OUTLOOK_CALENDAR_DELETE_EVENT",
+    },
+    "outlook": {
+        "create": "OUTLOOK_CALENDAR_CREATE_EVENT",
+        "update": "OUTLOOK_CALENDAR_UPDATE_EVENT",
+        "delete": "OUTLOOK_CALENDAR_DELETE_EVENT",
+    },
+}
+
+_CRM_READ_ACTIONS: dict[str, dict[str, str]] = {
+    "salesforce": {
+        "leads": "SALESFORCE_FETCH_SOBJECT",
+        "contacts": "SALESFORCE_FETCH_SOBJECT",
+        "accounts": "SALESFORCE_FETCH_SOBJECT",
+    },
+    "hubspot": {
+        "leads": "HUBSPOT_LIST_CONTACTS",
+        "contacts": "HUBSPOT_LIST_CONTACTS",
+        "accounts": "HUBSPOT_LIST_COMPANIES",
+    },
+}
+
+# Salesforce uses the same action for all record types with sObject type in
+# params.  HubSpot uses different actions per record type.
+_CRM_WRITE_ACTIONS: dict[str, dict[str, dict[str, str]]] = {
+    "salesforce": {
+        "create": {
+            "leads": "SALESFORCE_CREATE_SOBJECT",
+            "contacts": "SALESFORCE_CREATE_SOBJECT",
+            "accounts": "SALESFORCE_CREATE_SOBJECT",
+        },
+        "update": {
+            "leads": "SALESFORCE_UPDATE_SOBJECT",
+            "contacts": "SALESFORCE_UPDATE_SOBJECT",
+            "accounts": "SALESFORCE_UPDATE_SOBJECT",
+        },
+        "delete": {
+            "leads": "SALESFORCE_DELETE_SOBJECT",
+            "contacts": "SALESFORCE_DELETE_SOBJECT",
+            "accounts": "SALESFORCE_DELETE_SOBJECT",
+        },
+    },
+    "hubspot": {
+        "create": {
+            "leads": "HUBSPOT_CREATE_CONTACT",
+            "contacts": "HUBSPOT_CREATE_CONTACT",
+            "accounts": "HUBSPOT_CREATE_COMPANY",
+        },
+        "update": {
+            "leads": "HUBSPOT_UPDATE_CONTACT",
+            "contacts": "HUBSPOT_UPDATE_CONTACT",
+            "accounts": "HUBSPOT_UPDATE_COMPANY",
+        },
+        "delete": {
+            "leads": "HUBSPOT_DELETE_CONTACT",
+            "contacts": "HUBSPOT_DELETE_CONTACT",
+            "accounts": "HUBSPOT_DELETE_COMPANY",
+        },
+    },
+}
+
+# Map internal record_type names to Salesforce SObject type names.
+_SALESFORCE_SOBJECT_MAP: dict[str, str] = {
+    "leads": "Lead",
+    "contacts": "Contact",
+    "accounts": "Account",
+}
+
 
 class OperatorAgent(SkillAwareAgent):
     """System operations for calendar, CRM, and integrations.
@@ -34,7 +121,7 @@ class OperatorAgent(SkillAwareAgent):
     third-party integration management.
 
     All four public tools check the user's real integration status before
-    returning data.  No hardcoded mock data is ever returned.
+    executing actions via the Composio SDK.
     """
 
     name = "Operator"
@@ -160,7 +247,8 @@ class OperatorAgent(SkillAwareAgent):
 
         Returns:
             ``{"connected": bool, "provider": str | None,
-              "integration_id": str | None}``
+              "integration_id": str | None,
+              "composio_connection_id": str | None}``
         """
         integration_types: tuple[str, ...]
         if category == "calendar":
@@ -169,7 +257,12 @@ class OperatorAgent(SkillAwareAgent):
             integration_types = _CRM_INTEGRATION_TYPES
         else:
             logger.warning("Unknown integration category: %s", category)
-            return {"connected": False, "provider": None, "integration_id": None}
+            return {
+                "connected": False,
+                "provider": None,
+                "integration_id": None,
+                "composio_connection_id": None,
+            }
 
         try:
             from src.db.supabase import SupabaseClient
@@ -180,7 +273,7 @@ class OperatorAgent(SkillAwareAgent):
             # accepted types for this category.
             response = (
                 client.table("user_integrations")
-                .select("id, integration_type, status")
+                .select("id, integration_type, status, composio_connection_id")
                 .eq("user_id", self.user_id)
                 .eq("status", "active")
                 .in_("integration_type", list(integration_types))
@@ -194,6 +287,7 @@ class OperatorAgent(SkillAwareAgent):
                     "connected": True,
                     "provider": row.get("integration_type"),
                     "integration_id": row.get("id"),
+                    "composio_connection_id": row.get("composio_connection_id"),
                 }
 
         except Exception:
@@ -205,7 +299,64 @@ class OperatorAgent(SkillAwareAgent):
                 exc_info=True,
             )
 
-        return {"connected": False, "provider": None, "integration_id": None}
+        return {
+            "connected": False,
+            "provider": None,
+            "integration_id": None,
+            "composio_connection_id": None,
+        }
+
+    # ------------------------------------------------------------------
+    # Composio execution helper
+    # ------------------------------------------------------------------
+
+    async def _execute_composio_action(
+        self,
+        connection_id: str,
+        action: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute a Composio action via the OAuth client.
+
+        Args:
+            connection_id: Composio connection ID for the user's integration.
+            action: Composio tool slug (e.g., ``'GOOGLECALENDAR_FIND_EVENT'``).
+            params: Parameters for the action.
+
+        Returns:
+            Action result dict, or error/not_configured dict on failure.
+        """
+        from src.core.config import settings
+
+        if not settings.COMPOSIO_API_KEY:
+            return {
+                "status": "not_configured",
+                "message": ("Set COMPOSIO_API_KEY in environment to enable integrations."),
+            }
+
+        try:
+            from src.integrations.oauth import get_oauth_client
+
+            oauth_client = get_oauth_client()
+            result = await oauth_client.execute_action(
+                connection_id=connection_id,
+                action=action,
+                params=params,
+            )
+            return result
+
+        except Exception as e:
+            logger.error(
+                "Composio action %s failed: %s",
+                action,
+                e,
+                exc_info=True,
+                extra={"user_id": self.user_id},
+            )
+            return {
+                "status": "error",
+                "message": f"Integration action failed: {e}",
+            }
 
     # ------------------------------------------------------------------
     # Calendar tools
@@ -221,9 +372,7 @@ class OperatorAgent(SkillAwareAgent):
 
         Checks the user's integration status first.  If no calendar
         integration is active an honest "not connected" payload is
-        returned.  If the integration exists but the Composio client is
-        not yet wired up, a clear status message is returned instead of
-        fabricated data.
+        returned.  When connected, executes via Composio SDK.
 
         Args:
             start_date: Start date in YYYY-MM-DD format.
@@ -231,7 +380,7 @@ class OperatorAgent(SkillAwareAgent):
             calendar_id: Optional calendar identifier.
 
         Returns:
-            Dictionary describing connection status and (eventually) events.
+            Dictionary with connection status and events.
         """
         logger.info(
             "Reading calendar events from %s to %s",
@@ -254,30 +403,79 @@ class OperatorAgent(SkillAwareAgent):
                 "total_count": 0,
             }
 
-        # Integration row exists — Composio client is not yet available.
+        provider = status["provider"]
+        connection_id = status.get("composio_connection_id")
+
+        if not connection_id:
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": (
+                    f"Calendar integration detected ({provider}), but the "
+                    "connection ID is missing. Please reconnect in "
+                    "Settings > Integrations."
+                ),
+                "events": [],
+                "total_count": 0,
+            }
+
+        action_slug = _CALENDAR_READ_ACTIONS.get(provider)  # type: ignore[arg-type]
+        if not action_slug:
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": (f"No calendar read action mapped for provider '{provider}'."),
+                "events": [],
+                "total_count": 0,
+            }
+
+        # Build Composio-compatible params
+        composio_params: dict[str, Any] = {
+            "timeMin": f"{start_date}T00:00:00Z",
+        }
+        if end_date:
+            composio_params["timeMax"] = f"{end_date}T23:59:59Z"
+        if calendar_id:
+            composio_params["calendarId"] = calendar_id
+
+        result = await self._execute_composio_action(
+            connection_id,
+            action_slug,
+            composio_params,
+        )
+
+        if result.get("status") in ("not_configured", "error"):
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": result.get("message", "Failed to read calendar events."),
+                "events": [],
+                "total_count": 0,
+            }
+
+        # Normalize: Composio may return events under various keys
+        events = result.get("events", result.get("items", result.get("data", [])))
+        if not isinstance(events, list):
+            events = [events] if events else []
+
         return {
             "connected": True,
-            "provider": status["provider"],
-            "message": (
-                f"Calendar integration detected ({status['provider']}), "
-                "but the Composio client is not yet configured. "
-                "Events will be available once Composio setup is complete."
-            ),
-            "events": [],
-            "total_count": 0,
+            "provider": provider,
+            "events": events,
+            "total_count": len(events),
         }
 
     async def _calendar_write(
         self,
         action: str,
-        event: dict[str, Any] | None = None,  # noqa: ARG002 — needed when Composio is wired
+        event: dict[str, Any] | None = None,
         event_id: str | None = None,
     ) -> dict[str, Any]:
         """Write calendar operations (create, update, delete).
 
         Checks the user's integration status first.  Returns honest
-        status messages when the integration is missing or the Composio
-        client is not yet wired up.
+        status messages when the integration is missing.  When connected,
+        executes via Composio SDK.
 
         Args:
             action: Operation type - ``"create"``, ``"update"``, or ``"delete"``.
@@ -316,16 +514,57 @@ class OperatorAgent(SkillAwareAgent):
                 ),
             }
 
-        # Integration row exists — Composio client is not yet available.
+        provider = status["provider"]
+        connection_id = status.get("composio_connection_id")
+
+        if not connection_id:
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": (
+                    f"Calendar integration detected ({provider}), but the "
+                    "connection ID is missing. Please reconnect in "
+                    "Settings > Integrations."
+                ),
+            }
+
+        provider_actions = _CALENDAR_WRITE_ACTIONS.get(provider)  # type: ignore[arg-type]
+        action_slug = provider_actions.get(action) if provider_actions else None
+        if not action_slug:
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": (f"No calendar {action} action mapped for provider '{provider}'."),
+            }
+
+        # Build Composio-compatible params
+        composio_params: dict[str, Any] = {}
+        if event:
+            composio_params.update(event)
+        if event_id:
+            composio_params["eventId"] = event_id
+
+        result = await self._execute_composio_action(
+            connection_id,
+            action_slug,
+            composio_params,
+        )
+
+        if result.get("status") in ("not_configured", "error"):
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": result.get("message", f"Failed to {action} calendar event."),
+            }
+
         return {
             "connected": True,
-            "success": False,
-            "provider": status["provider"],
-            "message": (
-                f"Calendar integration detected ({status['provider']}), "
-                "but the Composio client is not yet configured. "
-                "Write operations will be available once Composio setup is complete."
-            ),
+            "success": True,
+            "provider": provider,
+            "data": result,
         }
 
     # ------------------------------------------------------------------
@@ -336,13 +575,13 @@ class OperatorAgent(SkillAwareAgent):
         self,
         record_type: str,
         record_id: str | None = None,
-        filters: dict[str, Any] | None = None,  # noqa: ARG002 — needed when Composio is wired
+        filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Read CRM records (leads, contacts, accounts).
 
         Checks the user's integration status first.  Returns honest
-        status messages when the CRM is not connected or when the
-        Composio client is not yet wired up.
+        status messages when the CRM is not connected.  When connected,
+        executes via Composio SDK.
 
         Args:
             record_type: Type of record - ``"leads"``, ``"contacts"``, ``"accounts"``.
@@ -350,7 +589,7 @@ class OperatorAgent(SkillAwareAgent):
             filters: Optional filters for querying records.
 
         Returns:
-            Dictionary with connection status and (eventually) records.
+            Dictionary with connection status and records.
         """
         logger.info(
             "Reading CRM records: %s",
@@ -372,31 +611,84 @@ class OperatorAgent(SkillAwareAgent):
                 "total_count": 0,
             }
 
-        # Integration row exists — Composio client is not yet available.
+        provider = status["provider"]
+        connection_id = status.get("composio_connection_id")
+
+        if not connection_id:
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": (
+                    f"CRM integration detected ({provider}), but the "
+                    "connection ID is missing. Please reconnect in "
+                    "Settings > Integrations."
+                ),
+                "records": [],
+                "total_count": 0,
+            }
+
+        provider_actions = _CRM_READ_ACTIONS.get(provider)  # type: ignore[arg-type]
+        action_slug = provider_actions.get(record_type) if provider_actions else None
+        if not action_slug:
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": (
+                    f"No CRM read action mapped for provider '{provider}' "
+                    f"and record type '{record_type}'."
+                ),
+                "records": [],
+                "total_count": 0,
+            }
+
+        # Build Composio-compatible params
+        composio_params: dict[str, Any] = {}
+        if provider == "salesforce":
+            composio_params["sObjectType"] = _SALESFORCE_SOBJECT_MAP.get(record_type, record_type)
+        if record_id:
+            composio_params["record_id"] = record_id
+        if filters:
+            composio_params.update(filters)
+
+        result = await self._execute_composio_action(
+            connection_id,
+            action_slug,
+            composio_params,
+        )
+
+        if result.get("status") in ("not_configured", "error"):
+            return {
+                "connected": True,
+                "provider": provider,
+                "message": result.get("message", "Failed to read CRM records."),
+                "records": [],
+                "total_count": 0,
+            }
+
+        # Normalize: Composio may return records under various keys
+        records = result.get("records", result.get("results", result.get("data", [])))
+        if not isinstance(records, list):
+            records = [records] if records else []
+
         return {
             "connected": True,
-            "provider": status["provider"],
-            "message": (
-                f"CRM integration detected ({status['provider']}), "
-                "but the Composio client is not yet configured. "
-                "CRM records will be available once Composio setup is complete."
-            ),
-            "records": [],
-            "total_count": 0,
+            "provider": provider,
+            "records": records,
+            "total_count": len(records),
         }
 
     async def _crm_write(
         self,
         action: str,
         record_type: str,
-        record: dict[str, Any] | None = None,  # noqa: ARG002 — needed when Composio is wired
+        record: dict[str, Any] | None = None,
         record_id: str | None = None,
     ) -> dict[str, Any]:
         """Write CRM operations (create, update, delete).
 
         Checks the user's integration status first.  Returns honest
-        status messages when the CRM is not connected or when the
-        Composio client is not yet wired up.
+        status messages when the CRM is not connected.  When connected,
+        executes via Composio SDK.
 
         Args:
             action: Operation type - ``"create"``, ``"update"``, or ``"delete"``.
@@ -444,14 +736,68 @@ class OperatorAgent(SkillAwareAgent):
                 ),
             }
 
-        # Integration row exists — Composio client is not yet available.
+        provider = status["provider"]
+        connection_id = status.get("composio_connection_id")
+
+        if not connection_id:
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": (
+                    f"CRM integration detected ({provider}), but the "
+                    "connection ID is missing. Please reconnect in "
+                    "Settings > Integrations."
+                ),
+            }
+
+        provider_actions = _CRM_WRITE_ACTIONS.get(provider)  # type: ignore[arg-type]
+        action_slug = None
+        if provider_actions:
+            action_map = provider_actions.get(action)
+            if action_map:
+                action_slug = action_map.get(record_type)
+
+        if not action_slug:
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": (
+                    f"No CRM {action} action mapped for provider '{provider}' "
+                    f"and record type '{record_type}'."
+                ),
+            }
+
+        # Build Composio-compatible params
+        composio_params: dict[str, Any] = {}
+        if provider == "salesforce":
+            composio_params["sObjectType"] = _SALESFORCE_SOBJECT_MAP.get(record_type, record_type)
+        if record:
+            composio_params.update(record)
+        if record_id:
+            composio_params["record_id"] = record_id
+
+        result = await self._execute_composio_action(
+            connection_id,
+            action_slug,
+            composio_params,
+        )
+
+        if result.get("status") in ("not_configured", "error"):
+            return {
+                "connected": True,
+                "success": False,
+                "provider": provider,
+                "message": result.get(
+                    "message",
+                    f"Failed to {action} CRM {record_type} record.",
+                ),
+            }
+
         return {
             "connected": True,
-            "success": False,
-            "provider": status["provider"],
-            "message": (
-                f"CRM integration detected ({status['provider']}), "
-                "but the Composio client is not yet configured. "
-                "Write operations will be available once Composio setup is complete."
-            ),
+            "success": True,
+            "provider": provider,
+            "data": result,
         }

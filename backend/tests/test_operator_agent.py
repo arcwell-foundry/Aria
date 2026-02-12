@@ -1,8 +1,9 @@
 """Tests for OperatorAgent module.
 
-All four tool methods now check integration status via Supabase before
-returning data.  Tests mock ``_check_integration_status`` to exercise
-both the "not connected" and "connected but Composio unavailable" paths.
+All four tool methods check integration status via Supabase before
+executing actions via Composio.  Tests mock ``_check_integration_status``
+and ``_execute_composio_action`` to exercise the "not connected",
+"composio not configured", "execution error", and "success" paths.
 Input-validation tests remain unchanged since validation runs before
 integration checks.
 """
@@ -26,11 +27,45 @@ def _make_agent() -> Any:
 
 
 def _not_connected() -> dict[str, Any]:
-    return {"connected": False, "provider": None, "integration_id": None}
+    return {
+        "connected": False,
+        "provider": None,
+        "integration_id": None,
+        "composio_connection_id": None,
+    }
 
 
 def _connected(provider: str = "google_calendar") -> dict[str, Any]:
-    return {"connected": True, "provider": provider, "integration_id": "int-001"}
+    return {
+        "connected": True,
+        "provider": provider,
+        "integration_id": "int-001",
+        "composio_connection_id": "conn-001",
+    }
+
+
+def _connected_no_conn_id(provider: str = "google_calendar") -> dict[str, Any]:
+    """Connected integration but composio_connection_id is missing."""
+    return {
+        "connected": True,
+        "provider": provider,
+        "integration_id": "int-001",
+        "composio_connection_id": None,
+    }
+
+
+def _composio_not_configured() -> dict[str, Any]:
+    return {
+        "status": "not_configured",
+        "message": "Set COMPOSIO_API_KEY in environment to enable integrations.",
+    }
+
+
+def _composio_error(msg: str = "Connection timeout") -> dict[str, Any]:
+    return {
+        "status": "error",
+        "message": f"Integration action failed: {msg}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -106,18 +141,67 @@ async def test_calendar_read_not_connected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_calendar_read_connected_but_composio_missing() -> None:
-    """When integration exists but Composio is unavailable, returns status message."""
+async def test_calendar_read_connected_composio_not_configured() -> None:
+    """When integration exists but COMPOSIO_API_KEY is missing, returns status message."""
     agent = _make_agent()
     agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_not_configured())
 
     result = await agent._calendar_read(start_date="2024-01-01", end_date="2024-01-07")
 
     assert result["connected"] is True
     assert result["provider"] == "google_calendar"
-    assert "composio" in result["message"].lower()
+    assert "COMPOSIO_API_KEY" in result["message"]
     assert result["events"] == []
     assert result["total_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_connected_missing_connection_id() -> None:
+    """When integration exists but composio_connection_id is None, returns reconnect message."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(
+        return_value=_connected_no_conn_id("google_calendar")
+    )
+
+    result = await agent._calendar_read(start_date="2024-01-01")
+
+    assert result["connected"] is True
+    assert "missing" in result["message"].lower()
+    assert result["events"] == []
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_success() -> None:
+    """When connected and Composio returns events, returns them in response."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    mock_events = [
+        {"summary": "Team Standup", "start": "2024-01-02T09:00:00Z"},
+        {"summary": "Client Call", "start": "2024-01-03T14:00:00Z"},
+    ]
+    agent._execute_composio_action = AsyncMock(return_value={"events": mock_events})
+
+    result = await agent._calendar_read(start_date="2024-01-01", end_date="2024-01-07")
+
+    assert result["connected"] is True
+    assert result["provider"] == "google_calendar"
+    assert result["events"] == mock_events
+    assert result["total_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_composio_error() -> None:
+    """When Composio execution fails, returns error message with empty events."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_error("API timeout"))
+
+    result = await agent._calendar_read(start_date="2024-01-01")
+
+    assert result["connected"] is True
+    assert result["events"] == []
+    assert "API timeout" in result["message"]
 
 
 @pytest.mark.asyncio
@@ -130,6 +214,21 @@ async def test_calendar_read_returns_events_key() -> None:
     assert isinstance(result, dict)
     assert "events" in result
     assert isinstance(result["events"], list)
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_normalizes_items_key() -> None:
+    """Composio responses with 'items' key are normalized to 'events'."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    agent._execute_composio_action = AsyncMock(
+        return_value={"items": [{"summary": "Event via items key"}]}
+    )
+
+    result = await agent._calendar_read(start_date="2024-01-01")
+
+    assert result["events"] == [{"summary": "Event via items key"}]
+    assert result["total_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -164,17 +263,37 @@ async def test_calendar_write_not_connected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_calendar_write_connected_but_composio_missing() -> None:
-    """When integration exists but Composio unavailable, write returns status."""
+async def test_calendar_write_connected_composio_not_configured() -> None:
+    """When integration exists but COMPOSIO_API_KEY missing, write returns status."""
     agent = _make_agent()
     agent._check_integration_status = AsyncMock(return_value=_connected("outlook_calendar"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_not_configured())
 
     result = await agent._calendar_write(action="create", event={"title": "Meeting"})
 
     assert result["connected"] is True
     assert result["success"] is False
     assert result["provider"] == "outlook_calendar"
-    assert "composio" in result["message"].lower()
+    assert "COMPOSIO_API_KEY" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_calendar_write_success() -> None:
+    """When connected and Composio succeeds, returns success with data."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    agent._execute_composio_action = AsyncMock(
+        return_value={"id": "evt-new", "status": "confirmed"}
+    )
+
+    result = await agent._calendar_write(
+        action="create", event={"summary": "Q1 Planning", "start": "2024-03-01T10:00:00Z"}
+    )
+
+    assert result["connected"] is True
+    assert result["success"] is True
+    assert result["provider"] == "google_calendar"
+    assert result["data"]["id"] == "evt-new"
 
 
 @pytest.mark.asyncio
@@ -221,18 +340,52 @@ async def test_crm_read_not_connected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_crm_read_connected_but_composio_missing() -> None:
-    """When CRM integration exists but Composio unavailable, returns status."""
+async def test_crm_read_connected_composio_not_configured() -> None:
+    """When CRM integration exists but COMPOSIO_API_KEY missing, returns status."""
     agent = _make_agent()
     agent._check_integration_status = AsyncMock(return_value=_connected("salesforce"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_not_configured())
 
     result = await agent._crm_read(record_type="leads")
 
     assert result["connected"] is True
     assert result["provider"] == "salesforce"
-    assert "composio" in result["message"].lower()
+    assert "COMPOSIO_API_KEY" in result["message"]
     assert result["records"] == []
     assert result["total_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_crm_read_success() -> None:
+    """When connected and Composio returns records, returns them in response."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("salesforce"))
+    mock_records = [
+        {"Id": "001abc", "Name": "Acme Corp", "Type": "Lead"},
+        {"Id": "002def", "Name": "GlobalTech", "Type": "Lead"},
+    ]
+    agent._execute_composio_action = AsyncMock(return_value={"records": mock_records})
+
+    result = await agent._crm_read(record_type="leads")
+
+    assert result["connected"] is True
+    assert result["provider"] == "salesforce"
+    assert result["records"] == mock_records
+    assert result["total_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_crm_read_composio_error() -> None:
+    """When Composio execution fails, returns error message with empty records."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("hubspot"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_error("Rate limited"))
+
+    result = await agent._crm_read(record_type="contacts")
+
+    assert result["connected"] is True
+    assert result["records"] == []
+    assert "Rate limited" in result["message"]
 
 
 @pytest.mark.asyncio
@@ -245,6 +398,20 @@ async def test_crm_read_returns_records_key() -> None:
     assert isinstance(result, dict)
     assert "records" in result
     assert isinstance(result["records"], list)
+
+
+@pytest.mark.asyncio
+async def test_crm_read_hubspot_accounts_uses_companies_action() -> None:
+    """HubSpot 'accounts' record type maps to HUBSPOT_LIST_COMPANIES action."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("hubspot"))
+    agent._execute_composio_action = AsyncMock(return_value={"data": []})
+
+    await agent._crm_read(record_type="accounts")
+
+    # Verify the correct action slug was used
+    call_args = agent._execute_composio_action.call_args
+    assert call_args[0][1] == "HUBSPOT_LIST_COMPANIES"
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +461,11 @@ async def test_crm_write_not_connected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_crm_write_connected_but_composio_missing() -> None:
-    """When CRM integration exists but Composio unavailable, returns status."""
+async def test_crm_write_connected_composio_not_configured() -> None:
+    """When CRM integration exists but COMPOSIO_API_KEY missing, returns status."""
     agent = _make_agent()
     agent._check_integration_status = AsyncMock(return_value=_connected("hubspot"))
+    agent._execute_composio_action = AsyncMock(return_value=_composio_not_configured())
 
     result = await agent._crm_write(
         action="create", record_type="leads", record={"name": "New Lead"}
@@ -306,7 +474,24 @@ async def test_crm_write_connected_but_composio_missing() -> None:
     assert result["connected"] is True
     assert result["success"] is False
     assert result["provider"] == "hubspot"
-    assert "composio" in result["message"].lower()
+    assert "COMPOSIO_API_KEY" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_crm_write_success() -> None:
+    """When connected and Composio succeeds, returns success with data."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("salesforce"))
+    agent._execute_composio_action = AsyncMock(return_value={"id": "001xyz", "success": True})
+
+    result = await agent._crm_write(
+        action="create", record_type="leads", record={"LastName": "Smith", "Company": "Acme"}
+    )
+
+    assert result["connected"] is True
+    assert result["success"] is True
+    assert result["provider"] == "salesforce"
+    assert result["data"]["id"] == "001xyz"
 
 
 @pytest.mark.asyncio
@@ -335,6 +520,21 @@ async def test_crm_write_delete_not_connected() -> None:
     assert result["success"] is False
 
 
+@pytest.mark.asyncio
+async def test_crm_write_salesforce_includes_sobject_type() -> None:
+    """Salesforce CRM write includes sObjectType in Composio params."""
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("salesforce"))
+    agent._execute_composio_action = AsyncMock(return_value={"id": "001", "success": True})
+
+    await agent._crm_write(action="create", record_type="accounts", record={"Name": "Acme"})
+
+    call_args = agent._execute_composio_action.call_args
+    composio_params = call_args[0][2]
+    assert composio_params["sObjectType"] == "Account"
+    assert composio_params["Name"] == "Acme"
+
+
 # ---------------------------------------------------------------------------
 # _check_integration_status (Supabase query)
 # ---------------------------------------------------------------------------
@@ -347,7 +547,12 @@ async def test_check_integration_status_calendar_connected() -> None:
 
     mock_response = MagicMock()
     mock_response.data = [
-        {"id": "int-abc", "integration_type": "google_calendar", "status": "active"}
+        {
+            "id": "int-abc",
+            "integration_type": "google_calendar",
+            "status": "active",
+            "composio_connection_id": "conn-xyz",
+        }
     ]
 
     mock_client = MagicMock()
@@ -362,6 +567,7 @@ async def test_check_integration_status_calendar_connected() -> None:
     assert result["connected"] is True
     assert result["provider"] == "google_calendar"
     assert result["integration_id"] == "int-abc"
+    assert result["composio_connection_id"] == "conn-xyz"
 
 
 @pytest.mark.asyncio
@@ -381,6 +587,7 @@ async def test_check_integration_status_crm_not_connected() -> None:
     assert result["connected"] is False
     assert result["provider"] is None
     assert result["integration_id"] is None
+    assert result["composio_connection_id"] is None
 
 
 @pytest.mark.asyncio
@@ -396,6 +603,7 @@ async def test_check_integration_status_db_error_treated_as_not_connected() -> N
 
     assert result["connected"] is False
     assert result["provider"] is None
+    assert result["composio_connection_id"] is None
 
 
 @pytest.mark.asyncio
@@ -406,6 +614,66 @@ async def test_check_integration_status_unknown_category() -> None:
 
     assert result["connected"] is False
     assert result["provider"] is None
+    assert result["composio_connection_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# _execute_composio_action
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_composio_action_no_api_key() -> None:
+    """When COMPOSIO_API_KEY is None, returns not_configured status."""
+    agent = _make_agent()
+
+    with patch("src.core.config.settings") as mock_settings:
+        mock_settings.COMPOSIO_API_KEY = None
+        result = await agent._execute_composio_action(
+            "conn-001", "GOOGLECALENDAR_FIND_EVENT", {"timeMin": "2024-01-01T00:00:00Z"}
+        )
+
+    assert result["status"] == "not_configured"
+    assert "COMPOSIO_API_KEY" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_composio_action_sdk_error() -> None:
+    """When Composio SDK raises an exception, returns error status."""
+    agent = _make_agent()
+
+    mock_oauth = MagicMock()
+    mock_oauth.execute_action = AsyncMock(side_effect=RuntimeError("SDK connection failed"))
+
+    with (
+        patch("src.core.config.settings") as mock_settings,
+        patch("src.integrations.oauth.get_oauth_client", return_value=mock_oauth),
+    ):
+        mock_settings.COMPOSIO_API_KEY = "test-key"
+        result = await agent._execute_composio_action("conn-001", "GOOGLECALENDAR_FIND_EVENT", {})
+
+    assert result["status"] == "error"
+    assert "SDK connection failed" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_composio_action_success() -> None:
+    """When Composio SDK succeeds, returns the result dict."""
+    agent = _make_agent()
+
+    mock_oauth = MagicMock()
+    mock_oauth.execute_action = AsyncMock(return_value={"events": [{"summary": "Test Event"}]})
+
+    with (
+        patch("src.core.config.settings") as mock_settings,
+        patch("src.integrations.oauth.get_oauth_client", return_value=mock_oauth),
+    ):
+        mock_settings.COMPOSIO_API_KEY = "test-key"
+        result = await agent._execute_composio_action(
+            "conn-001", "GOOGLECALENDAR_FIND_EVENT", {"timeMin": "2024-01-01T00:00:00Z"}
+        )
+
+    assert result == {"events": [{"summary": "Test Event"}]}
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +837,29 @@ async def test_full_operator_workflow_crm() -> None:
     }
     create_result = await agent.run(create_task)
     assert create_result.success is True
+
+
+@pytest.mark.asyncio
+async def test_full_operator_workflow_connected_success() -> None:
+    """End-to-end workflow when integration is connected and Composio works."""
+    from src.agents.base import AgentStatus
+
+    agent = _make_agent()
+    agent._check_integration_status = AsyncMock(return_value=_connected("google_calendar"))
+    agent._execute_composio_action = AsyncMock(
+        return_value={"events": [{"summary": "Sprint Review"}]}
+    )
+
+    read_task = {
+        "operation_type": "calendar_read",
+        "parameters": {"start_date": "2024-01-01", "end_date": "2024-01-07"},
+    }
+    read_result = await agent.run(read_task)
+
+    assert agent.status == AgentStatus.COMPLETE
+    assert read_result.success is True
+    assert read_result.data["events"] == [{"summary": "Sprint Review"}]
+    assert read_result.data["total_count"] == 1
 
 
 @pytest.mark.asyncio
