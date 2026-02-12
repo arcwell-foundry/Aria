@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/types/chat';
 import { MessageAvatar } from './MessageAvatar';
+import { RichContentRenderer } from '@/components/rich/RichContentRenderer';
 
 interface MessageBubbleProps {
   message: Message;
@@ -87,19 +88,7 @@ export function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleP
           </div>
 
           {message.rich_content.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {message.rich_content.map((rc, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]"
-                  data-aria-id={`rich-content-${rc.type}`}
-                >
-                  <span className="font-mono uppercase tracking-wider text-[var(--accent)]">
-                    {rc.type}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <RichContentRenderer items={message.rich_content} />
           )}
 
           {/* Hover timestamp tooltip */}
