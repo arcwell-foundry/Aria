@@ -364,10 +364,33 @@ body {
   }
 }
 
+/* === ARIA Logo Presence — breathing glow on sidebar logo === */
+
+.aria-logo-glow {
+  text-shadow:
+    0 0 20px rgba(46, 102, 255, 0.15),
+    0 0 40px rgba(46, 102, 255, 0.08);
+  animation: aria-logo-breathe 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes aria-logo-breathe {
+  0%, 100% {
+    text-shadow:
+      0 0 20px rgba(46, 102, 255, 0.08),
+      0 0 40px rgba(46, 102, 255, 0.04);
+  }
+  50% {
+    text-shadow:
+      0 0 24px rgba(46, 102, 255, 0.2),
+      0 0 48px rgba(46, 102, 255, 0.1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aria-breathe,
   .aria-drift,
-  .aria-glow {
+  .aria-glow,
+  .aria-logo-glow {
     animation: none;
   }
   .aria-settle {

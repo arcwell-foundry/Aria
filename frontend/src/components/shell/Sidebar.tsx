@@ -210,7 +210,7 @@ export function Sidebar({ badges = {}, isARIAActive = true }: SidebarProps) {
       {/* ----------------------------------------------------------------- */}
       <div className="flex items-center gap-2 px-5 py-6">
         <span
-          className="text-xl tracking-tight text-[#E8E6E1] italic"
+          className={`text-xl tracking-tight text-[#E8E6E1] italic ${isARIAActive ? 'aria-logo-glow' : ''}`}
           style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
         >
           ARIA
