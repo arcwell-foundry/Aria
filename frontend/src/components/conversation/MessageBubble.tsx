@@ -18,7 +18,11 @@ export function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleP
   if (isAria) {
     return (
       <div
-        className="group flex items-start gap-3 justify-start motion-safe:animate-[slideInLeft_200ms_ease-out]"
+        className={`group flex items-start gap-3 justify-start ${
+          message.isStreaming
+            ? 'aria-message-streaming'
+            : 'motion-safe:animate-[slideInLeft_200ms_ease-out] aria-message-settle'
+        }`}
         data-aria-id="message-aria"
         data-message-id={message.id}
       >

@@ -386,6 +386,64 @@ body {
   }
 }
 
+/* === ARIA Arrival — light sweep when ARIA starts responding === */
+
+@keyframes aria-arrival-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  30% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.aria-arrival-sweep {
+  overflow: hidden;
+}
+
+.aria-arrival-sweep::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(46, 102, 255, 0.06) 40%,
+    rgba(46, 102, 255, 0.12) 50%,
+    rgba(46, 102, 255, 0.06) 60%,
+    transparent 100%
+  );
+  animation: aria-arrival-sweep 0.8s ease-out forwards;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* === Streaming chunk fade-in === */
+
+@keyframes chunk-fade-in {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.aria-message-streaming .prose-aria > *:last-child {
+  animation: chunk-fade-in 0.15s ease-out;
+}
+
+/* === ARIA Message Settle — micro-ease when response completes === */
+
+.aria-message-settle {
+  animation: aria-settle 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aria-breathe,
   .aria-drift,
@@ -403,6 +461,11 @@ body {
   .aria-highlight-glow,
   .aria-highlight-pulse,
   .aria-highlight-outline {
+    animation: none;
+  }
+  .aria-arrival-sweep::before,
+  .aria-message-settle,
+  .aria-message-streaming .prose-aria > *:last-child {
     animation: none;
   }
 }
