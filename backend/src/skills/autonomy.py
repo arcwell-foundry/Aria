@@ -120,6 +120,7 @@ class SkillAutonomyService:
         Returns:
             A TrustHistory with all fields properly typed.
         """
+
         def parse_dt(value: Any) -> datetime | None:
             if value is None:
                 return None
@@ -290,7 +291,9 @@ class SkillAutonomyService:
             return None
 
         except Exception as e:
-            logger.error(f"Error recording execution outcome for user {user_id}, skill {skill_id}: {e}")
+            logger.error(
+                f"Error recording execution outcome for user {user_id}, skill {skill_id}: {e}"
+            )
             return None
 
     async def grant_session_trust(self, user_id: str, skill_id: str) -> TrustHistory | None:
@@ -401,7 +404,9 @@ class SkillAutonomyService:
             return None
 
         except Exception as e:
-            logger.error(f"Error granting global approval for user {user_id}, skill {skill_id}: {e}")
+            logger.error(
+                f"Error granting global approval for user {user_id}, skill {skill_id}: {e}"
+            )
             return None
 
     async def revoke_trust(self, user_id: str, skill_id: str) -> TrustHistory | None:
@@ -443,11 +448,13 @@ class SkillAutonomyService:
             # Update existing record - clear all trust flags
             response = (
                 self._client.table("skill_trust_history")
-                .update({
-                    "session_trust_granted": False,
-                    "globally_approved": False,
-                    "globally_approved_at": None,
-                })
+                .update(
+                    {
+                        "session_trust_granted": False,
+                        "globally_approved": False,
+                        "globally_approved_at": None,
+                    }
+                )
                 .eq("user_id", user_id)
                 .eq("skill_id", skill_id)
                 .execute()

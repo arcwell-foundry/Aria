@@ -217,9 +217,7 @@ async def request_password_reset(
         Message indicating reset email was sent.
     """
     await account_service.request_password_reset(email=data.email)
-    return {
-        "message": "If an account exists with this email, a reset link has been sent."
-    }
+    return {"message": "If an account exists with this email, a reset link has been sent."}
 
 
 @router.post(

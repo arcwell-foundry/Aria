@@ -90,7 +90,9 @@ class OnboardingReadinessService:
         scores = ReadinessBreakdown(
             corporate_memory=min(100.0, max(0.0, float(scores_data.get("corporate_memory", 0.0)))),
             digital_twin=min(100.0, max(0.0, float(scores_data.get("digital_twin", 0.0)))),
-            relationship_graph=min(100.0, max(0.0, float(scores_data.get("relationship_graph", 0.0)))),
+            relationship_graph=min(
+                100.0, max(0.0, float(scores_data.get("relationship_graph", 0.0)))
+            ),
             integrations=min(100.0, max(0.0, float(scores_data.get("integrations", 0.0)))),
             goal_clarity=min(100.0, max(0.0, float(scores_data.get("goal_clarity", 0.0)))),
         )

@@ -125,9 +125,9 @@ class ROIService:
                     continue
 
                 breakdown[key]["count"] = cast(int, breakdown[key]["count"]) + 1
-                breakdown[key]["estimated_hours"] = (
-                    cast(float, breakdown[key]["estimated_hours"]) + (minutes / 60)
-                )
+                breakdown[key]["estimated_hours"] = cast(
+                    float, breakdown[key]["estimated_hours"]
+                ) + (minutes / 60)
                 total_minutes += minutes
 
             total_hours = total_minutes / 60

@@ -140,10 +140,7 @@ class AccountService:
                 return await self.get_profile(user_id)
 
             response = (
-                self.client.table("user_profiles")
-                .update(update_data)
-                .eq("id", user_id)
-                .execute()
+                self.client.table("user_profiles").update(update_data).eq("id", user_id).execute()
             )
 
             if not response.data:
@@ -255,6 +252,7 @@ class AccountService:
             reset_url = f"{settings.APP_URL}/reset-password?email={email}"
             try:
                 from src.services.email_service import EmailService
+
                 email_service = EmailService()
                 await email_service.send_password_reset(email, reset_url)
             except Exception as email_error:
@@ -426,9 +424,7 @@ class AccountService:
             email = user_data.user.email
 
             try:
-                self.client.auth.sign_in_with_password(
-                    {"email": email, "password": password}
-                )
+                self.client.auth.sign_in_with_password({"email": email, "password": password})
             except Exception as err:
                 raise ARIAException(
                     message="Password is incorrect",
@@ -578,9 +574,7 @@ class AccountService:
             email = user_data.user.email
 
             try:
-                self.client.auth.sign_in_with_password(
-                    {"email": email, "password": password}
-                )
+                self.client.auth.sign_in_with_password({"email": email, "password": password})
             except Exception as err:
                 raise ARIAException(
                     message="Password is incorrect",
@@ -642,7 +636,9 @@ class AccountService:
 
         except Exception:
             # Don't raise - logging failures shouldn't break the main operation
-            logger.exception("Failed to log security event", extra={"user_id": user_id, "event_type": event_type})
+            logger.exception(
+                "Failed to log security event", extra={"user_id": user_id, "event_type": event_type}
+            )
 
     async def get_audit_log(
         self,

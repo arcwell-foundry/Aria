@@ -112,9 +112,7 @@ async def create_video_session(
     )
 
     # Notify frontend that ARIA avatar is now speaking
-    await ws_manager.send_to_user(
-        current_user.id, AriaSpeakingEvent(is_speaking=True)
-    )
+    await ws_manager.send_to_user(current_user.id, AriaSpeakingEvent(is_speaking=True))
 
     return VideoSessionResponse(
         id=saved["id"],
@@ -267,9 +265,7 @@ async def end_video_session(
     )
 
     # Notify frontend that ARIA avatar has stopped speaking
-    await ws_manager.send_to_user(
-        current_user.id, AriaSpeakingEvent(is_speaking=False)
-    )
+    await ws_manager.send_to_user(current_user.id, AriaSpeakingEvent(is_speaking=False))
 
     return VideoSessionResponse(
         id=updated["id"],

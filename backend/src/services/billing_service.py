@@ -312,14 +312,18 @@ class BillingService:
                     )
                     if subscriptions.data:
                         sub = subscriptions.data[0]
-                        result.update({
-                            "status": sub.status,
-                            "plan": sub.items.data[0].price.nickname if sub.items.data else "ARIA Annual",
-                            "current_period_end": datetime.fromtimestamp(
-                                sub.current_period_end, tz=UTC
-                            ).isoformat(),
-                            "cancel_at_period_end": sub.cancel_at_period_end,
-                        })
+                        result.update(
+                            {
+                                "status": sub.status,
+                                "plan": sub.items.data[0].price.nickname
+                                if sub.items.data
+                                else "ARIA Annual",
+                                "current_period_end": datetime.fromtimestamp(
+                                    sub.current_period_end, tz=UTC
+                                ).isoformat(),
+                                "cancel_at_period_end": sub.cancel_at_period_end,
+                            }
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to fetch live subscription data: {e}")
 
@@ -331,9 +335,7 @@ class BillingService:
             logger.exception("Error fetching subscription status", extra={"company_id": company_id})
             raise BillingError(f"Failed to fetch subscription status: {e}") from e
 
-    async def get_invoices(
-        self, company_id: str, limit: int = 12
-    ) -> list[dict[str, Any]]:
+    async def get_invoices(self, company_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Get invoice history for a company.
 
         Args:
@@ -377,18 +379,18 @@ class BillingService:
 
             result = []
             for invoice in invoices.data:
-                result.append({
-                    "id": invoice.id,
-                    "amount": (invoice.total or 0) / 100,  # Convert cents to dollars
-                    "currency": invoice.currency,
-                    "status": invoice.status,
-                    "date": datetime.fromtimestamp(
-                        invoice.created, tz=UTC
-                    ).isoformat()
-                    if invoice.created
-                    else None,
-                    "pdf_url": invoice.invoice_pdf,
-                })
+                result.append(
+                    {
+                        "id": invoice.id,
+                        "amount": (invoice.total or 0) / 100,  # Convert cents to dollars
+                        "currency": invoice.currency,
+                        "status": invoice.status,
+                        "date": datetime.fromtimestamp(invoice.created, tz=UTC).isoformat()
+                        if invoice.created
+                        else None,
+                        "pdf_url": invoice.invoice_pdf,
+                    }
+                )
 
             return result
 
@@ -463,6 +465,7 @@ class BillingService:
         # Send payment receipt email
         try:
             from src.services.email_service import EmailService
+
             email_service = EmailService()
 
             # Fetch company admin email
@@ -470,7 +473,11 @@ class BillingService:
             if admin_email:
                 # Get amount and date from invoice
                 amount = invoice.total or 0
-                date = datetime.fromtimestamp(invoice.created, tz=UTC).isoformat() if invoice.created else ""
+                date = (
+                    datetime.fromtimestamp(invoice.created, tz=UTC).isoformat()
+                    if invoice.created
+                    else ""
+                )
                 await email_service.send_payment_receipt(admin_email, amount, date)
         except Exception as email_error:
             logger.warning(
@@ -490,6 +497,7 @@ class BillingService:
         # Send payment failed email
         try:
             from src.services.email_service import EmailService
+
             email_service = EmailService()
 
             # Fetch company admin email and name
@@ -511,9 +519,7 @@ class BillingService:
             subscription: Stripe subscription object.
         """
         customer_id = subscription.customer
-        await self._update_subscription_status(
-            customer_id, self.STATUS_CANCELED, subscription
-        )
+        await self._update_subscription_status(customer_id, self.STATUS_CANCELED, subscription)
 
     async def _handle_checkout_completed(self, session: stripe.checkout.Session) -> None:
         """Handle checkout completion webhook.
@@ -525,9 +531,7 @@ class BillingService:
         if session.subscription:
             # Fetch subscription details
             subscription = stripe.Subscription.retrieve(session.subscription)
-            await self._update_subscription_status(
-                customer_id, self.STATUS_ACTIVE, subscription
-            )
+            await self._update_subscription_status(customer_id, self.STATUS_ACTIVE, subscription)
 
     async def _update_subscription_status(
         self,

@@ -1043,7 +1043,9 @@ async def get_insights(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to get insights")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)
+        ) from e
 
 
 @router.post("/{lead_id}/transition", response_model=LeadMemoryResponse)
@@ -1325,7 +1327,9 @@ async def list_contributions(
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to list contributions")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)
+        ) from e
 
 
 @router.post(
@@ -1365,14 +1369,18 @@ async def review_contribution(
 
     except ValidationError as e:
         logger.exception("Validation error reviewing contribution")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)
+        ) from e
     except LeadNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Lead {lead_id} not found"
         ) from e
     except LeadMemoryError as e:
         logger.exception("Failed to review contribution")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=sanitize_error(e)
+        ) from e
 
 
 @router.post("/export")

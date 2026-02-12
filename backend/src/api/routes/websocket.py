@@ -256,26 +256,32 @@ async def _handle_user_message(
                 system_prompt=system_prompt,
             ):
                 full_content += token
-                await websocket.send_json({
-                    "type": "aria.token",
-                    "payload": {"content": token, "conversation_id": conversation_id},
-                })
+                await websocket.send_json(
+                    {
+                        "type": "aria.token",
+                        "payload": {"content": token, "conversation_id": conversation_id},
+                    }
+                )
 
             # Stream completed successfully
-            await websocket.send_json({
-                "type": "aria.stream_complete",
-                "payload": {"conversation_id": conversation_id},
-            })
+            await websocket.send_json(
+                {
+                    "type": "aria.stream_complete",
+                    "payload": {"conversation_id": conversation_id},
+                }
+            )
         except Exception as stream_err:
             logger.error("LLM stream failed: %s", stream_err)
-            await websocket.send_json({
-                "type": "aria.stream_error",
-                "payload": {
-                    "error": "I encountered an issue generating my response. Let me try again.",
-                    "conversation_id": conversation_id,
-                    "recoverable": True,
-                },
-            })
+            await websocket.send_json(
+                {
+                    "type": "aria.stream_error",
+                    "payload": {
+                        "error": "I encountered an issue generating my response. Let me try again.",
+                        "conversation_id": conversation_id,
+                        "recoverable": True,
+                    },
+                }
+            )
             return
 
         # Add assistant response to working memory
@@ -317,21 +323,25 @@ async def _handle_user_message(
             ui_commands=ui_commands,
             suggestions=suggestions,
         )
-        await websocket.send_json({
-            **response_event.to_ws_dict(),
-            "conversation_id": conversation_id,
-        })
+        await websocket.send_json(
+            {
+                **response_event.to_ws_dict(),
+                "conversation_id": conversation_id,
+            }
+        )
 
     except Exception as chat_err:
         logger.exception("WebSocket chat error: %s", chat_err)
-        await websocket.send_json({
-            "type": "aria.message",
-            "message": "I encountered an error processing your message. Please try again.",
-            "rich_content": [],
-            "ui_commands": [],
-            "suggestions": ["Try again", "What can you help with?"],
-            "conversation_id": conversation_id,
-        })
+        await websocket.send_json(
+            {
+                "type": "aria.message",
+                "message": "I encountered an error processing your message. Please try again.",
+                "rich_content": [],
+                "ui_commands": [],
+                "suggestions": ["Try again", "What can you help with?"],
+                "conversation_id": conversation_id,
+            }
+        )
 
 
 async def _handle_action_approval(
@@ -349,10 +359,12 @@ async def _handle_action_approval(
 
         svc = ActionQueueService()
         await svc.approve_action(action_id=action_id, user_id=user_id)
-        await websocket.send_json({
-            "type": "action.completed",
-            "payload": {"action_id": action_id, "status": "approved"},
-        })
+        await websocket.send_json(
+            {
+                "type": "action.completed",
+                "payload": {"action_id": action_id, "status": "approved"},
+            }
+        )
     except Exception as e:
         logger.warning("Action approval failed: %s", e)
 
@@ -372,9 +384,11 @@ async def _handle_action_rejection(
 
         svc = ActionQueueService()
         await svc.reject_action(action_id=action_id, user_id=user_id)
-        await websocket.send_json({
-            "type": "action.completed",
-            "payload": {"action_id": action_id, "status": "rejected"},
-        })
+        await websocket.send_json(
+            {
+                "type": "action.completed",
+                "payload": {"action_id": action_id, "status": "rejected"},
+            }
+        )
     except Exception as e:
         logger.warning("Action rejection failed: %s", e)

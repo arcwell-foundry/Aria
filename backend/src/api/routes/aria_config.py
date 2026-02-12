@@ -56,7 +56,9 @@ async def update_aria_config(
         return config
     except ValueError as e:
         logger.exception("Invalid ARIA config update")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)
+        ) from e
     except Exception as e:
         logger.exception("Error updating ARIA config")
         raise HTTPException(

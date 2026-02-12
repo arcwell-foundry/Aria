@@ -435,8 +435,7 @@ class BaseSkillDefinition:
 
         if not self.validate_output(parsed):
             raise ValueError(
-                f"Skill '{self._skill_name}' template '{template_name}' "
-                "produced invalid output"
+                f"Skill '{self._skill_name}' template '{template_name}' produced invalid output"
             )
 
         return parsed

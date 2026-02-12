@@ -285,62 +285,110 @@ def _build_execution_plan(
     # Phase templates by goal type
     phase_templates: dict[str, list[dict[str, Any]]] = {
         "lead_gen": [
-            {"name": "Prospect Identification", "timeline": "Days 1-3",
-             "agent_filter": ("Hunter", "Scout"),
-             "output": "Qualified prospect list with company profiles"},
-            {"name": "Engagement Strategy", "timeline": "Days 3-5",
-             "agent_filter": ("Strategist", "Analyst"),
-             "output": "Personalized outreach strategy per prospect"},
-            {"name": "Outreach Execution", "timeline": f"Days 5-{timeline or '14'}",
-             "agent_filter": ("Scribe", "Operator"),
-             "output": "Email sequences, follow-up tasks, meeting requests"},
+            {
+                "name": "Prospect Identification",
+                "timeline": "Days 1-3",
+                "agent_filter": ("Hunter", "Scout"),
+                "output": "Qualified prospect list with company profiles",
+            },
+            {
+                "name": "Engagement Strategy",
+                "timeline": "Days 3-5",
+                "agent_filter": ("Strategist", "Analyst"),
+                "output": "Personalized outreach strategy per prospect",
+            },
+            {
+                "name": "Outreach Execution",
+                "timeline": f"Days 5-{timeline or '14'}",
+                "agent_filter": ("Scribe", "Operator"),
+                "output": "Email sequences, follow-up tasks, meeting requests",
+            },
         ],
         "competitive_intel": [
-            {"name": "Intelligence Gathering", "timeline": "Days 1-3",
-             "agent_filter": ("Scout", "Hunter"),
-             "output": "Competitor product, pricing, and positioning data"},
-            {"name": "Battle Card Creation", "timeline": "Days 3-5",
-             "agent_filter": ("Analyst", "Strategist"),
-             "output": "Battle cards with feature gaps and objection handling"},
-            {"name": "Team Enablement", "timeline": f"Days 5-{timeline or '10'}",
-             "agent_filter": ("Scribe",),
-             "output": "Talking points, win/loss summaries, competitive alerts"},
+            {
+                "name": "Intelligence Gathering",
+                "timeline": "Days 1-3",
+                "agent_filter": ("Scout", "Hunter"),
+                "output": "Competitor product, pricing, and positioning data",
+            },
+            {
+                "name": "Battle Card Creation",
+                "timeline": "Days 3-5",
+                "agent_filter": ("Analyst", "Strategist"),
+                "output": "Battle cards with feature gaps and objection handling",
+            },
+            {
+                "name": "Team Enablement",
+                "timeline": f"Days 5-{timeline or '10'}",
+                "agent_filter": ("Scribe",),
+                "output": "Talking points, win/loss summaries, competitive alerts",
+            },
         ],
         "research": [
-            {"name": "Data Collection", "timeline": "Days 1-4",
-             "agent_filter": ("Scout", "Hunter", "Analyst"),
-             "output": "Raw data from public sources, databases, and signals"},
-            {"name": "Synthesis & Insights", "timeline": "Days 4-7",
-             "agent_filter": ("Analyst", "Strategist"),
-             "output": "Research report with key findings and recommendations"},
-            {"name": "Deliverable", "timeline": f"Days 7-{timeline or '14'}",
-             "agent_filter": ("Scribe",),
-             "output": "Final report, executive summary, or presentation draft"},
+            {
+                "name": "Data Collection",
+                "timeline": "Days 1-4",
+                "agent_filter": ("Scout", "Hunter", "Analyst"),
+                "output": "Raw data from public sources, databases, and signals",
+            },
+            {
+                "name": "Synthesis & Insights",
+                "timeline": "Days 4-7",
+                "agent_filter": ("Analyst", "Strategist"),
+                "output": "Research report with key findings and recommendations",
+            },
+            {
+                "name": "Deliverable",
+                "timeline": f"Days 7-{timeline or '14'}",
+                "agent_filter": ("Scribe",),
+                "output": "Final report, executive summary, or presentation draft",
+            },
         ],
         "outreach": [
-            {"name": "Audience Mapping", "timeline": "Days 1-2",
-             "agent_filter": ("Hunter", "Analyst"),
-             "output": "Target list with contact details and context"},
-            {"name": "Content Creation", "timeline": "Days 2-4",
-             "agent_filter": ("Scribe", "Strategist"),
-             "output": "Personalized email drafts and messaging sequences"},
-            {"name": "Campaign Execution", "timeline": f"Days 4-{timeline or '10'}",
-             "agent_filter": ("Operator", "Scribe"),
-             "output": "Sent messages, tracked responses, follow-up queue"},
+            {
+                "name": "Audience Mapping",
+                "timeline": "Days 1-2",
+                "agent_filter": ("Hunter", "Analyst"),
+                "output": "Target list with contact details and context",
+            },
+            {
+                "name": "Content Creation",
+                "timeline": "Days 2-4",
+                "agent_filter": ("Scribe", "Strategist"),
+                "output": "Personalized email drafts and messaging sequences",
+            },
+            {
+                "name": "Campaign Execution",
+                "timeline": f"Days 4-{timeline or '10'}",
+                "agent_filter": ("Operator", "Scribe"),
+                "output": "Sent messages, tracked responses, follow-up queue",
+            },
         ],
     }
 
-    templates = phase_templates.get(goal_type, [
-        {"name": "Discovery", "timeline": "Days 1-3",
-         "agent_filter": ("Hunter", "Scout", "Analyst"),
-         "output": "Research report, lead list, or competitive data"},
-        {"name": "Analysis", "timeline": "Days 3-5",
-         "agent_filter": ("Analyst", "Strategist"),
-         "output": "Strategic insights and recommendations"},
-        {"name": "Execution", "timeline": f"Days 5-{timeline or '14'}",
-         "agent_filter": ("Scribe", "Operator"),
-         "output": "Drafts, outreach, or operational tasks"},
-    ])
+    templates = phase_templates.get(
+        goal_type,
+        [
+            {
+                "name": "Discovery",
+                "timeline": "Days 1-3",
+                "agent_filter": ("Hunter", "Scout", "Analyst"),
+                "output": "Research report, lead list, or competitive data",
+            },
+            {
+                "name": "Analysis",
+                "timeline": "Days 3-5",
+                "agent_filter": ("Analyst", "Strategist"),
+                "output": "Strategic insights and recommendations",
+            },
+            {
+                "name": "Execution",
+                "timeline": f"Days 5-{timeline or '14'}",
+                "agent_filter": ("Scribe", "Operator"),
+                "output": "Drafts, outreach, or operational tasks",
+            },
+        ],
+    )
 
     phases = [
         {

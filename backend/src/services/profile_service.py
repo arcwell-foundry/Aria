@@ -193,9 +193,7 @@ class ProfileService:
                 old_data = {}
 
             upsert_data = {**update_data, "id": user_id}
-            response = (
-                self.db.table("user_profiles").upsert(upsert_data).execute()
-            )
+            response = self.db.table("user_profiles").upsert(upsert_data).execute()
 
             if not response.data:
                 raise NotFoundError("User profile", user_id)
@@ -212,9 +210,7 @@ class ProfileService:
                 ProfileMergeService().process_update(user_id, old_data, update_data)
             )
             task.add_done_callback(
-                lambda t: logger.error(
-                    "ProfileMerge pipeline failed: %s", t.exception()
-                )
+                lambda t: logger.error("ProfileMerge pipeline failed: %s", t.exception())
                 if t.exception()
                 else None
             )
@@ -252,9 +248,7 @@ class ProfileService:
                         )
                     )
                     li_task.add_done_callback(
-                        lambda t: logger.error(
-                            "LinkedIn research failed: %s", t.exception()
-                        )
+                        lambda t: logger.error("LinkedIn research failed: %s", t.exception())
                         if t.exception()
                         else None
                     )

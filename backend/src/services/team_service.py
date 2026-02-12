@@ -155,6 +155,7 @@ class TeamService:
             # Send team invite email
             try:
                 from src.services.email_service import EmailService
+
                 email_service = EmailService()
                 invite_url = f"{settings.APP_URL}/accept-invite?token={token}"
                 await email_service.send_team_invite(

@@ -634,9 +634,7 @@ class OnboardingOrchestrator:
                         "step_name": step.value,
                         "data_quality_score": data_quality,
                         "fields_provided": provided_fields,
-                        "fields_skipped": [
-                            k for k, v in (step_data or {}).items() if not v
-                        ],
+                        "fields_skipped": [k for k, v in (step_data or {}).items() if not v],
                     }
                 ],
                 success_count=1,

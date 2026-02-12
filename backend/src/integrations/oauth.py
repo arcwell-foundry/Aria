@@ -63,9 +63,7 @@ class ComposioOAuthClient:
         # Filter to configs that actually match the requested toolkit.
         # Composio returns ALL configs when the slug doesn't match anything,
         # so we must filter client-side to avoid picking an unrelated config.
-        matching = [
-            item for item in result.items if item.toolkit.slug == toolkit_slug
-        ]
+        matching = [item for item in result.items if item.toolkit.slug == toolkit_slug]
 
         if not matching:
             logger.debug("No auth configs found for %s", toolkit_slug)

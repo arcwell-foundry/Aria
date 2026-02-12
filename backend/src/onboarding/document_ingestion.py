@@ -292,9 +292,7 @@ class DocumentIngestionService:
                     agent="analyst",
                     activity_type="document_processed",
                     title=f"Processed {filename}",
-                    description=(
-                        f"ARIA processed {filename} — extracted key entities and facts"
-                    ),
+                    description=(f"ARIA processed {filename} — extracted key entities and facts"),
                     confidence=0.8,
                     related_entity_type="document",
                     related_entity_id=doc_id,
@@ -415,9 +413,7 @@ class DocumentIngestionService:
             img = Image.open(BytesIO(content))
             return pytesseract.image_to_string(img)
         except ImportError:
-            logger.warning(
-                "pytesseract/Pillow not installed — image OCR unavailable"
-            )
+            logger.warning("pytesseract/Pillow not installed — image OCR unavailable")
             return ""
         except Exception as e:
             logger.warning("Image OCR failed: %s", e)
@@ -811,8 +807,7 @@ class DocumentIngestionService:
 
             # Build entity summary for graph seeding
             entity_summary = ", ".join(
-                f"{e.get('name', '')} ({e.get('type', 'unknown')})"
-                for e in unique_entities[:20]
+                f"{e.get('name', '')} ({e.get('type', 'unknown')})" for e in unique_entities[:20]
             )
 
             episode = Episode(
@@ -820,8 +815,7 @@ class DocumentIngestionService:
                 user_id=user_id,
                 event_type="document_entity_extraction",
                 content=(
-                    f"Extracted {len(unique_entities)} entities from document: "
-                    f"{entity_summary}"
+                    f"Extracted {len(unique_entities)} entities from document: {entity_summary}"
                 ),
                 participants=[e.get("name", "") for e in unique_entities[:20]],
                 occurred_at=now,

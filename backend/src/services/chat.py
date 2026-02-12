@@ -781,24 +781,28 @@ class ChatService:
 
         if skill_result:
             if skill_result.get("status") == "pending_approval":
-                rich_content.append({
-                    "type": "execution_plan",
-                    "data": {
-                        "plan_id": skill_result.get("plan_id"),
-                        "risk_level": skill_result.get("risk_level"),
-                        "reasoning": skill_result.get("reasoning"),
-                        "steps": skill_result.get("steps", []),
-                    },
-                })
+                rich_content.append(
+                    {
+                        "type": "execution_plan",
+                        "data": {
+                            "plan_id": skill_result.get("plan_id"),
+                            "risk_level": skill_result.get("risk_level"),
+                            "reasoning": skill_result.get("reasoning"),
+                            "steps": skill_result.get("steps", []),
+                        },
+                    }
+                )
             elif skill_result.get("working_memory"):
                 # Completed skill execution — surface artifacts as rich content
                 for entry in skill_result["working_memory"]:
                     artifacts = entry.get("artifacts") or {}
                     if artifacts.get("rich_content_type"):
-                        rich_content.append({
-                            "type": artifacts["rich_content_type"],
-                            "data": artifacts,
-                        })
+                        rich_content.append(
+                            {
+                                "type": artifacts["rich_content_type"],
+                                "data": artifacts,
+                            }
+                        )
 
         result: dict[str, Any] = {
             "message": response_text,
@@ -1007,16 +1011,12 @@ class ChatService:
         # Add dedicated prospective memory section
         if prospective_memories:
             task_lines = [f"- {mem['content']}" for mem in prospective_memories]
-            base_prompt += "\n\n" + PROSPECTIVE_CONTEXT_TEMPLATE.format(
-                tasks="\n".join(task_lines)
-            )
+            base_prompt += "\n\n" + PROSPECTIVE_CONTEXT_TEMPLATE.format(tasks="\n".join(task_lines))
 
         # Add dedicated lead memory section
         if lead_memories:
             lead_lines = [f"- {mem['content']}" for mem in lead_memories]
-            base_prompt += "\n\n" + LEAD_CONTEXT_TEMPLATE.format(
-                leads="\n".join(lead_lines)
-            )
+            base_prompt += "\n\n" + LEAD_CONTEXT_TEMPLATE.format(leads="\n".join(lead_lines))
 
         # Add personality calibration from Digital Twin
         if personality and personality.tone_guidance:

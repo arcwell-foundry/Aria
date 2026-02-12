@@ -39,11 +39,14 @@ else:
     def __getattr__(name: str):
         if name == "CRMSyncService":
             from src.services.crm_sync import CRMSyncService
+
             return CRMSyncService
         elif name == "get_crm_sync_service":
             from src.services.crm_sync import get_crm_sync_service
+
             return get_crm_sync_service
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Existing exports

@@ -232,9 +232,7 @@ class PersonalityCalibrator:
         if fp.get("ellipsis_usage") == "frequent":
             punctuation_notes.append("ellipses")
         if punctuation_notes:
-            parts.append(
-                "Mirror their punctuation: use " + ", ".join(punctuation_notes) + "."
-            )
+            parts.append("Mirror their punctuation: use " + ", ".join(punctuation_notes) + ".")
 
         # Exclamation frequency
         excl = fp.get("exclamation_frequency", "")
@@ -279,25 +277,19 @@ class PersonalityCalibrator:
 
         if cal.directness > 0.7:
             examples.append(
-                "Instead of 'You might want to consider...' "
-                "-> 'I'd push back on that discount.'"
+                "Instead of 'You might want to consider...' -> 'I'd push back on that discount.'"
             )
         elif cal.directness < 0.3:
-            examples.append(
-                "Instead of 'Don't do that.' "
-                "-> 'Have you considered holding at 15%?'"
-            )
+            examples.append("Instead of 'Don't do that.' -> 'Have you considered holding at 15%?'")
 
         if cal.warmth > 0.7:
             examples.append(
-                "Open with 'Hey [Name], hope you had a great weekend -' "
-                "before getting to business."
+                "Open with 'Hey [Name], hope you had a great weekend -' before getting to business."
             )
 
         if cal.assertiveness > 0.7:
             examples.append(
-                "Instead of 'We could maybe try...' "
-                "-> 'I recommend we move forward with...'"
+                "Instead of 'We could maybe try...' -> 'I recommend we move forward with...'"
             )
 
         return examples
@@ -310,8 +302,7 @@ class PersonalityCalibrator:
         """
         return PersonalityCalibration(
             tone_guidance=(
-                "Balanced professional tone. Direct but warm. "
-                "Data-informed but not overwhelming."
+                "Balanced professional tone. Direct but warm. Data-informed but not overwhelming."
             ),
         )
 

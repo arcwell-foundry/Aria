@@ -79,9 +79,7 @@ class UpdateConsentRequest(BaseModel):
 
         valid_categories = ComplianceService.ALL_CONSENT_CATEGORIES
         if v not in valid_categories:
-            raise ValueError(
-                f"Invalid consent category. Must be one of: {valid_categories}"
-            )
+            raise ValueError(f"Invalid consent category. Must be one of: {valid_categories}")
         return v
 
 

@@ -106,9 +106,13 @@ class FirstConversationGenerator:
         if goal_proposals:
             first_goal_title = goal_proposals[0].get("data", {}).get("title", "")
         suggestion_list = [
-            f'Tell me more about "{first_goal_title}"' if first_goal_title else "Tell me more about the first goal",
+            f'Tell me more about "{first_goal_title}"'
+            if first_goal_title
+            else "Tell me more about the first goal",
             "What competitors did you find?",
-            f'Start with "{first_goal_title}"' if first_goal_title else "Start with the pipeline goal",
+            f'Start with "{first_goal_title}"'
+            if first_goal_title
+            else "Start with the pipeline goal",
         ]
 
         # Attach to message

@@ -309,7 +309,9 @@ class PrimeConversationResponse(BaseModel):
     salient_facts: list[dict[str, Any]] = Field(
         default_factory=list, description="High-salience facts about entities"
     )
-    formatted_context: str = Field(..., min_length=1, max_length=50000, description="Pre-formatted context for LLM consumption")
+    formatted_context: str = Field(
+        ..., min_length=1, max_length=50000, description="Pre-formatted context for LLM consumption"
+    )
 
 
 class MemoryQueryService:
@@ -573,8 +575,7 @@ class MemoryQueryService:
                     "id": task.id,
                     "memory_type": "prospective",
                     "content": (
-                        f"[{task.status.value}] [{task.priority.value}] {task.task}"
-                        f"{due_info}"
+                        f"[{task.status.value}] [{task.priority.value}] {task.task}{due_info}"
                     ),
                     "relevance_score": relevance,
                     "confidence": None,
@@ -610,26 +611,30 @@ class MemoryQueryService:
         for lead in leads:
             company_lower = lead.company_name.lower()
             if company_lower in query_lower or query_lower in company_lower:
-                relevant.append({
-                    "id": lead.id,
-                    "memory_type": "lead",
-                    "content": self._format_lead_content(lead, prefix="Lead"),
-                    "relevance_score": 0.9,
-                    "confidence": None,
-                    "timestamp": lead.updated_at,
-                })
+                relevant.append(
+                    {
+                        "id": lead.id,
+                        "memory_type": "lead",
+                        "content": self._format_lead_content(lead, prefix="Lead"),
+                        "relevance_score": 0.9,
+                        "confidence": None,
+                        "timestamp": lead.updated_at,
+                    }
+                )
 
         # If no name match, return top active leads as general context
         if not relevant and leads:
             for lead in leads[:3]:
-                relevant.append({
-                    "id": lead.id,
-                    "memory_type": "lead",
-                    "content": self._format_lead_content(lead, prefix="Active lead"),
-                    "relevance_score": 0.5,
-                    "confidence": None,
-                    "timestamp": lead.updated_at,
-                })
+                relevant.append(
+                    {
+                        "id": lead.id,
+                        "memory_type": "lead",
+                        "content": self._format_lead_content(lead, prefix="Active lead"),
+                        "relevance_score": 0.5,
+                        "confidence": None,
+                        "timestamp": lead.updated_at,
+                    }
+                )
 
         return relevant[:limit]
 
@@ -1780,7 +1785,9 @@ class CorrectionResponse(BaseModel):
 async def get_memory_delta(
     current_user: CurrentUser,
     since: str | None = Query(None, description="ISO timestamp to filter facts created after"),
-    domain: str | None = Query(None, description="Domain filter: corporate_memory, competitive, relationship, digital_twin"),
+    domain: str | None = Query(
+        None, description="Domain filter: corporate_memory, competitive, relationship, digital_twin"
+    ),
 ) -> list[MemoryDeltaResponse]:
     """Get memory deltas showing what ARIA has learned.
 

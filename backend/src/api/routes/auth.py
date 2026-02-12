@@ -298,7 +298,10 @@ async def logout(request: Request, current_user: CurrentUser) -> MessageResponse
 
 @router.post("/refresh", response_model=TokenResponse)
 @rate_limit(RateLimitConfig(requests=10, window_seconds=60))
-async def refresh_token(http_request: Request, refresh_request: RefreshTokenRequest) -> TokenResponse:  # noqa: ARG001
+async def refresh_token(
+    http_request: Request,  # noqa: ARG001
+    refresh_request: RefreshTokenRequest,
+) -> TokenResponse:
     """Refresh the access token using a refresh token.
 
     Args:

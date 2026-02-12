@@ -248,12 +248,14 @@ class GoalService:
             return None
 
         now = datetime.now(UTC).isoformat()
-        self._db.table("goals").update({
-            "status": "complete",
-            "progress": 100,
-            "completed_at": now,
-            "updated_at": now,
-        }).eq("id", goal_id).eq("user_id", user_id).execute()
+        self._db.table("goals").update(
+            {
+                "status": "complete",
+                "progress": 100,
+                "completed_at": now,
+                "updated_at": now,
+            }
+        ).eq("id", goal_id).eq("user_id", user_id).execute()
 
         # Generate retrospective
         retro = await self.generate_retrospective(user_id, goal_id)
@@ -591,10 +593,7 @@ class GoalService:
 
             # Check if all milestones done → auto-complete goal
             all_ms = (
-                self._db.table("goal_milestones")
-                .select("status")
-                .eq("goal_id", goal_id)
-                .execute()
+                self._db.table("goal_milestones").select("status").eq("goal_id", goal_id).execute()
             )
             all_statuses = [m.get("status") for m in (all_ms.data or [])]
             if all_statuses and all(s in ("complete", "skipped") for s in all_statuses):

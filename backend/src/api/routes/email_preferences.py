@@ -194,12 +194,7 @@ class EmailPreferencesService:
 
         try:
             # First check if user_settings exists
-            existing = (
-                self._db.table("user_settings")
-                .select("*")
-                .eq("user_id", user_id)
-                .execute()
-            )
+            existing = self._db.table("user_settings").select("*").eq("user_id", user_id).execute()
 
             if existing.data:
                 # Update existing settings

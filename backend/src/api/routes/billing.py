@@ -205,6 +205,7 @@ async def create_portal_session(
 
         if not company_id:
             from src.services.billing_service import BillingError
+
             raise BillingError("No company found for this user")
 
         portal_url = await billing_service.create_portal_session(

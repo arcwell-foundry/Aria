@@ -205,7 +205,13 @@ async def chat_stream(
     async def event_stream():  # noqa: C901
         total_start = time.perf_counter()
 
-        memory_types = request.memory_types or ["episodic", "semantic", "procedural", "prospective", "lead"]
+        memory_types = request.memory_types or [
+            "episodic",
+            "semantic",
+            "procedural",
+            "prospective",
+            "lead",
+        ]
 
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(
@@ -255,8 +261,12 @@ async def chat_stream(
 
         # Build system prompt with all context layers
         system_prompt = service._build_system_prompt(
-            memories, load_state, proactive_insights, personality,
-            style_guidelines, priming_context,
+            memories,
+            load_state,
+            proactive_insights,
+            personality,
+            style_guidelines,
+            priming_context,
         )
 
         # Send metadata event
@@ -612,25 +622,33 @@ def _generate_suggestions(
 
     # Context-aware suggestions based on keywords
     if "battle card" in response_lower:
-        suggestions.extend([
-            "Compare with other competitors",
-            "Draft outreach based on this",
-        ])
+        suggestions.extend(
+            [
+                "Compare with other competitors",
+                "Draft outreach based on this",
+            ]
+        )
     elif "pipeline" in response_lower:
-        suggestions.extend([
-            "Which deals need attention?",
-            "Show me the forecast",
-        ])
+        suggestions.extend(
+            [
+                "Which deals need attention?",
+                "Show me the forecast",
+            ]
+        )
     elif "analysis" in response_lower or "landscape" in response_lower:
-        suggestions.extend([
-            "What are the key risks?",
-            "Recommend next steps",
-        ])
+        suggestions.extend(
+            [
+                "What are the key risks?",
+                "Recommend next steps",
+            ]
+        )
     elif "email" in response_lower or "draft" in response_lower:
-        suggestions.extend([
-            "Make it more concise",
-            "Adjust the tone",
-        ])
+        suggestions.extend(
+            [
+                "Make it more concise",
+                "Adjust the tone",
+            ]
+        )
 
     # Always add a generic follow-up if we have fewer than 2
     if len(suggestions) < 2:

@@ -52,7 +52,9 @@ async def update_preferences(
             "Preferences update failed",
             extra={"user_id": current_user.id, "error": str(e)},
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=sanitize_error(e)
+        ) from e
     except Exception as e:
         logger.exception("Error updating preferences")
         raise HTTPException(

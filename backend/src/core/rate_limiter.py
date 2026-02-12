@@ -64,9 +64,7 @@ class RateLimitTracker:
 
         # Remove old requests outside the time window
         # Filter in-place to maintain memory efficiency
-        self._requests[identifier] = [
-            ts for ts in request_timestamps if ts > window_start
-        ]
+        self._requests[identifier] = [ts for ts in request_timestamps if ts > window_start]
 
         # Check if under limit
         if len(self._requests[identifier]) < config.requests:

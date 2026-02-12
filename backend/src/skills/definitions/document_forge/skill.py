@@ -128,9 +128,7 @@ class DocumentForgeSkill(BaseSkillDefinition):
         """
         missing = self.validate_template_context(template_name, context)
         if missing:
-            raise ValueError(
-                f"Template '{template_name}' is missing required context: {missing}"
-            )
+            raise ValueError(f"Template '{template_name}' is missing required context: {missing}")
 
         logger.info(
             "Generating document",

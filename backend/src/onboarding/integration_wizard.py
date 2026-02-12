@@ -112,12 +112,7 @@ class IntegrationWizardService:
             }
         """
         # Get user's connected integrations
-        result = (
-            self._db.table("user_integrations")
-            .select("*")
-            .eq("user_id", user_id)
-            .execute()
-        )
+        result = self._db.table("user_integrations").select("*").eq("user_id", user_id).execute()
 
         connected_integrations: dict[str, dict[str, Any]] = {}
         if result.data:
@@ -146,8 +141,12 @@ class IntegrationWizardService:
                 display_name=config["display_name"],
                 category=category,
                 connected=connected,
-                connected_at=connected_integrations.get(composio_type, {}).get("connected_at") if connected else None,
-                connection_id=connected_integrations.get(composio_type, {}).get("connection_id") if connected else None,
+                connected_at=connected_integrations.get(composio_type, {}).get("connected_at")
+                if connected
+                else None,
+                connection_id=connected_integrations.get(composio_type, {}).get("connection_id")
+                if connected
+                else None,
             )
             status_by_category[category].append(status)
 
@@ -161,9 +160,7 @@ class IntegrationWizardService:
             "preferences": preferences.model_dump(),
         }
 
-    async def connect_integration(
-        self, user_id: str, app_name: str
-    ) -> dict[str, Any]:
+    async def connect_integration(self, user_id: str, app_name: str) -> dict[str, Any]:
         """Initiate OAuth flow for an integration.
 
         Args:
@@ -188,7 +185,9 @@ class IntegrationWizardService:
         try:
             oauth_client = get_oauth_client()
             integration_type = self.INTEGRATIONS[app_name]["composio_type"]
-            redirect_uri = f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
+            redirect_uri = (
+                f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
+            )
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)
             auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
@@ -231,9 +230,7 @@ class IntegrationWizardService:
                 "message": str(e),
             }
 
-    async def disconnect_integration(
-        self, user_id: str, app_name: str
-    ) -> dict[str, Any]:
+    async def disconnect_integration(self, user_id: str, app_name: str) -> dict[str, Any]:
         """Disconnect an integration.
 
         Args:
@@ -330,7 +327,9 @@ class IntegrationWizardService:
             .maybe_single()
             .execute()
         )
-        merged_integrations = existing.data.get("integrations", {}) if existing and existing.data else {}
+        merged_integrations = (
+            existing.data.get("integrations", {}) if existing and existing.data else {}
+        )
         merged_integrations["slack_channels"] = preferences.slack_channels
         merged_integrations["notification_enabled"] = preferences.notification_enabled
         merged_integrations["sync_frequency_hours"] = preferences.sync_frequency_hours

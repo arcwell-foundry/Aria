@@ -22,12 +22,8 @@ class EmotionEvent(BaseModel):
         ...,
         description="Detected emotion label (neutral, engaged, frustrated, etc.)",
     )
-    confidence: float = Field(
-        ..., ge=0.0, le=1.0, description="Detection confidence score"
-    )
-    timestamp: str | None = Field(
-        default=None, description="ISO timestamp of the detection"
-    )
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Detection confidence score")
+    timestamp: str | None = Field(default=None, description="ISO timestamp of the detection")
 
 
 class EmotionResponse(BaseModel):
