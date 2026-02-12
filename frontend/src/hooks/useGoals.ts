@@ -14,10 +14,12 @@ import {
   getGoalDetail,
   addMilestone,
   generateRetrospective,
+  approveGoalProposal,
   type CreateGoalData,
   type GoalStatus,
   type GoalWithProgress,
   type UpdateGoalData,
+  type GoalProposalApproval,
 } from "@/api/goals";
 
 // Query keys
@@ -183,6 +185,17 @@ export function useGenerateRetrospective() {
     mutationFn: (goalId: string) => generateRetrospective(goalId),
     onSuccess: (_data, goalId) => {
       queryClient.invalidateQueries({ queryKey: goalKeys.goalDetail(goalId) });
+    },
+  });
+}
+
+export function useApproveGoalProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: GoalProposalApproval) => approveGoalProposal(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: goalKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: goalKeys.dashboard() });
     },
   });
 }

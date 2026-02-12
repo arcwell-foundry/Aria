@@ -123,6 +123,16 @@ export interface GoalTemplate {
   applicable_roles: string[];
 }
 
+export interface GoalProposalApproval {
+  title: string;
+  description?: string;
+  goal_type: string;
+  rationale: string;
+  approach: string;
+  agents: string[];
+  timeline: string;
+}
+
 // API functions
 export async function createGoal(data: CreateGoalData): Promise<Goal> {
   const response = await apiClient.post<Goal>("/goals", data);
@@ -219,5 +229,10 @@ export async function generateRetrospective(
   const response = await apiClient.post<Retrospective>(
     `/goals/${goalId}/retrospective`
   );
+  return response.data;
+}
+
+export async function approveGoalProposal(data: GoalProposalApproval): Promise<Goal> {
+  const response = await apiClient.post<Goal>("/goals/approve-proposal", data);
   return response.data;
 }
