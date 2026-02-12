@@ -97,7 +97,7 @@ async def test_execute_goal_sends_thinking_on_start(mock_db: MagicMock) -> None:
             return_value={"agent_type": "scout", "success": True, "content": {}}
         )
 
-        await service.execute_goal("goal-1", "user-1")
+        await service.execute_goal_sync("goal-1", "user-1")
 
         mock_ws.send_thinking.assert_awaited_once_with("user-1")
 
@@ -120,7 +120,7 @@ async def test_execute_goal_sends_progress_after_agent(mock_db: MagicMock) -> No
             return_value={"agent_type": "scout", "success": True, "content": {}}
         )
 
-        await service.execute_goal("goal-1", "user-1")
+        await service.execute_goal_sync("goal-1", "user-1")
 
         mock_ws.send_progress_update.assert_awaited_once()
         call_kwargs = mock_ws.send_progress_update.call_args.kwargs
@@ -148,7 +148,7 @@ async def test_execute_goal_sends_aria_message_on_complete(mock_db: MagicMock) -
             return_value={"agent_type": "scout", "success": True, "content": {}}
         )
 
-        await service.execute_goal("goal-1", "user-1")
+        await service.execute_goal_sync("goal-1", "user-1")
 
         mock_ws.send_aria_message.assert_awaited_once()
         call_kwargs = mock_ws.send_aria_message.call_args.kwargs
@@ -198,7 +198,7 @@ async def test_execute_goal_sends_progress_per_agent_in_multi(mock_db: MagicMock
             return_value={"agent_type": "scout", "success": True, "content": {}}
         )
 
-        await service.execute_goal("goal-m", "user-1")
+        await service.execute_goal_sync("goal-m", "user-1")
 
         assert mock_ws.send_progress_update.await_count == 2
 
@@ -222,7 +222,7 @@ async def test_ws_failure_does_not_break_goal_execution(mock_db: MagicMock) -> N
         )
 
         # Should NOT raise even though ws_manager calls fail
-        result = await service.execute_goal("goal-1", "user-1")
+        result = await service.execute_goal_sync("goal-1", "user-1")
 
         assert result["status"] == "complete"
         assert result["goal_id"] == "goal-1"

@@ -84,7 +84,7 @@ async def test_chat_queries_memory_and_includes_in_response() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             # Setup extraction service
@@ -220,7 +220,7 @@ async def test_full_chat_flow_with_extraction() -> None:
                 {"role": "user", "content": "Our budget for this quarter is $500K."}
             ]
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             # Setup extraction - this is the key part
@@ -305,7 +305,7 @@ async def test_memory_context_improves_response_quality() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             # Setup extraction
@@ -351,7 +351,7 @@ async def test_extraction_failure_does_not_break_chat() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             # Extraction raises an exception

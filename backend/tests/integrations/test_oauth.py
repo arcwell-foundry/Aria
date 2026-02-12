@@ -53,6 +53,7 @@ async def test_generate_auth_url_with_connection_id(mock_composio):
     # Mock auth_configs.list to return a config
     mock_config = MagicMock()
     mock_config.id = "auth-config-123"
+    mock_config.toolkit.slug = "googlecalendar"
     mock_list_response = MagicMock()
     mock_list_response.items = [mock_config]
     mock_composio.client.auth_configs.list.return_value = mock_list_response
@@ -90,6 +91,7 @@ async def test_generate_auth_url_delegates(mock_composio):
 
     mock_config = MagicMock()
     mock_config.id = "auth-cfg-1"
+    mock_config.toolkit.slug = "salesforce"
     mock_list_response = MagicMock()
     mock_list_response.items = [mock_config]
     mock_composio.client.auth_configs.list.return_value = mock_list_response
@@ -134,6 +136,7 @@ async def test_auth_config_caching(mock_composio):
 
     mock_config = MagicMock()
     mock_config.id = "cached-config-id"
+    mock_config.toolkit.slug = "hubspot"
     mock_list_response = MagicMock()
     mock_list_response.items = [mock_config]
     mock_composio.client.auth_configs.list.return_value = mock_list_response

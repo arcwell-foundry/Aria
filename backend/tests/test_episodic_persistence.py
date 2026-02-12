@@ -78,7 +78,7 @@ class TestEpisodeCreation:
             {"role": "user", "content": "Hello"},
         ]
         chat_service._working_memory_manager = MagicMock()
-        chat_service._working_memory_manager.get_or_create.return_value = working_memory
+        chat_service._working_memory_manager.get_or_create = AsyncMock(return_value=working_memory)
         mocks["working_memory"] = working_memory
 
         # Cognitive load monitor
@@ -348,7 +348,7 @@ class TestEpisodicStorageFailureResilience:
             {"role": "user", "content": "Hello"},
         ]
         chat_service._working_memory_manager = MagicMock()
-        chat_service._working_memory_manager.get_or_create.return_value = working_memory
+        chat_service._working_memory_manager.get_or_create = AsyncMock(return_value=working_memory)
 
         from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 
@@ -420,7 +420,7 @@ class TestEpisodicStorageFailureResilience:
             {"role": "user", "content": "Hello"},
         ]
         chat_service._working_memory_manager = MagicMock()
-        chat_service._working_memory_manager.get_or_create.return_value = working_memory
+        chat_service._working_memory_manager.get_or_create = AsyncMock(return_value=working_memory)
 
         from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 

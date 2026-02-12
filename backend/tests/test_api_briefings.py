@@ -32,39 +32,43 @@ def test_client(mock_current_user: MagicMock) -> TestClient:
 
 
 def test_get_today_briefing_returns_briefing(test_client: TestClient) -> None:
-    """Test GET /api/v1/briefings/today returns briefing."""
+    """Test GET /api/v1/briefings/today returns existing briefing."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
-        "src.services.briefing.anthropic.Anthropic"
+        "src.services.briefing.LLMClient"
     ) as mock_llm_class:
-        # Setup DB mock
+        # Setup DB mock — return an existing briefing
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-            data=None
-        )
-        mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(
-            data=[{"id": "briefing-123"}]
+        existing_briefing = {
+            "id": "briefing-123",
+            "user_id": "test-user-123",
+            "briefing_date": date.today().isoformat(),
+            "content": {
+                "summary": "Good morning! You have 3 meetings today.",
+                "calendar": {"meeting_count": 0, "key_meetings": []},
+                "leads": {"hot_leads": [], "needs_attention": [], "recently_active": []},
+                "signals": {"company_news": [], "market_trends": [], "competitive_intel": []},
+                "tasks": {"overdue": [], "due_today": []},
+                "generated_at": "2026-02-12T10:00:00+00:00",
+            },
+        }
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=existing_briefing
         )
         mock_db_class.get_client.return_value = mock_db
-
-        # Setup LLM mock
-        mock_llm_response = MagicMock()
-        mock_llm_content = MagicMock()
-        mock_llm_content.text = "Good morning! You have 3 meetings today."
-        mock_llm_response.content = [mock_llm_content]
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
 
         response = test_client.get("/api/v1/briefings/today")
 
     assert response.status_code == 200
     data = response.json()
-    assert "summary" in data
-    assert data["calendar"]["meeting_count"] == 0
+    assert data["status"] == "ready"
+    assert data["briefing"]["summary"] == "Good morning! You have 3 meetings today."
+    assert data["briefing"]["calendar"]["meeting_count"] == 0
 
 
 def test_get_today_briefing_regenerates_when_flag_true(test_client: TestClient) -> None:
     """Test GET /api/v1/briefings/today?regenerate=true regenerates briefing."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
-        "src.services.briefing.anthropic.Anthropic"
+        "src.services.briefing.LLMClient"
     ) as mock_llm_class:
         # Setup DB mock
         mock_db = MagicMock()
@@ -74,11 +78,9 @@ def test_get_today_briefing_regenerates_when_flag_true(test_client: TestClient) 
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_response = MagicMock()
-        mock_llm_content = MagicMock()
-        mock_llm_content.text = "Regenerated briefing"
-        mock_llm_response.content = [mock_llm_content]
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Regenerated briefing"
+        )
 
         response = test_client.get("/api/v1/briefings/today?regenerate=true")
 
@@ -151,7 +153,7 @@ def test_get_briefing_by_date_returns_briefing(test_client: TestClient) -> None:
         }
         # Setup DB mock
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=expected_briefing
         )
         mock_db_class.get_client.return_value = mock_db
@@ -168,7 +170,7 @@ def test_get_briefing_by_date_returns_404_when_not_found(test_client: TestClient
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         # Setup DB mock
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
         mock_db_class.get_client.return_value = mock_db
@@ -182,7 +184,7 @@ def test_get_briefing_by_date_returns_404_when_not_found(test_client: TestClient
 def test_generate_briefing_creates_new_briefing(test_client: TestClient) -> None:
     """Test POST /api/v1/briefings/generate creates new briefing."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
-        "src.services.briefing.anthropic.Anthropic"
+        "src.services.briefing.LLMClient"
     ) as mock_llm_class:
         # Setup DB mock
         mock_db = MagicMock()
@@ -192,11 +194,9 @@ def test_generate_briefing_creates_new_briefing(test_client: TestClient) -> None
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_response = MagicMock()
-        mock_llm_content = MagicMock()
-        mock_llm_content.text = "Newly generated briefing"
-        mock_llm_response.content = [mock_llm_content]
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Newly generated briefing"
+        )
 
         response = test_client.post("/api/v1/briefings/generate")
 
@@ -206,7 +206,7 @@ def test_generate_briefing_creates_new_briefing(test_client: TestClient) -> None
 def test_generate_briefing_with_custom_date(test_client: TestClient) -> None:
     """Test POST /api/v1/briefings/generate with briefing_date creates briefing for that date."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
-        "src.services.briefing.anthropic.Anthropic"
+        "src.services.briefing.LLMClient"
     ) as mock_llm_class:
         # Setup DB mock
         mock_db = MagicMock()
@@ -216,11 +216,9 @@ def test_generate_briefing_with_custom_date(test_client: TestClient) -> None:
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_response = MagicMock()
-        mock_llm_content = MagicMock()
-        mock_llm_content.text = "Briefing for custom date"
-        mock_llm_response.content = [mock_llm_content]
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Briefing for custom date"
+        )
 
         response = test_client.post(
             "/api/v1/briefings/generate", json={"briefing_date": "2026-02-15"}
@@ -252,7 +250,7 @@ def test_briefings_endpoints_require_authentication() -> None:
 def test_regenerate_briefing_creates_new_briefing(test_client: TestClient) -> None:
     """Test POST /api/v1/briefings/regenerate creates new briefing."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class, patch(
-        "src.services.briefing.anthropic.Anthropic"
+        "src.services.briefing.LLMClient"
     ) as mock_llm_class:
         # Setup DB mock
         mock_db = MagicMock()
@@ -262,11 +260,9 @@ def test_regenerate_briefing_creates_new_briefing(test_client: TestClient) -> No
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_response = MagicMock()
-        mock_llm_content = MagicMock()
-        mock_llm_content.text = "Regenerated briefing"
-        mock_llm_response.content = [mock_llm_content]
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Regenerated briefing"
+        )
 
         response = test_client.post("/api/v1/briefings/regenerate")
 

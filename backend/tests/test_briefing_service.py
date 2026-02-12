@@ -7,23 +7,19 @@ import pytest
 
 
 @pytest.fixture
-def mock_llm_response() -> MagicMock:
-    """Create mock LLM response."""
-    response = MagicMock()
-    content = MagicMock()
-    content.text = "Good morning! You have a light schedule today."
-    response.content = [content]
-    return response
+def mock_llm_response_text() -> str:
+    """Create mock LLM response text."""
+    return "Good morning! You have a light schedule today."
 
 
 @pytest.mark.asyncio
 async def test_generate_briefing_creates_summary_with_llm(
-    mock_llm_response: MagicMock,
+    mock_llm_response_text: str,
 ) -> None:
     """Test generate_briefing uses LLM to create summary."""
     with (
         patch("src.services.briefing.SupabaseClient") as mock_db_class,
-        patch("src.services.briefing.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
         # Setup DB mock
         mock_db = MagicMock()
@@ -33,7 +29,9 @@ async def test_generate_briefing_creates_summary_with_llm(
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value=mock_llm_response_text
+        )
 
         from src.services.briefing import BriefingService
 
@@ -48,17 +46,17 @@ async def test_generate_briefing_creates_summary_with_llm(
         assert "generated_at" in result
 
         # Verify LLM was called for summary generation
-        mock_llm_class.return_value.messages.create.assert_called_once()
+        mock_llm_class.return_value.generate_response.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_generate_briefing_stores_result_in_db(
-    mock_llm_response: MagicMock,
+    mock_llm_response_text: str,
 ) -> None:
     """Test generate_briefing stores briefing in database."""
     with (
         patch("src.services.briefing.SupabaseClient") as mock_db_class,
-        patch("src.services.briefing.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
         # Setup DB mock
         mock_db = MagicMock()
@@ -70,7 +68,9 @@ async def test_generate_briefing_stores_result_in_db(
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value=mock_llm_response_text
+        )
 
         from src.services.briefing import BriefingService
 
@@ -95,7 +95,7 @@ async def test_get_briefing_returns_none_when_not_found() -> None:
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         # Setup DB mock to return None
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
         mock_db_class.get_client.return_value = mock_db
@@ -120,7 +120,7 @@ async def test_get_briefing_returns_existing_briefing() -> None:
         }
         # Setup DB mock
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=expected_briefing
         )
         mock_db_class.get_client.return_value = mock_db
@@ -135,16 +135,16 @@ async def test_get_briefing_returns_existing_briefing() -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_generate_briefing_generates_when_not_exists(
-    mock_llm_response: MagicMock,
+    mock_llm_response_text: str,
 ) -> None:
     """Test get_or_generate_briefing generates new briefing when none exists."""
     with (
         patch("src.services.briefing.SupabaseClient") as mock_db_class,
-        patch("src.services.briefing.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
         # Setup DB mock to return None (not found)
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
         mock_upsert = MagicMock()
@@ -155,7 +155,9 @@ async def test_get_or_generate_briefing_generates_when_not_exists(
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value=mock_llm_response_text
+        )
 
         from src.services.briefing import BriefingService
 
@@ -173,7 +175,7 @@ async def test_get_or_generate_briefing_returns_existing_when_exists() -> None:
         existing_content = {"summary": "Existing briefing summary"}
         # Setup DB mock to return existing
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data={"content": existing_content}
         )
         mock_db_class.get_client.return_value = mock_db
@@ -238,7 +240,7 @@ async def test_get_calendar_data_returns_empty_when_no_integration() -> None:
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         # No calendar integration configured
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
         mock_db_class.get_client.return_value = mock_db
@@ -259,7 +261,7 @@ async def test_get_calendar_data_structure() -> None:
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         mock_db = MagicMock()
         # Return None to simulate no integration
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
         mock_db_class.get_client.return_value = mock_db
@@ -295,7 +297,7 @@ async def test_get_calendar_data_checks_user_integrations_table() -> None:
         mock_select.eq.return_value = mock_eq1
         mock_eq1.eq.return_value = mock_eq2
         mock_eq2.eq.return_value = mock_eq3
-        mock_eq3.single.return_value = mock_single
+        mock_eq3.maybe_single.return_value = mock_single
         mock_single.execute.return_value = MagicMock(data=None)
 
         mock_db_class.get_client.return_value = mock_db
@@ -321,7 +323,7 @@ async def test_get_calendar_data_returns_empty_when_integration_exists() -> None
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         # Integration exists but fetch not yet implemented
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data={"id": "integration-123", "provider": "google_calendar", "status": "active"}
         )
         mock_db_class.get_client.return_value = mock_db
@@ -400,15 +402,17 @@ async def test_get_task_data_returns_empty_dict_when_no_tasks() -> None:
 
 @pytest.mark.asyncio
 async def test_generate_summary_calls_llm_with_context(
-    mock_llm_response: MagicMock,
+    mock_llm_response_text: str,
 ) -> None:
     """Test _generate_summary calls LLM with briefing context."""
     with (
         patch("src.services.briefing.SupabaseClient"),
-        patch("src.services.briefing.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
         # Setup LLM mock
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value=mock_llm_response_text
+        )
 
         from src.services.briefing import BriefingService
 
@@ -421,21 +425,20 @@ async def test_generate_summary_calls_llm_with_context(
         result = await service._generate_summary(calendar, leads, signals, tasks)
 
         # Verify LLM was called
-        mock_llm_class.return_value.messages.create.assert_called_once()
-        call_kwargs = mock_llm_class.return_value.messages.create.call_args.kwargs
+        mock_llm_class.return_value.generate_response.assert_called_once()
+        call_kwargs = mock_llm_class.return_value.generate_response.call_args.kwargs
         assert "messages" in call_kwargs
-        assert call_kwargs["model"] == "claude-sonnet-4-20250514"
         assert "max_tokens" in call_kwargs
 
 
 @pytest.mark.asyncio
 async def test_generate_briefing_uses_custom_date_when_provided(
-    mock_llm_response: MagicMock,
+    mock_llm_response_text: str,
 ) -> None:
     """Test generate_briefing uses custom briefing_date when provided."""
     with (
         patch("src.services.briefing.SupabaseClient") as mock_db_class,
-        patch("src.services.briefing.anthropic.Anthropic") as mock_llm_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
         # Setup DB mock
         mock_db = MagicMock()
@@ -447,7 +450,9 @@ async def test_generate_briefing_uses_custom_date_when_provided(
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock
-        mock_llm_class.return_value.messages.create.return_value = mock_llm_response
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value=mock_llm_response_text
+        )
 
         from src.services.briefing import BriefingService
 

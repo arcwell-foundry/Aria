@@ -75,7 +75,7 @@ async def test_chat_service_queries_memory_before_responding(
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -115,7 +115,7 @@ async def test_chat_service_includes_memory_in_llm_context(
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -152,7 +152,7 @@ async def test_chat_service_updates_working_memory() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -194,7 +194,7 @@ async def test_chat_response_includes_memory_citations(
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -230,7 +230,7 @@ async def test_chat_response_returns_conversation_id() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -265,7 +265,7 @@ async def test_chat_service_uses_default_memory_types() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -302,7 +302,7 @@ async def test_chat_service_accepts_custom_memory_types() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -341,7 +341,7 @@ async def test_chat_service_builds_citations_from_memories(
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -387,7 +387,7 @@ async def test_chat_service_no_memory_context_when_empty() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             service = ChatService()
@@ -512,7 +512,7 @@ async def test_chat_service_extracts_information_from_conversation() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             mock_extract = AsyncMock()
@@ -553,7 +553,7 @@ async def test_chat_service_returns_timing_metadata() -> None:
             mock_working_memory = MagicMock()
             mock_working_memory.get_context_for_llm.return_value = []
             mock_wmm = MagicMock()
-            mock_wmm.get_or_create.return_value = mock_working_memory
+            mock_wmm.get_or_create = AsyncMock(return_value=mock_working_memory)
             mock_wmm_class.return_value = mock_wmm
 
             mock_extract = AsyncMock()

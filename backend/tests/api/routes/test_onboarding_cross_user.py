@@ -222,7 +222,7 @@ class TestConfirmCompanyData:
             "src.onboarding.cross_user.CrossUserAccelerationService"
         ) as mock_service_class:
             mock_service = MagicMock()
-            mock_service.confirm_company_data = MagicMock(
+            mock_service.confirm_company_data = AsyncMock(
                 return_value={
                     "user_linked": True,
                     "steps_skipped": ["company_discovery", "document_upload"],
@@ -261,7 +261,7 @@ class TestConfirmCompanyData:
             "src.onboarding.cross_user.CrossUserAccelerationService"
         ) as mock_service_class:
             mock_service = MagicMock()
-            mock_service.confirm_company_data = MagicMock(
+            mock_service.confirm_company_data = AsyncMock(
                 return_value={
                     "user_linked": True,
                     "steps_skipped": ["company_discovery", "document_upload"],
@@ -320,7 +320,7 @@ class TestConfirmCompanyData:
             "src.onboarding.cross_user.CrossUserAccelerationService"
         ) as mock_service_class:
             mock_service = MagicMock()
-            mock_service.confirm_company_data = MagicMock(
+            mock_service.confirm_company_data = AsyncMock(
                 side_effect=Exception("Database connection failed")
             )
             mock_service_class.return_value = mock_service

@@ -587,23 +587,23 @@ async def test_get_classification_returns_none_when_no_company(
 
 
 @pytest.mark.asyncio()
-async def test_get_writing_style_returns_none_when_no_settings(
+async def test_get_digital_twin_config_returns_none_when_no_settings(
     generator: FirstConversationGenerator,
     mock_db: MagicMock,
 ) -> None:
-    """Writing style returns None when no user settings exist."""
+    """Digital twin config returns None when no user settings exist."""
     mock_db.table.return_value = _build_chain(None)
 
-    result = await generator._get_writing_style("user-1")
+    result, _ = await generator._get_digital_twin_config("user-1")
     assert result is None
 
 
 @pytest.mark.asyncio()
-async def test_get_writing_style_extracts_digital_twin(
+async def test_get_digital_twin_config_extracts_digital_twin(
     generator: FirstConversationGenerator,
     mock_db: MagicMock,
 ) -> None:
-    """Writing style extracts Digital Twin style from nested preferences."""
+    """Digital twin config extracts Digital Twin style from nested preferences."""
     mock_db.table.return_value = _build_chain(
         {
             "preferences": {
@@ -617,7 +617,7 @@ async def test_get_writing_style_extracts_digital_twin(
         }
     )
 
-    result = await generator._get_writing_style("user-1")
+    result, _ = await generator._get_digital_twin_config("user-1")
 
     assert result is not None
     assert result["directness"] == 0.8

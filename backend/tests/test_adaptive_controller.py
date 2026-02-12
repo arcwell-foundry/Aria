@@ -200,6 +200,15 @@ async def test_cdmo_user_gets_manufacturing_question(
         classification_chain,
     ]
 
+    # The LLM is called twice: once by _orient, once by _generate_contextual_questions.
+    # The second call must return a JSON array with a CDMO question.
+    controller._llm.generate_response = AsyncMock(
+        side_effect=[
+            '{"priority_action": "Continue", "emphasis": "none", "skip_recommendation": "none"}',
+            '[{"question": "Which CDMO modalities does your facility support?", "context": "CDMO-specific capability mapping"}]',
+        ]
+    )
+
     with patch.object(controller, "_log_assessment", new_callable=AsyncMock):
         assessment = await controller.assess_next_step(
             "user-123", OnboardingStep.COMPANY_DISCOVERY

@@ -52,6 +52,7 @@ class TestFullOAuthFlow:
 
         mock_config = MagicMock()
         mock_config.id = "auth-config-gcal"
+        mock_config.toolkit.slug = "google_calendar"
         mock_list_response = MagicMock()
         mock_list_response.items = [mock_config]
         mock_composio.client.auth_configs.list.return_value = mock_list_response
@@ -129,6 +130,7 @@ class TestFullOAuthFlow:
 
         mock_config = MagicMock()
         mock_config.id = "auth-config-gmail"
+        mock_config.toolkit.slug = "gmail"
         mock_list_response = MagicMock()
         mock_list_response.items = [mock_config]
         mock_composio.client.auth_configs.list.return_value = mock_list_response
@@ -195,6 +197,7 @@ class TestFullOAuthFlow:
 
         mock_config = MagicMock()
         mock_config.id = "auth-config-sfdc"
+        mock_config.toolkit.slug = "salesforce"
         mock_list_response = MagicMock()
         mock_list_response.items = [mock_config]
         mock_composio.client.auth_configs.list.return_value = mock_list_response

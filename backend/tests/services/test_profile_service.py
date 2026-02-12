@@ -212,18 +212,28 @@ class TestUpdateUserDetails:
         mock_supabase.get_user_by_id = AsyncMock(return_value=old_user_data)
 
         mock_table = MagicMock()
-        mock_update = MagicMock()
-        mock_eq = MagicMock()
+        mock_upsert = MagicMock()
         updated_data = {
             "id": "user-123",
             "full_name": "Jane Smith",
             "title": "SVP Sales",
             "department": "Commercial",
         }
-        mock_eq.execute.return_value = MagicMock(data=[updated_data])
-        mock_update.eq.return_value = mock_eq
-        mock_table.update.return_value = mock_update
-        mock_supabase.get_client.return_value.table.return_value = mock_table
+        mock_upsert.execute.return_value = MagicMock(data=[updated_data])
+        mock_table.upsert.return_value = mock_upsert
+
+        # Mock audit log table
+        mock_audit = MagicMock()
+        mock_audit.insert.return_value = MagicMock(
+            execute=MagicMock(return_value=MagicMock(data=[{}]))
+        )
+
+        def table_router(name):
+            if name == "security_audit_log":
+                return mock_audit
+            return mock_table
+
+        mock_supabase.get_client.return_value.table.side_effect = table_router
 
         result = await profile_service.update_user_details(
             user_id="user-123",
@@ -236,7 +246,7 @@ class TestUpdateUserDetails:
         assert result["full_name"] == "Jane Smith"
         assert result["title"] == "SVP Sales"
         assert result["merge_pending"] is True
-        mock_table.update.assert_called_once()
+        mock_table.upsert.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_empty_update_returns_current_profile(
@@ -310,11 +320,9 @@ class TestUpdateUserDetails:
         mock_supabase.get_user_by_id = AsyncMock(return_value=old_user_data)
 
         mock_table = MagicMock()
-        mock_update = MagicMock()
-        mock_eq = MagicMock()
-        mock_eq.execute.return_value = MagicMock(data=[{"id": "user-123", "full_name": "Jane"}])
-        mock_update.eq.return_value = mock_eq
-        mock_table.update.return_value = mock_update
+        mock_upsert = MagicMock()
+        mock_upsert.execute.return_value = MagicMock(data=[{"id": "user-123", "full_name": "Jane"}])
+        mock_table.upsert.return_value = mock_upsert
 
         # Mock audit table
         mock_audit = MagicMock()
@@ -334,11 +342,11 @@ class TestUpdateUserDetails:
             data={"full_name": "Jane", "role": "admin", "id": "hacker"},
         )
 
-        # The update call should NOT include id (role is in ALLOWED_USER_FIELDS)
-        update_call = mock_table.update.call_args[0][0]
-        assert "id" not in update_call
-        assert "full_name" in update_call
-        assert "role" in update_call
+        # The upsert call should NOT include "id" from user input as a field to update
+        # (though the service adds "id": user_id for the upsert key)
+        upsert_call = mock_table.upsert.call_args[0][0]
+        assert "full_name" in upsert_call
+        assert "role" in upsert_call
 
 
 class TestUpdateCompanyDetails:

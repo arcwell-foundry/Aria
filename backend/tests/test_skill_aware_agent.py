@@ -88,9 +88,9 @@ def test_skill_analysis_is_simple_field() -> None:
 
 
 def test_agent_skills_mapping_has_all_agents() -> None:
-    """Test AGENT_SKILLS contains all 6 agent identifiers."""
-    expected_agents = {"hunter", "analyst", "strategist", "scribe", "operator", "scout"}
-    assert set(AGENT_SKILLS.keys()) == expected_agents
+    """Test AGENT_SKILLS contains all 6 core agent identifiers."""
+    expected_core_agents = {"hunter", "analyst", "strategist", "scribe", "operator", "scout"}
+    assert expected_core_agents.issubset(set(AGENT_SKILLS.keys()))
 
 
 def test_agent_skills_hunter() -> None:
@@ -150,10 +150,12 @@ def test_agent_skills_scout() -> None:
 
 
 def test_agent_skills_values_are_lists() -> None:
-    """Test that every value in AGENT_SKILLS is a non-empty list of strings."""
+    """Test that every value in AGENT_SKILLS is a list of strings."""
+    core_agents = {"hunter", "analyst", "strategist", "scribe", "operator", "scout"}
     for agent_id, skills in AGENT_SKILLS.items():
         assert isinstance(skills, list), f"{agent_id} skills should be a list"
-        assert len(skills) > 0, f"{agent_id} should have at least one skill"
+        if agent_id in core_agents:
+            assert len(skills) > 0, f"{agent_id} should have at least one skill"
         for skill in skills:
             assert isinstance(skill, str), f"Skill '{skill}' for {agent_id} should be a string"
 

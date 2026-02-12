@@ -61,7 +61,7 @@ def _wire_mocks(service: Any, llm_response: str = "I found some insights about L
         {"role": "user", "content": "Research Lonza for me"},
     ]
     service._working_memory_manager = MagicMock()
-    service._working_memory_manager.get_or_create.return_value = working_memory
+    service._working_memory_manager.get_or_create = AsyncMock(return_value=working_memory)
     mocks["working_memory"] = working_memory
 
     # Cognitive load monitor

@@ -34,7 +34,7 @@ async def test_chat_includes_cognitive_load_in_response() -> None:
                     with patch("src.services.chat.WorkingMemoryManager") as mock_working:
                         mock_wm = MagicMock()
                         mock_wm.get_context_for_llm.return_value = []
-                        mock_working.return_value.get_or_create.return_value = mock_wm
+                        mock_working.return_value.get_or_create = AsyncMock(return_value=mock_wm)
 
                         with patch("src.services.chat.ExtractionService"):
                             with patch.object(
@@ -92,7 +92,7 @@ async def test_high_load_modifies_system_prompt() -> None:
                     with patch("src.services.chat.WorkingMemoryManager") as mock_working:
                         mock_wm = MagicMock()
                         mock_wm.get_context_for_llm.return_value = []
-                        mock_working.return_value.get_or_create.return_value = mock_wm
+                        mock_working.return_value.get_or_create = AsyncMock(return_value=mock_wm)
 
                         with patch("src.services.chat.ExtractionService"):
                             with patch.object(
@@ -149,7 +149,7 @@ async def test_low_load_does_not_add_high_load_instruction() -> None:
                     with patch("src.services.chat.WorkingMemoryManager") as mock_working:
                         mock_wm = MagicMock()
                         mock_wm.get_context_for_llm.return_value = []
-                        mock_working.return_value.get_or_create.return_value = mock_wm
+                        mock_working.return_value.get_or_create = AsyncMock(return_value=mock_wm)
 
                         with patch("src.services.chat.ExtractionService"):
                             with patch.object(
@@ -207,7 +207,7 @@ async def test_critical_load_also_adds_high_load_instruction() -> None:
                     with patch("src.services.chat.WorkingMemoryManager") as mock_working:
                         mock_wm = MagicMock()
                         mock_wm.get_context_for_llm.return_value = []
-                        mock_working.return_value.get_or_create.return_value = mock_wm
+                        mock_working.return_value.get_or_create = AsyncMock(return_value=mock_wm)
 
                         with patch("src.services.chat.ExtractionService"):
                             with patch.object(
