@@ -1,9 +1,11 @@
 -- ============================================================
 -- Video Sessions Migration
 -- Date: 2026-02-11
--- Purpose: Create video_sessions and video_transcripts tables
+-- Purpose: Create video_sessions and video_transcript_entries tables
 --          for Tavus avatar Dialogue Mode integration.
 -- Uses IF NOT EXISTS for idempotency.
+-- NOTE: Uses video_transcript_entries (not video_transcripts) to
+--       align with 006_video_sessions.sql canonical table name.
 -- ============================================================
 
 
@@ -76,10 +78,11 @@ CREATE INDEX IF NOT EXISTS idx_video_sessions_status
 
 
 -- ============================================================
--- 2. video_transcripts
+-- 2. video_transcript_entries
 --    Transcript entries from Tavus avatar video sessions.
+--    Canonical name from 006_video_sessions.sql.
 -- ============================================================
-CREATE TABLE IF NOT EXISTS video_transcripts (
+CREATE TABLE IF NOT EXISTS video_transcript_entries (
     id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     video_session_id    uuid NOT NULL REFERENCES video_sessions(id) ON DELETE CASCADE,
     speaker             text NOT NULL CHECK (speaker IN ('aria', 'user')),
@@ -88,22 +91,22 @@ CREATE TABLE IF NOT EXISTS video_transcripts (
     created_at          timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE video_transcripts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_transcript_entries ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies using EXISTS subquery to verify user owns the parent session
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
-        WHERE tablename = 'video_transcripts'
-        AND policyname = 'video_transcripts_select_own'
+        WHERE tablename = 'video_transcript_entries'
+        AND policyname = 'video_transcript_entries_select_own'
     ) THEN
-        CREATE POLICY video_transcripts_select_own
-            ON video_transcripts FOR SELECT
+        CREATE POLICY video_transcript_entries_select_own
+            ON video_transcript_entries FOR SELECT
             TO authenticated
             USING (
                 EXISTS (
                     SELECT 1 FROM video_sessions vs
-                    WHERE vs.id = video_transcripts.video_session_id
+                    WHERE vs.id = video_transcript_entries.video_session_id
                     AND vs.user_id = auth.uid()
                 )
             );
@@ -113,16 +116,16 @@ END $$;
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
-        WHERE tablename = 'video_transcripts'
-        AND policyname = 'video_transcripts_insert_own'
+        WHERE tablename = 'video_transcript_entries'
+        AND policyname = 'video_transcript_entries_insert_own'
     ) THEN
-        CREATE POLICY video_transcripts_insert_own
-            ON video_transcripts FOR INSERT
+        CREATE POLICY video_transcript_entries_insert_own
+            ON video_transcript_entries FOR INSERT
             TO authenticated
             WITH CHECK (
                 EXISTS (
                     SELECT 1 FROM video_sessions vs
-                    WHERE vs.id = video_transcripts.video_session_id
+                    WHERE vs.id = video_transcript_entries.video_session_id
                     AND vs.user_id = auth.uid()
                 )
             );
@@ -132,16 +135,16 @@ END $$;
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
-        WHERE tablename = 'video_transcripts'
-        AND policyname = 'video_transcripts_update_own'
+        WHERE tablename = 'video_transcript_entries'
+        AND policyname = 'video_transcript_entries_update_own'
     ) THEN
-        CREATE POLICY video_transcripts_update_own
-            ON video_transcripts FOR UPDATE
+        CREATE POLICY video_transcript_entries_update_own
+            ON video_transcript_entries FOR UPDATE
             TO authenticated
             USING (
                 EXISTS (
                     SELECT 1 FROM video_sessions vs
-                    WHERE vs.id = video_transcripts.video_session_id
+                    WHERE vs.id = video_transcript_entries.video_session_id
                     AND vs.user_id = auth.uid()
                 )
             );
@@ -149,5 +152,5 @@ DO $$ BEGIN
 END $$;
 
 -- Index
-CREATE INDEX IF NOT EXISTS idx_video_transcripts_session_id
-    ON video_transcripts(video_session_id);
+CREATE INDEX IF NOT EXISTS idx_video_transcript_entries_session_id
+    ON video_transcript_entries(video_session_id);
