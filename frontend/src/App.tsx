@@ -8,7 +8,7 @@ import { IntelPanelProvider } from "@/contexts/IntelPanelContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
-import { CommandPalette } from "@/_deprecated/components/CommandPalette";
+import { CommandPalette } from "@/components/common/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAuth } from "@/hooks/useAuth";
 import { AppRoutes } from "@/app/routes";

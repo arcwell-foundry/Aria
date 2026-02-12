@@ -1,8 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from '@/app/AppShell';
-import { ProtectedRoute } from '@/_deprecated/components/ProtectedRoute';
-import { LoginPage } from '@/_deprecated/pages/Login';
-import { SignupPage } from '@/_deprecated/pages/Signup';
+import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { LoginPage } from '@/components/pages/LoginPage';
+import { SignupPage } from '@/components/pages/SignupPage';
 import {
   ARIAWorkspace,
   PipelinePage,

@@ -159,13 +159,25 @@ async def chat(
         },
     )
 
+    # Extract ui_commands from response text if not provided by service
+    raw_rich = result.get("rich_content", [])
+    raw_ui = result.get("ui_commands", [])
+    if not raw_ui:
+        raw_ui = _analyze_ui_commands(result["message"])
+    raw_suggestions = result.get("suggestions", [])
+    if not raw_suggestions:
+        raw_suggestions = _generate_suggestions(
+            result["message"],
+            [],
+        )
+
     return ChatResponse(
         message=result["message"],
         citations=[Citation(**c) for c in result.get("citations", [])],
         conversation_id=result["conversation_id"],
-        rich_content=[],
-        ui_commands=[],
-        suggestions=result.get("suggestions", []),
+        rich_content=[RichContent(**rc) if isinstance(rc, dict) else rc for rc in raw_rich],
+        ui_commands=[UICommand(**uc) if isinstance(uc, dict) else uc for uc in raw_ui],
+        suggestions=raw_suggestions,
         timing=Timing(**result["timing"]) if result.get("timing") else None,
         cognitive_load=CognitiveLoadInfo(**result["cognitive_load"])
         if result.get("cognitive_load")

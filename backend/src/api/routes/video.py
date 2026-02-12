@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from src.api.deps import CurrentUser
+from src.core.ws import ws_manager
 from src.db.supabase import get_supabase_client
 from src.integrations.tavus import get_tavus_client
 from src.models.video import (
@@ -15,6 +16,7 @@ from src.models.video import (
     VideoSessionResponse,
     VideoSessionStatus,
 )
+from src.models.ws_events import AriaSpeakingEvent
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,11 @@ async def create_video_session(
             "user_id": current_user.id,
             "tavus_conversation_id": tavus_conversation_id,
         },
+    )
+
+    # Notify frontend that ARIA avatar is now speaking
+    await ws_manager.send_to_user(
+        current_user.id, AriaSpeakingEvent(is_speaking=True)
     )
 
     return VideoSessionResponse(
@@ -257,6 +264,11 @@ async def end_video_session(
             "user_id": current_user.id,
             "duration_seconds": duration_seconds,
         },
+    )
+
+    # Notify frontend that ARIA avatar has stopped speaking
+    await ws_manager.send_to_user(
+        current_user.id, AriaSpeakingEvent(is_speaking=False)
     )
 
     return VideoSessionResponse(

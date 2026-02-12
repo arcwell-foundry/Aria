@@ -80,6 +80,35 @@ class ActionQueueService:
                 "status": initial_status,
             },
         )
+
+        # Broadcast action.pending WebSocket event for pending actions
+        if initial_status == ActionStatus.PENDING.value:
+            try:
+                from src.core.ws import ws_manager
+
+                await ws_manager.send_action_pending(
+                    user_id=user_id,
+                    action_id=action["id"],
+                    title=data.title,
+                    agent=data.agent.value,
+                    risk_level=data.risk_level.value,
+                    description=data.description,
+                    payload=data.payload,
+                )
+                logger.info(
+                    "ActionPendingEvent broadcast via WebSocket",
+                    extra={
+                        "action_id": action["id"],
+                        "user_id": user_id,
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to broadcast ActionPendingEvent via WebSocket",
+                    extra={"action_id": action["id"]},
+                    exc_info=True,
+                )
+
         return action
 
     async def approve_action(

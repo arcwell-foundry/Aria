@@ -16,12 +16,12 @@ from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
 from src.core.llm import LLMClient
-from src.memory.episodic import Episode, EpisodicMemory
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
 from src.memory.conversation import ConversationService
 from src.memory.digital_twin import DigitalTwin
+from src.memory.episodic import Episode, EpisodicMemory
 from src.memory.priming import ConversationContext, ConversationPrimingService
 from src.memory.salience import SalienceService
 from src.memory.working import WorkingMemoryManager
@@ -756,13 +756,39 @@ class ChatService:
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
+        # Build rich_content from skill execution results
+        rich_content: list[dict[str, Any]] = []
+        ui_commands: list[dict[str, Any]] = []
+        suggestions: list[str] = []
+
+        if skill_result:
+            if skill_result.get("status") == "pending_approval":
+                rich_content.append({
+                    "type": "execution_plan",
+                    "data": {
+                        "plan_id": skill_result.get("plan_id"),
+                        "risk_level": skill_result.get("risk_level"),
+                        "reasoning": skill_result.get("reasoning"),
+                        "steps": skill_result.get("steps", []),
+                    },
+                })
+            elif skill_result.get("working_memory"):
+                # Completed skill execution — surface artifacts as rich content
+                for entry in skill_result["working_memory"]:
+                    artifacts = entry.get("artifacts") or {}
+                    if artifacts.get("rich_content_type"):
+                        rich_content.append({
+                            "type": artifacts["rich_content_type"],
+                            "data": artifacts,
+                        })
+
         result: dict[str, Any] = {
             "message": response_text,
             "citations": citations,
             "conversation_id": conversation_id,
-            "rich_content": [],
-            "ui_commands": [],
-            "suggestions": [],
+            "rich_content": rich_content,
+            "ui_commands": ui_commands,
+            "suggestions": suggestions,
             "timing": {
                 "memory_query_ms": round(memory_ms, 2),
                 "proactive_query_ms": round(proactive_ms, 2),

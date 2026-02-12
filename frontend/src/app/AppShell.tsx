@@ -20,6 +20,7 @@ import { CompactAvatar } from '@/components/avatar';
 import { useNavigationStore, type NavigationState } from '@/stores/navigationStore';
 import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
+import { useWebSocketStatus } from '@/hooks/useWebSocketStatus';
 
 /**
  * Routes where the right IntelPanel should be hidden.
@@ -37,6 +38,7 @@ function shouldShowPanel(pathname: string): boolean {
 export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { isConnected } = useWebSocketStatus();
   const setIntelPanelVisible = useNavigationStore(
     (s: NavigationState) => s.setIntelPanelVisible,
   );
@@ -67,7 +69,7 @@ export function AppShell() {
     <>
       <div className="flex h-screen w-screen overflow-hidden" data-aria-id="app-shell">
         {/* Left: Sidebar — always visible, always dark */}
-        <Sidebar />
+        <Sidebar isARIAActive={isConnected} />
 
         {/* Center: Active route content */}
         <main

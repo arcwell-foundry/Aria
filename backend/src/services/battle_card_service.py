@@ -32,6 +32,10 @@ class BattleCardCreate(BaseModel):
     objection_handlers: list[dict[str, Any]] = Field(
         default_factory=list, description="Common objections and responses"
     )
+    analysis: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Competitive analysis: metrics, strategies, feature_gaps, critical_gaps",
+    )
 
 
 class BattleCardUpdate(BaseModel):
@@ -46,6 +50,7 @@ class BattleCardUpdate(BaseModel):
     pricing: dict[str, Any] | None = None
     differentiation: list[dict[str, Any]] | None = None
     objection_handlers: list[dict[str, Any]] | None = None
+    analysis: dict[str, Any] | None = None
 
 
 class BattleCardService:
@@ -82,6 +87,7 @@ class BattleCardService:
                     "pricing": data.pricing,
                     "differentiation": data.differentiation,
                     "objection_handlers": data.objection_handlers,
+                    "analysis": data.analysis,
                     "update_source": "manual",
                 }
             )
@@ -203,6 +209,7 @@ class BattleCardService:
             "pricing",
             "differentiation",
             "objection_handlers",
+            "analysis",
         ]:
             new_value = getattr(data, field, None)
             if new_value is not None and new_value != current.get(field):

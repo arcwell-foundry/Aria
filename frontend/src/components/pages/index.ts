@@ -8,3 +8,5 @@ export { CommunicationsPage } from './CommunicationsPage';
 export { DraftDetailPage } from './DraftDetailPage';
 export { ActionsPage } from './ActionsPage';
 export { SettingsPage } from './SettingsPage';
+export { LoginPage } from './LoginPage';
+export { SignupPage } from './SignupPage';

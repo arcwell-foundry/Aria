@@ -14,6 +14,7 @@ class WSEventType(str, Enum):
     ACTION_PENDING = "action.pending"
     PROGRESS_UPDATE = "progress.update"
     SIGNAL_DETECTED = "signal.detected"
+    ARIA_SPEAKING = "aria.speaking"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -42,6 +43,13 @@ class ThinkingEvent(WSEvent):
     """ARIA is processing/thinking indicator."""
 
     type: WSEventType = WSEventType.THINKING
+
+
+class AriaSpeakingEvent(WSEvent):
+    """ARIA avatar speaking state change."""
+
+    type: WSEventType = WSEventType.ARIA_SPEAKING
+    is_speaking: bool
 
 
 class ActionPendingEvent(WSEvent):

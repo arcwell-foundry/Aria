@@ -8,6 +8,8 @@
  * - Sections: How to Win, Feature Gap Analysis, Critical Gaps, Objection Handling
  * - data-aria-id on all key elements
  *
+ * All data sourced from the battle_cards API (analysis JSONB column).
+ *
  * @example
  * <BattleCardDetail competitorId="Lonza" />
  */
@@ -34,141 +36,26 @@ import { cn } from '@/utils/cn';
 import { useBattleCard, useBattleCards } from '@/hooks/useBattleCards';
 import { CopyButton } from '@/components/common/CopyButton';
 import { EmptyState } from '@/components/common/EmptyState';
-import type { BattleCard, BattleCardObjectionHandler } from '@/api/battleCards';
+import type {
+  BattleCard,
+  BattleCardObjectionHandler,
+  BattleCardStrategy,
+  BattleCardFeatureGap,
+  BattleCardCriticalGap,
+} from '@/api/battleCards';
 
 // ============================================================================
-// MOCK DATA (Will be replaced by enhanced API in future)
+// ICON MAPPING
 // ============================================================================
 
-interface MockMetrics {
-  marketCapGap: number;
-  winRate: number;
-  pricingDelta: number;
-  lastSignalDays: number;
-}
-
-interface MockStrategy {
-  id: string;
-  title: string;
-  description: string;
-  icon: typeof Zap;
-  agent: string;
-  updatedAt: string;
-}
-
-interface MockFeatureGap {
-  feature: string;
-  ariaScore: number; // 0-100
-  competitorScore: number; // 0-100
-  ariaLeads: boolean;
-}
-
-interface MockCriticalGap {
-  id: string;
-  description: string;
-  isAdvantage: boolean; // true = ARIA advantage, false = competitor advantage
-}
-
-const MOCK_METRICS: Record<string, MockMetrics> = {
-  'Lonza': { marketCapGap: 12.5, winRate: 42, pricingDelta: 8.3, lastSignalDays: 2 },
-  'Catalent': { marketCapGap: -8.2, winRate: 58, pricingDelta: -3.1, lastSignalDays: 1 },
-  'Thermo Fisher': { marketCapGap: 45.3, winRate: 35, pricingDelta: 15.2, lastSignalDays: 6 },
-  'WuXi AppTec': { marketCapGap: -3.1, winRate: 68, pricingDelta: -5.7, lastSignalDays: 0 },
-  'Samsung Biologics': { marketCapGap: 22.8, winRate: 51, pricingDelta: 12.0, lastSignalDays: 14 },
-  'Eurofins': { marketCapGap: -15.6, winRate: 72, pricingDelta: -8.9, lastSignalDays: 2 },
+/** Map strategy icon strings from the API to Lucide icon components. */
+const STRATEGY_ICON_MAP: Record<string, typeof Zap> = {
+  zap: Zap,
+  target: Target,
+  clock: Clock,
+  shield: Shield,
 };
 
-const MOCK_STRATEGIES: Record<string, MockStrategy[]> = {
-  'Lonza': [
-    { id: '1', title: 'Emphasize Speed', description: 'Highlight our 40% faster turnaround for small batches', icon: Zap, agent: 'Hunter', updatedAt: '2026-02-10T14:30:00Z' },
-    { id: '2', title: 'Target Emerging Biotech', description: 'Focus on Series A-C companies underserved by Lonza\'s enterprise focus', icon: Target, agent: 'Strategist', updatedAt: '2026-02-09T10:15:00Z' },
-    { id: '3', title: 'Quick Win: Pricing', description: 'Offer 15% discount on first project to dislodge incumbent', icon: Clock, agent: 'Operator', updatedAt: '2026-02-08T16:45:00Z' },
-    { id: '4', title: 'Defend on Quality', description: 'Prepare case studies showing superior analytical capabilities', icon: Shield, agent: 'Analyst', updatedAt: '2026-02-07T09:00:00Z' },
-  ],
-  'Catalent': [
-    { id: '1', title: 'Lead with Agility', description: 'Our decision-making is 3x faster for scope changes', icon: Zap, agent: 'Hunter', updatedAt: '2026-02-10T11:20:00Z' },
-    { id: '2', title: 'Target Gene Therapy', description: 'Position strongly in cell/gene where Catalent is weak', icon: Target, agent: 'Strategist', updatedAt: '2026-02-09T15:30:00Z' },
-    { id: '3', title: 'Quick Win: Capacity', description: 'Offer immediate slot availability for Q2 projects', icon: Clock, agent: 'Operator', updatedAt: '2026-02-08T10:00:00Z' },
-    { id: '4', title: 'Defend on Scale', description: 'Show successful large-scale production track record', icon: Shield, agent: 'Analyst', updatedAt: '2026-02-07T14:15:00Z' },
-  ],
-  'Thermo Fisher': [
-    { id: '1', title: 'Highlight Partnership', description: 'We act as partners, not vendors - dedicated teams', icon: Zap, agent: 'Hunter', updatedAt: '2026-02-09T09:00:00Z' },
-    { id: '2', title: 'Target Mid-Market', description: 'Focus on companies too small for Thermo\'s attention', icon: Target, agent: 'Strategist', updatedAt: '2026-02-08T12:30:00Z' },
-    { id: '3', title: 'Quick Win: Responsiveness', description: 'Guarantee 24-hour response on all inquiries', icon: Clock, agent: 'Operator', updatedAt: '2026-02-07T16:00:00Z' },
-    { id: '4', title: 'Defend on Integration', description: 'Show seamless end-to-end process management', icon: Shield, agent: 'Analyst', updatedAt: '2026-02-06T10:45:00Z' },
-  ],
-};
-
-const DEFAULT_STRATEGIES: MockStrategy[] = [
-  { id: '1', title: 'Lead with Value', description: 'Focus on unique value propositions', icon: Zap, agent: 'Hunter', updatedAt: new Date().toISOString() },
-  { id: '2', title: 'Strategic Positioning', description: 'Identify and target underserved market segments', icon: Target, agent: 'Strategist', updatedAt: new Date().toISOString() },
-  { id: '3', title: 'Quick Win Available', description: 'Leverage immediate competitive advantages', icon: Clock, agent: 'Operator', updatedAt: new Date().toISOString() },
-  { id: '4', title: 'Defensive Strategy', description: 'Prepare responses to common objections', icon: Shield, agent: 'Analyst', updatedAt: new Date().toISOString() },
-];
-
-const MOCK_FEATURE_GAPS: Record<string, MockFeatureGap[]> = {
-  'Lonza': [
-    { feature: 'Analytical Capabilities', ariaScore: 85, competitorScore: 75, ariaLeads: true },
-    { feature: 'Small Batch Speed', ariaScore: 92, competitorScore: 65, ariaLeads: true },
-    { feature: 'Global Footprint', ariaScore: 45, competitorScore: 88, ariaLeads: false },
-    { feature: 'Regulatory Expertise', ariaScore: 78, competitorScore: 82, ariaLeads: false },
-    { feature: 'Cost Competitiveness', ariaScore: 70, competitorScore: 72, ariaLeads: false },
-    { feature: 'Technology Platform', ariaScore: 80, competitorScore: 78, ariaLeads: true },
-  ],
-  'Catalent': [
-    { feature: 'Project Management', ariaScore: 88, competitorScore: 72, ariaLeads: true },
-    { feature: 'Gene Therapy Expertise', ariaScore: 75, competitorScore: 60, ariaLeads: true },
-    { feature: 'Manufacturing Scale', ariaScore: 55, competitorScore: 90, ariaLeads: false },
-    { feature: 'Supply Chain', ariaScore: 65, competitorScore: 85, ariaLeads: false },
-    { feature: 'Pricing Flexibility', ariaScore: 82, competitorScore: 68, ariaLeads: true },
-    { feature: 'Client Communication', ariaScore: 90, competitorScore: 70, ariaLeads: true },
-  ],
-  'Thermo Fisher': [
-    { feature: 'Personalized Service', ariaScore: 92, competitorScore: 55, ariaLeads: true },
-    { feature: 'Mid-Market Focus', ariaScore: 88, competitorScore: 45, ariaLeads: true },
-    { feature: 'Product Breadth', ariaScore: 40, competitorScore: 95, ariaLeads: false },
-    { feature: 'Brand Recognition', ariaScore: 50, competitorScore: 92, ariaLeads: false },
-    { feature: 'Technical Expertise', ariaScore: 78, competitorScore: 80, ariaLeads: false },
-    { feature: 'Responsiveness', ariaScore: 85, competitorScore: 65, ariaLeads: true },
-  ],
-};
-
-const DEFAULT_FEATURE_GAPS: MockFeatureGap[] = [
-  { feature: 'Core Competency', ariaScore: 75, competitorScore: 75, ariaLeads: false },
-  { feature: 'Market Position', ariaScore: 70, competitorScore: 70, ariaLeads: false },
-  { feature: 'Service Quality', ariaScore: 80, competitorScore: 75, ariaLeads: true },
-  { feature: 'Pricing', ariaScore: 65, competitorScore: 70, ariaLeads: false },
-];
-
-const MOCK_CRITICAL_GAPS: Record<string, MockCriticalGap[]> = {
-  'Lonza': [
-    { id: '1', description: 'Faster turnaround on small batch projects (avg. 4 weeks vs 6 weeks)', isAdvantage: true },
-    { id: '2', description: 'More flexible contract terms for early-stage companies', isAdvantage: true },
-    { id: '3', description: 'Dedicated project manager assigned to each client', isAdvantage: true },
-    { id: '4', description: 'Competitor has larger global manufacturing footprint (6 sites vs 3)', isAdvantage: false },
-    { id: '5', description: 'Competitor offers integrated supply chain services', isAdvantage: false },
-  ],
-  'Catalent': [
-    { id: '1', description: 'Stronger gene therapy and cell therapy capabilities', isAdvantage: true },
-    { id: '2', description: 'More responsive to scope changes (avg. 2 days vs 7 days)', isAdvantage: true },
-    { id: '3', description: 'Better pricing transparency and predictability', isAdvantage: true },
-    { id: '4', description: 'Competitor has significantly larger manufacturing capacity', isAdvantage: false },
-    { id: '5', description: 'Competitor offers broader range of dosage forms', isAdvantage: false },
-  ],
-  'Thermo Fisher': [
-    { id: '1', description: 'Higher touch, more personalized client experience', isAdvantage: true },
-    { id: '2', description: 'Faster decision-making on scope changes', isAdvantage: true },
-    { id: '3', description: 'More attention given to mid-market clients', isAdvantage: true },
-    { id: '4', description: 'Competitor has vastly superior product portfolio breadth', isAdvantage: false },
-    { id: '5', description: 'Competitor has stronger brand recognition globally', isAdvantage: false },
-  ],
-};
-
-const DEFAULT_CRITICAL_GAPS: MockCriticalGap[] = [
-  { id: '1', description: 'Personalized client service approach', isAdvantage: true },
-  { id: '2', description: 'Flexible engagement models', isAdvantage: true },
-  { id: '3', description: 'Competitor may have broader market presence', isAdvantage: false },
-];
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -206,16 +93,28 @@ function formatRelativeTime(dateStr: string): string {
   return `${months}mo ago`;
 }
 
-function formatLastSignal(days: number): string {
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 7) return `${days} days ago`;
-  if (days < 30) {
-    const weeks = Math.floor(days / 7);
+function formatLastSignal(dateStr: string | null): string {
+  if (!dateStr) return 'No signals';
+
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 30) {
+    const weeks = Math.floor(diffDays / 7);
     return `${weeks}w ago`;
   }
-  const months = Math.floor(days / 30);
+  const months = Math.floor(diffDays / 30);
   return `${months}mo ago`;
+}
+
+/** Extract the win rate from a battle card's analysis, defaulting to 50. */
+function getCardWinRate(card: BattleCard): number {
+  return card.analysis?.metrics?.win_rate ?? 50;
 }
 
 // ============================================================================
@@ -317,23 +216,24 @@ function Section({ title, agent, updatedAt, children, className = '', dark = fal
 
 // Strategy Card for How to Win section
 interface StrategyCardProps {
-  strategy: MockStrategy;
+  strategy: BattleCardStrategy;
+  index: number;
 }
 
-function StrategyCard({ strategy }: StrategyCardProps) {
-  const Icon = strategy.icon;
+function StrategyCard({ strategy, index }: StrategyCardProps) {
+  const StrategyIcon = STRATEGY_ICON_MAP[strategy.icon] ?? Zap;
 
   return (
     <div
       className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-4 hover:border-[var(--accent)] transition-colors duration-200"
-      data-aria-id={`strategy-${strategy.id}`}
+      data-aria-id={`strategy-${index}`}
     >
       <div className="flex items-start gap-3">
         <div
           className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
           style={{ backgroundColor: 'var(--bg-subtle)' }}
         >
-          <Icon className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+          <StrategyIcon className="w-5 h-5" style={{ color: 'var(--accent)' }} />
         </div>
         <div className="flex-1 min-w-0">
           <h3
@@ -356,12 +256,13 @@ function StrategyCard({ strategy }: StrategyCardProps) {
 
 // Feature Gap Bar
 interface FeatureGapBarProps {
-  gap: MockFeatureGap;
+  gap: BattleCardFeatureGap;
 }
 
 function FeatureGapBar({ gap }: FeatureGapBarProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const delta = gap.ariaScore - gap.competitorScore;
+  const ariaLeads = gap.aria_score >= gap.competitor_score;
+  const delta = gap.aria_score - gap.competitor_score;
 
   return (
     <div
@@ -378,7 +279,7 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
         >
           {gap.feature}
         </span>
-        {gap.ariaLeads ? (
+        {ariaLeads ? (
           <CircleCheck className="w-4 h-4 text-emerald-500" />
         ) : (
           <AlertCircle className="w-4 h-4 text-amber-500" />
@@ -399,7 +300,7 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
             <div
               className="h-full rounded-full transition-all duration-300"
               style={{
-                width: `${gap.ariaScore}%`,
+                width: `${gap.aria_score}%`,
                 backgroundColor: '#2E66FF',
               }}
             />
@@ -408,7 +309,7 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
             className="text-xs w-8 text-right font-mono"
             style={{ color: 'var(--text-secondary)' }}
           >
-            {gap.ariaScore}
+            {gap.aria_score}
           </span>
         </div>
 
@@ -424,7 +325,7 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
             <div
               className="h-full rounded-full transition-all duration-300"
               style={{
-                width: `${gap.competitorScore}%`,
+                width: `${gap.competitor_score}%`,
                 backgroundColor: '#64748B',
               }}
             />
@@ -433,7 +334,7 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
             className="text-xs w-8 text-right font-mono"
             style={{ color: 'var(--text-secondary)' }}
           >
-            {gap.competitorScore}
+            {gap.competitor_score}
           </span>
         </div>
       </div>
@@ -455,16 +356,17 @@ function FeatureGapBar({ gap }: FeatureGapBarProps) {
 
 // Critical Gap Item
 interface CriticalGapItemProps {
-  gap: MockCriticalGap;
+  gap: BattleCardCriticalGap;
+  index: number;
 }
 
-function CriticalGapItem({ gap }: CriticalGapItemProps) {
+function CriticalGapItem({ gap, index }: CriticalGapItemProps) {
   return (
     <div
       className="flex items-start gap-3 py-2"
-      data-aria-id={`critical-gap-${gap.id}`}
+      data-aria-id={`critical-gap-${index}`}
     >
-      {gap.isAdvantage ? (
+      {gap.is_advantage ? (
         <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
       ) : (
         <XCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
@@ -544,13 +446,13 @@ interface CompetitorDropdownProps {
   competitors: BattleCard[];
   selectedName: string;
   onSelect: (name: string) => void;
-  getWinRate: (name: string) => number;
 }
 
-function CompetitorDropdown({ competitors, selectedName, onSelect, getWinRate }: CompetitorDropdownProps) {
+function CompetitorDropdown({ competitors, selectedName, onSelect }: CompetitorDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const selectedWinRate = getWinRate(selectedName);
+  const selectedCard = competitors.find(c => c.competitor_name === selectedName);
+  const selectedWinRate = selectedCard ? getCardWinRate(selectedCard) : 50;
 
   return (
     <div className="relative" data-aria-id="competitor-dropdown">
@@ -585,7 +487,7 @@ function CompetitorDropdown({ competitors, selectedName, onSelect, getWinRate }:
             className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-lg z-20 py-1"
           >
             {competitors.map((comp) => {
-              const winRate = getWinRate(comp.competitor_name);
+              const winRate = getCardWinRate(comp);
               const isSelected = comp.competitor_name === selectedName;
               return (
                 <button
@@ -675,35 +577,32 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
   // Fetch the selected battle card
   const { data: battleCard, isLoading: isLoadingCard, error } = useBattleCard(decodedName);
 
-  // Get mock data
+  // Extract analysis data from the API response
   const metrics = useMemo(() => {
-    if (!decodedName) return { marketCapGap: 0, winRate: 50, pricingDelta: 0, lastSignalDays: 7 };
-    return MOCK_METRICS[decodedName] || { marketCapGap: 0, winRate: 50, pricingDelta: 0, lastSignalDays: 7 };
-  }, [decodedName]);
+    const m = battleCard?.analysis?.metrics;
+    return {
+      marketCapGap: m?.market_cap_gap ?? 0,
+      winRate: m?.win_rate ?? 50,
+      pricingDelta: m?.pricing_delta ?? 0,
+      lastSignalAt: m?.last_signal_at ?? null,
+    };
+  }, [battleCard]);
 
   const strategies = useMemo(() => {
-    if (!decodedName) return DEFAULT_STRATEGIES;
-    return MOCK_STRATEGIES[decodedName] || DEFAULT_STRATEGIES;
-  }, [decodedName]);
+    return battleCard?.analysis?.strategies ?? [];
+  }, [battleCard]);
 
   const featureGaps = useMemo(() => {
-    if (!decodedName) return DEFAULT_FEATURE_GAPS;
-    return MOCK_FEATURE_GAPS[decodedName] || DEFAULT_FEATURE_GAPS;
-  }, [decodedName]);
+    return battleCard?.analysis?.feature_gaps ?? [];
+  }, [battleCard]);
 
   const criticalGaps = useMemo(() => {
-    if (!decodedName) return DEFAULT_CRITICAL_GAPS;
-    return MOCK_CRITICAL_GAPS[decodedName] || DEFAULT_CRITICAL_GAPS;
-  }, [decodedName]);
+    return battleCard?.analysis?.critical_gaps ?? [];
+  }, [battleCard]);
 
   // Separate advantages and gaps
-  const advantages = criticalGaps.filter(g => g.isAdvantage);
-  const gaps = criticalGaps.filter(g => !g.isAdvantage);
-
-  // Get win rate for a competitor
-  const getWinRateForCompetitor = (name: string): number => {
-    return MOCK_METRICS[name]?.winRate ?? 50;
-  };
+  const advantages = criticalGaps.filter(g => g.is_advantage);
+  const disadvantages = criticalGaps.filter(g => !g.is_advantage);
 
   // Handle competitor selection
   const handleCompetitorSelect = (name: string) => {
@@ -808,7 +707,6 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
                 competitors={allBattleCards}
                 selectedName={battleCard.competitor_name}
                 onSelect={handleCompetitorSelect}
-                getWinRate={getWinRateForCompetitor}
               />
             )}
           </div>
@@ -848,7 +746,7 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
           />
           <MetricCard
             label="Last Signal"
-            value={formatLastSignal(metrics.lastSignalDays)}
+            value={formatLastSignal(metrics.lastSignalAt)}
             sublabel="intelligence detected"
           />
         </div>
@@ -856,69 +754,79 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
         {/* Sections */}
         <div className="space-y-6">
           {/* How to Win */}
-          <Section
-            title="How to Win"
-            agent="Hunter"
-            updatedAt={strategies[0]?.updatedAt || new Date().toISOString()}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {strategies.map((strategy) => (
-                <StrategyCard key={strategy.id} strategy={strategy} />
-              ))}
-            </div>
-          </Section>
+          {strategies.length > 0 && (
+            <Section
+              title="How to Win"
+              agent={strategies[0]?.agent ?? 'Hunter'}
+              updatedAt={battleCard.last_updated}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {strategies.map((strategy, index) => (
+                  <StrategyCard key={index} strategy={strategy} index={index} />
+                ))}
+              </div>
+            </Section>
+          )}
 
           {/* Feature Gap Analysis */}
-          <Section
-            title="Feature Gap Analysis"
-            agent="Analyst"
-            updatedAt={battleCard.last_updated}
-          >
-            <div className="space-y-4">
-              {featureGaps.map((gap, index) => (
-                <FeatureGapBar key={index} gap={gap} />
-              ))}
-            </div>
-          </Section>
+          {featureGaps.length > 0 && (
+            <Section
+              title="Feature Gap Analysis"
+              agent="Analyst"
+              updatedAt={battleCard.last_updated}
+            >
+              <div className="space-y-4">
+                {featureGaps.map((gap, index) => (
+                  <FeatureGapBar key={index} gap={gap} />
+                ))}
+              </div>
+            </Section>
+          )}
 
           {/* Critical Gaps */}
-          <Section
-            title="Critical Gaps"
-            agent="Strategist"
-            updatedAt={battleCard.last_updated}
-          >
-            {/* ARIA Advantages */}
-            <div className="mb-6">
-              <h3
-                className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
-                style={{ color: 'var(--success)' }}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                ARIA Advantages ({advantages.length})
-              </h3>
-              <div className="space-y-1">
-                {advantages.map((gap) => (
-                  <CriticalGapItem key={gap.id} gap={gap} />
-                ))}
-              </div>
-            </div>
+          {criticalGaps.length > 0 && (
+            <Section
+              title="Critical Gaps"
+              agent="Strategist"
+              updatedAt={battleCard.last_updated}
+            >
+              {/* ARIA Advantages */}
+              {advantages.length > 0 && (
+                <div className="mb-6">
+                  <h3
+                    className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
+                    style={{ color: 'var(--success)' }}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    ARIA Advantages ({advantages.length})
+                  </h3>
+                  <div className="space-y-1">
+                    {advantages.map((gap, index) => (
+                      <CriticalGapItem key={index} gap={gap} index={index} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {/* Competitor Advantages */}
-            <div>
-              <h3
-                className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
-                style={{ color: 'var(--warning)' }}
-              >
-                <XCircle className="w-3.5 h-3.5" />
-                Competitor Advantages ({gaps.length})
-              </h3>
-              <div className="space-y-1">
-                {gaps.map((gap) => (
-                  <CriticalGapItem key={gap.id} gap={gap} />
-                ))}
-              </div>
-            </div>
-          </Section>
+              {/* Competitor Advantages */}
+              {disadvantages.length > 0 && (
+                <div>
+                  <h3
+                    className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
+                    style={{ color: 'var(--warning)' }}
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    Competitor Advantages ({disadvantages.length})
+                  </h3>
+                  <div className="space-y-1">
+                    {disadvantages.map((gap, index) => (
+                      <CriticalGapItem key={index} gap={gap} index={advantages.length + index} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Section>
+          )}
 
           {/* Objection Handling */}
           <Section

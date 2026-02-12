@@ -9,6 +9,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import { MessageAvatar } from '@/components/conversation/MessageAvatar';
+import { RichContentRenderer } from '@/components/rich/RichContentRenderer';
 import type { Message } from '@/types/chat';
 
 interface TranscriptEntryProps {
@@ -56,18 +57,7 @@ export function TranscriptEntry({ message, isActive, isFirstInGroup }: Transcrip
 
         {/* Rich content cards */}
         {message.rich_content.length > 0 && (
-          <div className="mt-2 space-y-2">
-            {message.rich_content.map((rc, i) => (
-              <div
-                key={i}
-                className="rounded-lg bg-[#1A1A2E] border-l-2 border-[#2E66FF] px-3 py-2 text-xs text-[#E2E4E9]"
-              >
-                <span className="font-mono uppercase tracking-wider text-[#2E66FF] text-[10px]">
-                  {rc.type}
-                </span>
-              </div>
-            ))}
-          </div>
+          <RichContentRenderer items={message.rich_content} />
         )}
       </div>
     </div>

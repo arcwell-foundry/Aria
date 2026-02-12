@@ -105,6 +105,71 @@ async def _run_calendar_meeting_checks() -> None:
         logger.exception("Calendar meeting check scheduler run failed")
 
 
+async def _run_medium_action_timeout() -> None:
+    """Auto-approve MEDIUM risk actions that have been pending for over 30 minutes.
+
+    Queries aria_action_queue for actions with status='pending' and
+    risk_level='medium' where created_at is more than 30 minutes ago.
+    Updates their status to 'auto_approved' and sets approved_at.
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        cutoff = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+
+        # Find MEDIUM risk actions pending for more than 30 minutes
+        result = (
+            db.table("aria_action_queue")
+            .select("id, user_id, title")
+            .eq("status", "pending")
+            .eq("risk_level", "medium")
+            .lt("created_at", cutoff)
+            .execute()
+        )
+
+        actions = result.data or []
+        if not actions:
+            return
+
+        logger.info(
+            "Medium action timeout: auto-approving %d actions",
+            len(actions),
+        )
+
+        now = datetime.now(UTC).isoformat()
+        action_ids = [a["id"] for a in actions]
+
+        # Batch update all timed-out actions
+        (
+            db.table("aria_action_queue")
+            .update(
+                {
+                    "status": "auto_approved",
+                    "approved_at": now,
+                }
+            )
+            .in_("id", action_ids)
+            .execute()
+        )
+
+        for action in actions:
+            logger.info(
+                "Medium action auto-approved after 30-min timeout",
+                extra={
+                    "action_id": action["id"],
+                    "user_id": action["user_id"],
+                    "title": action["title"],
+                },
+            )
+
+    except Exception:
+        logger.exception("Medium action timeout scheduler run failed")
+
+
 async def _run_ooda_goal_checks() -> None:
     """Run a single OODA iteration for each active goal.
 
@@ -241,12 +306,20 @@ async def start_scheduler() -> None:
             name="OODA goal monitoring",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_medium_action_timeout,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="medium_action_timeout",
+            name="Medium action 30-min auto-approve timeout",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "Background scheduler started — ambient gaps at 06:00 daily, "
             "calendar meeting checks every 30 min, "
             "predictive pre-executor every 30 min, "
-            "OODA goal monitoring every 30 min"
+            "OODA goal monitoring every 30 min, "
+            "medium action timeout every 5 min"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")

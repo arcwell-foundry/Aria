@@ -16,6 +16,38 @@ export interface BattleCardObjectionHandler {
   response: string;
 }
 
+export interface BattleCardMetrics {
+  market_cap_gap: number;
+  win_rate: number;
+  pricing_delta: number;
+  last_signal_at: string | null;
+}
+
+export interface BattleCardStrategy {
+  title: string;
+  description: string;
+  icon: string;
+  agent: string;
+}
+
+export interface BattleCardFeatureGap {
+  feature: string;
+  aria_score: number;
+  competitor_score: number;
+}
+
+export interface BattleCardCriticalGap {
+  description: string;
+  is_advantage: boolean;
+}
+
+export interface BattleCardAnalysis {
+  metrics?: BattleCardMetrics;
+  strategies?: BattleCardStrategy[];
+  feature_gaps?: BattleCardFeatureGap[];
+  critical_gaps?: BattleCardCriticalGap[];
+}
+
 export interface BattleCard {
   id: string;
   company_id: string;
@@ -27,8 +59,9 @@ export interface BattleCard {
   pricing: BattleCardPricing;
   differentiation: BattleCardDifferentiation[];
   objection_handlers: BattleCardObjectionHandler[];
+  analysis: BattleCardAnalysis;
   last_updated: string;
-  update_source: "manual" | "auto";
+  update_source: "manual" | "auto" | "demo_seed";
 }
 
 export interface BattleCardChange {
@@ -50,6 +83,7 @@ export interface CreateBattleCardData {
   pricing?: BattleCardPricing;
   differentiation?: BattleCardDifferentiation[];
   objection_handlers?: BattleCardObjectionHandler[];
+  analysis?: BattleCardAnalysis;
 }
 
 export interface UpdateBattleCardData {
@@ -59,6 +93,7 @@ export interface UpdateBattleCardData {
   pricing?: BattleCardPricing;
   differentiation?: BattleCardDifferentiation[];
   objection_handlers?: BattleCardObjectionHandler[];
+  analysis?: BattleCardAnalysis;
 }
 
 // API functions

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { Send } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -16,7 +16,17 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
   const setInputValue = useConversationStore((s) => s.setInputValue);
   const isStreaming = useConversationStore((s) => s.isStreaming);
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const canSend = inputValue.trim().length > 0 && !disabled && !isStreaming;
+
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [inputValue]);
 
   const handleSubmit = useCallback(
     (e?: FormEvent) => {
@@ -70,13 +80,14 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
         />
 
         <textarea
+          ref={textareaRef}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isListening ? 'Listening...' : placeholder}
           rows={1}
           disabled={disabled || isListening}
-          className="flex-1 resize-none bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none min-h-[36px] max-h-[120px] py-1.5"
+          className="flex-1 resize-none bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none min-h-[36px] max-h-[120px] py-1.5 overflow-y-auto"
           style={{ fontFamily: 'var(--font-sans)' }}
           data-aria-id="message-input"
         />

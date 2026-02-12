@@ -10,7 +10,7 @@
  * through the navigation store.
  */
 
-import { useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AudioLines,
@@ -28,6 +28,7 @@ import {
 } from '@/stores/navigationStore';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '@/components/primitives/Avatar';
+import { wsManager } from '@/core/WebSocketManager';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -151,10 +152,63 @@ function NavItem({
 // Sidebar
 // ---------------------------------------------------------------------------
 
-export function Sidebar({ badges = {}, isARIAActive = true }: SidebarProps) {
+export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+
+  // ---------------------------------------------------------------------------
+  // Task 2: Derive isARIAActive from WebSocket connection state
+  // ---------------------------------------------------------------------------
+  const [wsConnected, setWsConnected] = useState(() => wsManager.isConnected);
+
+  useEffect(() => {
+    const handleConnected = () => {
+      setWsConnected(true);
+    };
+    const handleError = () => {
+      setWsConnected(false);
+    };
+
+    wsManager.on('connection.established', handleConnected);
+    wsManager.on('connection.error', handleError);
+
+    // Sync with current state on mount (in case connect happened before mount)
+    setWsConnected(wsManager.isConnected);
+
+    return () => {
+      wsManager.off('connection.established', handleConnected as (payload: unknown) => void);
+      wsManager.off('connection.error', handleError as (payload: unknown) => void);
+    };
+  }, []);
+
+  // Use prop if explicitly provided, otherwise derive from WebSocket state
+  const ariaActive = isARIAActive ?? wsConnected;
+
+  // ---------------------------------------------------------------------------
+  // Task 1: Listen for aria:sidebar-badge custom events from UICommandExecutor
+  // ---------------------------------------------------------------------------
+  const [eventBadges, setEventBadges] = useState<Partial<Record<SidebarItem, number>>>({});
+
+  useEffect(() => {
+    const handleBadgeEvent = (e: Event) => {
+      const { item, count } = (e as CustomEvent<{ item: SidebarItem; count: number }>).detail;
+      setEventBadges((prev) => ({ ...prev, [item]: count }));
+    };
+
+    window.addEventListener('aria:sidebar-badge', handleBadgeEvent);
+    return () => {
+      window.removeEventListener('aria:sidebar-badge', handleBadgeEvent);
+    };
+  }, []);
+
+  // Merge prop badges with event-driven badges (event badges take precedence)
+  const mergedBadges = useMemo<Partial<Record<SidebarItem, number>>>(
+    () => ({ ...badges, ...eventBadges }),
+    [badges, eventBadges],
+  );
+
+  // ---------------------------------------------------------------------------
 
   const activeSidebarItem = useNavigationStore((s: NavigationState) => s.activeSidebarItem);
   const setActiveSidebarItem = useNavigationStore(
@@ -192,11 +246,11 @@ export function Sidebar({ badges = {}, isARIAActive = true }: SidebarProps) {
           key={entry.key}
           entry={entry}
           isActive={activeSidebarItem === entry.key}
-          badge={badges[entry.key]}
+          badge={mergedBadges[entry.key]}
           onClick={() => handleNav(entry)}
         />
       )),
-    [activeSidebarItem, badges, handleNav],
+    [activeSidebarItem, mergedBadges, handleNav],
   );
 
   return (
@@ -210,12 +264,12 @@ export function Sidebar({ badges = {}, isARIAActive = true }: SidebarProps) {
       {/* ----------------------------------------------------------------- */}
       <div className="flex items-center gap-2 px-5 py-6">
         <span
-          className={`text-xl tracking-tight text-[#E8E6E1] italic ${isARIAActive ? 'aria-logo-glow' : ''}`}
+          className={`text-xl tracking-tight text-[#E8E6E1] italic ${ariaActive ? 'aria-logo-glow' : ''}`}
           style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
         >
           ARIA
         </span>
-        {isARIAActive && (
+        {ariaActive && (
           <span className="aria-pulse-dot w-2 h-2 rounded-full bg-[#2E66FF]" />
         )}
       </div>
@@ -236,7 +290,7 @@ export function Sidebar({ badges = {}, isARIAActive = true }: SidebarProps) {
         <NavItem
           entry={SETTINGS_NAV}
           isActive={activeSidebarItem === 'settings'}
-          badge={badges.settings}
+          badge={mergedBadges.settings}
           onClick={() => handleNav(SETTINGS_NAV)}
         />
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useModalityStore } from '@/stores/modalityStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -36,6 +36,13 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   const streamingIdRef = useRef<string | null>(null);
 
+  const isBriefing = sessionType === 'briefing' || tavusSession.sessionType === 'briefing';
+
+  // Briefing playback state
+  const [isBriefingPlaying, setIsBriefingPlaying] = useState(true);
+  const [briefingProgress, setBriefingProgress] = useState(0);
+  const briefingProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Connect WebSocket on mount
   useEffect(() => {
     if (!user?.id || !session?.id) return;
@@ -60,6 +67,40 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
     deliverBriefing();
   }, [sessionType]);
+
+  // Track briefing progress based on aria.speaking events
+  useEffect(() => {
+    if (!isBriefing) return;
+
+    const handleBriefingSpeaking = (payload: unknown) => {
+      const data = payload as { is_speaking: boolean };
+      setIsBriefingPlaying(data.is_speaking);
+
+      if (data.is_speaking) {
+        // Start gradual progress increment while speaking
+        if (briefingProgressRef.current) clearInterval(briefingProgressRef.current);
+        briefingProgressRef.current = setInterval(() => {
+          setBriefingProgress((prev) => Math.min(prev + 1, 100));
+        }, 1000);
+      } else {
+        // Stop progress increment when not speaking
+        if (briefingProgressRef.current) {
+          clearInterval(briefingProgressRef.current);
+          briefingProgressRef.current = null;
+        }
+      }
+    };
+
+    wsManager.on(WS_EVENTS.ARIA_SPEAKING, handleBriefingSpeaking);
+
+    return () => {
+      wsManager.off(WS_EVENTS.ARIA_SPEAKING, handleBriefingSpeaking);
+      if (briefingProgressRef.current) {
+        clearInterval(briefingProgressRef.current);
+        briefingProgressRef.current = null;
+      }
+    };
+  }, [isBriefing]);
 
   // Wire up event listeners (same pattern as ARIAWorkspace + speaking events)
   useEffect(() => {
@@ -155,6 +196,46 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
   }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking]);
 
+  // Briefing control handlers
+  const handlePlayPause = useCallback(() => {
+    setIsBriefingPlaying((prev) => {
+      if (prev) {
+        // Pausing: stop progress and send interrupt to Tavus via WS
+        if (briefingProgressRef.current) {
+          clearInterval(briefingProgressRef.current);
+          briefingProgressRef.current = null;
+        }
+        wsManager.send(WS_EVENTS.USER_MESSAGE, {
+          message: '/briefing pause',
+          conversation_id: activeConversationId,
+        });
+      } else {
+        // Resuming: send resume to Tavus via WS
+        wsManager.send(WS_EVENTS.USER_MESSAGE, {
+          message: '/briefing resume',
+          conversation_id: activeConversationId,
+        });
+      }
+      return !prev;
+    });
+  }, [activeConversationId]);
+
+  const handleRewind = useCallback(() => {
+    // Cannot truly seek in a live Tavus stream; ask ARIA to repeat last point
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message: '/briefing repeat',
+      conversation_id: activeConversationId,
+    });
+  }, [activeConversationId]);
+
+  const handleForward = useCallback(() => {
+    // Cannot truly seek in a live Tavus stream; ask ARIA to skip to next point
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message: '/briefing next',
+      conversation_id: activeConversationId,
+    });
+  }, [activeConversationId]);
+
   const handleSend = useCallback(
     (message: string) => {
       addMessage({
@@ -172,8 +253,6 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     [addMessage, activeConversationId],
   );
 
-  const isBriefing = sessionType === 'briefing' || tavusSession.sessionType === 'briefing';
-
   return (
     <div
       className="flex-1 flex flex-col h-full"
@@ -189,11 +268,11 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           {isBriefing && (
             <div className="absolute bottom-8 z-10">
               <BriefingControls
-                progress={0}
-                isPlaying={true}
-                onPlayPause={() => {}}
-                onRewind={() => {}}
-                onForward={() => {}}
+                progress={briefingProgress}
+                isPlaying={isBriefingPlaying}
+                onPlayPause={handlePlayPause}
+                onRewind={handleRewind}
+                onForward={handleForward}
               />
             </div>
           )}

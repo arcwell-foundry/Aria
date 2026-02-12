@@ -544,7 +544,7 @@ class RetroactiveEnrichmentService:
                 try:
                     # Find lead memory for this entity
                     response = (
-                        self._db.table("lead_memory")
+                        self._db.table("lead_memories")
                         .select("id")
                         .eq("user_id", user_id)
                         .eq("company_name", result.entity_name)
