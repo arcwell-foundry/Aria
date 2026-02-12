@@ -39,9 +39,13 @@ export function useEmotionDetection() {
       if (now - lastSentRef.current < DEBOUNCE_MS) return;
       lastSentRef.current = now;
 
+      const token = localStorage.getItem('access_token');
       fetch('/api/v1/perception/emotion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           emotion: reading.emotion,
           confidence: reading.confidence,

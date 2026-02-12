@@ -29,37 +29,40 @@ export function EmotionIndicator() {
   const currentEmotion = usePerceptionStore((s) => s.currentEmotion);
   const engagementLevel = usePerceptionStore((s) => s.engagementLevel);
 
-  if (!currentEmotion) return null;
-
-  const label = EMOTION_LABELS[currentEmotion.emotion] ?? currentEmotion.emotion;
+  const label = currentEmotion
+    ? (EMOTION_LABELS[currentEmotion.emotion] ?? currentEmotion.emotion)
+    : '';
   const color = ENGAGEMENT_COLORS[engagementLevel];
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: -4 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.3 }}
-        className="flex items-center gap-1.5"
-        data-aria-id="emotion-indicator"
-      >
-        <div
-          className="w-1.5 h-1.5 rounded-full"
-          style={{ backgroundColor: color }}
-        />
-        <span
-          className="font-mono text-[9px] tracking-widest uppercase select-none"
-          style={{ color }}
+      {currentEmotion && (
+        <motion.div
+          key="emotion-readout"
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.3 }}
+          className="flex items-center gap-1.5"
+          data-aria-id="emotion-indicator"
         >
-          {label}
-        </span>
-        {currentEmotion.confidence > 0.8 && (
-          <span className="font-mono text-[8px] text-[var(--text-secondary)] opacity-40">
-            {Math.round(currentEmotion.confidence * 100)}%
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ backgroundColor: color }}
+          />
+          <span
+            className="font-mono text-[9px] tracking-widest uppercase select-none"
+            style={{ color }}
+          >
+            {label}
           </span>
-        )}
-      </motion.div>
+          {currentEmotion.confidence > 0.8 && (
+            <span className="font-mono text-[8px] text-[var(--text-secondary)] opacity-40">
+              {Math.round(currentEmotion.confidence * 100)}%
+            </span>
+          )}
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 }
