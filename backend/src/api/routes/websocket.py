@@ -148,7 +148,7 @@ async def _handle_user_message(
     """
     from src.api.routes.chat import _analyze_ui_commands, _generate_suggestions
     from src.db.supabase import get_supabase_client
-    from src.services.chat import ChatService
+    from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
     from src.services.conversations import ConversationService
 
     payload = data.get("payload", {})
@@ -195,7 +195,7 @@ async def _handle_user_message(
 
     try:
         service = ChatService()
-        memory_types = ["episodic", "semantic", "procedural", "prospective", "lead"]
+        memory_types = DEFAULT_MEMORY_TYPES
 
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(

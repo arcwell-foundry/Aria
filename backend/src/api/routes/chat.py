@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from src.api.deps import CurrentUser
 from src.core.exceptions import NotFoundError, sanitize_error
 from src.db.supabase import get_supabase_client
-from src.services.chat import ChatService
+from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
 from src.services.conversations import ConversationService
 
 logger = logging.getLogger(__name__)
@@ -205,13 +205,7 @@ async def chat_stream(
     async def event_stream():  # noqa: C901
         total_start = time.perf_counter()
 
-        memory_types = request.memory_types or [
-            "episodic",
-            "semantic",
-            "procedural",
-            "prospective",
-            "lead",
-        ]
+        memory_types = request.memory_types or DEFAULT_MEMORY_TYPES
 
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(

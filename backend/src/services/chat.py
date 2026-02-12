@@ -104,6 +104,11 @@ IMPORTANT: The user appears to be under high cognitive load right now. Adapt you
 - Use bullet points for clarity
 """
 
+# Default memory types queried for every chat interaction.
+# All three chat paths (REST, SSE, WebSocket) must use this constant
+# so that responses are equally informed regardless of transport.
+DEFAULT_MEMORY_TYPES: list[str] = ["episodic", "semantic", "procedural", "prospective", "lead"]
+
 # Skill detection confidence threshold
 _SKILL_CONFIDENCE_THRESHOLD = 0.7
 
@@ -575,7 +580,7 @@ class ChatService:
         total_start = time.perf_counter()
 
         if memory_types is None:
-            memory_types = ["episodic", "semantic", "procedural", "prospective"]
+            memory_types = DEFAULT_MEMORY_TYPES
 
         # Get or create working memory for this conversation
         working_memory = await self._working_memory_manager.get_or_create(
