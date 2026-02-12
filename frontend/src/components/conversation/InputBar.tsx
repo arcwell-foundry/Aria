@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Mic, Send } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { VoiceIndicator } from './VoiceIndicator';
 
 interface InputBarProps {
   onSend: (message: string) => void;
@@ -36,6 +38,12 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
     [handleSubmit],
   );
 
+  const { isListening, isSupported, toggleListening } = useVoiceInput({
+    onTranscript: (text) => {
+      onSend(text);
+    },
+  });
+
   return (
     <div className="relative px-6 pb-4 pt-2" data-aria-id="input-bar">
       <div
@@ -49,34 +57,29 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
         onSubmit={handleSubmit}
         className="relative flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2"
         style={{
-          boxShadow: '0 -8px 40px rgba(46,102,255,0.08), 0 0 0 1px rgba(46,102,255,0.05)',
+          boxShadow: isListening
+            ? '0 0 20px rgba(46,102,255,0.15), 0 0 0 1px rgba(46,102,255,0.2)'
+            : '0 -8px 40px rgba(46,102,255,0.08), 0 0 0 1px rgba(46,102,255,0.05)',
+          transition: 'box-shadow 0.3s ease',
         }}
       >
-        <button
-          type="button"
-          className="flex-shrink-0 p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
-          aria-label="Voice input"
-        >
-          <Mic size={18} />
-        </button>
+        <VoiceIndicator
+          isListening={isListening}
+          isSupported={isSupported}
+          onToggle={toggleListening}
+        />
 
         <textarea
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={isListening ? 'Listening...' : placeholder}
           rows={1}
-          disabled={disabled}
+          disabled={disabled || isListening}
           className="flex-1 resize-none bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none min-h-[36px] max-h-[120px] py-1.5"
           style={{ fontFamily: 'var(--font-sans)' }}
           data-aria-id="message-input"
         />
-
-        <div className="flex-shrink-0 hidden sm:flex items-center">
-          <span className="font-mono text-[9px] tracking-widest uppercase text-[var(--text-secondary)] opacity-50 mr-2 select-none">
-            Space to talk
-          </span>
-        </div>
 
         <button
           type="submit"
