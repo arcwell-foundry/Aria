@@ -27,6 +27,7 @@ import {
   useFirstGoalSuggestions,
   useCreateFirstGoal,
   useActivateAria,
+  useCompanyDiscovery,
 } from "@/hooks/useOnboarding";
 import { useEnrichmentStatus } from "@/hooks/useEnrichmentStatus";
 import { useActivationStatus } from "@/hooks/useActivationStatus";
@@ -56,10 +57,9 @@ interface StepConfig {
 const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   company_discovery: {
     ariaMessage:
-      "Welcome! I'm ARIA, your AI Department Director. I'll be working alongside you to transform how your team operates. Let's get to know each other — what company are you with?",
-    inputMode: "text",
+      "Welcome! I'm ARIA, your AI Department Director. I'll be working alongside you to transform how your team operates. Let's get started — tell me about your company.",
+    inputMode: "action_panel",
     skippable: false,
-    placeholder: "e.g. Acme Therapeutics",
   },
   document_upload: {
     ariaMessage:
@@ -128,6 +128,116 @@ function createMessage(
 
 function stepIndex(step: OnboardingStep): number {
   return STEP_ORDER.indexOf(step);
+}
+
+// --- Action Panel: Company Discovery ---
+
+function CompanyDiscoveryPanel({
+  onComplete,
+}: {
+  onComplete: (response: OnboardingStateResponse) => void;
+}) {
+  const [companyName, setCompanyName] = useState("");
+  const [website, setWebsite] = useState("");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const discoveryMutation = useCompanyDiscovery();
+
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+
+    if (!companyName.trim()) {
+      setError("Please enter your company name.");
+      return;
+    }
+    if (!website.trim()) {
+      setError("Please enter your company website.");
+      return;
+    }
+    if (!email.trim()) {
+      setError("Please enter your work email.");
+      return;
+    }
+
+    const result = await discoveryMutation.mutateAsync({
+      company_name: companyName.trim(),
+      website: website.trim(),
+      email: email.trim(),
+    });
+
+    if (!result.success) {
+      setError(result.message || result.error);
+      return;
+    }
+
+    // Advance the onboarding step with company info
+    const response = await completeStep("company_discovery", {
+      company_id: result.company.id,
+      company_name: result.company.name,
+    });
+    onComplete(response);
+  }, [companyName, website, email, discoveryMutation, onComplete]);
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-4">
+      <div className="space-y-3">
+        <input
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          placeholder="Company name"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <input
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          placeholder="Website (e.g. acme.com)"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          placeholder="Work email"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {discoveryMutation.isPending && (
+        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Validating your company...
+        </div>
+      )}
+
+      <button
+        onClick={() => void handleSubmit()}
+        disabled={
+          !companyName.trim() ||
+          !website.trim() ||
+          !email.trim() ||
+          discoveryMutation.isPending
+        }
+        className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+      >
+        Continue
+      </button>
+    </div>
+  );
 }
 
 // --- Action Panel: Document Upload ---
@@ -831,6 +941,10 @@ export function OnboardingPage() {
           )}
 
           {/* Action panels */}
+          {activeActionPanel === "company_discovery" && (
+            <CompanyDiscoveryPanel onComplete={advanceFromResponse} />
+          )}
+
           {activeActionPanel === "document_upload" && (
             <DocumentUploadPanel
               onComplete={advanceFromResponse}

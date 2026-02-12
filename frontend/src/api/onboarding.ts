@@ -555,3 +555,48 @@ export async function getPersonalityCalibration(): Promise<
   return response.data;
 }
 
+// Company Discovery endpoint (US-902)
+
+export interface CompanyDiscoveryRequest {
+  company_name: string;
+  website: string;
+  email: string;
+}
+
+export interface CompanyDiscoverySuccessResponse {
+  success: true;
+  company: {
+    id: string;
+    name: string;
+    domain: string;
+    is_existing: boolean;
+  };
+  gate_result: {
+    is_life_sciences: boolean;
+    confidence: number;
+  };
+  enrichment_status: string;
+}
+
+export interface CompanyDiscoveryErrorResponse {
+  success: false;
+  error: string;
+  type: "email_validation" | "vertical_mismatch";
+  message?: string;
+  reasoning?: string;
+}
+
+export type CompanyDiscoveryResponse =
+  | CompanyDiscoverySuccessResponse
+  | CompanyDiscoveryErrorResponse;
+
+export async function submitCompanyDiscovery(
+  request: CompanyDiscoveryRequest
+): Promise<CompanyDiscoveryResponse> {
+  const response = await apiClient.post<CompanyDiscoveryResponse>(
+    "/onboarding/company-discovery/submit",
+    request
+  );
+  return response.data;
+}
+

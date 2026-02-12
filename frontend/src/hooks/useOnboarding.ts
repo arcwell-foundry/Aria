@@ -10,8 +10,10 @@ import {
   getFirstGoalSuggestions,
   createFirstGoal,
   activateAria,
+  submitCompanyDiscovery,
   type OnboardingStep,
   type FirstGoalCreateRequest,
+  type CompanyDiscoveryRequest,
 } from "@/api/onboarding";
 import {
   uploadDocument,
@@ -191,6 +193,19 @@ export function useActivateAria() {
 
   return useMutation({
     mutationFn: () => activateAria(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
+    },
+  });
+}
+
+// --- Company Discovery hook ---
+
+export function useCompanyDiscovery() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CompanyDiscoveryRequest) => submitCompanyDiscovery(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
     },
