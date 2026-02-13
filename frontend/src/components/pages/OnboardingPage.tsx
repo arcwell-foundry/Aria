@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2,
@@ -7,6 +7,10 @@ import {
   Mail,
   Check,
   Target,
+  Building2,
+  Calendar,
+  MessageSquare,
+  ExternalLink,
 } from "lucide-react";
 import { MessageBubble } from "@/components/conversation/MessageBubble";
 import { ProgressBar } from "@/components/primitives/ProgressBar";
@@ -30,11 +34,14 @@ import {
   useActivateAria,
   useCompanyDiscovery,
   useAnalyzeWriting,
+  useIntegrationWizardStatus,
+  useConnectIntegration,
 } from "@/hooks/useOnboarding";
 import { useEnrichmentStatus } from "@/hooks/useEnrichmentStatus";
 import { useActivationStatus } from "@/hooks/useActivationStatus";
 import type { EmailProvider } from "@/api/emailIntegration";
 import type { CompanyDocument } from "@/api/documents";
+import type { IntegrationAppName, IntegrationStatus } from "@/api/onboarding";
 
 // --- Step configuration ---
 
@@ -89,10 +96,9 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   },
   integration_wizard: {
     ariaMessage:
-      "Would you like to connect any other tools? Tell me which ones you use — Salesforce, HubSpot, Google Calendar, Slack — and I'll wire them up.",
-    inputMode: "text",
+      "Would you like to connect any other tools? Connect your CRM, calendar, or messaging apps and I'll start syncing data immediately.",
+    inputMode: "action_panel",
     skippable: true,
-    placeholder: "e.g. Salesforce, Google Calendar, Slack — or type 'skip'",
   },
   first_goal: {
     ariaMessage:
@@ -809,6 +815,154 @@ function EmailIntegrationPanel({
   );
 }
 
+// --- Action Panel: Integration Wizard ---
+
+function IntegrationWizardPanel({
+  onComplete,
+  onSkip,
+}: {
+  onComplete: (response: OnboardingStateResponse) => void;
+  onSkip: () => void;
+}) {
+  const statusQuery = useIntegrationWizardStatus(true);
+  const connectMutation = useConnectIntegration();
+  const [popupBlocked, setPopupBlocked] = useState(false);
+  const [connectingApp, setConnectingApp] = useState<IntegrationAppName | null>(null);
+
+  const allIntegrations = useMemo(() => {
+    const data = statusQuery.data;
+    return [
+      ...(data?.crm ?? []),
+      ...(data?.calendar ?? []),
+      ...(data?.messaging ?? []),
+    ];
+  }, [statusQuery.data]);
+
+  const connectedCount = useMemo(
+    () => allIntegrations.filter((i) => i.connected).length,
+    [allIntegrations]
+  );
+
+  const handleConnect = useCallback(
+    async (appName: IntegrationAppName) => {
+      setConnectingApp(appName);
+      try {
+        const result = await connectMutation.mutateAsync(appName);
+        const popup = window.open(result.auth_url, "_blank");
+        if (!popup) {
+          setPopupBlocked(true);
+        }
+      } finally {
+        setConnectingApp(null);
+      }
+    },
+    [connectMutation],
+  );
+
+  const handleContinue = useCallback(async () => {
+    const connectedNames = allIntegrations
+      .filter((i) => i.connected)
+      .map((i) => i.name);
+    const response = await completeStep("integration_wizard", {
+      connected_integrations: connectedNames,
+    });
+    onComplete(response);
+  }, [allIntegrations, onComplete]);
+
+  const renderIntegrationButton = (integration: IntegrationStatus) => {
+    const isConnecting = connectingApp === integration.name;
+    const isPending = connectMutation.isPending && isConnecting;
+
+    return (
+      <button
+        key={integration.name}
+        onClick={() => void handleConnect(integration.name)}
+        disabled={integration.connected || connectMutation.isPending}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${
+          integration.connected
+            ? "border-green-500/30 bg-green-500/10 text-green-400"
+            : "border-white/10 bg-white/[0.03] text-[var(--text-primary,#F1F1F1)] hover:border-white/20"
+        } disabled:opacity-60`}
+      >
+        <span className="flex items-center gap-2">
+          {integration.connected ? (
+            <Check className="h-4 w-4" />
+          ) : isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <ExternalLink className="h-4 w-4" />
+          )}
+          {integration.connected
+            ? `${integration.display_name} Connected`
+            : `Connect ${integration.display_name}`}
+        </span>
+      </button>
+    );
+  };
+
+  const renderCategory = (
+    title: string,
+    icon: React.ReactNode,
+    items: IntegrationStatus[]
+  ) => (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary,#6B7280)]">
+        {icon}
+        {title}
+      </div>
+      <div className="space-y-2">
+        {items.map(renderIntegrationButton)}
+      </div>
+    </div>
+  );
+
+  if (statusQuery.isLoading) {
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-4">
+        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading available integrations...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-5">
+      {renderCategory("CRM", <Building2 className="h-3.5 w-3.5" />, statusQuery.data?.crm ?? [])}
+      {renderCategory("Calendar", <Calendar className="h-3.5 w-3.5" />, statusQuery.data?.calendar ?? [])}
+      {renderCategory("Messaging", <MessageSquare className="h-3.5 w-3.5" />, statusQuery.data?.messaging ?? [])}
+
+      {popupBlocked && (
+        <p className="text-sm text-yellow-400">
+          Popup was blocked. Please allow popups for this site and try again.
+        </p>
+      )}
+
+      {connectedCount > 0 && (
+        <p className="text-sm text-green-400">
+          {connectedCount} integration{connectedCount !== 1 ? "s" : ""} connected
+        </p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => void handleContinue()}
+          className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+        >
+          Continue
+        </button>
+        <button
+          onClick={onSkip}
+          className="text-sm text-[var(--text-tertiary,#6B7280)] transition hover:text-[var(--text-secondary,#A1A1AA)]"
+        >
+          Skip for now
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --- Action Panel: First Goal ---
 
 function FirstGoalPanel({
@@ -1290,6 +1444,13 @@ export function OnboardingPage() {
 
           {activeActionPanel === "email_integration" && (
             <EmailIntegrationPanel
+              onComplete={advanceFromResponse}
+              onSkip={() => void handleSkip()}
+            />
+          )}
+
+          {activeActionPanel === "integration_wizard" && (
+            <IntegrationWizardPanel
               onComplete={advanceFromResponse}
               onSkip={() => void handleSkip()}
             />

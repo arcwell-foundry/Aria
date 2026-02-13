@@ -12,9 +12,13 @@ import {
   activateAria,
   submitCompanyDiscovery,
   analyzeWritingSamples,
+  getIntegrationWizardStatus,
+  connectIntegration,
+  disconnectIntegration,
   type OnboardingStep,
   type FirstGoalCreateRequest,
   type CompanyDiscoveryRequest,
+  type IntegrationAppName,
 } from "@/api/onboarding";
 import {
   uploadDocument,
@@ -49,6 +53,11 @@ export const emailKeys = {
 export const goalKeys = {
   all: ["goals"] as const,
   suggestions: () => [...goalKeys.all, "suggestions"] as const,
+};
+
+export const integrationKeys = {
+  all: ["integrations"] as const,
+  status: () => [...integrationKeys.all, "status"] as const,
 };
 
 export function useOnboardingState() {
@@ -217,6 +226,46 @@ export function useCompanyDiscovery() {
     mutationFn: (data: CompanyDiscoveryRequest) => submitCompanyDiscovery(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
+    },
+  });
+}
+
+// --- Integration Wizard hooks ---
+
+export function useIntegrationWizardStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: integrationKeys.status(),
+    queryFn: getIntegrationWizardStatus,
+    enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const anyPending =
+        [...(data?.crm ?? []), ...(data?.calendar ?? []), ...(data?.messaging ?? [])].some(
+          (i) => !i.connected
+        );
+      return anyPending ? 3000 : false;
+    },
+  });
+}
+
+export function useConnectIntegration() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (appName: IntegrationAppName) => connectIntegration(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: integrationKeys.status() });
+    },
+  });
+}
+
+export function useDisconnectIntegration() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (appName: IntegrationAppName) => disconnectIntegration(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: integrationKeys.status() });
     },
   });
 }
