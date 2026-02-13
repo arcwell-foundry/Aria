@@ -46,6 +46,7 @@ import { useActivationStatus } from "@/hooks/useActivationStatus";
 import type { EmailProvider } from "@/api/emailIntegration";
 import type { CompanyDocument } from "@/api/documents";
 import type { IntegrationAppName, IntegrationStatus } from "@/api/onboarding";
+import { IntelligenceMoment } from "@/components/onboarding/IntelligenceMoment";
 
 // --- Animation direction type ---
 type AnimationDirection = "forward" | "backward" | "none";
@@ -216,6 +217,16 @@ function CompanyDiscoveryPanel({
   const [website, setWebsite] = useState((initialData?.website as string) || "");
   const [email, setEmail] = useState((initialData?.email as string) || "");
   const [error, setError] = useState<string | null>(null);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [intelligenceData, setIntelligenceData] = useState<{
+    companyName?: string;
+    productCount?: number;
+    competitorCount?: number;
+    classification?: {
+      company_type?: string;
+      therapeutic_areas?: string[];
+    } | null;
+  }>({});
   const discoveryMutation = useCompanyDiscovery();
 
   const handleSubmit = useCallback(async () => {
@@ -234,24 +245,55 @@ function CompanyDiscoveryPanel({
       return;
     }
 
-    const result = await discoveryMutation.mutateAsync({
-      company_name: companyName.trim(),
-      website: website.trim(),
-      email: email.trim(),
-    });
+    // Start intelligence moment
+    setShowIntelligence(true);
+    setIntelligenceData({ companyName: companyName.trim() });
 
-    if (!result.success) {
-      setError(result.message || result.error);
-      return;
+    try {
+      const result = await discoveryMutation.mutateAsync({
+        company_name: companyName.trim(),
+        website: website.trim(),
+        email: email.trim(),
+      });
+
+      if (!result.success) {
+        setShowIntelligence(false);
+        setError(result.message || result.error);
+        return;
+      }
+
+      // Update intelligence data with real results
+      // In production, this would come from enrichment
+      setIntelligenceData({
+        companyName: result.company.name,
+        productCount: 3, // Placeholder - would come from enrichment API
+        competitorCount: 5, // Placeholder
+        classification: null, // Would be populated by enrichment
+      });
+
+      // Advance the onboarding step with company info
+      const response = await completeStep("company_discovery", {
+        company_id: result.company.id,
+        company_name: result.company.name,
+      });
+      onComplete(response);
+    } catch {
+      setShowIntelligence(false);
+      setError("Failed to validate company. Please try again.");
     }
-
-    // Advance the onboarding step with company info
-    const response = await completeStep("company_discovery", {
-      company_id: result.company.id,
-      company_name: result.company.name,
-    });
-    onComplete(response);
   }, [companyName, website, email, discoveryMutation, onComplete]);
+
+  // Show intelligence moment during processing
+  if (showIntelligence) {
+    return (
+      <IntelligenceMoment
+        step="company_discovery"
+        responseData={intelligenceData}
+        isLoading={discoveryMutation.isPending}
+        minDuration={2500}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -300,15 +342,6 @@ function CompanyDiscoveryPanel({
         </AnimatedField>
       )}
 
-      {discoveryMutation.isPending && (
-        <AnimatedField index={3} fieldKey="loading">
-          <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Validating your company...
-          </div>
-        </AnimatedField>
-      )}
-
       <AnimatedField index={4} fieldKey="submit">
         <button
           onClick={() => void handleSubmit()}
@@ -344,6 +377,11 @@ function UserProfilePanel({
   const [roleType, setRoleType] = useState((initialData?.role_type as string) || "");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [intelligenceData, setIntelligenceData] = useState<{
+    linkedinFound?: boolean;
+    roleType?: string;
+  }>({});
 
   const roleOptions = [
     { value: "sales", label: "Sales" },
@@ -374,6 +412,13 @@ function UserProfilePanel({
       return;
     }
 
+    // Start intelligence moment
+    setShowIntelligence(true);
+    setIntelligenceData({
+      linkedinFound: linkedinUrl.trim().length > 0,
+      roleType: roleType,
+    });
+
     setIsSubmitting(true);
     try {
       const response = await completeStep("user_profile", {
@@ -386,11 +431,24 @@ function UserProfilePanel({
       });
       onComplete(response);
     } catch {
+      setShowIntelligence(false);
       setError("Failed to save profile. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   }, [fullName, title, department, linkedinUrl, phone, roleType, onComplete]);
+
+  // Show intelligence moment during processing
+  if (showIntelligence) {
+    return (
+      <IntelligenceMoment
+        step="user_profile"
+        responseData={intelligenceData}
+        isLoading={isSubmitting}
+        minDuration={1800}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -477,15 +535,6 @@ function UserProfilePanel({
         </AnimatedField>
       )}
 
-      {isSubmitting && (
-        <AnimatedField index={6} fieldKey="loading">
-          <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Saving your profile...
-          </div>
-        </AnimatedField>
-      )}
-
       <AnimatedField index={7} fieldKey="submit">
         <button
           onClick={() => void handleSubmit()}
@@ -524,6 +573,11 @@ function WritingSamplesPanel({
   const [fingerprint, setFingerprint] = useState<WritingStyleFingerprint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [intelligenceData, setIntelligenceData] = useState<{
+    writingFingerprint?: WritingStyleFingerprint | null;
+    sampleCount?: number;
+  }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const analyzeMutation = useAnalyzeWriting();
   const extractTextMutation = useExtractTextFromFile();
@@ -588,15 +642,25 @@ function WritingSamplesPanel({
       return;
     }
     setError(null);
+
+    // Start intelligence moment
+    setShowIntelligence(true);
+    setIntelligenceData({ sampleCount: samples.length });
+
     try {
       const result = await analyzeMutation.mutateAsync(samples);
       setFingerprint(result);
+      setIntelligenceData({
+        writingFingerprint: result,
+        sampleCount: samples.length,
+      });
       const response = await completeStep("writing_samples", {
         sample_count: samples.length,
         confidence: result.confidence,
       });
       onComplete(response);
     } catch {
+      setShowIntelligence(false);
       setError("Analysis failed. Please try again.");
     }
   }, [samples, analyzeMutation, onComplete]);
@@ -619,6 +683,18 @@ function WritingSamplesPanel({
   );
 
   const isProcessing = analyzeMutation.isPending || extractTextMutation.isPending;
+
+  // Show intelligence moment during analysis
+  if (showIntelligence) {
+    return (
+      <IntelligenceMoment
+        step="writing_samples"
+        responseData={intelligenceData}
+        isLoading={analyzeMutation.isPending}
+        minDuration={2200}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -954,6 +1030,12 @@ function EmailIntegrationPanel({
   const statusQuery = useEmailStatus(true);
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [intelligenceData, setIntelligenceData] = useState<{
+    emailProvider?: string;
+    contactCount?: number;
+    priorityContacts?: number;
+  }>({});
 
   // Privacy config state
   const [ingestionScopeDays, setIngestionScopeDays] = useState(60);
@@ -978,6 +1060,10 @@ function EmailIntegrationPanel({
 
   const handleContinue = useCallback(async () => {
     const provider = googleConnected ? "google" : "microsoft";
+
+    // Start intelligence moment
+    setShowIntelligence(true);
+    setIntelligenceData({ emailProvider: provider });
 
     // Build privacy exclusions from inputs
     const privacyExclusions: PrivacyExclusion[] = [];
@@ -1013,6 +1099,12 @@ function EmailIntegrationPanel({
         ingestion_scope_days: ingestionScopeDays,
         attachment_ingestion: attachmentIngestion,
       });
+      // Update with placeholder data - would come from email scan
+      setIntelligenceData({
+        emailProvider: provider,
+        contactCount: 127,
+        priorityContacts: 12,
+      });
     } catch (error) {
       console.error("Failed to save email privacy config:", error);
       // Continue anyway - privacy config is optional
@@ -1031,6 +1123,18 @@ function EmailIntegrationPanel({
     ingestionScopeDays,
     attachmentIngestion,
   ]);
+
+  // Show intelligence moment during processing
+  if (showIntelligence) {
+    return (
+      <IntelligenceMoment
+        step="email_integration"
+        responseData={intelligenceData}
+        isLoading={isSavingPrivacy}
+        minDuration={2000}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
