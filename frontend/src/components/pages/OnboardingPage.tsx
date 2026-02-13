@@ -1518,28 +1518,10 @@ export function OnboardingPage() {
         setSkippedSteps(stateSkippedSteps);
         setStepData(stateStepData);
 
-        // Build summary messages for completed steps
-        const resumeMessages: Message[] = [];
-        for (const completedStep of STEP_ORDER) {
-          if (!stateCompletedSteps.includes(completedStep)) break;
-          // Add a brief summary ARIA message for the completed step
-          resumeMessages.push(
-            createMessage(
-              "aria",
-              STEP_CONFIG[completedStep as OnboardingStep].ariaMessage,
-            ),
-          );
-          resumeMessages.push(
-            createMessage("user", "(completed)"),
-          );
-        }
-
-        // Add the current step's ARIA message
-        resumeMessages.push(
+        // Only show the CURRENT step's ARIA message - previous steps are represented by progress dots
+        setMessages([
           createMessage("aria", STEP_CONFIG[step].ariaMessage),
-        );
-
-        setMessages(resumeMessages);
+        ]);
         setCurrentStep(step);
         if (STEP_CONFIG[step].inputMode === "action_panel") {
           setActiveActionPanel(step);
@@ -1568,7 +1550,8 @@ export function OnboardingPage() {
       setInputValue("");
 
       const config = STEP_CONFIG[nextStep];
-      setMessages((prev) => [...prev, createMessage("aria", config.ariaMessage)]);
+      // REPLACE messages - only show current step, previous step content is gone
+      setMessages([createMessage("aria", config.ariaMessage)]);
 
       if (config.inputMode === "action_panel") {
         setActiveActionPanel(nextStep);
@@ -1628,12 +1611,8 @@ export function OnboardingPage() {
 
     const previousStep = STEP_ORDER[currentIndex - 1];
 
-    // Add a user message indicating navigation
-    setMessages((prev) => [
-      ...prev,
-      createMessage("user", "(going back)"),
-      createMessage("aria", STEP_CONFIG[previousStep].ariaMessage),
-    ]);
+    // REPLACE messages - only show previous step
+    setMessages([createMessage("aria", STEP_CONFIG[previousStep].ariaMessage)]);
 
     goToStep(previousStep);
   }, [currentStep, goToStep]);
@@ -1796,8 +1775,6 @@ export function OnboardingPage() {
             value={progressPercent}
             variant="default"
             size="sm"
-            showValue
-            formatValue={() => `Step ${currentStep ? stepIndex(currentStep) + 1 : 0} of ${STEP_ORDER.length}`}
           />
         </div>
       </header>
