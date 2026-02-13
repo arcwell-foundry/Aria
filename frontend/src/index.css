@@ -444,11 +444,27 @@ body {
   animation: aria-settle 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
+/* === ARIA Avatar Breathing — subtle idle animation === */
+
+@keyframes aria-breathing {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+.animate-aria-breathing {
+  animation: aria-breathing 4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aria-breathe,
   .aria-drift,
   .aria-glow,
-  .aria-logo-glow {
+  .aria-logo-glow,
+  .animate-aria-breathing {
     animation: none;
   }
   .aria-settle {
