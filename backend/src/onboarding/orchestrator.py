@@ -443,11 +443,11 @@ class OnboardingOrchestrator:
         user_id: str,
         step_data: dict[str, Any],
     ) -> None:
-        """Store user profile facts in Semantic Memory via ProfileMergeService.
+        """Store user profile in user_profiles table and Semantic Memory.
 
-        When the user completes the USER_PROFILE step, their name, title,
-        department, and other profile fields should be stored as semantic
-        facts with user_stated source (confidence 0.95).
+        Updates the user_profiles table with structured fields, merges into
+        semantic memory via ProfileMergeService, and triggers LinkedIn research
+        if a LinkedIn URL is provided.
 
         Args:
             user_id: The user's ID.
@@ -456,12 +456,33 @@ class OnboardingOrchestrator:
         if not step_data:
             return
 
+        # Update user_profiles table with structured fields
+        profile_update: dict[str, Any] = {}
+        if step_data.get("full_name"):
+            profile_update["full_name"] = step_data["full_name"]
+        if step_data.get("title"):
+            profile_update["title"] = step_data["title"]
+        if step_data.get("department"):
+            profile_update["department"] = step_data["department"]
+        if step_data.get("linkedin_url"):
+            profile_update["linkedin_url"] = step_data["linkedin_url"]
+        if step_data.get("phone"):
+            profile_update["phone"] = step_data["phone"]
+
+        if profile_update:
+            self._db.table("user_profiles").update(profile_update).eq("id", user_id).execute()
+
+        # Merge into semantic memory via ProfileMergeService
         from src.memory.profile_merge import ProfileMergeService
 
         merge_service = ProfileMergeService()
-        # Treat profile data as new with no prior values (onboarding first-time entry)
         old_data: dict[str, Any] = {}
         await merge_service.process_update(user_id, old_data, step_data)
+
+        # Trigger LinkedIn research if URL provided (non-blocking background task)
+        linkedin_url = step_data.get("linkedin_url")
+        if linkedin_url and isinstance(linkedin_url, str) and linkedin_url.strip():
+            asyncio.create_task(self._trigger_linkedin_research(user_id, step_data))
 
         # Update readiness score for digital_twin (profile data contributes to identity)
         try:
@@ -473,9 +494,60 @@ class OnboardingOrchestrator:
             )
 
         logger.info(
-            "User profile facts merged into Semantic Memory",
+            "User profile processed",
             extra={"user_id": user_id, "fields": list(step_data.keys())},
         )
+
+    async def _trigger_linkedin_research(
+        self,
+        user_id: str,
+        step_data: dict[str, Any],
+    ) -> None:
+        """Background task to research LinkedIn profile.
+
+        Uses LinkedInResearchService to enrich user profile data from LinkedIn
+        and store it in the digital twin and semantic memory.
+
+        Args:
+            user_id: The user's ID.
+            step_data: Profile data including linkedin_url, full_name, title.
+        """
+        try:
+            # Get company name for context
+            profile = (
+                self._db.table("user_profiles")
+                .select("company_id, companies(name)")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            company_name = ""
+            if profile and profile.data:
+                company = profile.data.get("companies")
+                if company:
+                    company_name = company.get("name", "")
+
+            from src.onboarding.linkedin_research import LinkedInResearchService
+
+            service = LinkedInResearchService()
+            await service.research_profile(
+                user_id=user_id,
+                linkedin_url=step_data.get("linkedin_url", ""),
+                full_name=step_data.get("full_name", ""),
+                job_title=step_data.get("title", ""),
+                company_name=company_name,
+            )
+
+            logger.info(
+                "LinkedIn research completed",
+                extra={"user_id": user_id},
+            )
+        except Exception as e:
+            logger.warning(
+                "LinkedIn research failed (non-blocking)",
+                extra={"user_id": user_id, "error": str(e)},
+            )
 
     async def _process_integration_wizard(self, user_id: str) -> None:
         """Enrich integration_wizard step_data with actual connection flags.

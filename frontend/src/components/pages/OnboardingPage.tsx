@@ -69,10 +69,9 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   },
   user_profile: {
     ariaMessage:
-      "Now tell me about your role — what's your title and what does a typical day look like for you?",
-    inputMode: "text",
+      "Tell me about yourself so I can personalize my work for you.",
+    inputMode: "action_panel",
     skippable: false,
-    placeholder: "e.g. VP of Sales — I manage a team of 5 reps across the Northeast",
   },
   writing_samples: {
     ariaMessage:
@@ -231,6 +230,164 @@ function CompanyDiscoveryPanel({
           !website.trim() ||
           !email.trim() ||
           discoveryMutation.isPending
+        }
+        className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+      >
+        Continue
+      </button>
+    </div>
+  );
+}
+
+// --- Action Panel: User Profile ---
+
+function UserProfilePanel({
+  onComplete,
+}: {
+  onComplete: (response: OnboardingStateResponse) => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [title, setTitle] = useState("");
+  const [department, setDepartment] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [phone, setPhone] = useState("");
+  const [roleType, setRoleType] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const roleOptions = [
+    { value: "sales", label: "Sales" },
+    { value: "bd", label: "Business Development" },
+    { value: "marketing", label: "Marketing" },
+    { value: "commercial_ops", label: "Commercial Ops" },
+    { value: "leadership", label: "Leadership" },
+    { value: "other", label: "Other" },
+  ];
+
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+
+    if (!fullName.trim()) {
+      setError("Please enter your full name.");
+      return;
+    }
+    if (!title.trim()) {
+      setError("Please enter your job title.");
+      return;
+    }
+    if (!department.trim()) {
+      setError("Please enter your department.");
+      return;
+    }
+    if (!roleType) {
+      setError("Please select your role type.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await completeStep("user_profile", {
+        full_name: fullName.trim(),
+        title: title.trim(),
+        department: department.trim(),
+        linkedin_url: linkedinUrl.trim() || null,
+        phone: phone.trim() || null,
+        role_type: roleType,
+      });
+      onComplete(response);
+    } catch {
+      setError("Failed to save profile. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [fullName, title, department, linkedinUrl, phone, roleType, onComplete]);
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-4">
+      <div className="space-y-3">
+        <input
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          placeholder="Full name"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Job title"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <input
+          value={department}
+          onChange={(e) => setDepartment(e.target.value)}
+          placeholder="Department"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <select
+          value={roleType}
+          onChange={(e) => setRoleType(e.target.value)}
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+        >
+          <option value="" disabled className="text-[var(--text-tertiary,#6B7280)]">
+            Select your role type
+          </option>
+          {roleOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <input
+          value={linkedinUrl}
+          onChange={(e) => setLinkedinUrl(e.target.value)}
+          placeholder="LinkedIn URL (optional)"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          type="tel"
+          placeholder="Phone number (optional)"
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSubmit();
+          }}
+        />
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {isSubmitting && (
+        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Saving your profile...
+        </div>
+      )}
+
+      <button
+        onClick={() => void handleSubmit()}
+        disabled={
+          !fullName.trim() ||
+          !title.trim() ||
+          !department.trim() ||
+          !roleType ||
+          isSubmitting
         }
         className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
       >
@@ -950,6 +1107,10 @@ export function OnboardingPage() {
               onComplete={advanceFromResponse}
               onSkip={() => void handleSkip()}
             />
+          )}
+
+          {activeActionPanel === "user_profile" && (
+            <UserProfilePanel onComplete={advanceFromResponse} />
           )}
 
           {activeActionPanel === "email_integration" && (
