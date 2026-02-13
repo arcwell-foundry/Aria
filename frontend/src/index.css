@@ -459,6 +459,161 @@ body {
   animation: aria-breathing 4s ease-in-out infinite;
 }
 
+/* === Onboarding Step Transitions === */
+
+/* Step content exit/enter animations */
+@keyframes onboarding-exit-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+}
+
+@keyframes onboarding-exit-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@keyframes onboarding-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ARIA message text entrance */
+@keyframes onboarding-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Form field staggered entrance */
+@keyframes onboarding-field-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Progress dot scale pulse */
+@keyframes onboarding-dot-complete {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Checkmark draw-in */
+@keyframes onboarding-checkmark-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Progress bar smooth fill */
+@keyframes onboarding-progress-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Animation classes - only animate transform and opacity */
+.onboarding-step-exit-left {
+  animation: onboarding-exit-left 150ms ease-out forwards;
+}
+
+.onboarding-step-exit-right {
+  animation: onboarding-exit-right 150ms ease-out forwards;
+}
+
+.onboarding-step-enter-right {
+  animation: onboarding-enter-right 200ms ease-in forwards;
+}
+
+.onboarding-step-enter-left {
+  animation: onboarding-enter-left 200ms ease-in forwards;
+}
+
+.onboarding-message-in {
+  animation: onboarding-message-in 300ms ease-out forwards;
+}
+
+.onboarding-field-in {
+  opacity: 0;
+  animation: onboarding-field-in 200ms ease-out forwards;
+}
+
+.onboarding-dot-complete {
+  animation: onboarding-dot-complete 300ms ease-out;
+}
+
+.onboarding-checkmark-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: onboarding-checkmark-draw 300ms ease-out forwards;
+}
+
+/* Progress bar with transform-origin for smooth fill */
+.onboarding-progress-fill {
+  transform-origin: left;
+  transition: transform 400ms ease-out;
+}
+
+/* Stagger delays for form fields */
+.onboarding-field-delay-0 { animation-delay: 0ms; }
+.onboarding-field-delay-1 { animation-delay: 80ms; }
+.onboarding-field-delay-2 { animation-delay: 160ms; }
+.onboarding-field-delay-3 { animation-delay: 240ms; }
+.onboarding-field-delay-4 { animation-delay: 320ms; }
+.onboarding-field-delay-5 { animation-delay: 400ms; }
+
+/* Reduced motion fallback - simple 150ms opacity fade */
 @media (prefers-reduced-motion: reduce) {
   .aria-breathe,
   .aria-drift,
@@ -483,5 +638,45 @@ body {
   .aria-message-settle,
   .aria-message-streaming .prose-aria > *:last-child {
     animation: none;
+  }
+
+  /* Onboarding reduced motion fallback */
+  .onboarding-step-exit-left,
+  .onboarding-step-exit-right {
+    animation: none;
+    opacity: 0;
+  }
+
+  .onboarding-step-enter-right,
+  .onboarding-step-enter-left {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .onboarding-message-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .onboarding-field-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .onboarding-dot-complete {
+    animation: none;
+  }
+
+  .onboarding-checkmark-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .onboarding-progress-fill {
+    transition: opacity 150ms ease-out;
+    transform: none;
   }
 }

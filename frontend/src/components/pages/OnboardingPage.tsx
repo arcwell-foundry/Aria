@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2,
@@ -46,6 +46,69 @@ import { useActivationStatus } from "@/hooks/useActivationStatus";
 import type { EmailProvider } from "@/api/emailIntegration";
 import type { CompanyDocument } from "@/api/documents";
 import type { IntegrationAppName, IntegrationStatus } from "@/api/onboarding";
+
+// --- Animation direction type ---
+type AnimationDirection = "forward" | "backward" | "none";
+
+// --- Animated Step Content Wrapper ---
+function AnimatedStepContent({
+  children,
+  direction,
+  stepKey,
+}: {
+  children: ReactNode;
+  direction: AnimationDirection;
+  stepKey: string;
+}) {
+  if (direction === "none") {
+    return <div>{children}</div>;
+  }
+
+  const enterClass =
+    direction === "forward"
+      ? "onboarding-step-enter-right"
+      : "onboarding-step-enter-left";
+
+  // Use key to force re-mount and trigger animation
+  return (
+    <div key={stepKey} className={enterClass}>
+      {children}
+    </div>
+  );
+}
+
+// --- Animated Message Wrapper ---
+function AnimatedMessage({
+  children,
+  messageKey,
+}: {
+  children: ReactNode;
+  messageKey: string;
+}) {
+  return (
+    <div key={messageKey} className="onboarding-message-in">
+      {children}
+    </div>
+  );
+}
+
+// --- Animated Form Field Wrapper ---
+function AnimatedField({
+  children,
+  index,
+  fieldKey,
+}: {
+  children: ReactNode;
+  index: number;
+  fieldKey: string;
+}) {
+  const delayClass = `onboarding-field-delay-${Math.min(index, 5)}`;
+  return (
+    <div key={fieldKey} className={`onboarding-field-in ${delayClass}`}>
+      {children}
+    </div>
+  );
+}
 
 // --- Step configuration ---
 
@@ -193,61 +256,73 @@ function CompanyDiscoveryPanel({
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
       <div className="space-y-3">
-        <input
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          placeholder="Company name"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <input
-          value={website}
-          onChange={(e) => setWebsite(e.target.value)}
-          placeholder="Website (e.g. acme.com)"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
-          placeholder="Work email"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
+        <AnimatedField index={0} fieldKey="company-name">
+          <input
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Company name"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={1} fieldKey="website">
+          <input
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+            placeholder="Website (e.g. acme.com)"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={2} fieldKey="email">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            placeholder="Work email"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {error}
-        </div>
+        <AnimatedField index={3} fieldKey="error">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {error}
+          </div>
+        </AnimatedField>
       )}
 
       {discoveryMutation.isPending && (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Validating your company...
-        </div>
+        <AnimatedField index={3} fieldKey="loading">
+          <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Validating your company...
+          </div>
+        </AnimatedField>
       )}
 
-      <button
-        onClick={() => void handleSubmit()}
-        disabled={
-          !companyName.trim() ||
-          !website.trim() ||
-          !email.trim() ||
-          discoveryMutation.isPending
-        }
-        className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
-      >
-        Continue
-      </button>
+      <AnimatedField index={4} fieldKey="submit">
+        <button
+          onClick={() => void handleSubmit()}
+          disabled={
+            !companyName.trim() ||
+            !website.trim() ||
+            !email.trim() ||
+            discoveryMutation.isPending
+          }
+          className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+        >
+          Continue
+        </button>
+      </AnimatedField>
     </div>
   );
 }
@@ -320,94 +395,112 @@ function UserProfilePanel({
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
       <div className="space-y-3">
-        <input
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          placeholder="Full name"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Job title"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <input
-          value={department}
-          onChange={(e) => setDepartment(e.target.value)}
-          placeholder="Department"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <select
-          value={roleType}
-          onChange={(e) => setRoleType(e.target.value)}
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-        >
-          <option value="" disabled className="text-[var(--text-tertiary,#6B7280)]">
-            Select your role type
-          </option>
-          {roleOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
+        <AnimatedField index={0} fieldKey="full-name">
+          <input
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Full name"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={1} fieldKey="title">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Job title"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={2} fieldKey="department">
+          <input
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            placeholder="Department"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={3} fieldKey="role-type">
+          <select
+            value={roleType}
+            onChange={(e) => setRoleType(e.target.value)}
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          >
+            <option value="" disabled className="text-[var(--text-tertiary,#6B7280)]">
+              Select your role type
             </option>
-          ))}
-        </select>
-        <input
-          value={linkedinUrl}
-          onChange={(e) => setLinkedinUrl(e.target.value)}
-          placeholder="LinkedIn URL (optional)"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          type="tel"
-          placeholder="Phone number (optional)"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSubmit();
-          }}
-        />
+            {roleOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </AnimatedField>
+        <AnimatedField index={4} fieldKey="linkedin">
+          <input
+            value={linkedinUrl}
+            onChange={(e) => setLinkedinUrl(e.target.value)}
+            placeholder="LinkedIn URL (optional)"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
+        <AnimatedField index={5} fieldKey="phone">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            type="tel"
+            placeholder="Phone number (optional)"
+            className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </AnimatedField>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {error}
-        </div>
+        <AnimatedField index={6} fieldKey="error">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {error}
+          </div>
+        </AnimatedField>
       )}
 
       {isSubmitting && (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Saving your profile...
-        </div>
+        <AnimatedField index={6} fieldKey="loading">
+          <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Saving your profile...
+          </div>
+        </AnimatedField>
       )}
 
-      <button
-        onClick={() => void handleSubmit()}
-        disabled={
-          !fullName.trim() ||
-          !title.trim() ||
-          !department.trim() ||
-          !roleType ||
-          isSubmitting
-        }
-        className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
-      >
-        Continue
-      </button>
+      <AnimatedField index={7} fieldKey="submit">
+        <button
+          onClick={() => void handleSubmit()}
+          disabled={
+            !fullName.trim() ||
+            !title.trim() ||
+            !department.trim() ||
+            !roleType ||
+            isSubmitting
+          }
+          className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+        >
+          Continue
+        </button>
+      </AnimatedField>
     </div>
   );
 }
@@ -1489,6 +1582,12 @@ export function OnboardingPage() {
   const [stepData, setStepData] = useState<Record<string, unknown>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Animation state
+  const [animationDirection, setAnimationDirection] = useState<AnimationDirection>("none");
+  const [stepKey, setStepKey] = useState(0);
+  const [animatingDot, setAnimatingDot] = useState<string | null>(null);
+  const prevProgressRef = useRef(0);
+
   // Check email connection status (for writing samples panel)
   const emailStatusQuery = useEmailStatus(true);
   const emailConnected = (emailStatusQuery.data?.google?.connected ?? false) ||
@@ -1545,7 +1644,17 @@ export function OnboardingPage() {
   // --- Navigation helpers ---
 
   const advanceToStep = useCallback(
-    (nextStep: OnboardingStep) => {
+    (nextStep: OnboardingStep, direction: AnimationDirection = "forward") => {
+      const currentIndex = currentStep ? stepIndex(currentStep) : -1;
+      const nextIndex = stepIndex(nextStep);
+
+      // Determine animation direction if not specified
+      const actualDirection = direction === "none"
+        ? (nextIndex > currentIndex ? "forward" : "backward")
+        : direction;
+
+      setAnimationDirection(actualDirection);
+      setStepKey((k) => k + 1);
       setCurrentStep(nextStep);
       setInputValue("");
 
@@ -1563,8 +1672,14 @@ export function OnboardingPage() {
       if (nextStep === "activation") {
         setActiveActionPanel(null);
       }
+
+      // Trigger dot animation for completed step
+      if (actualDirection === "forward" && currentStep) {
+        setAnimatingDot(currentStep);
+        setTimeout(() => setAnimatingDot(null), 300);
+      }
     },
-    [],
+    [currentStep],
   );
 
   const advanceFromResponse = useCallback(
@@ -1577,7 +1692,7 @@ export function OnboardingPage() {
       setCompletedSteps(response.state.completed_steps);
       setSkippedSteps(response.state.skipped_steps);
       setStepData(response.state.step_data);
-      advanceToStep(response.state.current_step);
+      advanceToStep(response.state.current_step, "forward");
     },
     [advanceToStep, navigate],
   );
@@ -1585,6 +1700,14 @@ export function OnboardingPage() {
   // Navigate to a specific step (for back navigation and clicking on completed steps)
   const goToStep = useCallback(
     (targetStep: OnboardingStep) => {
+      if (!currentStep) return;
+
+      const currentIndex = stepIndex(currentStep);
+      const targetIndex = stepIndex(targetStep);
+      const direction: AnimationDirection = targetIndex < currentIndex ? "backward" : "forward";
+
+      setAnimationDirection(direction);
+      setStepKey((k) => k + 1);
       setCurrentStep(targetStep);
       setInputValue("");
 
@@ -1599,7 +1722,7 @@ export function OnboardingPage() {
         setActiveActionPanel(null);
       }
     },
-    [],
+    [currentStep],
   );
 
   // Go back to previous step
@@ -1698,6 +1821,12 @@ export function OnboardingPage() {
     ? ((stepIndex(currentStep)) / STEP_ORDER.length) * 100
     : 0;
 
+  // Track progress changes for smooth bar animation
+  const progressChanged = progressPercent !== prevProgressRef.current;
+  if (progressChanged) {
+    prevProgressRef.current = progressPercent;
+  }
+
   if (!isInitialized) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--bg-primary,#0A0A0B)]">
@@ -1740,6 +1869,7 @@ export function OnboardingPage() {
               const isCurrent = step === currentStep;
               const isPast = currentStep ? idx < stepIndex(currentStep) : false;
               const isClickable = isCompleted || isSkipped || isPast;
+              const isAnimating = animatingDot === step;
 
               return (
                 <button
@@ -1747,6 +1877,8 @@ export function OnboardingPage() {
                   onClick={() => isClickable && goToStep(step)}
                   disabled={!isClickable}
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium transition ${
+                    isAnimating ? "onboarding-dot-complete" : ""
+                  } ${
                     isCurrent
                       ? "bg-[var(--color-accent,#2E66FF)] text-white"
                       : isCompleted
@@ -1760,7 +1892,10 @@ export function OnboardingPage() {
                   title={step.replace(/_/g, " ")}
                 >
                   {isCompleted ? (
-                    <Check className="h-3 w-3" />
+                    <Check
+                      className={`h-3 w-3 ${isAnimating ? "onboarding-checkmark-draw" : ""}`}
+                      style={isAnimating ? { strokeDasharray: 24, strokeDashoffset: 0 } : undefined}
+                    />
                   ) : isSkipped ? (
                     "—"
                   ) : (
@@ -1771,11 +1906,12 @@ export function OnboardingPage() {
             })}
           </div>
 
-          <ProgressBar
-            value={progressPercent}
-            variant="default"
-            size="sm"
-          />
+          <div className="overflow-hidden rounded-full bg-white/5">
+            <div
+              className="h-1.5 rounded-full bg-[var(--color-accent,#2E66FF)] transition-[width] duration-400 ease-out"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
         </div>
       </header>
 
@@ -1783,13 +1919,14 @@ export function OnboardingPage() {
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-4">
           {messages.map((msg, idx) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isFirstInGroup={
-                idx === 0 || messages[idx - 1].role !== msg.role
-              }
-            />
+            <AnimatedMessage key={msg.id} messageKey={msg.id}>
+              <MessageBubble
+                message={msg}
+                isFirstInGroup={
+                  idx === 0 || messages[idx - 1].role !== msg.role
+                }
+              />
+            </AnimatedMessage>
           ))}
 
           {isProcessing && (
@@ -1799,57 +1936,59 @@ export function OnboardingPage() {
             </div>
           )}
 
-          {/* Action panels */}
-          {activeActionPanel === "company_discovery" && (
-            <CompanyDiscoveryPanel
-              onComplete={advanceFromResponse}
-              initialData={stepData.company_discovery as Record<string, unknown> | undefined}
-            />
-          )}
+          {/* Action panels with animation wrapper */}
+          <AnimatedStepContent direction={animationDirection} stepKey={String(stepKey)}>
+            {activeActionPanel === "company_discovery" && (
+              <CompanyDiscoveryPanel
+                onComplete={advanceFromResponse}
+                initialData={stepData.company_discovery as Record<string, unknown> | undefined}
+              />
+            )}
 
-          {activeActionPanel === "document_upload" && (
-            <DocumentUploadPanel
-              onComplete={advanceFromResponse}
-              onSkip={() => void handleSkip()}
-            />
-          )}
+            {activeActionPanel === "document_upload" && (
+              <DocumentUploadPanel
+                onComplete={advanceFromResponse}
+                onSkip={() => void handleSkip()}
+              />
+            )}
 
-          {activeActionPanel === "user_profile" && (
-            <UserProfilePanel
-              onComplete={advanceFromResponse}
-              initialData={stepData.user_profile as Record<string, unknown> | undefined}
-            />
-          )}
+            {activeActionPanel === "user_profile" && (
+              <UserProfilePanel
+                onComplete={advanceFromResponse}
+                initialData={stepData.user_profile as Record<string, unknown> | undefined}
+              />
+            )}
 
-          {activeActionPanel === "writing_samples" && (
-            <WritingSamplesPanel
-              onComplete={advanceFromResponse}
-              onSkip={() => void handleSkip()}
-              emailConnected={emailConnected}
-            />
-          )}
+            {activeActionPanel === "writing_samples" && (
+              <WritingSamplesPanel
+                onComplete={advanceFromResponse}
+                onSkip={() => void handleSkip()}
+                emailConnected={emailConnected}
+              />
+            )}
 
-          {activeActionPanel === "email_integration" && (
-            <EmailIntegrationPanel
-              onComplete={advanceFromResponse}
-              onSkip={() => void handleSkip()}
-            />
-          )}
+            {activeActionPanel === "email_integration" && (
+              <EmailIntegrationPanel
+                onComplete={advanceFromResponse}
+                onSkip={() => void handleSkip()}
+              />
+            )}
 
-          {activeActionPanel === "integration_wizard" && (
-            <IntegrationWizardPanel
-              onComplete={advanceFromResponse}
-              onSkip={() => void handleSkip()}
-            />
-          )}
+            {activeActionPanel === "integration_wizard" && (
+              <IntegrationWizardPanel
+                onComplete={advanceFromResponse}
+                onSkip={() => void handleSkip()}
+              />
+            )}
 
-          {activeActionPanel === "first_goal" && (
-            <FirstGoalPanel onComplete={advanceFromResponse} />
-          )}
+            {activeActionPanel === "first_goal" && (
+              <FirstGoalPanel onComplete={advanceFromResponse} />
+            )}
 
-          {currentStep === "activation" && (
-            <ActivationPanel onReady={handleActivationReady} />
-          )}
+            {currentStep === "activation" && (
+              <ActivationPanel onReady={handleActivationReady} />
+            )}
+          </AnimatedStepContent>
 
           <div ref={bottomRef} />
         </div>
