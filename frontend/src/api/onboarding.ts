@@ -326,6 +326,42 @@ export async function activateAria(): Promise<ActivateAriaResponse> {
   return response.data;
 }
 
+// Writing Analysis endpoint (US-908)
+
+export interface WritingStyleFingerprint {
+  avg_sentence_length: number;
+  sentence_length_variance: number;
+  paragraph_style: string;
+  lexical_diversity: number;
+  formality_index: number;
+  vocabulary_sophistication: string;
+  uses_em_dashes: boolean;
+  uses_semicolons: boolean;
+  exclamation_frequency: string;
+  ellipsis_usage: boolean;
+  opening_style: string;
+  closing_style: string;
+  directness: number;
+  warmth: number;
+  assertiveness: number;
+  data_driven: boolean;
+  hedging_frequency: string;
+  emoji_usage: string;
+  rhetorical_style: string;
+  style_summary: string;
+  confidence: number;
+}
+
+export async function analyzeWritingSamples(
+  samples: string[],
+): Promise<WritingStyleFingerprint> {
+  const response = await apiClient.post<WritingStyleFingerprint>(
+    "/onboarding/writing-analysis/analyze",
+    { samples },
+  );
+  return response.data;
+}
+
 // Readiness Score endpoint (US-913)
 
 export interface ReadinessBreakdown {

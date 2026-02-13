@@ -11,6 +11,7 @@ import {
   createFirstGoal,
   activateAria,
   submitCompanyDiscovery,
+  analyzeWritingSamples,
   type OnboardingStep,
   type FirstGoalCreateRequest,
   type CompanyDiscoveryRequest,
@@ -196,6 +197,14 @@ export function useActivateAria() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
     },
+  });
+}
+
+// --- Writing Analysis hook ---
+
+export function useAnalyzeWriting() {
+  return useMutation({
+    mutationFn: (samples: string[]) => analyzeWritingSamples(samples),
   });
 }
 

@@ -18,6 +18,7 @@ import {
   type OnboardingStep,
   type OnboardingStateResponse,
   type GoalSuggestion,
+  type WritingStyleFingerprint,
 } from "@/api/onboarding";
 import {
   useDocumentUpload,
@@ -28,6 +29,7 @@ import {
   useCreateFirstGoal,
   useActivateAria,
   useCompanyDiscovery,
+  useAnalyzeWriting,
 } from "@/hooks/useOnboarding";
 import { useEnrichmentStatus } from "@/hooks/useEnrichmentStatus";
 import { useActivationStatus } from "@/hooks/useActivationStatus";
@@ -75,10 +77,9 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   },
   writing_samples: {
     ariaMessage:
-      "Who are the main competitors you go up against? List a few names and I'll start building your competitive intelligence.",
-    inputMode: "text",
+      "I'd like to learn how you communicate so I can draft messages that sound like you. Paste a recent email, report excerpt, or LinkedIn post below — the more samples, the better the match.",
+    inputMode: "action_panel",
     skippable: true,
-    placeholder: "e.g. Lonza, Catalent, Samsung Biologics",
   },
   email_integration: {
     ariaMessage:
@@ -393,6 +394,173 @@ function UserProfilePanel({
       >
         Continue
       </button>
+    </div>
+  );
+}
+
+// --- Action Panel: Writing Samples ---
+
+function WritingSamplesPanel({
+  onComplete,
+  onSkip,
+}: {
+  onComplete: (response: OnboardingStateResponse) => void;
+  onSkip: () => void;
+}) {
+  const [samples, setSamples] = useState<string[]>([]);
+  const [currentSample, setCurrentSample] = useState("");
+  const [fingerprint, setFingerprint] = useState<WritingStyleFingerprint | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const analyzeMutation = useAnalyzeWriting();
+
+  const handleAddSample = useCallback(() => {
+    const text = currentSample.trim();
+    if (!text) return;
+    setSamples((prev) => [...prev, text]);
+    setCurrentSample("");
+    setError(null);
+  }, [currentSample]);
+
+  const handleRemoveSample = useCallback((index: number) => {
+    setSamples((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleAnalyze = useCallback(async () => {
+    if (samples.length === 0) {
+      setError("Please add at least one writing sample.");
+      return;
+    }
+    setError(null);
+    try {
+      const result = await analyzeMutation.mutateAsync(samples);
+      setFingerprint(result);
+      const response = await completeStep("writing_samples", {
+        sample_count: samples.length,
+        confidence: result.confidence,
+      });
+      onComplete(response);
+    } catch {
+      setError("Analysis failed. Please try again.");
+    }
+  }, [samples, analyzeMutation, onComplete]);
+
+  const traitBar = (label: string, value: number) => (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-[var(--text-secondary,#A1A1AA)]">{label}</span>
+        <span className="font-mono text-[var(--text-tertiary,#6B7280)]">
+          {Math.round(value * 100)}%
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-[var(--color-accent,#2E66FF)] transition-all"
+          style={{ width: `${value * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-4">
+      {!fingerprint ? (
+        <>
+          <textarea
+            value={currentSample}
+            onChange={(e) => setCurrentSample(e.target.value)}
+            placeholder="Paste a recent email, report, or LinkedIn post you've written..."
+            rows={5}
+            className="w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+          />
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleAddSample}
+              disabled={!currentSample.trim()}
+              className="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-[var(--text-primary,#F1F1F1)] transition hover:border-white/20 disabled:opacity-40"
+            >
+              Add Sample
+            </button>
+            {samples.length > 0 && (
+              <span className="rounded-full bg-[var(--color-accent,#2E66FF)]/20 px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent,#2E66FF)]">
+                {samples.length} sample{samples.length !== 1 ? "s" : ""} added
+              </span>
+            )}
+          </div>
+
+          {samples.length > 0 && (
+            <div className="space-y-2">
+              {samples.map((sample, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start justify-between rounded-lg border border-white/5 bg-white/[0.02] px-4 py-2.5"
+                >
+                  <p className="mr-3 line-clamp-2 text-sm text-[var(--text-secondary,#A1A1AA)]">
+                    {sample}
+                  </p>
+                  <button
+                    onClick={() => handleRemoveSample(idx)}
+                    className="shrink-0 text-xs text-[var(--text-tertiary,#6B7280)] transition hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+
+          {analyzeMutation.isPending && (
+            <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Analyzing your writing style...
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => void handleAnalyze()}
+              disabled={samples.length === 0 || analyzeMutation.isPending}
+              className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
+            >
+              Analyze My Style
+            </button>
+            <button
+              onClick={onSkip}
+              className="text-sm text-[var(--text-tertiary,#6B7280)] transition hover:text-[var(--text-secondary,#A1A1AA)]"
+            >
+              Skip for now
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-4 rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <h3 className="text-sm font-medium text-[var(--text-primary,#F1F1F1)]">
+            Your Writing Style
+          </h3>
+          <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
+            {fingerprint.style_summary}
+          </p>
+          <div className="space-y-3">
+            {traitBar("Directness", fingerprint.directness)}
+            {traitBar("Warmth", fingerprint.warmth)}
+            {traitBar("Assertiveness", fingerprint.assertiveness)}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[var(--text-secondary,#A1A1AA)]">
+              {fingerprint.rhetorical_style}
+            </span>
+            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[var(--text-secondary,#A1A1AA)]">
+              Formality: {Math.round(fingerprint.formality_index * 100)}%
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1111,6 +1279,13 @@ export function OnboardingPage() {
 
           {activeActionPanel === "user_profile" && (
             <UserProfilePanel onComplete={advanceFromResponse} />
+          )}
+
+          {activeActionPanel === "writing_samples" && (
+            <WritingSamplesPanel
+              onComplete={advanceFromResponse}
+              onSkip={() => void handleSkip()}
+            />
           )}
 
           {activeActionPanel === "email_integration" && (
