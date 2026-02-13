@@ -19,10 +19,12 @@ import {
   completeStep,
   skipStep,
   getOnboardingState,
+  saveEmailPrivacyConfig,
   type OnboardingStep,
   type OnboardingStateResponse,
   type GoalSuggestion,
   type WritingStyleFingerprint,
+  type PrivacyExclusion,
 } from "@/api/onboarding";
 import {
   useDocumentUpload,
@@ -711,6 +713,14 @@ function DocumentUploadPanel({
 
 // --- Action Panel: Email Integration ---
 
+const DATE_RANGE_OPTIONS = [
+  { value: 30, label: "30 days" },
+  { value: 60, label: "60 days" },
+  { value: 90, label: "90 days" },
+  { value: 180, label: "180 days" },
+  { value: 365, label: "1 year" },
+] as const;
+
 function EmailIntegrationPanel({
   onComplete,
   onSkip,
@@ -721,6 +731,13 @@ function EmailIntegrationPanel({
   const connectMutation = useEmailConnect();
   const statusQuery = useEmailStatus(true);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+
+  // Privacy config state
+  const [ingestionScopeDays, setIngestionScopeDays] = useState(60);
+  const [excludedDomains, setExcludedDomains] = useState("");
+  const [excludedSenders, setExcludedSenders] = useState("");
+  const [attachmentIngestion, setAttachmentIngestion] = useState(false);
 
   const googleConnected = statusQuery.data?.google?.connected ?? false;
   const microsoftConnected = statusQuery.data?.microsoft?.connected ?? false;
@@ -739,9 +756,59 @@ function EmailIntegrationPanel({
 
   const handleContinue = useCallback(async () => {
     const provider = googleConnected ? "google" : "microsoft";
+
+    // Build privacy exclusions from inputs
+    const privacyExclusions: PrivacyExclusion[] = [];
+
+    // Parse excluded domains (comma-separated)
+    if (excludedDomains.trim()) {
+      const domains = excludedDomains
+        .split(",")
+        .map((d) => d.trim())
+        .filter((d) => d.length > 0);
+      domains.forEach((domain) => {
+        privacyExclusions.push({ type: "domain", value: domain });
+      });
+    }
+
+    // Parse excluded senders (comma-separated)
+    if (excludedSenders.trim()) {
+      const senders = excludedSenders
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      senders.forEach((sender) => {
+        privacyExclusions.push({ type: "sender", value: sender });
+      });
+    }
+
+    // First save privacy config
+    setIsSavingPrivacy(true);
+    try {
+      await saveEmailPrivacyConfig({
+        provider,
+        privacy_exclusions: privacyExclusions,
+        ingestion_scope_days: ingestionScopeDays,
+        attachment_ingestion: attachmentIngestion,
+      });
+    } catch (error) {
+      console.error("Failed to save email privacy config:", error);
+      // Continue anyway - privacy config is optional
+    } finally {
+      setIsSavingPrivacy(false);
+    }
+
+    // Then complete the step
     const response = await completeStep("email_integration", { provider });
     onComplete(response);
-  }, [googleConnected, onComplete]);
+  }, [
+    googleConnected,
+    onComplete,
+    excludedDomains,
+    excludedSenders,
+    ingestionScopeDays,
+    attachmentIngestion,
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -796,13 +863,104 @@ function EmailIntegrationPanel({
         </p>
       )}
 
+      {/* Privacy Controls - shown after connection */}
+      {anyConnected && (
+        <div className="mt-6 space-y-4 rounded-lg border border-white/10 bg-white/[0.02] p-4">
+          <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
+            Before I start reading your emails, let me know your comfort level.
+            You can always adjust these later in Settings.
+          </p>
+
+          {/* Date Range Selector */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-[var(--text-primary,#F1F1F1)]">
+              How far back should I read?
+            </label>
+            <select
+              value={ingestionScopeDays}
+              onChange={(e) => setIngestionScopeDays(Number(e.target.value))}
+              className="w-full rounded-lg border border-white/10 bg-[var(--surface-secondary,#1A1D24)] px-3 py-2 text-sm text-[var(--text-primary,#F1F1F1)] focus:border-[var(--color-accent,#2E66FF)] focus:outline-none"
+            >
+              {DATE_RANGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Exclude Domains */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-[var(--text-primary,#F1F1F1)]">
+              Exclude domains
+              <span className="ml-1 font-normal text-[var(--text-tertiary,#6B7280)]">
+                (comma-separated, e.g. personal.gmail.com)
+              </span>
+            </label>
+            <input
+              type="text"
+              value={excludedDomains}
+              onChange={(e) => setExcludedDomains(e.target.value)}
+              placeholder="e.g. newsletters.com, personal.gmail.com"
+              className="w-full rounded-lg border border-white/10 bg-[var(--surface-secondary,#1A1D24)] px-3 py-2 text-sm text-[var(--text-primary,#F1F1F1)] placeholder:text-[var(--text-tertiary,#6B7280)] focus:border-[var(--color-accent,#2E66FF)] focus:outline-none"
+            />
+          </div>
+
+          {/* Exclude Senders */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-[var(--text-primary,#F1F1F1)]">
+              Exclude specific senders
+              <span className="ml-1 font-normal text-[var(--text-tertiary,#6B7280)]">
+                (comma-separated email addresses)
+              </span>
+            </label>
+            <input
+              type="text"
+              value={excludedSenders}
+              onChange={(e) => setExcludedSenders(e.target.value)}
+              placeholder="e.g. spouse@personal.com, hr@company.com"
+              className="w-full rounded-lg border border-white/10 bg-[var(--surface-secondary,#1A1D24)] px-3 py-2 text-sm text-[var(--text-primary,#F1F1F1)] placeholder:text-[var(--text-tertiary,#6B7280)] focus:border-[var(--color-accent,#2E66FF)] focus:outline-none"
+            />
+          </div>
+
+          {/* Attachment Toggle */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setAttachmentIngestion(!attachmentIngestion)}
+              className={`flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                attachmentIngestion
+                  ? "bg-[var(--color-accent,#2E66FF)]"
+                  : "bg-white/20"
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  attachmentIngestion ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+            <span className="text-sm text-[var(--text-primary,#F1F1F1)]">
+              Allow me to read attachments
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <button
           onClick={() => void handleContinue()}
-          disabled={!anyConnected}
+          disabled={!anyConnected || isSavingPrivacy}
           className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
         >
-          Continue
+          {isSavingPrivacy ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving...
+            </span>
+          ) : (
+            "Continue"
+          )}
         </button>
         <button
           onClick={onSkip}

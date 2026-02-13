@@ -636,3 +636,34 @@ export async function submitCompanyDiscovery(
   return response.data;
 }
 
+// Email Privacy Configuration (US-907)
+
+export interface PrivacyExclusion {
+  type: "sender" | "domain" | "category";
+  value: string;
+  reason?: string;
+}
+
+export interface EmailPrivacyConfig {
+  provider: "google" | "microsoft";
+  privacy_exclusions: PrivacyExclusion[];
+  ingestion_scope_days: number;
+  attachment_ingestion: boolean;
+}
+
+export interface EmailPrivacyConfigResponse {
+  status: string;
+  exclusion_count: number;
+  provider: string;
+}
+
+export async function saveEmailPrivacyConfig(
+  config: EmailPrivacyConfig
+): Promise<EmailPrivacyConfigResponse> {
+  const response = await apiClient.post<EmailPrivacyConfigResponse>(
+    "/onboarding/email/privacy",
+    config
+  );
+  return response.data;
+}
+
