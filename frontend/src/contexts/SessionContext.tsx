@@ -27,9 +27,13 @@ export const SessionContext = createContext<SessionContextType | null>(null);
 
 interface SessionProviderProps {
   children: ReactNode;
+  isAuthenticated?: boolean;
 }
 
-export function SessionProvider({ children }: SessionProviderProps) {
+export function SessionProvider({
+  children,
+  isAuthenticated = false,
+}: SessionProviderProps) {
   const [session, setSession] = useState<UnifiedSession | null>(null);
   const [isSessionReady, setIsSessionReady] = useState(false);
 
@@ -41,10 +45,28 @@ export function SessionProvider({ children }: SessionProviderProps) {
     sessionRef.current = session;
   }, [session]);
 
-  // Initialize session on mount
+  // Initialize session only when authenticated
   useEffect(() => {
     let cleanupSync: (() => void) | undefined;
     let cancelled = false;
+
+    // Don't initialize backend session if not authenticated
+    if (!isAuthenticated) {
+      // Create a local-only session for unauthenticated users
+      const localSession = {
+        id: crypto.randomUUID(),
+        user_id: "local",
+        started_at: new Date().toISOString(),
+        ended_at: null,
+        current_route: window.location.pathname,
+        active_modality: "text" as const,
+        conversation_thread: [],
+        metadata: { local_only: true },
+      };
+      setSession(localSession);
+      setIsSessionReady(true);
+      return;
+    }
 
     const init = async () => {
       const manager = managerRef.current;
@@ -56,11 +78,13 @@ export function SessionProvider({ children }: SessionProviderProps) {
       sessionRef.current = initialSession;
       setIsSessionReady(true);
 
-      // Start the 30-second sync interval
-      cleanupSync = manager.startSyncInterval(
-        initialSession,
-        () => sessionRef.current ?? initialSession,
-      );
+      // Only start sync interval for non-local sessions
+      if (initialSession.user_id !== "local") {
+        cleanupSync = manager.startSyncInterval(
+          initialSession,
+          () => sessionRef.current ?? initialSession,
+        );
+      }
     };
 
     void init();
@@ -69,7 +93,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       cancelled = true;
       cleanupSync?.();
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const updateSession = useCallback((updates: UpdatableSessionFields) => {
     setSession((prev) => {

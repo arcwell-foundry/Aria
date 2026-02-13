@@ -157,7 +157,10 @@ class SupabaseClient:
         company_id: str | None = None,
         role: str = "user",
     ) -> dict[str, Any]:
-        """Create a new user profile.
+        """Create or update a user profile.
+
+        Uses UPSERT to handle the case where an auth trigger has already
+        created a skeleton profile row.
 
         Args:
             user_id: The user's UUID (from auth.users).
@@ -166,7 +169,7 @@ class SupabaseClient:
             role: User role (default: "user").
 
         Returns:
-            Created user profile data.
+            Created or updated user profile data.
 
         Raises:
             DatabaseError: If database operation fails.
@@ -180,7 +183,12 @@ class SupabaseClient:
                 "company_id": company_id,
                 "role": role,
             }
-            response = client.table("user_profiles").insert(data).execute()
+            # Use upsert to handle pre-existing profile from auth trigger
+            response = (
+                client.table("user_profiles")
+                .upsert(data, on_conflict="id")
+                .execute()
+            )
             if response.data and len(response.data) > 0:
                 _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])
@@ -196,13 +204,15 @@ class SupabaseClient:
 
     @classmethod
     async def create_user_settings(cls, user_id: str) -> dict[str, Any]:
-        """Create default user settings.
+        """Create or update default user settings.
+
+        Uses UPSERT to handle the case where settings already exist.
 
         Args:
             user_id: The user's UUID.
 
         Returns:
-            Created user settings data.
+            Created or updated user settings data.
 
         Raises:
             DatabaseError: If database operation fails.
@@ -215,7 +225,12 @@ class SupabaseClient:
                 "preferences": {},
                 "integrations": {},
             }
-            response = client.table("user_settings").insert(data).execute()
+            # Use upsert to handle pre-existing settings
+            response = (
+                client.table("user_settings")
+                .upsert(data, on_conflict="user_id")
+                .execute()
+            )
             if response.data and len(response.data) > 0:
                 _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])
@@ -231,13 +246,15 @@ class SupabaseClient:
 
     @classmethod
     async def create_onboarding_state(cls, user_id: str) -> dict[str, Any]:
-        """Create initial onboarding state for a new user.
+        """Create or reset onboarding state for a user.
+
+        Uses UPSERT to handle the case where onboarding state already exists.
 
         Args:
             user_id: The user's UUID.
 
         Returns:
-            Created onboarding state data.
+            Created or updated onboarding state data.
 
         Raises:
             DatabaseError: If database operation fails.
@@ -259,7 +276,12 @@ class SupabaseClient:
                     "goal_clarity": 0,
                 },
             }
-            response = client.table("onboarding_state").insert(data).execute()
+            # Use upsert to handle pre-existing onboarding state
+            response = (
+                client.table("onboarding_state")
+                .upsert(data, on_conflict="user_id")
+                .execute()
+            )
             if response.data and len(response.data) > 0:
                 _supabase_circuit_breaker.record_success()
                 return cast(dict[str, Any], response.data[0])

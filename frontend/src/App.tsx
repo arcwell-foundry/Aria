@@ -59,7 +59,7 @@ function AppContent() {
   return (
     <>
       <ThemeProvider>
-        <SessionProvider>
+        <SessionProvider isAuthenticated={isAuthenticated}>
           <IntelPanelProvider>
             <AppRoutes />
           </IntelPanelProvider>
