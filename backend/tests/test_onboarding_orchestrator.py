@@ -405,13 +405,13 @@ async def test_routing_incomplete_onboarding(
     orchestrator: OnboardingOrchestrator,
     mock_db: MagicMock,
 ) -> None:
-    """User with incomplete onboarding routes to 'resume'."""
+    """User with incomplete onboarding routes to 'onboarding' to complete it."""
     profile_chain = _build_chain(None)
     state_chain = _build_chain({"completed_at": None, "current_step": "user_profile"})
     mock_db.table.side_effect = [profile_chain, state_chain]
 
     route = await orchestrator.get_routing_decision("user-123")
-    assert route == "resume"
+    assert route == "onboarding"
 
 
 @pytest.mark.asyncio()

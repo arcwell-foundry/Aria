@@ -306,7 +306,8 @@ class OnboardingOrchestrator:
         if state_data.get("completed_at"):
             return "dashboard"
 
-        return "resume"
+        # Onboarding exists but not complete -> route to onboarding page
+        return "onboarding"
 
     # --- Private helpers ---
 
