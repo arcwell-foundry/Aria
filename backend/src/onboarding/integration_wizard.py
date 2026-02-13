@@ -99,6 +99,9 @@ class IntegrationWizardService:
     async def get_integration_status(self, user_id: str) -> dict[str, Any]:
         """Get connection status for all integrations.
 
+        First checks local database, then syncs with Composio to auto-record
+        any connections that completed OAuth but weren't recorded locally.
+
         Args:
             user_id: The authenticated user's ID.
 
@@ -111,7 +114,7 @@ class IntegrationWizardService:
                 "preferences": IntegrationPreferences
             }
         """
-        # Get user's connected integrations
+        # Get user's connected integrations from local DB
         result = self._db.table("user_integrations").select("*").eq("user_id", user_id).execute()
 
         connected_integrations: dict[str, dict[str, Any]] = {}
@@ -123,6 +126,9 @@ class IntegrationWizardService:
                         "connected_at": row.get("created_at"),
                         "connection_id": row.get("composio_connection_id"),
                     }
+
+        # Sync with Composio to find any unrecorded connections
+        await self._sync_composio_connections(user_id, connected_integrations)
 
         # Build status for all integrations
         status_by_category: dict[str, list[IntegrationStatus]] = {
@@ -160,6 +166,79 @@ class IntegrationWizardService:
             "preferences": preferences.model_dump(),
         }
 
+    async def _sync_composio_connections(
+        self,
+        user_id: str,
+        connected_integrations: dict[str, dict[str, Any]],
+    ) -> None:
+        """Sync with Composio and auto-record any unrecorded connections.
+
+        Args:
+            user_id: The authenticated user's ID.
+            connected_integrations: Dict to update with newly found connections.
+        """
+        import asyncio
+
+        try:
+            oauth_client = get_oauth_client()
+
+            def _list_connections() -> Any:
+                return oauth_client._client.client.connected_accounts.list()  # type: ignore[union-attr]
+
+            connections = await asyncio.to_thread(_list_connections)
+
+            for conn in connections.items:
+                if (
+                    hasattr(conn, "toolkit")
+                    and hasattr(conn.toolkit, "slug")
+                    and str(conn.status).upper() == "ACTIVE"
+                ):
+                    slug = conn.toolkit.slug.lower()
+                    # Map Composio slug to our integration_type
+                    type_mapping = {
+                        "salesforce": "salesforce",
+                        "hubspot": "hubspot",
+                        "googlecalendar": "googlecalendar",
+                        "outlook": "outlook",
+                        "slack": "slack",
+                    }
+
+                    integration_type = type_mapping.get(slug)
+                    if integration_type and integration_type not in connected_integrations:
+                        # Found new connection — record it
+                        connection_id = conn.id
+                        logger.info(
+                            "Auto-recording integration connection from Composio",
+                            extra={
+                                "user_id": user_id,
+                                "integration_type": integration_type,
+                                "connection_id": connection_id,
+                            },
+                        )
+
+                        self._db.table("user_integrations").upsert(
+                            {
+                                "user_id": user_id,
+                                "integration_type": integration_type,
+                                "provider": integration_type.upper(),
+                                "status": "active",
+                                "composio_connection_id": connection_id,
+                            },
+                            on_conflict="user_id,integration_type",
+                        ).execute()
+
+                        # Update the dict for immediate use
+                        connected_integrations[integration_type] = {
+                            "connected_at": datetime.now(UTC).isoformat(),
+                            "connection_id": connection_id,
+                        }
+
+        except Exception as e:
+            logger.warning(
+                "Failed to sync Composio connections",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
     async def connect_integration(self, user_id: str, app_name: str) -> dict[str, Any]:
         """Initiate OAuth flow for an integration.
 
@@ -186,7 +265,7 @@ class IntegrationWizardService:
             oauth_client = get_oauth_client()
             integration_type = self.INTEGRATIONS[app_name]["composio_type"]
             redirect_uri = (
-                f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
+                f"{self._get_base_url()}/onboarding"
             )
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)

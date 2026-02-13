@@ -123,7 +123,10 @@ async def test_check_connection_status_returns_disconnected(service, mock_db):
 
     mock_db.table.return_value = mock_table
 
-    result = await service.check_connection_status("user-456", "microsoft")
+    # Patch the oauth module to raise an exception when get_oauth_client is called
+    with patch("src.integrations.oauth._oauth_client", None), \
+         patch("src.integrations.oauth.Composio", side_effect=Exception("Composio not configured")):
+        result = await service.check_connection_status("user-456", "microsoft")
 
     assert result["connected"] is False
     assert result["provider"] == "microsoft"

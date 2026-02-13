@@ -1,5 +1,4 @@
 import { apiClient } from "@/api/client";
-import type { AxiosError } from "axios";
 
 export interface UnifiedSession {
   id: string;
@@ -17,8 +16,9 @@ const SYNC_INTERVAL_MS = 30_000;
 /**
  * Manages session lifecycle via REST API calls.
  *
- * Resilient by design: if the backend is unreachable, falls back to a
- * local-only session so the app continues to function.
+ * Resilient by design: if the backend is unreachable or endpoints don't exist,
+ * falls back to a local-only session so the app continues to function.
+ * All errors are silently swallowed to prevent console noise.
  */
 export class SessionManager {
   /**
@@ -42,24 +42,8 @@ export class SessionManager {
       }
 
       return await this.createSession();
-    } catch (error: unknown) {
-      const axiosError = error as AxiosError;
-
-      if (axiosError.response?.status === 404) {
-        // No current session — create a fresh one
-        try {
-          return await this.createSession();
-        } catch {
-          // Backend unreachable during creation — fall back to local
-          return this.createLocalSession();
-        }
-      }
-
-      // Any other error (network, 5xx, etc.) — fall back to local session
-      console.warn(
-        "[SessionManager] Backend unreachable during initialize, using local session",
-        axiosError.message ?? error,
-      );
+    } catch {
+      // Backend unreachable or endpoint doesn't exist — fall back to local
       return this.createLocalSession();
     }
   }
@@ -76,34 +60,29 @@ export class SessionManager {
         metadata: {},
       });
       return response.data;
-    } catch (error: unknown) {
-      console.warn(
-        "[SessionManager] Failed to create session on backend, using local session",
-        error,
-      );
+    } catch {
+      // Backend unreachable or endpoint doesn't exist — fall back to local
       return this.createLocalSession();
     }
   }
 
   /**
    * Archive a session by setting its ended_at timestamp.
+   * Silently ignores errors (endpoint may not exist).
    */
   async archiveSession(sessionId: string): Promise<void> {
     try {
       await apiClient.patch(`/sessions/${sessionId}`, {
         ended_at: new Date().toISOString(),
       });
-    } catch (error: unknown) {
-      console.warn(
-        "[SessionManager] Failed to archive session",
-        sessionId,
-        error,
-      );
+    } catch {
+      // Silently ignore — endpoint may not exist
     }
   }
 
   /**
    * Sync the current session state to the backend.
+   * Silently ignores errors (endpoint may not exist).
    */
   async syncSession(session: UnifiedSession): Promise<void> {
     try {
@@ -113,12 +92,8 @@ export class SessionManager {
         conversation_thread: session.conversation_thread,
         metadata: session.metadata,
       });
-    } catch (error: unknown) {
-      console.warn(
-        "[SessionManager] Failed to sync session",
-        session.id,
-        error,
-      );
+    } catch {
+      // Silently ignore — endpoint may not exist
     }
   }
 

@@ -86,7 +86,7 @@ class EmailIntegrationService:
             # Map provider to Composio integration type
             integration_type = "GMAIL" if provider == "google" else "OUTLOOK"
             redirect_uri = (
-                f"{self._get_base_url()}/settings/integrations/callback?redirect_to=onboarding"
+                f"{self._get_base_url()}/onboarding"
             )
 
             # Generate OAuth URL via Composio SDK (returns real connection ID)
@@ -133,6 +133,9 @@ class EmailIntegrationService:
     async def check_connection_status(self, user_id: str, provider: str) -> dict[str, Any]:
         """Check if email provider is connected for the user.
 
+        First checks local database. If not found, queries Composio for
+        active connections and auto-records them if found.
+
         Args:
             user_id: The authenticated user's ID.
             provider: Either "google" or "microsoft".
@@ -141,11 +144,14 @@ class EmailIntegrationService:
             Dict with connection status:
             {"connected": bool, "provider": str, "connected_at": str | None}
         """
+        integration_type = "gmail" if provider == "google" else "outlook"
+
+        # Check local database first
         result = (
             self._db.table("user_integrations")
             .select("*")
             .eq("user_id", user_id)
-            .eq("integration_type", "gmail" if provider == "google" else "outlook")
+            .eq("integration_type", integration_type)
             .maybe_single()
             .execute()
         )
@@ -158,6 +164,66 @@ class EmailIntegrationService:
                 "provider": provider,
                 "connected_at": data.get("created_at"),
             }
+
+        # Not in local DB — check Composio for active connections
+        # This handles the case where OAuth completed but callback wasn't processed
+        try:
+            from src.integrations.oauth import get_oauth_client
+
+            oauth_client = get_oauth_client()
+            composio_type = "GMAIL" if provider == "google" else "OUTLOOK"
+
+            # Query Composio for user's connected accounts
+            import asyncio
+
+            def _list_connections() -> Any:
+                return oauth_client._client.client.connected_accounts.list(  # type: ignore[union-attr]
+
+                )
+
+            connections = await asyncio.to_thread(_list_connections)
+
+            # Find matching connection
+            for conn in connections.items:
+                if (
+                    hasattr(conn, "toolkit")
+                    and hasattr(conn.toolkit, "slug")
+                    and conn.toolkit.slug.lower() == composio_type.lower()
+                    and str(conn.status).upper() == "ACTIVE"
+                ):
+                    # Found active connection — record it locally
+                    connection_id = conn.id
+                    logger.info(
+                        "Auto-recording email connection from Composio",
+                        extra={
+                            "user_id": user_id,
+                            "provider": provider,
+                            "connection_id": connection_id,
+                        },
+                    )
+
+                    self._db.table("user_integrations").upsert(
+                        {
+                            "user_id": user_id,
+                            "integration_type": integration_type,
+                            "provider": integration_type.upper(),
+                            "status": "active",
+                            "composio_connection_id": connection_id,
+                        },
+                        on_conflict="user_id,integration_type",
+                    ).execute()
+
+                    return {
+                        "connected": True,
+                        "provider": provider,
+                        "connected_at": datetime.now(UTC).isoformat(),
+                    }
+
+        except Exception as e:
+            logger.warning(
+                "Failed to check Composio connections",
+                extra={"user_id": user_id, "provider": provider, "error": str(e)},
+            )
 
         return {"connected": False, "provider": provider}
 
