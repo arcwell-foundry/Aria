@@ -55,6 +55,66 @@ interface StatusLine {
   delay: number;
   /** Whether this line should pulse with ellipsis while loading */
   pulse?: boolean;
+  /** Optional numeric value for count-up animation */
+  countUpValue?: number;
+  /** Text before the number */
+  textBefore?: string;
+  /** Text after the number */
+  textAfter?: string;
+}
+
+// --- Count-Up Number Animation Component ---
+function CountUpNumber({
+  targetValue,
+  duration = 400,
+}: {
+  targetValue: number;
+  duration?: number;
+}) {
+  const [displayValue, setDisplayValue] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(true);
+  const startTimeRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const animate = (timestamp: number) => {
+      if (!startTimeRef.current) {
+        startTimeRef.current = timestamp;
+      }
+
+      const elapsed = timestamp - startTimeRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const currentValue = Math.round(eased * targetValue);
+
+      setDisplayValue(currentValue);
+
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      } else {
+        setIsAnimating(false);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, [targetValue, duration]);
+
+  return (
+    <span
+      className={`font-mono tabular-nums ${isAnimating ? "count-up-animating" : ""}`}
+      style={{ display: "inline-block", minWidth: `${String(targetValue).length}ch` }}
+    >
+      {displayValue.toLocaleString()}
+    </span>
+  );
 }
 
 // Step-specific status line configurations
@@ -83,9 +143,10 @@ function getStatusLines(
       if (products !== undefined || !isLoading) {
         lines.push({
           id: "products",
-          text: products !== undefined
-            ? `Found ${products} key products...`
-            : "Identifying product portfolio...",
+          text: products !== undefined ? "" : "Identifying product portfolio...",
+          textBefore: products !== undefined ? "Found " : undefined,
+          countUpValue: products,
+          textAfter: products !== undefined ? " key products..." : undefined,
           delay: 300,
           pulse: isLoading && !competitors,
         });
@@ -94,9 +155,10 @@ function getStatusLines(
       if (competitors !== undefined || (!isLoading && products !== undefined)) {
         lines.push({
           id: "competitors",
-          text: competitors !== undefined
-            ? `Identified ${competitors} competitors...`
-            : "Mapping competitive landscape...",
+          text: competitors !== undefined ? "" : "Mapping competitive landscape...",
+          textBefore: competitors !== undefined ? "Identified " : undefined,
+          countUpValue: competitors,
+          textAfter: competitors !== undefined ? " competitors..." : undefined,
           delay: 600,
           pulse: isLoading && !classification,
         });
@@ -161,9 +223,10 @@ function getStatusLines(
       const lines: StatusLine[] = [
         {
           id: "analyzing",
-          text: count
-            ? `Analyzing ${count} writing sample${count !== 1 ? "s" : ""}...`
-            : "Analyzing writing patterns...",
+          text: count ? "" : "Analyzing writing patterns...",
+          textBefore: count ? "Analyzing " : undefined,
+          countUpValue: count,
+          textAfter: count ? ` writing sample${count !== 1 ? "s" : ""}...` : undefined,
           delay: 0,
           pulse: isLoading,
         },
@@ -213,9 +276,10 @@ function getStatusLines(
       if (contacts !== undefined || !isLoading) {
         lines.push({
           id: "relationships",
-          text: contacts !== undefined
-            ? `Found ${contacts} contacts...`
-            : "Building relationship graph...",
+          text: contacts !== undefined ? "" : "Building relationship graph...",
+          textBefore: contacts !== undefined ? "Found " : undefined,
+          countUpValue: contacts,
+          textAfter: contacts !== undefined ? " contacts..." : undefined,
           delay: 300,
           pulse: isLoading && !priority,
         });
@@ -224,9 +288,10 @@ function getStatusLines(
       if (priority !== undefined || (!isLoading && contacts !== undefined)) {
         lines.push({
           id: "priority",
-          text: priority !== undefined
-            ? `Identified ${priority} priority contacts.`
-            : "Priority contacts identified.",
+          text: priority !== undefined ? "" : "Priority contacts identified.",
+          textBefore: priority !== undefined ? "Identified " : undefined,
+          countUpValue: priority,
+          textAfter: priority !== undefined ? " priority contacts." : undefined,
           delay: 600,
           pulse: false,
         });
@@ -339,7 +404,15 @@ export function IntelligenceMoment({
             className={`intelligence-line intelligence-line-delay-${Math.min(idx, 5)}`}
           >
             <p className="text-sm text-[var(--text-secondary,#A1A1AA)] font-medium">
-              {line.text}
+              {line.countUpValue !== undefined ? (
+                <>
+                  {line.textBefore}
+                  <CountUpNumber targetValue={line.countUpValue} duration={400} />
+                  {line.textAfter}
+                </>
+              ) : (
+                line.text
+              )}
               {line.pulse && (
                 <span className="intelligence-ellipsis ml-1">
                   <span>.</span>

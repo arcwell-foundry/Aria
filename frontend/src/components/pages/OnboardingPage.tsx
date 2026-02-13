@@ -12,6 +12,7 @@ import {
   MessageSquare,
   ExternalLink,
   ChevronLeft,
+  type LucideIcon,
 } from "lucide-react";
 import { MessageBubble } from "@/components/conversation/MessageBubble";
 import { ProgressBar } from "@/components/primitives/ProgressBar";
@@ -108,6 +109,77 @@ function AnimatedField({
     <div key={fieldKey} className={`onboarding-field-in ${delayClass}`}>
       {children}
     </div>
+  );
+}
+
+// --- Animated Connection Button ---
+function AnimatedConnectionButton({
+  isConnected,
+  isPending,
+  onConnect,
+  onDisconnect,
+  connectLabel,
+  connectedLabel,
+  icon: Icon,
+  disabled = false,
+  className = "",
+}: {
+  isConnected: boolean;
+  isPending: boolean;
+  onConnect: () => void;
+  onDisconnect?: () => void;
+  connectLabel: string;
+  connectedLabel: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+  className?: string;
+}) {
+  // Use connection state as key to force re-render and re-trigger animations
+  // This ensures the CSS animations play fresh each time connection state changes
+  const animationKey = isConnected ? "connected" : "disconnected";
+
+  const handleClick = () => {
+    if (isConnected && onDisconnect) {
+      onDisconnect();
+    } else if (!isConnected) {
+      onConnect();
+    }
+  };
+
+  const baseClasses = "flex items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors duration-300 disabled:opacity-60";
+
+  const stateClasses = isConnected
+    ? "border-green-500/30 bg-green-500/10 text-green-400 connection-success"
+    : "border-white/10 bg-white/[0.03] text-[var(--text-primary,#F1F1F1)] hover:border-white/20";
+
+  return (
+    <button
+      key={animationKey}
+      onClick={handleClick}
+      disabled={disabled || isPending}
+      className={`${baseClasses} ${stateClasses} ${className}`}
+    >
+      <span className="connection-text-wrapper">
+        {isConnected ? (
+          <>
+            <Check className="h-4 w-4 connection-checkmark" />
+            <span className="connection-text-in">
+              {connectedLabel}
+            </span>
+          </>
+        ) : isPending ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Connecting...</span>
+          </>
+        ) : (
+          <>
+            <Icon className="h-4 w-4" />
+            <span>{connectLabel}</span>
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -1140,40 +1212,26 @@ function EmailIntegrationPanel({
     <div className="mx-auto w-full max-w-2xl space-y-4">
       <div className="flex gap-3">
         {/* Gmail button */}
-        <button
-          onClick={() => void handleConnect("google")}
-          disabled={googleConnected || connectMutation.isPending}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${
-            googleConnected
-              ? "border-green-500/30 bg-green-500/10 text-green-400"
-              : "border-white/10 bg-white/[0.03] text-[var(--text-primary,#F1F1F1)] hover:border-white/20"
-          } disabled:opacity-60`}
-        >
-          {googleConnected ? (
-            <Check className="h-4 w-4" />
-          ) : (
-            <Mail className="h-4 w-4" />
-          )}
-          {googleConnected ? "Gmail Connected" : "Connect Gmail"}
-        </button>
+        <AnimatedConnectionButton
+          isConnected={googleConnected}
+          isPending={connectMutation.isPending}
+          onConnect={() => void handleConnect("google")}
+          connectLabel="Connect Gmail"
+          connectedLabel="Gmail Connected"
+          icon={Mail}
+          className="flex-1"
+        />
 
         {/* Outlook button */}
-        <button
-          onClick={() => void handleConnect("microsoft")}
-          disabled={microsoftConnected || connectMutation.isPending}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${
-            microsoftConnected
-              ? "border-green-500/30 bg-green-500/10 text-green-400"
-              : "border-white/10 bg-white/[0.03] text-[var(--text-primary,#F1F1F1)] hover:border-white/20"
-          } disabled:opacity-60`}
-        >
-          {microsoftConnected ? (
-            <Check className="h-4 w-4" />
-          ) : (
-            <Mail className="h-4 w-4" />
-          )}
-          {microsoftConnected ? "Outlook Connected" : "Connect Outlook"}
-        </button>
+        <AnimatedConnectionButton
+          isConnected={microsoftConnected}
+          isPending={connectMutation.isPending}
+          onConnect={() => void handleConnect("microsoft")}
+          connectLabel="Connect Outlook"
+          connectedLabel="Outlook Connected"
+          icon={Mail}
+          className="flex-1"
+        />
       </div>
 
       {connectMutation.isPending && (
@@ -1358,29 +1416,16 @@ function IntegrationWizardPanel({
     const isPending = connectMutation.isPending && isConnecting;
 
     return (
-      <button
+      <AnimatedConnectionButton
         key={integration.name}
-        onClick={() => void handleConnect(integration.name)}
-        disabled={integration.connected || connectMutation.isPending}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${
-          integration.connected
-            ? "border-green-500/30 bg-green-500/10 text-green-400"
-            : "border-white/10 bg-white/[0.03] text-[var(--text-primary,#F1F1F1)] hover:border-white/20"
-        } disabled:opacity-60`}
-      >
-        <span className="flex items-center gap-2">
-          {integration.connected ? (
-            <Check className="h-4 w-4" />
-          ) : isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <ExternalLink className="h-4 w-4" />
-          )}
-          {integration.connected
-            ? `${integration.display_name} Connected`
-            : `Connect ${integration.display_name}`}
-        </span>
-      </button>
+        isConnected={integration.connected}
+        isPending={isPending}
+        onConnect={() => void handleConnect(integration.name)}
+        connectLabel={`Connect ${integration.display_name}`}
+        connectedLabel={`${integration.display_name} Connected`}
+        icon={ExternalLink}
+        className="w-full"
+      />
     );
   };
 

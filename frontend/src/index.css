@@ -613,6 +613,132 @@ body {
 .onboarding-field-delay-4 { animation-delay: 320ms; }
 .onboarding-field-delay-5 { animation-delay: 400ms; }
 
+/* === OAuth Connection Success Animations === */
+
+/* Background transition from blue/default to muted green */
+@keyframes connection-success-bg {
+  0% {
+    background-color: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  100% {
+    background-color: rgba(107, 143, 113, 0.1);
+    border-color: rgba(107, 143, 113, 0.3);
+  }
+}
+
+/* Scale click-into-place effect */
+@keyframes connection-click-settle {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Text crossfade animation container */
+.connection-text-transition {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Old text (Connect X) fades out */
+@keyframes connection-text-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* New text (X Connected) fades in */
+@keyframes connection-text-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Checkmark draw animation (200ms) */
+@keyframes connection-checkmark-draw {
+  0% {
+    stroke-dashoffset: 24;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Connection success button state */
+.connection-success {
+  animation:
+    connection-click-settle 300ms ease-out,
+    connection-success-bg 300ms ease-out forwards;
+}
+
+.connection-success .connection-checkmark {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: connection-checkmark-draw 200ms ease-out 100ms forwards;
+}
+
+/* Text crossfade wrapper */
+.connection-text-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-text-out {
+  animation: connection-text-out 200ms ease-out forwards;
+}
+
+.connection-text-in {
+  animation: connection-text-in 200ms ease-out forwards;
+}
+
+/* Disconnect state - smooth transition back */
+@keyframes connection-disconnect-bg {
+  0% {
+    background-color: rgba(107, 143, 113, 0.1);
+    border-color: rgba(107, 143, 113, 0.3);
+  }
+  100% {
+    background-color: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.connection-disconnect {
+  animation: connection-disconnect-bg 300ms ease-out forwards;
+}
+
+/* Count-up number animation */
+@keyframes count-up-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.count-up-animating {
+  animation: count-up-pulse 100ms ease-in-out;
+  font-variant-numeric: tabular-nums;
+}
+
 /* === Intelligence Moment — ARIA learning processing state === */
 
 /* Pulsing glow ring around avatar */
@@ -803,5 +929,27 @@ body {
   .onboarding-progress-fill {
     transition: opacity 150ms ease-out;
     transform: none;
+  }
+
+  /* OAuth connection animations reduced motion */
+  .connection-success,
+  .connection-disconnect {
+    animation: none;
+  }
+
+  .connection-success .connection-checkmark {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .connection-text-out,
+  .connection-text-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .count-up-animating {
+    animation: none;
   }
 }
