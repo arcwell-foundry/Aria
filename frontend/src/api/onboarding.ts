@@ -362,6 +362,30 @@ export async function analyzeWritingSamples(
   return response.data;
 }
 
+export interface ExtractedTextResponse {
+  text: string;
+  char_count: number;
+  filename: string;
+  file_type: string;
+}
+
+export async function extractTextFromFile(
+  file: File,
+): Promise<ExtractedTextResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await apiClient.post<ExtractedTextResponse>(
+    "/onboarding/writing-analysis/extract-text",
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    },
+  );
+  return response.data;
+}
+
 // Readiness Score endpoint (US-913)
 
 export interface ReadinessBreakdown {

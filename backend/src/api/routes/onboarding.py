@@ -519,6 +519,107 @@ async def get_writing_fingerprint(
     return fp.model_dump()
 
 
+@router.post("/writing-analysis/extract-text")
+async def extract_text_for_writing_sample(
+    current_user: CurrentUser,  # noqa: ARG001 - Required for auth
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Extract text from an uploaded file for writing sample analysis.
+
+    Supports .txt, .doc, .docx, and .pdf files. Extracts the raw text
+    content without storing the file - used for writing style analysis.
+
+    Args:
+        file: Uploaded file to extract text from.
+
+    Returns:
+        Dict with extracted text and metadata.
+
+    Raises:
+        HTTPException: 400 if unsupported file type or extraction fails.
+    """
+    # Validate file type
+    allowed_types = {
+        "text/plain": "txt",
+        "application/pdf": "pdf",
+        "application/msword": "doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    }
+
+    content_type = file.content_type or ""
+    file_type = allowed_types.get(content_type)
+
+    if not file_type:
+        # Also check by extension
+        filename = file.filename or ""
+        ext = filename.lower().split(".")[-1] if "." in filename else ""
+        if ext in ("txt", "pdf", "doc", "docx"):
+            file_type = ext
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {content_type or ext}. Supported: .txt, .doc, .docx, .pdf",
+            )
+
+    # Read file content
+    content = await file.read()
+
+    # Limit file size to 10MB for writing samples
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="File too large. Maximum is 10MB for writing samples.",
+        )
+
+    # Extract text based on type
+    extracted_text = ""
+
+    try:
+        if file_type == "txt":
+            # Try UTF-8 first, then fall back to latin-1
+            try:
+                extracted_text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                extracted_text = content.decode("latin-1")
+
+        elif file_type == "pdf":
+            from src.onboarding.document_ingestion import DocumentIngestionService
+
+            extracted_text = DocumentIngestionService._extract_pdf(content)
+
+        elif file_type in ("doc", "docx"):
+            from src.onboarding.document_ingestion import DocumentIngestionService
+
+            extracted_text = DocumentIngestionService._extract_docx(content)
+
+    except Exception as e:
+        logger.warning("Failed to extract text from file: %s", e)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to extract text from file: {str(e)}",
+        ) from e
+
+    # Clean up and truncate if needed
+    extracted_text = extracted_text.strip()
+
+    if not extracted_text:
+        raise HTTPException(
+            status_code=400,
+            detail="No text could be extracted from this file.",
+        )
+
+    # Truncate to reasonable length (6000 chars max for analysis)
+    if len(extracted_text) > 6000:
+        extracted_text = extracted_text[:6000] + "..."
+
+    return {
+        "text": extracted_text,
+        "char_count": len(extracted_text),
+        "filename": file.filename,
+        "file_type": file_type,
+    }
+
+
 # Email integration endpoints (US-907)
 
 

@@ -12,6 +12,7 @@ import {
   activateAria,
   submitCompanyDiscovery,
   analyzeWritingSamples,
+  extractTextFromFile,
   getIntegrationWizardStatus,
   connectIntegration,
   disconnectIntegration,
@@ -214,6 +215,12 @@ export function useActivateAria() {
 export function useAnalyzeWriting() {
   return useMutation({
     mutationFn: (samples: string[]) => analyzeWritingSamples(samples),
+  });
+}
+
+export function useExtractTextFromFile() {
+  return useMutation({
+    mutationFn: (file: File) => extractTextFromFile(file),
   });
 }
 

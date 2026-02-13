@@ -11,6 +11,7 @@ import {
   Calendar,
   MessageSquare,
   ExternalLink,
+  ChevronLeft,
 } from "lucide-react";
 import { MessageBubble } from "@/components/conversation/MessageBubble";
 import { ProgressBar } from "@/components/primitives/ProgressBar";
@@ -36,6 +37,7 @@ import {
   useActivateAria,
   useCompanyDiscovery,
   useAnalyzeWriting,
+  useExtractTextFromFile,
   useIntegrationWizardStatus,
   useConnectIntegration,
 } from "@/hooks/useOnboarding";
@@ -142,12 +144,14 @@ function stepIndex(step: OnboardingStep): number {
 
 function CompanyDiscoveryPanel({
   onComplete,
+  initialData,
 }: {
   onComplete: (response: OnboardingStateResponse) => void;
+  initialData?: Record<string, unknown>;
 }) {
-  const [companyName, setCompanyName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [email, setEmail] = useState("");
+  const [companyName, setCompanyName] = useState((initialData?.company_name as string) || "");
+  const [website, setWebsite] = useState((initialData?.website as string) || "");
+  const [email, setEmail] = useState((initialData?.email as string) || "");
   const [error, setError] = useState<string | null>(null);
   const discoveryMutation = useCompanyDiscovery();
 
@@ -252,15 +256,17 @@ function CompanyDiscoveryPanel({
 
 function UserProfilePanel({
   onComplete,
+  initialData,
 }: {
   onComplete: (response: OnboardingStateResponse) => void;
+  initialData?: Record<string, unknown>;
 }) {
-  const [fullName, setFullName] = useState("");
-  const [title, setTitle] = useState("");
-  const [department, setDepartment] = useState("");
-  const [linkedinUrl, setLinkedinUrl] = useState("");
-  const [phone, setPhone] = useState("");
-  const [roleType, setRoleType] = useState("");
+  const [fullName, setFullName] = useState((initialData?.full_name as string) || "");
+  const [title, setTitle] = useState((initialData?.title as string) || "");
+  const [department, setDepartment] = useState((initialData?.department as string) || "");
+  const [linkedinUrl, setLinkedinUrl] = useState((initialData?.linkedin_url as string) || "");
+  const [phone, setPhone] = useState((initialData?.phone as string) || "");
+  const [roleType, setRoleType] = useState((initialData?.role_type as string) || "");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -408,30 +414,80 @@ function UserProfilePanel({
 
 // --- Action Panel: Writing Samples ---
 
+const WRITING_SAMPLE_FILE_TYPES = ".txt,.doc,.docx,.pdf";
+
 function WritingSamplesPanel({
   onComplete,
   onSkip,
+  emailConnected,
 }: {
   onComplete: (response: OnboardingStateResponse) => void;
   onSkip: () => void;
+  emailConnected: boolean;
 }) {
   const [samples, setSamples] = useState<string[]>([]);
+  const [sampleSources, setSampleSources] = useState<string[]>([]); // Track source (pasted/file)
   const [currentSample, setCurrentSample] = useState("");
   const [fingerprint, setFingerprint] = useState<WritingStyleFingerprint | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const analyzeMutation = useAnalyzeWriting();
+  const extractTextMutation = useExtractTextFromFile();
 
   const handleAddSample = useCallback(() => {
     const text = currentSample.trim();
     if (!text) return;
     setSamples((prev) => [...prev, text]);
+    setSampleSources((prev) => [...prev, "pasted"]);
     setCurrentSample("");
     setError(null);
   }, [currentSample]);
 
   const handleRemoveSample = useCallback((index: number) => {
     setSamples((prev) => prev.filter((_, i) => i !== index));
+    setSampleSources((prev) => prev.filter((_, i) => i !== index));
   }, []);
+
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files) return;
+
+      for (const file of Array.from(files)) {
+        // Check file type
+        const ext = file.name.toLowerCase().split(".").pop();
+        if (!["txt", "doc", "docx", "pdf"].includes(ext || "")) {
+          setError(`Unsupported file type: .${ext}. Supported: .txt, .doc, .docx, .pdf`);
+          continue;
+        }
+
+        // For .txt files, read directly
+        if (ext === "txt") {
+          try {
+            const text = await file.text();
+            if (text.trim()) {
+              setSamples((prev) => [...prev, text.trim()]);
+              setSampleSources((prev) => [...prev, file.name]);
+            }
+          } catch {
+            setError(`Failed to read file: ${file.name}`);
+          }
+        } else {
+          // For .doc, .docx, .pdf, use backend extraction
+          try {
+            const result = await extractTextMutation.mutateAsync(file);
+            if (result.text.trim()) {
+              setSamples((prev) => [...prev, result.text]);
+              setSampleSources((prev) => [...prev, file.name]);
+            }
+          } catch (e) {
+            setError(`Failed to extract text from ${file.name}: ${e instanceof Error ? e.message : "Unknown error"}`);
+          }
+        }
+      }
+    },
+    [extractTextMutation],
+  );
 
   const handleAnalyze = useCallback(async () => {
     if (samples.length === 0) {
@@ -469,19 +525,64 @@ function WritingSamplesPanel({
     </div>
   );
 
+  const isProcessing = analyzeMutation.isPending || extractTextMutation.isPending;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
       {!fingerprint ? (
         <>
-          <textarea
-            value={currentSample}
-            onChange={(e) => setCurrentSample(e.target.value)}
-            placeholder="Paste a recent email, report, or LinkedIn post you've written..."
-            rows={5}
-            className="w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-          />
+          {/* Instructions */}
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] px-4 py-3">
+            <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
+              You can paste emails, reports, LinkedIn posts, or any writing. The more samples, the better ARIA matches your voice.
+            </p>
+          </div>
 
-          <div className="flex items-center gap-3">
+          {/* File upload drop zone */}
+          <div
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-6 transition ${
+              isDragging
+                ? "border-[var(--color-accent,#2E66FF)] bg-[var(--color-accent,#2E66FF)]/5"
+                : "border-white/10 hover:border-white/20"
+            }`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              void handleFiles(e.dataTransfer.files);
+            }}
+          >
+            <Upload className="mb-2 h-6 w-6 text-[var(--text-tertiary,#6B7280)]" />
+            <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
+              Drag files here or click to browse
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-tertiary,#6B7280)]">
+              TXT, DOC, DOCX, PDF
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={WRITING_SAMPLE_FILE_TYPES}
+              className="hidden"
+              onChange={(e) => void handleFiles(e.target.files)}
+            />
+          </div>
+
+          {/* Text input */}
+          <div className="space-y-2">
+            <textarea
+              value={currentSample}
+              onChange={(e) => setCurrentSample(e.target.value)}
+              placeholder="Or paste a sample directly here..."
+              rows={4}
+              className="w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
+            />
             <button
               onClick={handleAddSample}
               disabled={!currentSample.trim()}
@@ -489,13 +590,18 @@ function WritingSamplesPanel({
             >
               Add Sample
             </button>
-            {samples.length > 0 && (
+          </div>
+
+          {/* Sample count badge */}
+          {samples.length > 0 && (
+            <div className="flex items-center gap-2">
               <span className="rounded-full bg-[var(--color-accent,#2E66FF)]/20 px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent,#2E66FF)]">
                 {samples.length} sample{samples.length !== 1 ? "s" : ""} added
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
+          {/* Added samples list */}
           {samples.length > 0 && (
             <div className="space-y-2">
               {samples.map((sample, idx) => (
@@ -503,9 +609,14 @@ function WritingSamplesPanel({
                   key={idx}
                   className="flex items-start justify-between rounded-lg border border-white/5 bg-white/[0.02] px-4 py-2.5"
                 >
-                  <p className="mr-3 line-clamp-2 text-sm text-[var(--text-secondary,#A1A1AA)]">
-                    {sample}
-                  </p>
+                  <div className="mr-3 flex-1">
+                    <p className="mb-1 text-xs text-[var(--text-tertiary,#6B7280)]">
+                      {sampleSources[idx] === "pasted" ? "Pasted text" : sampleSources[idx]}
+                    </p>
+                    <p className="line-clamp-2 text-sm text-[var(--text-secondary,#A1A1AA)]">
+                      {sample.slice(0, 200)}{sample.length > 200 ? "..." : ""}
+                    </p>
+                  </div>
                   <button
                     onClick={() => handleRemoveSample(idx)}
                     className="shrink-0 text-xs text-[var(--text-tertiary,#6B7280)] transition hover:text-red-400"
@@ -517,23 +628,32 @@ function WritingSamplesPanel({
             </div>
           )}
 
+          {/* Email learning message */}
+          {emailConnected && samples.length > 0 && (
+            <div className="rounded-lg border border-[var(--color-accent,#2E66FF)]/20 bg-[var(--color-accent,#2E66FF)]/5 px-4 py-3">
+              <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
+                I'll also learn from your sent emails to refine your writing style over time.
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
               {error}
             </div>
           )}
 
-          {analyzeMutation.isPending && (
+          {isProcessing && (
             <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary,#6B7280)]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Analyzing your writing style...
+              {extractTextMutation.isPending ? "Extracting text from file..." : "Analyzing your writing style..."}
             </div>
           )}
 
           <div className="flex items-center gap-3">
             <button
               onClick={() => void handleAnalyze()}
-              disabled={samples.length === 0 || analyzeMutation.isPending}
+              disabled={samples.length === 0 || isProcessing}
               className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
             >
               Analyze My Style
@@ -542,7 +662,7 @@ function WritingSamplesPanel({
               onClick={onSkip}
               className="text-sm text-[var(--text-tertiary,#6B7280)] transition hover:text-[var(--text-secondary,#A1A1AA)]"
             >
-              Skip for now
+              Skip — ARIA will learn from your emails instead
             </button>
           </div>
         </>
@@ -558,15 +678,24 @@ function WritingSamplesPanel({
             {traitBar("Directness", fingerprint.directness)}
             {traitBar("Warmth", fingerprint.warmth)}
             {traitBar("Assertiveness", fingerprint.assertiveness)}
+            {traitBar("Formality", fingerprint.formality_index)}
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded-full border border-white/10 px-2.5 py-1 text-[var(--text-secondary,#A1A1AA)]">
               {fingerprint.rhetorical_style}
             </span>
             <span className="rounded-full border border-white/10 px-2.5 py-1 text-[var(--text-secondary,#A1A1AA)]">
-              Formality: {Math.round(fingerprint.formality_index * 100)}%
+              Vocabulary: {fingerprint.vocabulary_sophistication}
+            </span>
+            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[var(--text-secondary,#A1A1AA)]">
+              Confidence: {Math.round(fingerprint.confidence * 100)}%
             </span>
           </div>
+          {emailConnected && (
+            <p className="text-xs text-[var(--text-tertiary,#6B7280)]">
+              I'll continue refining your style as I learn from your sent emails.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -1355,7 +1484,15 @@ export function OnboardingPage() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  const [skippedSteps, setSkippedSteps] = useState<string[]>([]);
+  const [stepData, setStepData] = useState<Record<string, unknown>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Check email connection status (for writing samples panel)
+  const emailStatusQuery = useEmailStatus(true);
+  const emailConnected = (emailStatusQuery.data?.google?.connected ?? false) ||
+    (emailStatusQuery.data?.microsoft?.connected ?? false);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -1372,12 +1509,19 @@ export function OnboardingPage() {
         }
 
         const step = stateResponse.state.current_step;
-        const completedSteps = stateResponse.state.completed_steps;
+        const stateCompletedSteps = stateResponse.state.completed_steps;
+        const stateSkippedSteps = stateResponse.state.skipped_steps;
+        const stateStepData = stateResponse.state.step_data;
+
+        // Store step state for back navigation
+        setCompletedSteps(stateCompletedSteps);
+        setSkippedSteps(stateSkippedSteps);
+        setStepData(stateStepData);
 
         // Build summary messages for completed steps
         const resumeMessages: Message[] = [];
         for (const completedStep of STEP_ORDER) {
-          if (!completedSteps.includes(completedStep)) break;
+          if (!stateCompletedSteps.includes(completedStep)) break;
           // Add a brief summary ARIA message for the completed step
           resumeMessages.push(
             createMessage(
@@ -1446,10 +1590,56 @@ export function OnboardingPage() {
         navigate("/", { replace: true });
         return;
       }
+      // Update step state tracking
+      setCompletedSteps(response.state.completed_steps);
+      setSkippedSteps(response.state.skipped_steps);
+      setStepData(response.state.step_data);
       advanceToStep(response.state.current_step);
     },
     [advanceToStep, navigate],
   );
+
+  // Navigate to a specific step (for back navigation and clicking on completed steps)
+  const goToStep = useCallback(
+    (targetStep: OnboardingStep) => {
+      setCurrentStep(targetStep);
+      setInputValue("");
+
+      const config = STEP_CONFIG[targetStep];
+      if (config.inputMode === "action_panel") {
+        setActiveActionPanel(targetStep);
+      } else {
+        setActiveActionPanel(null);
+      }
+
+      if (targetStep === "activation") {
+        setActiveActionPanel(null);
+      }
+    },
+    [],
+  );
+
+  // Go back to previous step
+  const goBack = useCallback(() => {
+    if (!currentStep) return;
+
+    const currentIndex = stepIndex(currentStep);
+    if (currentIndex <= 0) return; // Can't go back from first step
+
+    const previousStep = STEP_ORDER[currentIndex - 1];
+
+    // Add a user message indicating navigation
+    setMessages((prev) => [
+      ...prev,
+      createMessage("user", "(going back)"),
+      createMessage("aria", STEP_CONFIG[previousStep].ariaMessage),
+    ]);
+
+    goToStep(previousStep);
+  }, [currentStep, goToStep]);
+
+  // Check if we can go back
+  const canGoBack = currentStep ? stepIndex(currentStep) > 0 : false;
 
   const handleSend = useCallback(async () => {
     const text = inputValue.trim();
@@ -1542,11 +1732,66 @@ export function OnboardingPage() {
       {/* Header */}
       <header className="border-b border-white/5 px-6 py-4">
         <div className="mx-auto max-w-2xl">
-          <div className="mb-3 flex items-center justify-center">
+          <div className="mb-3 flex items-center justify-between">
+            {/* Back button */}
+            <div className="w-20">
+              {canGoBack && (
+                <button
+                  onClick={goBack}
+                  className="flex items-center gap-1 text-sm text-[var(--text-tertiary,#6B7280)] transition hover:text-[var(--text-secondary,#A1A1AA)]"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Back
+                </button>
+              )}
+            </div>
+
             <h1 className="font-display text-xl italic text-[var(--text-primary,#F1F1F1)]">
               Welcome to ARIA
             </h1>
+
+            <div className="w-20" />
           </div>
+
+          {/* Step indicators */}
+          <div className="mb-3 flex items-center justify-center gap-1.5">
+            {STEP_ORDER.map((step, idx) => {
+              const isCompleted = completedSteps.includes(step) || skippedSteps.includes(step);
+              const isSkipped = skippedSteps.includes(step);
+              const isCurrent = step === currentStep;
+              const isPast = currentStep ? idx < stepIndex(currentStep) : false;
+              const isClickable = isCompleted || isSkipped || isPast;
+
+              return (
+                <button
+                  key={step}
+                  onClick={() => isClickable && goToStep(step)}
+                  disabled={!isClickable}
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium transition ${
+                    isCurrent
+                      ? "bg-[var(--color-accent,#2E66FF)] text-white"
+                      : isCompleted
+                        ? "cursor-pointer bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                        : isSkipped
+                          ? "cursor-pointer bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                          : isPast
+                            ? "cursor-pointer bg-white/10 text-[var(--text-tertiary,#6B7280)] hover:bg-white/15"
+                            : "bg-white/5 text-[var(--text-tertiary,#6B7280)]"
+                  }`}
+                  title={step.replace(/_/g, " ")}
+                >
+                  {isCompleted ? (
+                    <Check className="h-3 w-3" />
+                  ) : isSkipped ? (
+                    "—"
+                  ) : (
+                    idx + 1
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           <ProgressBar
             value={progressPercent}
             variant="default"
@@ -1579,7 +1824,10 @@ export function OnboardingPage() {
 
           {/* Action panels */}
           {activeActionPanel === "company_discovery" && (
-            <CompanyDiscoveryPanel onComplete={advanceFromResponse} />
+            <CompanyDiscoveryPanel
+              onComplete={advanceFromResponse}
+              initialData={stepData.company_discovery as Record<string, unknown> | undefined}
+            />
           )}
 
           {activeActionPanel === "document_upload" && (
@@ -1590,13 +1838,17 @@ export function OnboardingPage() {
           )}
 
           {activeActionPanel === "user_profile" && (
-            <UserProfilePanel onComplete={advanceFromResponse} />
+            <UserProfilePanel
+              onComplete={advanceFromResponse}
+              initialData={stepData.user_profile as Record<string, unknown> | undefined}
+            />
           )}
 
           {activeActionPanel === "writing_samples" && (
             <WritingSamplesPanel
               onComplete={advanceFromResponse}
               onSkip={() => void handleSkip()}
+              emailConnected={emailConnected}
             />
           )}
 
