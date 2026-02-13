@@ -252,38 +252,9 @@ Respond in JSON format:
         if not email_check["valid"]:
             return {"success": False, "error": email_check["reason"], "type": "email_validation"}
 
-        # 2. Life sciences gate
+        # 2. Check life sciences classification for context (don't gate)
+        # This provides useful metadata but doesn't block onboarding
         gate_result = await self.check_life_sciences_gate(company_name, website)
-        if not gate_result.get("is_life_sciences", False):
-            # Add to waitlist
-            try:
-                (
-                    self._db.table("waitlist")
-                    .upsert(
-                        {
-                            "email": email,
-                            "company_name": company_name,
-                            "website": website,
-                            "gate_reasoning": gate_result.get("reasoning", ""),
-                        }
-                    )
-                    .execute()
-                )
-            except Exception as e:
-                logger.warning(f"Failed to add to waitlist: {e}")
-
-            return {
-                "success": False,
-                "error": "life_sciences_gate",
-                "type": "vertical_mismatch",
-                "message": (
-                    f"ARIA is currently focused on the life sciences vertical. "
-                    f"Based on our analysis, {company_name} appears to be outside "
-                    f"this focus area. We've added you to our waitlist and will "
-                    f"notify you when we expand to your industry."
-                ),
-                "reasoning": gate_result.get("reasoning", ""),
-            }
 
         # 3. Create company profile
         company = await self.create_company_profile(user_id, company_name, website, email)

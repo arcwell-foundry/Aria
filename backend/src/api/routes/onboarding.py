@@ -267,13 +267,10 @@ async def submit_company_discovery(
     body: CompanyDiscoveryRequest,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Submit company discovery and run life sciences gate check.
+    """Submit company discovery and create company profile.
 
-    Validates email domain, checks if company is in life sciences vertical,
-    creates/links company profile, and triggers enrichment.
-
-    For non-life-sciences companies, adds to waitlist and returns
-    a graceful message (not an error).
+    Validates email domain, creates/links company profile, and triggers enrichment.
+    Also saves form data to step_data for form persistence when navigating back.
     """
     try:
         service = _get_company_service()
@@ -288,8 +285,28 @@ async def submit_company_discovery(
         if not result["success"] and result.get("type") == "email_validation":
             raise HTTPException(status_code=400, detail=result["error"])
 
-        # Other results (including vertical mismatch) return 200
-        # with the full result for frontend handling
+        # Save form data to step_data for persistence when navigating back
+        if result["success"]:
+            db = SupabaseClient.get_client()
+            state = (
+                db.table("onboarding_state")
+                .select("step_data")
+                .eq("user_id", current_user.id)
+                .maybe_single()
+                .execute()
+            )
+            if state and state.data:
+                step_data = state.data.get("step_data", {})
+                step_data["company_discovery"] = {
+                    "company_name": body.company_name,
+                    "website": body.website,
+                    "email": body.email,
+                    "company_id": result.get("company", {}).get("id"),
+                }
+                db.table("onboarding_state").update({"step_data": step_data}).eq(
+                    "user_id", current_user.id
+                ).execute()
+
         return result
     except HTTPException:
         raise

@@ -38,6 +38,9 @@ class OnboardingOrchestrator:
     async def get_or_create_state(self, user_id: str) -> OnboardingStateResponse:
         """Get existing onboarding state or create a new one for user.
 
+        Also backfills step_data from existing database records if missing
+        (for users who completed steps before step_data persistence was added).
+
         Args:
             user_id: The authenticated user's ID.
 
@@ -54,6 +57,10 @@ class OnboardingOrchestrator:
 
         if response and response.data:
             state = self._parse_state(cast(dict[str, Any], response.data))
+
+            # Backfill step_data from existing database records if missing
+            state = await self._backfill_step_data(user_id, state)
+
             return self._build_response(state)
 
         # Create new state
@@ -83,6 +90,77 @@ class OnboardingOrchestrator:
         row = cast(dict[str, Any], insert_response.data[0])
         state = self._parse_state(row)
         return self._build_response(state)
+
+    async def _backfill_step_data(
+        self, user_id: str, state: OnboardingState
+    ) -> OnboardingState:
+        """Backfill step_data from existing database records.
+
+        This handles users who completed steps before step_data persistence
+        was added, ensuring their forms are pre-filled when navigating back.
+
+        Args:
+            user_id: The authenticated user's ID.
+            state: Current onboarding state.
+
+        Returns:
+            Updated state with backfilled step_data.
+        """
+        step_data = dict(state.step_data)
+        updated = False
+
+        # Backfill company_discovery from companies table
+        if "company_discovery" not in step_data and OnboardingStep.COMPANY_DISCOVERY.value in state.completed_steps:
+            profile = (
+                self._db.table("user_profiles")
+                .select("company_id, companies(name, domain, website)")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile and profile.data:
+                company = profile.data.get("companies", {})
+                if company:
+                    step_data["company_discovery"] = {
+                        "company_name": company.get("name", ""),
+                        "website": company.get("website", "") or f"https://{company.get('domain', '')}",
+                        "email": "",  # Can't retrieve from auth for privacy
+                        "company_id": profile.data.get("company_id"),
+                    }
+                    updated = True
+
+        # Backfill user_profile from user_profiles table
+        if "user_profile" not in step_data and OnboardingStep.USER_PROFILE.value in state.completed_steps:
+            profile = (
+                self._db.table("user_profiles")
+                .select("full_name, title, department, linkedin_url, phone, role_type")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile and profile.data:
+                step_data["user_profile"] = {
+                    "full_name": profile.data.get("full_name", ""),
+                    "title": profile.data.get("title", ""),
+                    "department": profile.data.get("department", ""),
+                    "linkedin_url": profile.data.get("linkedin_url", ""),
+                    "phone": profile.data.get("phone", ""),
+                    "role_type": profile.data.get("role_type", ""),
+                }
+                updated = True
+
+        if updated:
+            # Update the state and persist
+            state.step_data = step_data
+            self._db.table("onboarding_state").update({"step_data": step_data}).eq(
+                "user_id", user_id
+            ).execute()
+            logger.info(
+                "Backfilled step_data for user",
+                extra={"user_id": user_id, "keys": list(step_data.keys())},
+            )
+
+        return state
 
     async def complete_step(
         self,
