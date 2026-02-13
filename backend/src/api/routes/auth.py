@@ -106,6 +106,17 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
     Raises:
         HTTPException: If signup fails.
     """
+    # DEBUG: Log incoming request
+    logger.info(
+        "SIGNUP REQUEST BODY",
+        extra={
+            "email": signup_request.email,
+            "full_name": signup_request.full_name,
+            "company_name": signup_request.company_name,
+            "password_length": len(signup_request.password) if signup_request.password else 0,
+        },
+    )
+
     user_id: str | None = None
 
     try:
@@ -126,6 +137,15 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
             )
 
         user_id = auth_response.user.id
+
+        # Save the tokens before clearing session
+        access_token = auth_response.session.access_token
+        refresh_token = auth_response.session.refresh_token
+        expires_in = auth_response.session.expires_in or 3600
+
+        # IMPORTANT: Clear the session so subsequent REST calls use service role
+        # The sign_up call sets a user session which breaks RLS for service_role
+        client.auth.sign_out()
 
         # Step 2: Create company if provided
         company_id: str | None = None
@@ -149,14 +169,22 @@ async def signup(request: Request, signup_request: SignupRequest) -> TokenRespon
         logger.info("User signed up successfully", extra={"user_id": user_id})
 
         return TokenResponse(
-            access_token=auth_response.session.access_token,
-            refresh_token=auth_response.session.refresh_token,
-            expires_in=auth_response.session.expires_in or 3600,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=expires_in,
         )
 
     except HTTPException:
         raise
     except Exception as e:
+        # Check for specific Supabase auth errors
+        error_message = str(e)
+        if "already registered" in error_message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists. Please log in instead.",
+            ) from e
+
         logger.exception("Error during signup")
         # Cleanup: Delete orphaned auth user if created
         if user_id:

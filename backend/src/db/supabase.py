@@ -38,6 +38,18 @@ class SupabaseClient:
             except Exception as e:
                 logger.exception("Failed to initialize Supabase client")
                 raise DatabaseError(f"Failed to initialize database connection: {e}") from e
+
+        # DEBUG: Log the current auth state
+        try:
+            session = cls._client.auth.get_session()
+            if session:
+                logger.warning(
+                    "Client has active session (may affect RLS)",
+                    extra={"user_email": getattr(session.user, 'email', None)},
+                )
+        except Exception:
+            pass  # No session is fine
+
         return cls._client
 
     @classmethod

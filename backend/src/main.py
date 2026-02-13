@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
@@ -297,20 +298,77 @@ async def pydantic_validation_handler(
     Returns:
         JSON error response with validation details.
     """
+    import json
+
     request_id = str(uuid.uuid4())
-    logger.warning(
-        "Validation error",
+    # DEBUG: Log full validation error details
+    logger.error(
+        "PYDANTIC VALIDATION ERROR",
         extra={
             "request_id": request_id,
             "path": request.url.path,
-            "errors": exc.error_count(),
+            "method": request.method,
+            "error_count": exc.error_count(),
+            "errors": json.dumps(exc.errors(), default=str),
         },
     )
+    # Also print to stdout for immediate visibility
+    print(f"\n{'='*60}")
+    print(f"PYDANTIC VALIDATION ERROR on {request.method} {request.url.path}")
+    print(f"Errors: {json.dumps(exc.errors(), indent=2, default=str)}")
+    print(f"{'='*60}\n")
+
     return JSONResponse(
         status_code=400,
         content={
             "detail": "Validation error",
             "code": "VALIDATION_ERROR",
+            "request_id": request_id,
+            "errors": exc.errors(),
+        },
+    )
+
+
+# FastAPI Request validation error handler (catches body parsing errors)
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Handle FastAPI request validation errors.
+
+    This catches errors during request body parsing and validation.
+
+    Args:
+        request: The incoming request.
+        exc: The validation exception.
+
+    Returns:
+        JSON error response with validation details.
+    """
+    import json
+
+    request_id = str(uuid.uuid4())
+    # DEBUG: Log full validation error details
+    logger.error(
+        "REQUEST VALIDATION ERROR",
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+            "method": request.method,
+            "errors": json.dumps(exc.errors(), default=str),
+        },
+    )
+    # Also print to stdout for immediate visibility
+    print(f"\n{'='*60}")
+    print(f"REQUEST VALIDATION ERROR on {request.method} {request.url.path}")
+    print(f"Errors: {json.dumps(exc.errors(), indent=2, default=str)}")
+    print(f"{'='*60}\n")
+
+    return JSONResponse(
+        status_code=400,
+        content={
+            "detail": "Request validation error",
+            "code": "REQUEST_VALIDATION_ERROR",
             "request_id": request_id,
             "errors": exc.errors(),
         },
