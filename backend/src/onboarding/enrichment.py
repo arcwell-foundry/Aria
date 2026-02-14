@@ -450,6 +450,23 @@ Respond ONLY with the JSON object, no additional text."""
                         if text:
                             texts.append(text)
                     return "\n\n".join(texts)
+                else:
+                    # Log response body for debugging - catches credits exceeded, auth errors, etc.
+                    error_body = response.text
+                    if response.status_code == 402:
+                        logger.error(
+                            "Exa API credits exceeded. Visit dashboard.exa.ai to top up. "
+                            "Response: %s",
+                            error_body,
+                        )
+                    else:
+                        logger.error(
+                            "Exa API request failed for website content fetch: "
+                            "status=%d website=%s response=%s",
+                            response.status_code,
+                            website,
+                            error_body,
+                        )
         except Exception as e:
             logger.warning(f"Website content fetch for classification failed: {e}")
 
@@ -562,11 +579,21 @@ Respond ONLY with the JSON object, no additional text."""
                         website,
                     )
                 else:
-                    logger.error(
-                        "Website research FAILED: status=%d website=%s",
-                        response.status_code,
-                        website,
-                    )
+                    # Log response body for debugging
+                    error_body = response.text
+                    if response.status_code == 402:
+                        logger.error(
+                            "Exa API credits exceeded for website research. "
+                            "Visit dashboard.exa.ai to top up. Response: %s",
+                            error_body,
+                        )
+                    else:
+                        logger.error(
+                            "Website research FAILED: status=%d website=%s response=%s",
+                            response.status_code,
+                            website,
+                            error_body,
+                        )
 
         except Exception as e:
             logger.error(
@@ -626,11 +653,21 @@ Respond ONLY with the JSON object, no additional text."""
                         company_name,
                     )
                 else:
-                    logger.error(
-                        "News research FAILED: status=%d company=%s",
-                        response.status_code,
-                        company_name,
-                    )
+                    # Log response body for debugging
+                    error_body = response.text
+                    if response.status_code == 402:
+                        logger.error(
+                            "Exa API credits exceeded for news research. "
+                            "Visit dashboard.exa.ai to top up. Response: %s",
+                            error_body,
+                        )
+                    else:
+                        logger.error(
+                            "News research FAILED: status=%d company=%s response=%s",
+                            response.status_code,
+                            company_name,
+                            error_body,
+                        )
 
         except Exception as e:
             logger.error(
@@ -740,11 +777,21 @@ Respond ONLY with the JSON object, no additional text."""
                         company_name,
                     )
                 else:
-                    logger.error(
-                        "Leadership research FAILED: status=%d company=%s",
-                        response.status_code,
-                        company_name,
-                    )
+                    # Log response body for debugging
+                    error_body = response.text
+                    if response.status_code == 402:
+                        logger.error(
+                            "Exa API credits exceeded for leadership research. "
+                            "Visit dashboard.exa.ai to top up. Response: %s",
+                            error_body,
+                        )
+                    else:
+                        logger.error(
+                            "Leadership research FAILED: status=%d company=%s response=%s",
+                            response.status_code,
+                            company_name,
+                            error_body,
+                        )
 
         except Exception as e:
             logger.error(

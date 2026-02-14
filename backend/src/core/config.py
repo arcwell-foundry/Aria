@@ -127,6 +127,39 @@ class Settings(BaseSettings):
         """Check if Exa API is configured for web enrichment."""
         return bool(self.EXA_API_KEY)
 
+    async def check_exa_credits(self) -> tuple[bool, str]:
+        """Check if Exa API has available credits.
+
+        Returns:
+            Tuple of (has_credits, message) where message explains any issues.
+        """
+        if not self.EXA_API_KEY:
+            return False, "EXA_API_KEY not configured"
+
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as client:
+                # Use a minimal search to test credits
+                response = await client.post(
+                    "https://api.exa.ai/search",
+                    headers={"x-api-key": self.EXA_API_KEY},
+                    json={
+                        "query": "test",
+                        "numResults": 1,
+                    },
+                    timeout=10.0,
+                )
+                if response.status_code == 200:
+                    return True, "Exa API operational"
+                elif response.status_code == 402:
+                    return False, "Exa API credits exceeded. Visit dashboard.exa.ai to top up."
+                else:
+                    error_body = response.text[:200]
+                    return False, f"Exa API error (status {response.status_code}): {error_body}"
+        except Exception as e:
+            return False, f"Exa API connection failed: {e}"
+
     def validate_startup(self) -> None:
         """Validate that all required secrets are configured.
 

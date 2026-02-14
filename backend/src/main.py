@@ -98,7 +98,12 @@ async def lifespan(_app: FastAPI) -> Any:
 
     # Log EXA API key status for enrichment diagnostics
     if settings.exa_configured:
-        logger.info("EXA_API_KEY configured - web enrichment enabled")
+        # Check if Exa has available credits
+        has_credits, message = await settings.check_exa_credits()
+        if has_credits:
+            logger.info("EXA_API_KEY configured - web enrichment enabled")
+        else:
+            logger.warning("EXA_API_KEY configured but %s", message)
     else:
         logger.warning("EXA_API_KEY not configured - web enrichment DISABLED")
     # US-942: Start the sync scheduler
