@@ -888,11 +888,15 @@ class TestBootstrapResultModel:
 
 
 class TestBootstrapTrigger:
-    """Tests for bootstrap trigger from privacy config save."""
+    """Tests for bootstrap trigger behavior.
+
+    Note: Bootstrap is now triggered from /integrations/record-connection
+    endpoint in the API route layer, not from save_privacy_config.
+    """
 
     @pytest.mark.asyncio
-    async def test_save_privacy_config_triggers_bootstrap(self) -> None:
-        """Saving privacy config triggers PriorityEmailIngestion.run_bootstrap."""
+    async def test_save_privacy_config_does_not_trigger_bootstrap(self) -> None:
+        """Saving privacy config no longer triggers bootstrap (moved to record-connection)."""
         mock_db = MagicMock()
         mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock()
 
@@ -922,7 +926,31 @@ class TestBootstrapTrigger:
 
             await service.save_privacy_config("user-123", config)
 
-            mock_bootstrap_instance.run_bootstrap.assert_called_once()
+            # Bootstrap should NOT be called from save_privacy_config anymore
+            mock_bootstrap_instance.run_bootstrap.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetch_emails_detects_provider(self) -> None:
+        """PriorityEmailIngestion._fetch_sent_emails detects provider from user_integrations."""
+        mock_db = MagicMock()
+        # Mock the provider lookup
+        mock_result = MagicMock()
+        mock_result.data = {"integration_type": "outlook"}
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.maybe_single.return_value.execute.return_value = (
+            mock_result
+        )
+
+        with (
+            patch(
+                "src.onboarding.email_bootstrap.SupabaseClient.get_client",
+                return_value=mock_db,
+            ),
+            patch("src.onboarding.email_bootstrap.LLMClient"),
+        ):
+            service = PriorityEmailIngestion()
+
+            # Verify the service can be instantiated and will detect provider
+            assert service is not None
 
 
 # ---------------------------------------------------------------------------

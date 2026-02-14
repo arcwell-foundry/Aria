@@ -919,6 +919,33 @@ async def record_integration_connection(
             integration_type=integration_type,
             composio_connection_id=body.connection_id,
         )
+
+        # Trigger email bootstrap for Gmail/Outlook connections (US-908)
+        if integration_type in (IntegrationType.GMAIL, IntegrationType.OUTLOOK):
+            logger.info(
+                "Email integration recorded, triggering bootstrap for user %s",
+                current_user.id,
+            )
+            try:
+                import asyncio
+
+                from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+                bootstrap = PriorityEmailIngestion()
+                asyncio.create_task(bootstrap.run_bootstrap(current_user.id))
+                logger.info(
+                    "Email bootstrap triggered successfully for user %s",
+                    current_user.id,
+                )
+            except Exception as bootstrap_error:
+                # Log but don't fail - bootstrap is non-blocking
+                logger.error(
+                    "Failed to trigger email bootstrap for user %s: %s",
+                    current_user.id,
+                    bootstrap_error,
+                    exc_info=True,
+                )
+
     except Exception as e:
         # Handle duplicate key (already connected) gracefully
         error_str = str(e)

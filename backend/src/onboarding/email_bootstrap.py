@@ -121,9 +121,17 @@ class PriorityEmailIngestion:
         """
         result = EmailBootstrapResult()
 
+        logger.info("EMAIL_BOOTSTRAP: Starting for user %s", user_id)
+
         try:
             # 1. Load privacy exclusions
+            logger.info("EMAIL_BOOTSTRAP: Loading privacy exclusions for user %s", user_id)
             exclusions = await self._load_exclusions(user_id)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Loaded %d privacy exclusions for user %s",
+                len(exclusions),
+                user_id,
+            )
 
             # 2. Fetch sent emails (last 60 days)
             if progress_callback:
@@ -131,15 +139,35 @@ class PriorityEmailIngestion:
                     {"stage": "fetching", "message": "Fetching recent emails..."}
                 )
 
+            logger.info(
+                "EMAIL_BOOTSTRAP: Fetching sent emails (last 60 days) for user %s",
+                user_id,
+            )
             emails = await self._fetch_sent_emails(user_id, days=60)
             result.emails_processed = len(emails)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Fetched %d sent emails from last 60 days for user %s",
+                len(emails),
+                user_id,
+            )
 
             if not emails:
-                logger.info("No emails found for user %s", user_id)
+                logger.info("EMAIL_BOOTSTRAP: No emails found for user %s", user_id)
                 return result
 
             # 3. Filter out excluded senders/domains
+            logger.info(
+                "EMAIL_BOOTSTRAP: Applying %d exclusions to %d emails for user %s",
+                len(exclusions),
+                len(emails),
+                user_id,
+            )
             emails = self._apply_exclusions(emails, exclusions)
+            logger.info(
+                "EMAIL_BOOTSTRAP: %d emails remaining after exclusions for user %s",
+                len(emails),
+                user_id,
+            )
 
             # 4. Extract contacts
             if progress_callback:
@@ -149,8 +177,14 @@ class PriorityEmailIngestion:
                         "message": f"Analyzing {len(emails)} emails for contacts...",
                     }
                 )
+            logger.info("EMAIL_BOOTSTRAP: Extracting contacts for user %s", user_id)
             contacts = await self._extract_contacts(emails)
             result.contacts_discovered = len(contacts)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Extracted %d contacts for user %s",
+                len(contacts),
+                user_id,
+            )
 
             # 5. Identify active threads
             if progress_callback:
@@ -162,26 +196,52 @@ class PriorityEmailIngestion:
                         ),
                     }
                 )
+            logger.info(
+                "EMAIL_BOOTSTRAP: Identifying active threads for user %s",
+                user_id,
+            )
             threads = await self._identify_active_threads(emails)
             result.active_threads = len(threads)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Detected %d active deal threads for user %s",
+                len([t for t in threads if t.thread_type == "deal"]),
+                user_id,
+            )
 
             # 6. Detect commitments
+            logger.info("EMAIL_BOOTSTRAP: Detecting commitments for user %s", user_id)
             commitments = await self._detect_commitments(emails)
             result.commitments_detected = len(commitments)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Detected %d commitments for user %s",
+                len(commitments),
+                user_id,
+            )
 
             # 7. Extract writing samples for style refinement
             writing_samples = self._extract_writing_samples(emails)
             result.writing_samples_extracted = len(writing_samples)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Writing style refined from %d email samples for user %s",
+                len(writing_samples),
+                user_id,
+            )
 
             # 8. Analyze communication patterns
             result.communication_patterns = self._analyze_patterns(emails)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Analyzed communication patterns for user %s",
+                user_id,
+            )
 
             # 9. Store results
+            logger.info("EMAIL_BOOTSTRAP: Storing results for user %s", user_id)
             await self._store_contacts(user_id, contacts)
             await self._store_threads(user_id, threads)
             await self._store_commitments(user_id, commitments)
             await self._refine_writing_style(user_id, writing_samples)
             await self._store_patterns(user_id, result.communication_patterns)
+            logger.info("EMAIL_BOOTSTRAP: All results stored for user %s", user_id)
 
             # 10. Update readiness
             await self._update_readiness(user_id, result)
@@ -208,6 +268,16 @@ class PriorityEmailIngestion:
                 )
             except Exception as e:
                 logger.warning("Failed to record email bootstrap activity: %s", e)
+
+            # Final summary log
+            logger.info(
+                "EMAIL_BOOTSTRAP: Complete for user %s. "
+                "%d contacts, %d deals, %d patterns stored",
+                user_id,
+                result.contacts_discovered,
+                result.active_threads,
+                1 if result.communication_patterns else 0,
+            )
 
             if progress_callback:
                 await progress_callback(
@@ -260,6 +330,9 @@ class PriorityEmailIngestion:
     async def _fetch_sent_emails(self, user_id: str, days: int = 60) -> list[dict[str, Any]]:
         """Fetch sent emails via Composio.
 
+        Detects the user's email provider (Gmail or Outlook) from user_integrations
+        and uses the appropriate Composio action.
+
         Args:
             user_id: The user whose emails to fetch.
             days: How many days of history to fetch.
@@ -268,6 +341,30 @@ class PriorityEmailIngestion:
             List of email dicts with: to, cc, subject, body, date, thread_id.
         """
         try:
+            # Detect provider from user_integrations
+            result = (
+                self._db.table("user_integrations")
+                .select("integration_type")
+                .eq("user_id", user_id)
+                .in_("integration_type", ["gmail", "outlook"])
+                .maybe_single()
+                .execute()
+            )
+
+            if not result or not result.data:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: No email integration found for user %s",
+                    user_id,
+                )
+                return []
+
+            provider = result.data.get("integration_type", "").lower()
+            logger.info(
+                "EMAIL_BOOTSTRAP: Detected email provider '%s' for user %s",
+                provider,
+                user_id,
+            )
+
             from composio import ComposioToolSet
 
             toolset = ComposioToolSet()
@@ -275,19 +372,50 @@ class PriorityEmailIngestion:
 
             since_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
-            response = entity.execute(
-                action="GMAIL_FETCH_EMAILS",
-                params={
-                    "label": "SENT",
-                    "after": since_date,
-                    "max_results": 500,
-                },
-            )
+            # Use appropriate Composio action based on provider
+            if provider == "outlook":
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Using OUTLOOK365_FETCH_EMAILS for user %s",
+                    user_id,
+                )
+                response = entity.execute(
+                    action="OUTLOOK365_FETCH_EMAILS",
+                    params={
+                        "folder": "sentitems",
+                        "start_date": since_date,
+                        "max_results": 500,
+                    },
+                )
+            else:
+                # Default to Gmail
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Using GMAIL_FETCH_EMAILS for user %s",
+                    user_id,
+                )
+                response = entity.execute(
+                    action="GMAIL_FETCH_EMAILS",
+                    params={
+                        "label": "SENT",
+                        "after": since_date,
+                        "max_results": 500,
+                    },
+                )
 
-            return response.get("emails", []) if isinstance(response, dict) else []
+            emails = response.get("emails", []) if isinstance(response, dict) else []
+            logger.info(
+                "EMAIL_BOOTSTRAP: Composio returned %d emails for user %s",
+                len(emails),
+                user_id,
+            )
+            return emails
 
         except Exception as e:
-            logger.warning("Email fetch failed: %s", e)
+            logger.error(
+                "EMAIL_BOOTSTRAP: Email fetch failed for user %s: %s",
+                user_id,
+                e,
+                exc_info=True,
+            )
             return []
 
     # ------------------------------------------------------------------
