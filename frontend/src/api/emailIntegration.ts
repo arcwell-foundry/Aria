@@ -109,3 +109,27 @@ export async function getBootstrapStatus(): Promise<BootstrapStatus> {
   );
   return response.data;
 }
+
+export interface RecordConnectionRequest {
+  integration_type: string; // "gmail" or "outlook"
+  connection_id: string; // Composio connected_account_id
+}
+
+export interface RecordConnectionResponse {
+  status: string;
+  integration_type: string;
+}
+
+/**
+ * Record a completed OAuth connection after Composio callback.
+ * This explicitly saves the connection to user_integrations table.
+ */
+export async function recordEmailConnection(
+  data: RecordConnectionRequest
+): Promise<RecordConnectionResponse> {
+  const response = await apiClient.post<RecordConnectionResponse>(
+    "/onboarding/integrations/record-connection",
+    data
+  );
+  return response.data;
+}

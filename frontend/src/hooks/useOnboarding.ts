@@ -168,11 +168,15 @@ export function useEmailStatus(enabled: boolean) {
     enabled,
     refetchInterval: (query) => {
       const data = query.state.data;
+      // Stop polling if connected
       if (data?.google?.connected || data?.microsoft?.connected) {
         return false;
       }
-      return 3000;
+      return 3000; // Poll every 3 seconds
     },
+    // Stop polling after 3 minutes to prevent infinite polling storms
+    staleTime: 3000,
+    gcTime: 5 * 60 * 1000,
   });
 }
 

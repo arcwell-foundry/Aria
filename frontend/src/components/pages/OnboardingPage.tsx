@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
   Upload,
@@ -41,10 +42,12 @@ import {
   useExtractTextFromFile,
   useIntegrationWizardStatus,
   useConnectIntegration,
+  emailKeys,
 } from "@/hooks/useOnboarding";
 import { useEnrichmentStatus } from "@/hooks/useEnrichmentStatus";
 import { useActivationStatus } from "@/hooks/useActivationStatus";
 import type { EmailProvider } from "@/api/emailIntegration";
+import { recordEmailConnection } from "@/api/emailIntegration";
 import type { CompanyDocument } from "@/api/documents";
 import type { IntegrationAppName, IntegrationStatus } from "@/api/onboarding";
 import { IntelligenceMoment } from "@/components/onboarding/IntelligenceMoment";
@@ -1112,8 +1115,9 @@ function EmailIntegrationPanel({
   onSkip: () => void;
 }) {
   const connectMutation = useEmailConnect();
+  // EmailIntegrationPanel is only rendered when on email_integration step,
+  // so always enable status checking here
   const statusQuery = useEmailStatus(true);
-  const [popupBlocked, setPopupBlocked] = useState(false);
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
   const [showIntelligence, setShowIntelligence] = useState(false);
   const [intelligenceData, setIntelligenceData] = useState<{
@@ -1135,10 +1139,10 @@ function EmailIntegrationPanel({
   const handleConnect = useCallback(
     async (provider: EmailProvider) => {
       const result = await connectMutation.mutateAsync(provider);
-      const popup = window.open(result.auth_url, "_blank");
-      if (!popup) {
-        setPopupBlocked(true);
-      }
+      // Store provider in sessionStorage to retrieve after OAuth callback
+      sessionStorage.setItem("pending_email_provider", provider);
+      // Redirect in current tab instead of opening new window
+      window.location.href = result.auth_url;
     },
     [connectMutation],
   );
@@ -1252,12 +1256,6 @@ function EmailIntegrationPanel({
           <Loader2 className="h-4 w-4 animate-spin" />
           Opening authentication window...
         </div>
-      )}
-
-      {popupBlocked && (
-        <p className="text-sm text-yellow-400">
-          Popup was blocked. Please allow popups for this site and try again.
-        </p>
       )}
 
       {/* Privacy Controls - shown after connection */}
@@ -1381,7 +1379,6 @@ function IntegrationWizardPanel({
 }) {
   const statusQuery = useIntegrationWizardStatus(true);
   const connectMutation = useConnectIntegration();
-  const [popupBlocked, setPopupBlocked] = useState(false);
   const [connectingApp, setConnectingApp] = useState<IntegrationAppName | null>(null);
 
   const allIntegrations = useMemo(() => {
@@ -1403,10 +1400,8 @@ function IntegrationWizardPanel({
       setConnectingApp(appName);
       try {
         const result = await connectMutation.mutateAsync(appName);
-        const popup = window.open(result.auth_url, "_blank");
-        if (!popup) {
-          setPopupBlocked(true);
-        }
+        // Redirect in current tab instead of opening new window
+        window.location.href = result.auth_url;
       } finally {
         setConnectingApp(null);
       }
@@ -1474,12 +1469,6 @@ function IntegrationWizardPanel({
       {renderCategory("CRM", <Building2 className="h-3.5 w-3.5" />, statusQuery.data?.crm ?? [])}
       {renderCategory("Calendar", <Calendar className="h-3.5 w-3.5" />, statusQuery.data?.calendar ?? [])}
       {renderCategory("Messaging", <MessageSquare className="h-3.5 w-3.5" />, statusQuery.data?.messaging ?? [])}
-
-      {popupBlocked && (
-        <p className="text-sm text-yellow-400">
-          Popup was blocked. Please allow popups for this site and try again.
-        </p>
-      )}
 
       {connectedCount > 0 && (
         <p className="text-sm text-green-400">
@@ -1732,6 +1721,8 @@ function ActivationPanel({
 
 export function OnboardingPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentStep, setCurrentStep] = useState<OnboardingStep | null>(null);
   const [activeActionPanel, setActiveActionPanel] =
@@ -1751,7 +1742,8 @@ export function OnboardingPage() {
   const prevProgressRef = useRef(0);
 
   // Check email connection status (for writing samples panel)
-  const emailStatusQuery = useEmailStatus(true);
+  // Only poll when on email_integration step; otherwise just check once
+  const emailStatusQuery = useEmailStatus(currentStep === "email_integration");
   const emailConnected = (emailStatusQuery.data?.google?.connected ?? false) ||
     (emailStatusQuery.data?.microsoft?.connected ?? false);
 
@@ -1802,6 +1794,40 @@ export function OnboardingPage() {
         setIsInitialized(true);
       });
   }, [navigate]);
+
+  // --- OAuth callback detection ---
+  // Handle Composio OAuth redirect with status=success&connected_account_id=XXX
+  useEffect(() => {
+    const status = searchParams.get("status");
+    const connectedAccountId = searchParams.get("connected_account_id");
+
+    if (status === "success" && connectedAccountId) {
+      // Retrieve provider from sessionStorage (set before OAuth redirect)
+      const pendingProvider = sessionStorage.getItem("pending_email_provider");
+      // Map provider to integration_type
+      const integrationType = pendingProvider === "microsoft" ? "outlook" : "gmail";
+
+      // Record the connection explicitly in the database
+      recordEmailConnection({
+        integration_type: integrationType,
+        connection_id: connectedAccountId,
+      })
+        .then(() => {
+          // Clear the pending provider
+          sessionStorage.removeItem("pending_email_provider");
+          // Invalidate email status to refresh UI
+          queryClient.invalidateQueries({ queryKey: emailKeys.status() });
+        })
+        .catch((error) => {
+          console.error("Failed to record email connection:", error);
+          // Still invalidate to trigger backend auto-discovery as fallback
+          queryClient.invalidateQueries({ queryKey: emailKeys.status() });
+        });
+
+      // Clean URL params to prevent re-triggering on refresh
+      setSearchParams(new URLSearchParams(), { replace: true });
+    }
+  }, [searchParams, setSearchParams, queryClient]);
 
   // --- Navigation helpers ---
 
