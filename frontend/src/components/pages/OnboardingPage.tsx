@@ -354,10 +354,12 @@ function CompanyDiscoveryPanel({
         classification: null, // Would be populated by enrichment
       });
 
-      // Advance the onboarding step with company info
+      // Advance the onboarding step with company info (include all fields for persistence)
       const response = await completeStep("company_discovery", {
         company_id: result.company.id,
         company_name: result.company.name,
+        website: website.trim(),
+        email: email.trim(),
       });
       onComplete(response);
     } catch {
