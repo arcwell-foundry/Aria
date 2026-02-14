@@ -336,34 +336,25 @@ function CompanyDiscoveryPanel({
     setIntelligenceData({ companyName: companyName.trim() });
 
     try {
-      const result = await discoveryMutation.mutateAsync({
+      // The backend now handles step completion and returns OnboardingStateResponse directly
+      const response = await discoveryMutation.mutateAsync({
         company_name: companyName.trim(),
         website: website.trim(),
         email: email.trim(),
       });
 
-      if (!result.success) {
-        setShowIntelligence(false);
-        setError(result.message || result.error);
-        return;
-      }
-
-      // Update intelligence data with real results
-      // In production, this would come from enrichment
+      // Update intelligence data with results from step_data
+      const stepData = response.state.step_data.company_discovery as {
+        company_name?: string;
+      } | undefined;
       setIntelligenceData({
-        companyName: result.company.name,
+        companyName: stepData?.company_name || companyName.trim(),
         productCount: 3, // Placeholder - would come from enrichment API
         competitorCount: 5, // Placeholder
         classification: null, // Would be populated by enrichment
       });
 
-      // Advance the onboarding step with company info (include all fields for persistence)
-      const response = await completeStep("company_discovery", {
-        company_id: result.company.id,
-        company_name: result.company.name,
-        website: website.trim(),
-        email: email.trim(),
-      });
+      // Advance to the next step
       onComplete(response);
     } catch {
       setShowIntelligence(false);

@@ -262,15 +262,17 @@ async def re_run_enrichment(
         ) from e
 
 
-@router.post("/company-discovery/submit")
+@router.post("/company-discovery/submit", response_model=OnboardingStateResponse)
 async def submit_company_discovery(
     body: CompanyDiscoveryRequest,
     current_user: CurrentUser,
-) -> dict[str, Any]:
+) -> OnboardingStateResponse:
     """Submit company discovery and create company profile.
 
-    Validates email domain, creates/links company profile, and triggers enrichment.
-    Also saves form data to step_data for form persistence when navigating back.
+    Validates email domain, creates/links company profile, triggers enrichment,
+    and marks the step as complete, advancing to the next onboarding step.
+
+    Returns the updated onboarding state for frontend navigation.
     """
     try:
         service = _get_company_service()
@@ -285,29 +287,26 @@ async def submit_company_discovery(
         if not result["success"] and result.get("type") == "email_validation":
             raise HTTPException(status_code=400, detail=result["error"])
 
-        # Save form data to step_data for persistence when navigating back
+        # Complete the step using the orchestrator (handles step advancement)
         if result["success"]:
-            db = SupabaseClient.get_client()
-            state = (
-                db.table("onboarding_state")
-                .select("step_data")
-                .eq("user_id", current_user.id)
-                .maybe_single()
-                .execute()
+            orchestrator = _get_orchestrator()
+            step_data = {
+                "company_name": body.company_name,
+                "website": body.website,
+                "email": body.email,
+                "company_id": result.get("company", {}).get("id"),
+            }
+            return await orchestrator.complete_step(
+                current_user.id,
+                OnboardingStep.COMPANY_DISCOVERY,
+                step_data,
             )
-            if state and state.data:
-                step_data = state.data.get("step_data", {})
-                step_data["company_discovery"] = {
-                    "company_name": body.company_name,
-                    "website": body.website,
-                    "email": body.email,
-                    "company_id": result.get("company", {}).get("id"),
-                }
-                db.table("onboarding_state").update({"step_data": step_data}).eq(
-                    "user_id", current_user.id
-                ).execute()
 
-        return result
+        # If not successful but not an email validation error, return error
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("error", "Company discovery failed"),
+        )
     except HTTPException:
         raise
     except Exception:

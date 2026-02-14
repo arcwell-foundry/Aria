@@ -650,10 +650,14 @@ export type CompanyDiscoveryResponse =
   | CompanyDiscoverySuccessResponse
   | CompanyDiscoveryErrorResponse;
 
+/**
+ * Submit company discovery and complete the onboarding step.
+ * Returns the updated onboarding state for frontend navigation.
+ */
 export async function submitCompanyDiscovery(
   request: CompanyDiscoveryRequest
-): Promise<CompanyDiscoveryResponse> {
-  const response = await apiClient.post<CompanyDiscoveryResponse>(
+): Promise<OnboardingStateResponse> {
+  const response = await apiClient.post<OnboardingStateResponse>(
     "/onboarding/company-discovery/submit",
     request
   );
