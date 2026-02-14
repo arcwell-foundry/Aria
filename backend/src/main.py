@@ -88,11 +88,18 @@ def get_cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Any:
     """Application lifespan handler for startup and shutdown events."""
+    from src.core.config import settings
     from src.db.graphiti import GraphitiClient
     from src.integrations.sync_scheduler import get_sync_scheduler  # US-942: Sync scheduler
 
     # Startup
     logger.info("Starting ARIA API...")
+
+    # Log EXA API key status for enrichment diagnostics
+    if settings.exa_configured:
+        logger.info("EXA_API_KEY configured - web enrichment enabled")
+    else:
+        logger.warning("EXA_API_KEY not configured - web enrichment DISABLED")
     # US-942: Start the sync scheduler
     scheduler = get_sync_scheduler()
     await scheduler.start()

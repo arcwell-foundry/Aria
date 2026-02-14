@@ -6,6 +6,16 @@ over the web with structured content extraction — ideal for finding
 LinkedIn profiles, bios, press mentions, and scientific publications.
 
 Rate limited to 100 req/min via a sliding-window token bucket.
+
+New endpoints (Feb 2026):
+- search_instant: Sub-200ms for real-time chat
+- search_fast: <350ms for interactive workflows
+- search_deep: ~3.5s for highest quality
+- search_news: News with date filtering
+- find_similar: Find similar pages (competitors)
+- answer: Direct factual answer
+- research: Deep agentic research
+- get_contents: Get full page contents
 """
 
 import asyncio
@@ -13,6 +23,9 @@ import logging
 import time
 from datetime import UTC, datetime
 from typing import Any
+
+import httpx
+from pydantic import BaseModel
 
 from src.agents.capabilities.enrichment_providers.base import (
     BaseEnrichmentProvider,
@@ -23,6 +36,22 @@ from src.agents.capabilities.enrichment_providers.base import (
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Result Models
+# ---------------------------------------------------------------------------
+
+
+class ExaSearchResult(BaseModel):
+    """Standardized result from Exa search endpoints."""
+
+    url: str
+    title: str = ""
+    text: str = ""
+    published_date: str | None = None
+    author: str | None = None
+    score: float = 0.0
 
 # ---------------------------------------------------------------------------
 # Rate limiter (sliding window, 100 req/min)
@@ -68,6 +97,13 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
     def __init__(self) -> None:
         self._api_key = settings.EXA_API_KEY
         self._base_url = "https://api.exa.ai"
+
+        if not self._api_key:
+            logger.warning(
+                "ExaEnrichmentProvider initialized WITHOUT API key - all searches will return empty"
+            )
+        else:
+            logger.info("ExaEnrichmentProvider initialized with API key")
 
     def _get_headers(self) -> dict[str, str]:
         """Build request headers with API key."""
@@ -448,6 +484,566 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         except httpx.HTTPError:
             return False
 
+    # ── New Exa Endpoints (Feb 2026) ────────────────────────────────────
+
+    async def search_instant(
+        self,
+        query: str,
+        num_results: int = 5,
+    ) -> list[ExaSearchResult]:
+        """Sub-200ms search for real-time chat interactions.
+
+        Args:
+            query: Search query string.
+            num_results: Number of results to request.
+
+        Returns:
+            List of ExaSearchResult objects.
+        """
+        logger.info("Exa search_instant: query='%s'", query[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping instant search")
+            return []
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=5.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/search",
+                    json={
+                        "query": query,
+                        "numResults": num_results,
+                        "type": "auto",
+                        "contents": {"text": {"maxCharacters": 1000}},
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa search_instant failed: status=%d query='%s'",
+                        resp.status_code,
+                        query[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa search_instant: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa search_instant exception: query='%s' error='%s'",
+                query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def search_fast(
+        self,
+        query: str,
+        num_results: int = 10,
+        *,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> list[ExaSearchResult]:
+        """Fast search (<350ms) for interactive workflows.
+
+        Args:
+            query: Search query string.
+            num_results: Number of results to request.
+            include_domains: Only return results from these domains.
+            exclude_domains: Exclude results from these domains.
+
+        Returns:
+            List of ExaSearchResult objects.
+        """
+        logger.info("Exa search_fast: query='%s'", query[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping fast search")
+            return []
+
+        try:
+            payload: dict[str, Any] = {
+                "query": query,
+                "numResults": num_results,
+                "type": "auto",
+                "contents": {"text": {"maxCharacters": 2000}},
+            }
+            if include_domains:
+                payload["includeDomains"] = include_domains
+            if exclude_domains:
+                payload["excludeDomains"] = exclude_domains
+
+            async with httpx.AsyncClient(
+                timeout=10.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(f"{self._base_url}/search", json=payload)
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa search_fast failed: status=%d query='%s'",
+                        resp.status_code,
+                        query[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa search_fast: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa search_fast exception: query='%s' error='%s'",
+                query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def search_deep(
+        self,
+        query: str,
+        num_results: int = 10,
+        *,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> list[ExaSearchResult]:
+        """Deep search (~3.5s) for highest quality results.
+
+        Uses Exa's deep search mode for comprehensive research.
+
+        Args:
+            query: Search query string.
+            num_results: Number of results to request.
+            include_domains: Only return results from these domains.
+            exclude_domains: Exclude results from these domains.
+
+        Returns:
+            List of ExaSearchResult objects.
+        """
+        logger.info("Exa search_deep: query='%s'", query[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping deep search")
+            return []
+
+        try:
+            payload: dict[str, Any] = {
+                "query": query,
+                "numResults": num_results,
+                "type": "neural",
+                "useAutoprompt": True,
+                "contents": {"text": {"maxCharacters": 3000}},
+            }
+            if include_domains:
+                payload["includeDomains"] = include_domains
+            if exclude_domains:
+                payload["excludeDomains"] = exclude_domains
+
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(f"{self._base_url}/search", json=payload)
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa search_deep failed: status=%d query='%s'",
+                        resp.status_code,
+                        query[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        author=r.get("author"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa search_deep: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa search_deep exception: query='%s' error='%s'",
+                query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def search_news(
+        self,
+        query: str,
+        num_results: int = 10,
+        *,
+        days_back: int = 30,
+    ) -> list[ExaSearchResult]:
+        """Search for recent news with date filtering.
+
+        Args:
+            query: Search query string.
+            num_results: Number of results to request.
+            days_back: Only return news from the last N days.
+
+        Returns:
+            List of ExaSearchResult objects.
+        """
+        logger.info(
+            "Exa search_news: query='%s' days_back=%d",
+            query[:100],
+            days_back,
+        )
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping news search")
+            return []
+
+        try:
+            # Calculate start date filter
+            from datetime import timedelta
+
+            start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime(
+                "%Y-%m-%d"
+            )
+
+            async with httpx.AsyncClient(
+                timeout=20.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/search",
+                    json={
+                        "query": query,
+                        "numResults": num_results,
+                        "type": "neural",
+                        "useAutoprompt": True,
+                        "startPublishedDate": start_date,
+                        "contents": {"text": {"maxCharacters": 2000}},
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa search_news failed: status=%d query='%s'",
+                        resp.status_code,
+                        query[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        author=r.get("author"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa search_news: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa search_news exception: query='%s' error='%s'",
+                query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def find_similar(
+        self,
+        url: str,
+        num_results: int = 10,
+        *,
+        exclude_domains: list[str] | None = None,
+    ) -> list[ExaSearchResult]:
+        """Find similar pages to a given URL (competitor discovery).
+
+        Args:
+            url: The URL to find similar pages for.
+            num_results: Number of results to request.
+            exclude_domains: Domains to exclude (e.g., the original domain).
+
+        Returns:
+            List of ExaSearchResult objects for similar pages.
+        """
+        logger.info("Exa find_similar: url='%s'", url[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping find_similar")
+            return []
+
+        try:
+            payload: dict[str, Any] = {
+                "url": url,
+                "numResults": num_results,
+                "contents": {"text": {"maxCharacters": 2000}},
+            }
+            if exclude_domains:
+                payload["excludeDomains"] = exclude_domains
+
+            async with httpx.AsyncClient(
+                timeout=20.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/findSimilar",
+                    json=payload,
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa find_similar failed: status=%d url='%s'",
+                        resp.status_code,
+                        url[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa find_similar: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa find_similar exception: url='%s' error='%s'",
+                url[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def answer(
+        self,
+        question: str,
+    ) -> str:
+        """Get a direct factual answer to a question.
+
+        Args:
+            question: The question to answer.
+
+        Returns:
+            The answer string, or empty string on failure.
+        """
+        logger.info("Exa answer: question='%s'", question[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping answer")
+            return ""
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/answer",
+                    json={
+                        "query": question,
+                        "text": True,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa answer failed: status=%d question='%s'",
+                        resp.status_code,
+                        question[:100],
+                    )
+                    return ""
+
+                data = resp.json()
+                answer_text = data.get("answer", "")
+                logger.info(
+                    "Exa answer: returned %d chars",
+                    len(answer_text),
+                )
+                return answer_text
+
+        except Exception as e:
+            logger.error(
+                "Exa answer exception: question='%s' error='%s'",
+                question[:100],
+                str(e),
+                exc_info=True,
+            )
+            return ""
+
+    async def research(
+        self,
+        query: str,
+    ) -> list[ExaSearchResult]:
+        """Deep agentic research (polling-based, up to 60s).
+
+        Note: This uses the /research endpoint which may require polling.
+        Falls back to deep search if research endpoint is unavailable.
+
+        Args:
+            query: Research query string.
+
+        Returns:
+            List of ExaSearchResult objects.
+        """
+        logger.info("Exa research: query='%s'", query[:100])
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping research")
+            return []
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=60.0,
+                headers=self._get_headers(),
+            ) as client:
+                # Try the research endpoint
+                resp = await client.post(
+                    f"{self._base_url}/research",
+                    json={
+                        "query": query,
+                        "numResults": 15,
+                    },
+                )
+
+                # If research endpoint not available, fall back to deep search
+                if resp.status_code == 404:
+                    logger.info(
+                        "Exa research endpoint not available, falling back to deep search"
+                    )
+                    return await self.search_deep(query, num_results=15)
+
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa research failed: status=%d query='%s'",
+                        resp.status_code,
+                        query[:100],
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                        author=r.get("author"),
+                        score=r.get("score", 0.0),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa research: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa research exception: query='%s' error='%s'",
+                query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return []
+
+    async def get_contents(
+        self,
+        urls: list[str],
+    ) -> list[ExaSearchResult]:
+        """Get full page contents for a list of URLs.
+
+        Args:
+            urls: List of URLs to fetch contents for.
+
+        Returns:
+            List of ExaSearchResult objects with full text content.
+        """
+        logger.info("Exa get_contents: %d urls", len(urls))
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping get_contents")
+            return []
+
+        if not urls:
+            return []
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/contents",
+                    json={
+                        "urls": urls,
+                        "text": True,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa get_contents failed: status=%d",
+                        resp.status_code,
+                    )
+                    return []
+
+                data = resp.json()
+                results = [
+                    ExaSearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        text=r.get("text", ""),
+                        published_date=r.get("publishedDate"),
+                    )
+                    for r in data.get("results", [])
+                ]
+                logger.info("Exa get_contents: returned %d results", len(results))
+                return results
+
+        except Exception as e:
+            logger.error(
+                "Exa get_contents exception: error='%s'",
+                str(e),
+                exc_info=True,
+            )
+            return []
+
     # ── Private helpers ───────────────────────────────────────────────
 
     async def _exa_search(
@@ -459,6 +1055,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         use_autoprompt: bool = True,
+        search_type: str = "auto",
     ) -> list[dict[str, Any]]:
         """Execute an Exa search with rate limiting and content extraction.
 
@@ -472,10 +1069,27 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             include_domains: Only return results from these domains.
             exclude_domains: Exclude results from these domains.
             use_autoprompt: Let Exa optimise the query.
+            search_type: Search type for logging (auto, neural, keyword).
 
         Returns:
             List of result dicts from the Exa response.
         """
+        # Early return if no API key - log explicitly
+        if not self._api_key:
+            logger.warning(
+                "EXA_API_KEY not configured; skipping search for query='%s'",
+                query[:100],
+            )
+            return []
+
+        # Log BEFORE call for diagnostics
+        logger.info(
+            "EXA: Calling search with query='%s', type=%s, num_results=%d",
+            query[:100],
+            search_type,
+            num_results,
+        )
+
         await _wait_for_rate_limit()
 
         payload: dict[str, Any] = {
@@ -498,16 +1112,31 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                 json=payload,
             )
             if resp.status_code != 200:
-                logger.warning(
-                    "Exa search failed: %d %s",
+                logger.error(
+                    "EXA: Search failed with status=%d query='%s' response='%s'",
                     resp.status_code,
+                    query[:100],
                     resp.text[:200],
                 )
                 return []
 
             data = resp.json()
-            return data.get("results", [])
+            results = data.get("results", [])
+
+            # Log AFTER success with result count
+            logger.info(
+                "EXA: Got %d results for query='%s'",
+                len(results),
+                query[:100],
+            )
+            return results
 
         except Exception as exc:
-            logger.warning("Exa search error: %s", exc)
+            # Log ERRORS with full context
+            logger.error(
+                "EXA: Exception for query='%s' error='%s'",
+                query[:100],
+                str(exc),
+                exc_info=True,
+            )
             return []

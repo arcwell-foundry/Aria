@@ -471,27 +471,49 @@ Respond ONLY with the JSON object, no additional text."""
         Returns:
             Tuple of (aggregated raw research data, list of source names used).
         """
+        logger.info("Starting research modules for %s", company_name)
+
         tasks = [
             self._research_website(website),
             self._research_news(company_name),
             self._research_clinical_trials(company_name, classification),
             self._research_leadership(company_name),
+            self._research_competitors(company_name, website),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_data: list[dict[str, Any]] = []
         sources_used: list[str] = []
-        source_names = ["website", "news", "clinical_trials", "leadership"]
+        source_names = ["website", "news", "clinical_trials", "leadership", "competitors"]
 
         for i, res in enumerate(results):
+            stage_name = source_names[i]
             if isinstance(res, BaseException):
-                logger.warning(f"Research module {source_names[i]} failed: {res}")
+                logger.error(
+                    "%s research FAILED for %s: %s",
+                    stage_name,
+                    company_name,
+                    str(res),
+                    exc_info=res,
+                )
                 continue
             if res:
                 all_data.extend(res)
-                sources_used.append(source_names[i])
+                sources_used.append(stage_name)
+                logger.info(
+                    "%s research: found %d results for %s",
+                    stage_name,
+                    len(res),
+                    company_name,
+                )
 
+        logger.info(
+            "Research complete for %s: %d total results from %d sources",
+            company_name,
+            len(all_data),
+            len(sources_used),
+        )
         return all_data, sources_used
 
     async def _research_website(self, website: str) -> list[dict[str, Any]]:
@@ -506,8 +528,10 @@ Respond ONLY with the JSON object, no additional text."""
         results: list[dict[str, Any]] = []
         try:
             if not settings.EXA_API_KEY:
-                logger.info("Exa API key not configured, skipping website research")
+                logger.info("EXA_API_KEY not configured, skipping website research")
                 return results
+
+            logger.info("Starting website research for %s", website)
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -532,10 +556,25 @@ Respond ONLY with the JSON object, no additional text."""
                                 "content": item.get("text", ""),
                             }
                         )
+                    logger.info(
+                        "Website research: found %d pages from %s",
+                        len(results),
+                        website,
+                    )
+                else:
+                    logger.error(
+                        "Website research FAILED: status=%d website=%s",
+                        response.status_code,
+                        website,
+                    )
 
-            logger.info(f"Website research found {len(results)} pages")
         except Exception as e:
-            logger.warning(f"Website research failed: {e}")
+            logger.error(
+                "Website research FAILED for %s: %s",
+                website,
+                str(e),
+                exc_info=True,
+            )
 
         return results
 
@@ -551,8 +590,10 @@ Respond ONLY with the JSON object, no additional text."""
         results: list[dict[str, Any]] = []
         try:
             if not settings.EXA_API_KEY:
-                logger.info("Exa API key not configured, skipping news research")
+                logger.info("EXA_API_KEY not configured, skipping news research")
                 return results
+
+            logger.info("Starting news research for %s", company_name)
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -579,10 +620,25 @@ Respond ONLY with the JSON object, no additional text."""
                                 "published_date": item.get("publishedDate"),
                             }
                         )
+                    logger.info(
+                        "News research: found %d articles for %s",
+                        len(results),
+                        company_name,
+                    )
+                else:
+                    logger.error(
+                        "News research FAILED: status=%d company=%s",
+                        response.status_code,
+                        company_name,
+                    )
 
-            logger.info(f"News research found {len(results)} articles")
         except Exception as e:
-            logger.warning(f"News research failed: {e}")
+            logger.error(
+                "News research FAILED for %s: %s",
+                company_name,
+                str(e),
+                exc_info=True,
+            )
 
         return results
 
@@ -650,8 +706,10 @@ Respond ONLY with the JSON object, no additional text."""
         results: list[dict[str, Any]] = []
         try:
             if not settings.EXA_API_KEY:
-                logger.info("Exa API key not configured, skipping leadership research")
+                logger.info("EXA_API_KEY not configured, skipping leadership research")
                 return results
+
+            logger.info("Starting leadership research for %s", company_name)
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -676,10 +734,91 @@ Respond ONLY with the JSON object, no additional text."""
                                 "content": item.get("text", ""),
                             }
                         )
+                    logger.info(
+                        "Leadership research: found %d results for %s",
+                        len(results),
+                        company_name,
+                    )
+                else:
+                    logger.error(
+                        "Leadership research FAILED: status=%d company=%s",
+                        response.status_code,
+                        company_name,
+                    )
 
-            logger.info(f"Leadership research found {len(results)} results")
         except Exception as e:
-            logger.warning(f"Leadership research failed: {e}")
+            logger.error(
+                "Leadership research FAILED for %s: %s",
+                company_name,
+                str(e),
+                exc_info=True,
+            )
+
+        return results
+
+    async def _research_competitors(
+        self, company_name: str, website: str
+    ) -> list[dict[str, Any]]:
+        """Find similar companies and competitors using Exa find_similar.
+
+        Args:
+            company_name: Name of the company.
+            website: Company website URL for similarity search.
+
+        Returns:
+            List of competitor/similar company data dicts.
+        """
+        results: list[dict[str, Any]] = []
+
+        # Skip if no website provided
+        if not website:
+            logger.info("No website provided, skipping competitor research")
+            return results
+
+        try:
+            if not settings.EXA_API_KEY:
+                logger.info("Exa API key not configured, skipping competitor research")
+                return results
+
+            # Extract domain to exclude from results
+            from urllib.parse import urlparse
+
+            parsed = urlparse(website if "://" in website else f"https://{website}")
+            own_domain = parsed.netloc or website.replace("https://", "").replace(
+                "http://", ""
+            )
+
+            # Use Exa's find_similar endpoint via the provider
+            from src.agents.capabilities.enrichment_providers.exa_provider import (
+                ExaEnrichmentProvider,
+            )
+
+            provider = ExaEnrichmentProvider()
+            similar_results = await provider.find_similar(
+                url=website,
+                num_results=10,
+                exclude_domains=[own_domain],
+            )
+
+            for item in similar_results:
+                results.append(
+                    {
+                        "source": "competitors",
+                        "url": item.url,
+                        "title": item.title,
+                        "content": item.text,
+                        "similarity_score": item.score,
+                    }
+                )
+
+            logger.info("Competitor research found %d similar companies", len(results))
+        except Exception as e:
+            logger.error(
+                "Competitor research FAILED for %s: %s",
+                company_name,
+                str(e),
+                exc_info=True,
+            )
 
         return results
 
@@ -884,6 +1023,14 @@ Respond ONLY with the JSON array, no additional text."""
     def _calculate_quality_score(self, result: EnrichmentResult) -> float:
         """Calculate enrichment completeness score (0-100).
 
+        Scoring breakdown:
+        - Classification quality: 15 points
+        - Fact quantity: 25 points (20+ facts = full)
+        - Category diversity: 20 points
+        - Source diversity: 15 points (NEW - rewards multiple research stages)
+        - Hypothesis quality: 10 points
+        - Gap coverage: 15 points
+
         Args:
             result: The enrichment result to score.
 
@@ -892,31 +1039,35 @@ Respond ONLY with the JSON array, no additional text."""
         """
         score = 0.0
 
-        # Classification quality (20 points)
+        # Classification quality (15 points)
         if result.classification.confidence > 0.7:
-            score += 20
+            score += 15
         elif result.classification.confidence > 0.4:
-            score += 10
+            score += 8
 
-        # Fact quantity (30 points)
+        # Fact quantity (25 points)
         fact_count = len(result.facts)
         if fact_count >= 20:
-            score += 30
+            score += 25
         elif fact_count >= 10:
-            score += 20
+            score += 18
         elif fact_count >= 5:
             score += 10
 
         # Category diversity (20 points)
         categories = {f.category for f in result.facts}
-        category_score = min(20, len(categories) * 3)
+        category_score = min(20, len(categories) * 4)
         score += category_score
 
-        # Hypothesis quality (15 points)
+        # Source diversity (15 points) - rewards multiple research stages contributing
+        source_score = min(15, len(result.research_sources_used) * 3)
+        score += source_score
+
+        # Hypothesis quality (10 points)
         if len(result.hypotheses) >= 5:
-            score += 15
+            score += 10
         elif len(result.hypotheses) >= 2:
-            score += 8
+            score += 5
 
         # Gap coverage — fewer gaps = better (15 points)
         high_gaps = [g for g in result.gaps if g.priority == "high"]

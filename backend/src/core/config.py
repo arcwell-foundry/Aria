@@ -121,6 +121,11 @@ class Settings(BaseSettings):
             and self.ANTHROPIC_API_KEY.get_secret_value()
         )
 
+    @property
+    def exa_configured(self) -> bool:
+        """Check if Exa API is configured for web enrichment."""
+        return bool(self.EXA_API_KEY)
+
     def validate_startup(self) -> None:
         """Validate that all required secrets are configured.
 
