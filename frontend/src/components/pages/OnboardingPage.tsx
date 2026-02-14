@@ -1712,7 +1712,7 @@ function ActivationPanel({
 
 export function OnboardingPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentStep, setCurrentStep] = useState<OnboardingStep | null>(null);
@@ -1788,15 +1788,36 @@ export function OnboardingPage() {
 
   // --- OAuth callback detection ---
   // Handle Composio OAuth redirect with status=success&connected_account_id=XXX
+  // Use ref to ensure we only process the callback once
+  const oauthCallbackProcessedRef = useRef(false);
+
   useEffect(() => {
+    // Skip if already processed
+    if (oauthCallbackProcessedRef.current) {
+      return;
+    }
+
     const status = searchParams.get("status");
     const connectedAccountId = searchParams.get("connected_account_id");
 
     if (status === "success" && connectedAccountId) {
+      // Mark as processed immediately
+      oauthCallbackProcessedRef.current = true;
+
       // Retrieve provider from sessionStorage (set before OAuth redirect)
       const pendingProvider = sessionStorage.getItem("pending_email_provider");
       // Map provider to integration_type
       const integrationType = pendingProvider === "microsoft" ? "outlook" : "gmail";
+
+      console.log("[OAuth] Processing callback:", {
+        status,
+        connectedAccountId,
+        pendingProvider,
+        integrationType,
+      });
+
+      // Clean URL params immediately to prevent re-triggering
+      window.history.replaceState({}, "", window.location.pathname);
 
       // Record the connection explicitly in the database
       recordEmailConnection({
@@ -1804,21 +1825,19 @@ export function OnboardingPage() {
         connection_id: connectedAccountId,
       })
         .then(() => {
+          console.log("[OAuth] Connection recorded successfully");
           // Clear the pending provider
           sessionStorage.removeItem("pending_email_provider");
           // Invalidate email status to refresh UI
           queryClient.invalidateQueries({ queryKey: emailKeys.status() });
         })
         .catch((error) => {
-          console.error("Failed to record email connection:", error);
+          console.error("[OAuth] Failed to record email connection:", error);
           // Still invalidate to trigger backend auto-discovery as fallback
           queryClient.invalidateQueries({ queryKey: emailKeys.status() });
         });
-
-      // Clean URL params to prevent re-triggering on refresh
-      setSearchParams(new URLSearchParams(), { replace: true });
     }
-  }, [searchParams, setSearchParams, queryClient]);
+  }, [searchParams, queryClient]);
 
   // --- Navigation helpers ---
 

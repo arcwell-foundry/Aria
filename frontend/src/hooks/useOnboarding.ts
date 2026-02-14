@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useEffect, useCallback } from "react";
 import {
   getOnboardingState,
   completeStep,
@@ -161,23 +162,51 @@ export function useEmailConnect() {
   });
 }
 
+const MAX_EMAIL_STATUS_ATTEMPTS = 30; // Max 30 attempts (90 seconds at 3s interval)
+
 export function useEmailStatus(enabled: boolean) {
-  return useQuery({
+  const attemptsRef = useRef(0);
+  const queryClient = useQueryClient();
+
+  // Reset attempts when enabled changes (step change)
+  useEffect(() => {
+    if (enabled) {
+      attemptsRef.current = 0;
+    }
+  }, [enabled]);
+
+  const query = useQuery({
     queryKey: emailKeys.status(),
     queryFn: getEmailStatus,
     enabled,
     refetchInterval: (query) => {
       const data = query.state.data;
+
       // Stop polling if connected
       if (data?.google?.connected || data?.microsoft?.connected) {
         return false;
       }
+
+      // Stop polling after max attempts
+      if (attemptsRef.current >= MAX_EMAIL_STATUS_ATTEMPTS) {
+        return false;
+      }
+
+      // Increment attempt counter
+      attemptsRef.current += 1;
       return 3000; // Poll every 3 seconds
     },
-    // Stop polling after 3 minutes to prevent infinite polling storms
     staleTime: 3000,
     gcTime: 5 * 60 * 1000,
   });
+
+  // Provide a method to reset attempts (useful for retry after OAuth)
+  const resetAttempts = useCallback(() => {
+    attemptsRef.current = 0;
+    queryClient.invalidateQueries({ queryKey: emailKeys.status() });
+  }, [queryClient]);
+
+  return { ...query, resetAttempts };
 }
 
 // --- First goal hooks ---
