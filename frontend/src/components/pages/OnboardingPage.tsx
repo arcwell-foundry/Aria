@@ -206,52 +206,63 @@ interface StepConfig {
 const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   company_discovery: {
     ariaMessage:
-      "Welcome! I'm ARIA, your AI Department Director. I'll be working alongside you to transform how your team operates. Let's get started — tell me about your company.",
+      "Let's start with your company. I'll use this to research your market, map your competitors, and build a complete picture of your industry — so I'm never starting from zero.",
     inputMode: "action_panel",
     skippable: false,
   },
   document_upload: {
     ariaMessage:
-      "I'd love to learn more about your company. If you have any internal documents — pitch decks, product briefs, competitive analyses — upload them here and I'll absorb the key insights.",
+      "Upload any documents that would help me understand your business — pitch decks, product guides, competitive analyses, territory plans. I'll extract key insights and remember everything.",
     inputMode: "action_panel",
     skippable: true,
   },
   user_profile: {
     ariaMessage:
-      "Tell me about yourself so I can personalize my work for you.",
+      "Now tell me about you. Your role and background help me calibrate how I communicate on your behalf and what intelligence matters most to you.",
     inputMode: "action_panel",
     skippable: false,
   },
   writing_samples: {
     ariaMessage:
-      "I'd like to learn how you communicate so I can draft messages that sound like you. Paste a recent email, report excerpt, or LinkedIn post below — the more samples, the better the match.",
+      "Share examples of how you write — emails, LinkedIn posts, reports. The more I see, the better I match your voice. You can also skip this and I'll learn from your sent emails instead.",
     inputMode: "action_panel",
     skippable: true,
   },
   email_integration: {
     ariaMessage:
-      "Let me connect to your email so I can understand your relationships and communication patterns. This helps me prioritize outreach and surface warm leads.",
+      "Let me connect to your email so I can map your relationships, spot warm leads, and understand your communication patterns. Your privacy controls come first.",
     inputMode: "action_panel",
     skippable: true,
   },
   integration_wizard: {
     ariaMessage:
-      "Would you like to connect any other tools? Connect your CRM, calendar, or messaging apps and I'll start syncing data immediately.",
+      "Connect your tools and I'll unify everything into one intelligence layer. No more switching between Salesforce, calendar, and Slack to piece together what's happening.",
     inputMode: "action_panel",
     skippable: true,
   },
   first_goal: {
     ariaMessage:
-      "Based on what I know so far, here are some goals I'd recommend starting with. Pick one and I'll get to work immediately.",
+      "What should I focus on first? I'll suggest goals based on what I've learned about your company, but you can set your own priority.",
     inputMode: "action_panel",
     skippable: false,
   },
   activation: {
     ariaMessage:
-      "Excellent. Give me a moment while I enrich your company data, deploy your agents, and set up your workspace...",
+      "Everything is connected. I'm activating my agents to start working on your behalf. Here's what I've learned and what I'm doing first.",
     inputMode: "none",
     skippable: false,
   },
+};
+
+const STEP_DISPLAY_NAMES: Record<OnboardingStep, string> = {
+  company_discovery: "Company",
+  document_upload: "Documents",
+  user_profile: "Profile",
+  writing_samples: "Writing Style",
+  email_integration: "Email",
+  integration_wizard: "Integrations",
+  first_goal: "First Goal",
+  activation: "Activation",
 };
 
 // --- Helpers ---
@@ -1861,6 +1872,9 @@ export function OnboardingPage() {
       setInputValue("");
 
       const config = STEP_CONFIG[targetStep];
+      // Update the ARIA message for the new step
+      setMessages([createMessage("aria", config.ariaMessage)]);
+
       if (config.inputMode === "action_panel") {
         setActiveActionPanel(targetStep);
       } else {
@@ -2038,7 +2052,7 @@ export function OnboardingPage() {
                             ? "cursor-pointer bg-white/10 text-[var(--text-tertiary,#6B7280)] hover:bg-white/15"
                             : "bg-white/5 text-[var(--text-tertiary,#6B7280)]"
                   }`}
-                  title={step.replace(/_/g, " ")}
+                  title={STEP_DISPLAY_NAMES[step]}
                 >
                   {isCompleted ? (
                     <Check
