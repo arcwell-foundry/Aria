@@ -86,12 +86,27 @@ class HunterAgent(SkillAwareAgent):
             skill_index: Optional index for skill discovery.
         """
         self._company_cache: dict[str, Any] = {}
+        self._exa_provider: Any = None
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
         )
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("HunterAgent: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("HunterAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
+        return self._exa_provider
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate Hunter agent task input.
@@ -141,6 +156,7 @@ class HunterAgent(SkillAwareAgent):
             "enrich_company": self._enrich_company,
             "find_contacts": self._find_contacts,
             "score_fit": self._score_fit,
+            "find_similar_companies": self._find_similar_companies,
         }
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
@@ -224,7 +240,7 @@ class HunterAgent(SkillAwareAgent):
         query: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Search for companies using the Exa API directly.
+        """Search for companies using the ExaEnrichmentProvider.
 
         Args:
             query: Search query string.
@@ -236,37 +252,18 @@ class HunterAgent(SkillAwareAgent):
         Raises:
             Exception: If Exa API call fails.
         """
-        import httpx
+        exa = self._get_exa_provider()
+        if not exa:
+            raise RuntimeError("ExaEnrichmentProvider not available")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.exa.ai/search",
-                headers={
-                    "x-api-key": settings.EXA_API_KEY,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                json={
-                    "query": f"{query} companies life sciences commercial",
-                    "numResults": limit,
-                    "useAutoprompt": True,
-                    "contents": {
-                        "text": {"maxCharacters": 1000},
-                    },
-                },
-            )
-
-            if resp.status_code != 200:
-                raise RuntimeError(
-                    f"Exa search failed with status {resp.status_code}: {resp.text[:200]}"
-                )
-
-            data = resp.json()
-            results = data.get("results", [])
+        results = await exa.search_fast(
+            query=f"{query} companies life sciences commercial",
+            num_results=limit,
+        )
 
         companies: list[dict[str, Any]] = []
         for result in results:
-            url = result.get("url", "")
+            url = result.url
             # Extract domain from URL
             domain = ""
             if url:
@@ -276,9 +273,9 @@ class HunterAgent(SkillAwareAgent):
 
             companies.append(
                 {
-                    "name": result.get("title", "Unknown Company"),
+                    "name": result.title or "Unknown Company",
                     "domain": domain,
-                    "description": (result.get("text", "") or "")[:500],
+                    "description": (result.text or "")[:500],
                     "industry": query,  # Use query as initial industry tag
                     "size": "",
                     "geography": "",
@@ -730,9 +727,8 @@ class HunterAgent(SkillAwareAgent):
     ) -> list[dict[str, Any]]:
         """Find contacts at a target company.
 
-        Calls Claude LLM to generate role-based contact suggestions.
-        Falls back to a standard set of role-based placeholders if the
-        LLM call fails.
+        Tries Exa search_person for real contact data first,
+        then falls back to LLM-based suggestions.
 
         Args:
             company_name: Name of the company to find contacts for.
@@ -745,7 +741,45 @@ class HunterAgent(SkillAwareAgent):
             f"Finding contacts for '{company_name}'" + (f" with roles: {roles}" if roles else ""),
         )
 
-        # Try LLM-based contact suggestions
+        # Strategy 1: Try Exa search_person for real contacts
+        exa = self._get_exa_provider()
+        if exa:
+            try:
+                # Search for key decision makers
+                target_roles = roles or ["VP Sales", "Director", "CEO", "CFO", "CTO"]
+                contacts: list[dict[str, Any]] = []
+
+                for target_role in target_roles[:3]:  # Limit to 3 role searches
+                    enrichment = await exa.search_person(
+                        name="",
+                        company=company_name,
+                        role=target_role,
+                    )
+
+                    if enrichment.linkedin_url or enrichment.bio:
+                        contact = {
+                            "name": enrichment.name or f"{target_role} at {company_name}",
+                            "title": enrichment.title or target_role,
+                            "email": "",  # Don't fake emails
+                            "linkedin_url": enrichment.linkedin_url or "",
+                            "seniority": "C-Level" if "C" in target_role else "VP-Level" if "VP" in target_role else "Director-Level",
+                            "department": self._infer_department(target_role),
+                            "bio": enrichment.bio[:200] if enrichment.bio else "",
+                            "confidence": enrichment.confidence,
+                            "source": "exa_search_person",
+                        }
+                        contacts.append(contact)
+
+                if contacts:
+                    logger.info(
+                        f"Exa search_person found {len(contacts)} contacts for '{company_name}'"
+                    )
+                    return contacts
+
+            except Exception as exc:
+                logger.warning(f"Exa contact search failed for '{company_name}': {exc}")
+
+        # Strategy 2: Try LLM-based contact suggestions
         try:
             contacts = await self._find_contacts_via_llm(company_name, roles)
             if contacts:
@@ -756,7 +790,7 @@ class HunterAgent(SkillAwareAgent):
         except Exception as exc:
             logger.warning(f"LLM contact search failed for '{company_name}': {exc}")
 
-        # Fallback: Return standard role-based contact suggestions
+        # Strategy 3: Fallback - Return standard role-based placeholders
         all_contacts = [
             {
                 "name": f"CEO at {company_name}",
@@ -808,6 +842,95 @@ class HunterAgent(SkillAwareAgent):
             return filtered_contacts
 
         return all_contacts
+
+    def _infer_department(self, title: str) -> str:
+        """Infer department from job title.
+
+        Args:
+            title: Job title string.
+
+        Returns:
+            Department name.
+        """
+        title_lower = title.lower()
+        if any(kw in title_lower for kw in ["sales", "revenue", "business development"]):
+            return "Sales"
+        elif any(kw in title_lower for kw in ["marketing", "brand", "communications"]):
+            return "Marketing"
+        elif any(kw in title_lower for kw in ["engineer", "technology", "it", "cto", "software"]):
+            return "Engineering"
+        elif any(kw in title_lower for kw in ["finance", "cfo", "accounting"]):
+            return "Finance"
+        elif any(kw in title_lower for kw in ["hr", "people", "talent"]):
+            return "Human Resources"
+        elif any(kw in title_lower for kw in ["operations", "coo"]):
+            return "Operations"
+        elif any(kw in title_lower for kw in ["executive", "ceo", "president", "chief"]):
+            return "Executive"
+        return "General"
+
+    async def _find_similar_companies(
+        self,
+        website: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Find companies similar to a given company website.
+
+        Uses Exa find_similar to discover similar companies, useful for
+        identifying prospects similar to won accounts.
+
+        Args:
+            website: URL of the reference company.
+            limit: Maximum number of similar companies to return.
+
+        Returns:
+            List of similar company dicts.
+        """
+        logger.info(f"Finding similar companies to '{website}'")
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for find_similar")
+            return []
+
+        try:
+            # Extract domain for exclusion
+            domain = ""
+            if "://" in website:
+                domain = website.split("://")[1].split("/")[0].replace("www.", "")
+
+            results = await exa.find_similar(
+                url=website,
+                num_results=limit,
+                exclude_domains=[domain] if domain else None,
+            )
+
+            similar_companies: list[dict[str, Any]] = []
+            for result in results:
+                # Extract domain from URL
+                result_domain = ""
+                if result.url:
+                    parts = result.url.split("/")
+                    if len(parts) > 2:
+                        result_domain = parts[2].removeprefix("www.")
+
+                similar_companies.append({
+                    "name": result.title.split(" - ")[0] if " - " in result.title else result.title[:50],
+                    "domain": result_domain,
+                    "description": (result.text or "")[:300],
+                    "website": result.url,
+                    "similarity_score": result.score,
+                    "source": "exa_find_similar",
+                })
+
+            logger.info(
+                f"Found {len(similar_companies)} similar companies to '{website}'"
+            )
+            return similar_companies
+
+        except Exception as e:
+            logger.warning(f"find_similar failed for '{website}': {e}")
+            return []
 
     async def _score_fit(
         self,

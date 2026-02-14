@@ -84,7 +84,7 @@ class ScoutAgent(SkillAwareAgent):
     The Scout agent monitors entities, searches for signals,
     deduplicates results, and filters noise from relevant information.
 
-    Uses Exa API for real-time web intelligence when configured,
+    Uses ExaEnrichmentProvider for real-time web intelligence when configured,
     with Claude LLM fallback for generating intelligence based on
     training knowledge.
     """
@@ -108,12 +108,27 @@ class ScoutAgent(SkillAwareAgent):
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
         """
+        self._exa_provider: Any = None
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
         )
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("ScoutAgent: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("ScoutAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
+        return self._exa_provider
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate Scout agent task input.
@@ -155,6 +170,7 @@ class ScoutAgent(SkillAwareAgent):
             "social_monitor": self._social_monitor,
             "detect_signals": self._detect_signals,
             "deduplicate_signals": self._deduplicate_signals,
+            "find_similar_pages": self._find_similar_pages,
         }
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
@@ -204,7 +220,7 @@ class ScoutAgent(SkillAwareAgent):
     ) -> list[dict[str, Any]]:
         """Search the web for relevant information.
 
-        Uses Exa API when available, falls back to Claude LLM generation.
+        Uses ExaEnrichmentProvider when available, falls back to Claude LLM generation.
 
         Args:
             query: Search query string.
@@ -228,42 +244,22 @@ class ScoutAgent(SkillAwareAgent):
             f"Web search with query='{query}', limit={limit}",
         )
 
-        # Try Exa API first
-        if settings.EXA_API_KEY:
+        # Try Exa provider first
+        exa = self._get_exa_provider()
+        if exa:
             try:
-                import httpx
+                results = await exa.search_fast(query=query, num_results=limit)
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "https://api.exa.ai/search",
-                        headers={
-                            "x-api-key": settings.EXA_API_KEY,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "query": query,
-                            "numResults": limit,
-                            "useAutoprompt": True,
-                            "contents": {
-                                "text": {"maxCharacters": 500},
-                            },
-                        },
-                    )
-                    response.raise_for_status()
-                    data = response.json()
+                formatted_results: list[dict[str, Any]] = []
+                for item in results:
+                    formatted_results.append({
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": (item.text or "")[:500],
+                    })
 
-                results: list[dict[str, Any]] = []
-                for item in data.get("results", []):
-                    results.append(
-                        {
-                            "title": item.get("title", ""),
-                            "url": item.get("url", ""),
-                            "snippet": item.get("text", item.get("snippet", "")),
-                        }
-                    )
-
-                logger.info(f"Exa web search returned {len(results)} results for '{query}'")
-                return results[:limit]
+                logger.info(f"Exa web search returned {len(formatted_results)} results for '{query}'")
+                return formatted_results[:limit]
 
             except Exception as e:
                 logger.warning(f"Exa web search failed for '{query}': {e}")
@@ -306,14 +302,16 @@ class ScoutAgent(SkillAwareAgent):
         self,
         query: str,
         limit: int = 10,
+        days_back: int = 30,
     ) -> list[dict[str, Any]]:
         """Search news sources for relevant articles.
 
-        Uses Exa API when available, falls back to Claude LLM generation.
+        Uses ExaEnrichmentProvider when available, falls back to Claude LLM generation.
 
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
+            days_back: Number of days to look back (default 30, use 1 for daily mode).
 
         Returns:
             List of news articles with title, url, source, published_at.
@@ -330,46 +328,22 @@ class ScoutAgent(SkillAwareAgent):
             raise ValueError(f"limit must be greater than 0, got {limit}")
 
         logger.info(
-            f"News search with query='{query}', limit={limit}",
+            f"News search with query='{query}', limit={limit}, days_back={days_back}",
         )
 
-        # Try Exa API first
-        if settings.EXA_API_KEY:
+        # Try Exa provider first
+        exa = self._get_exa_provider()
+        if exa:
             try:
-                import httpx
-
-                # Add "news" to query and use recency filter for news-like results
-                news_query = f"{query} news"
-                # Calculate 30 days ago for recency filter
-                from datetime import timedelta
-
-                start_date = (datetime.now(tz=UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
+                results = await exa.search_news(
+                    query=f"{query} news",
+                    num_results=limit,
+                    days_back=days_back,
                 )
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "https://api.exa.ai/search",
-                        headers={
-                            "x-api-key": settings.EXA_API_KEY,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "query": news_query,
-                            "numResults": limit,
-                            "useAutoprompt": True,
-                            "startPublishedDate": start_date,
-                            "contents": {
-                                "text": {"maxCharacters": 500},
-                            },
-                        },
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-
                 articles: list[dict[str, Any]] = []
-                for item in data.get("results", []):
-                    url = item.get("url", "")
+                for item in results:
+                    url = item.url
                     # Extract domain as source name
                     source = ""
                     if url:
@@ -381,17 +355,12 @@ class ScoutAgent(SkillAwareAgent):
                         except Exception:
                             source = "Unknown"
 
-                    articles.append(
-                        {
-                            "title": item.get("title", ""),
-                            "url": url,
-                            "source": source,
-                            "published_at": item.get(
-                                "publishedDate",
-                                datetime.now(tz=UTC).isoformat(),
-                            ),
-                        }
-                    )
+                    articles.append({
+                        "title": item.title,
+                        "url": url,
+                        "source": source,
+                        "published_at": item.published_date or datetime.now(tz=UTC).isoformat(),
+                    })
 
                 logger.info(f"Exa news search returned {len(articles)} articles for '{query}'")
                 return articles[:limit]
@@ -443,7 +412,7 @@ class ScoutAgent(SkillAwareAgent):
     ) -> list[dict[str, Any]]:
         """Monitor social media for entity mentions.
 
-        Uses Exa API with social domain filtering when available,
+        Uses ExaEnrichmentProvider with social domain filtering when available,
         falls back to Claude LLM generation.
 
         Args:
@@ -468,38 +437,19 @@ class ScoutAgent(SkillAwareAgent):
             f"Social monitoring for entity='{entity}', limit={limit}",
         )
 
-        # Try Exa API first with social media domain filtering
-        if settings.EXA_API_KEY:
+        # Try Exa provider first with social media domain filtering
+        exa = self._get_exa_provider()
+        if exa:
             try:
-                import httpx
-
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "https://api.exa.ai/search",
-                        headers={
-                            "x-api-key": settings.EXA_API_KEY,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "query": entity,
-                            "numResults": limit,
-                            "useAutoprompt": True,
-                            "includeDomains": [
-                                "twitter.com",
-                                "linkedin.com",
-                                "reddit.com",
-                            ],
-                            "contents": {
-                                "text": {"maxCharacters": 500},
-                            },
-                        },
-                    )
-                    response.raise_for_status()
-                    data = response.json()
+                results = await exa.search_fast(
+                    query=entity,
+                    num_results=limit,
+                    include_domains=["twitter.com", "linkedin.com", "reddit.com"],
+                )
 
                 mentions: list[dict[str, Any]] = []
-                for item in data.get("results", []):
-                    url = item.get("url", "")
+                for item in results:
+                    url = item.url
 
                     # Determine platform from URL domain
                     platform = "unknown"
@@ -528,14 +478,12 @@ class ScoutAgent(SkillAwareAgent):
                         except Exception:
                             pass
 
-                    mentions.append(
-                        {
-                            "content": item.get("text", item.get("snippet", "")),
-                            "author": author,
-                            "platform": platform,
-                            "url": url,
-                        }
-                    )
+                    mentions.append({
+                        "content": (item.text or "")[:500],
+                        "author": author,
+                        "platform": platform,
+                        "url": url,
+                    })
 
                 logger.info(f"Exa social monitor returned {len(mentions)} mentions for '{entity}'")
                 return mentions[:limit]
@@ -584,6 +532,7 @@ class ScoutAgent(SkillAwareAgent):
         self,
         entities: list[str],
         signal_types: list[str] | None = None,
+        mode: str = "standard",
     ) -> list[dict[str, Any]]:
         """Detect market signals for monitored entities.
 
@@ -593,6 +542,7 @@ class ScoutAgent(SkillAwareAgent):
         Args:
             entities: List of entity names to monitor.
             signal_types: Optional list of signal types to filter by.
+            mode: "standard" for 30-day lookback, "daily" for 1-day lookback.
 
         Returns:
             List of detected signals with relevance scores.
@@ -601,8 +551,11 @@ class ScoutAgent(SkillAwareAgent):
         if not entities:
             return []
 
+        # Determine days_back based on mode
+        days_back = 1 if mode == "daily" else 30
+
         logger.info(
-            f"Detecting signals for entities={entities}, signal_types={signal_types}",
+            f"Detecting signals for entities={entities}, signal_types={signal_types}, mode={mode}",
         )
 
         all_signals: list[dict[str, Any]] = []
@@ -610,7 +563,7 @@ class ScoutAgent(SkillAwareAgent):
         for entity in entities:
             # Gather intelligence from all sources
             web_results = await self._web_search(query=entity, limit=5)
-            news_results = await self._news_search(query=entity, limit=5)
+            news_results = await self._news_search(query=entity, limit=5, days_back=days_back)
             social_results = await self._social_monitor(entity=entity, limit=5)
 
             # Combine all gathered results for LLM classification
@@ -786,3 +739,57 @@ class ScoutAgent(SkillAwareAgent):
         similarity = len(intersection) / len(union) if union else 0
 
         return similarity >= threshold
+
+    async def _find_similar_pages(
+        self,
+        url: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Find pages similar to a given URL using Exa find_similar.
+
+        Useful for competitor discovery and finding related content.
+
+        Args:
+            url: The URL to find similar pages for.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of similar pages with title, url, snippet.
+        """
+        if not url:
+            return []
+
+        logger.info(f"Finding similar pages to '{url}'")
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for find_similar")
+            return []
+
+        try:
+            # Extract domain for exclusion
+            domain = ""
+            if "://" in url:
+                domain = url.split("://")[1].split("/")[0].replace("www.", "")
+
+            results = await exa.find_similar(
+                url=url,
+                num_results=limit,
+                exclude_domains=[domain] if domain else None,
+            )
+
+            similar_pages: list[dict[str, Any]] = []
+            for item in results:
+                similar_pages.append({
+                    "title": item.title,
+                    "url": item.url,
+                    "snippet": (item.text or "")[:500],
+                    "similarity_score": item.score,
+                })
+
+            logger.info(f"Found {len(similar_pages)} similar pages to '{url}'")
+            return similar_pages
+
+        except Exception as e:
+            logger.warning(f"find_similar failed for '{url}': {e}")
+            return []

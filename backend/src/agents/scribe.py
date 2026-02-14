@@ -98,6 +98,8 @@ class ScribeAgent(SkillAwareAgent):
     writing style using Digital Twin, with support for multiple
     tones and templates. Uses LLM generation as the primary drafting
     method with template-based fallback.
+
+    Now includes recipient research via Exa for personalized emails.
     """
 
     name = "Scribe"
@@ -124,12 +126,27 @@ class ScribeAgent(SkillAwareAgent):
             skill_index: Optional index for skill discovery.
         """
         self._templates: dict[str, str] = self._get_builtin_templates()
+        self._exa_provider: Any = None
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
         )
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("ScribeAgent: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("ScribeAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
+        return self._exa_provider
 
     def _get_builtin_templates(self) -> dict[str, str]:
         """Get built-in communication templates.
@@ -178,6 +195,7 @@ class ScribeAgent(SkillAwareAgent):
             "draft_document": self._draft_document,
             "personalize": self._personalize,
             "apply_template": self._apply_template,
+            "research_recipient": self._research_recipient,
         }
 
     def validate_input(self, task: dict[str, Any]) -> bool:
@@ -373,6 +391,8 @@ class ScribeAgent(SkillAwareAgent):
         tailored to the life sciences commercial context. Falls back to
         template-based generation if the LLM call fails.
 
+        Now includes optional recipient research via Exa for personalized context.
+
         Args:
             recipient: Recipient information with name, title, company.
             context: Background context for the email.
@@ -386,10 +406,19 @@ class ScribeAgent(SkillAwareAgent):
         recipient_name = "there"
         recipient_company = ""
         recipient_title = ""
+        recipient_research: dict[str, Any] | None = None
+
         if recipient:
             recipient_name = recipient.get("name", "there")
             recipient_company = recipient.get("company", "")
             recipient_title = recipient.get("title", "")
+
+            # Research recipient for personalized context
+            if recipient_name != "there":
+                try:
+                    recipient_research = await self._research_recipient(recipient)
+                except Exception as e:
+                    logger.warning(f"Recipient research failed: {e}")
 
         logger.info(
             f"Drafting email to {recipient_name}",
@@ -397,6 +426,7 @@ class ScribeAgent(SkillAwareAgent):
                 "recipient": recipient_name,
                 "tone": tone,
                 "goal": goal[:50] if goal else "",
+                "has_research": recipient_research is not None,
             },
         )
 
@@ -406,6 +436,18 @@ class ScribeAgent(SkillAwareAgent):
             recipient_info_parts.append(f"Title: {recipient_title}")
         if recipient_company:
             recipient_info_parts.append(f"Company: {recipient_company}")
+
+        # Add research context if available
+        if recipient_research:
+            if recipient_research.get("bio"):
+                recipient_info_parts.append(f"Background: {recipient_research['bio'][:300]}")
+            if recipient_research.get("recent_news"):
+                news_items = recipient_research["recent_news"][:2]
+                news_summary = "; ".join([n.get("title", "") for n in news_items])
+                recipient_info_parts.append(f"Recent Company News: {news_summary}")
+            if recipient_research.get("linkedin_url"):
+                recipient_info_parts.append(f"LinkedIn: {recipient_research['linkedin_url']}")
+
         recipient_info = "\n".join(recipient_info_parts)
 
         style_hints = ""
@@ -432,7 +474,8 @@ class ScribeAgent(SkillAwareAgent):
             f"- Include a clear call to action\n"
             f"- Match the requested tone ({tone})\n"
             f"- Do NOT use emojis\n"
-            f"- Use specific details from the context, not generic placeholders\n\n"
+            f"- Use specific details from the context, not generic placeholders\n"
+            f"- Reference the recipient's background or recent news if provided\n\n"
             f"Respond with JSON only:\n"
             f'{{"subject": "email subject line", "body": "full email body text", '
             f'"tone_notes": "brief note on tone choices made"}}'
@@ -495,6 +538,7 @@ class ScribeAgent(SkillAwareAgent):
                 "tone": tone,
                 "word_count": word_count,
                 "has_call_to_action": has_cta,
+                "research_informed": recipient_research is not None,
             }
 
         except Exception as e:
@@ -510,6 +554,83 @@ class ScribeAgent(SkillAwareAgent):
                 goal=goal,
                 tone=tone,
             )
+
+    async def _research_recipient(
+        self,
+        recipient: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Research a recipient for personalized email context.
+
+        Uses Exa search_person for bio/LinkedIn info and search_news
+        for company context.
+
+        Args:
+            recipient: Recipient info with name and optionally company.
+
+        Returns:
+            Dict with bio, linkedin_url, and recent_news.
+        """
+        name = recipient.get("name", "")
+        company = recipient.get("company", "")
+
+        if not name:
+            return {}
+
+        logger.info(f"Researching recipient: {name} at {company}")
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for recipient research")
+            return {}
+
+        result: dict[str, Any] = {}
+
+        try:
+            # Get person enrichment
+            enrichment = await exa.search_person(name=name, company=company)
+
+            if enrichment.bio:
+                result["bio"] = enrichment.bio[:500]
+            if enrichment.linkedin_url:
+                result["linkedin_url"] = enrichment.linkedin_url
+            if enrichment.title:
+                result["verified_title"] = enrichment.title
+
+        except Exception as e:
+            logger.warning(f"Person search failed for {name}: {e}")
+
+        # Get company news if company is known
+        if company:
+            try:
+                news_results = await exa.search_news(
+                    query=f"{company} news announcement",
+                    num_results=5,
+                    days_back=30,
+                )
+
+                if news_results:
+                    result["recent_news"] = [
+                        {
+                            "title": n.title,
+                            "url": n.url,
+                            "date": n.published_date,
+                        }
+                        for n in news_results[:3]
+                    ]
+
+            except Exception as e:
+                logger.warning(f"Company news search failed for {company}: {e}")
+
+        logger.info(
+            f"Recipient research complete for {name}",
+            extra={
+                "has_bio": bool(result.get("bio")),
+                "has_linkedin": bool(result.get("linkedin_url")),
+                "news_count": len(result.get("recent_news", [])),
+            },
+        )
+
+        return result
 
     def _draft_email_fallback(
         self,

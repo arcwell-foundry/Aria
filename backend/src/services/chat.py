@@ -5,13 +5,16 @@ This service handles chat interactions by:
 2. Including memory context in the LLM prompt
 3. Updating working memory with the conversation flow
 4. Extracting and storing new information from the chat
+5. Web grounding for real-time information via Exa
 """
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Any
 
 from src.api.routes.memory import MemoryQueryService
@@ -31,6 +34,335 @@ from src.onboarding.personality_calibrator import PersonalityCalibration, Person
 from src.services.extraction import ExtractionService
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Web Grounding Service
+# ---------------------------------------------------------------------------
+
+
+class WebGroundingService:
+    """Detects when chat needs web data and fetches it via Exa.
+
+    Uses regex-based pattern matching (<50ms) for query type detection,
+    routing to appropriate Exa endpoints for real-time information.
+
+    Design decisions:
+    - Regex over LLM for speed (<50ms vs >500ms)
+    - Graceful fallback to LLM on errors
+    - LRU caching with 1hr TTL for entities
+    """
+
+    # Pattern for detecting company-related queries
+    COMPANY_PATTERNS = [
+        r"(?i)(?:about|tell me about|what is|who is)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s*(?:company|inc|corp|llc|ltd)?",
+        r"(?i)(?:revenue|funding|employees|valuation)\s+(?:of\s+)?([A-Z][a-zA-Z]+)",
+        r"(?i)(?:news|latest|recent)\s+(?:about\s+)?([A-Z][a-zA-Z]+)",
+        r"(?i)(?:what does|what's)\s+([A-Z][a-zA-Z]+)\s+(?:do|make|sell)",
+    ]
+
+    # Pattern for detecting person-related queries
+    PERSON_PATTERNS = [
+        r"(?i)(?:who is|find|contact)\s+(?:the\s+)?(?:VP|CEO|CTO|CFO|Director|Head|Chief|President)?\s*(?:of\s+)?(?:Sales|Marketing|Engineering|Finance|Operations)?\s*(?:at\s+)?([A-Z][a-zA-Z]+)",
+        r"(?i)(?:ceo|cto|cfo|vp|director)\s+(?:of\s+)?([A-Z][a-zA-Z]+)",
+        r"(?i)(?:linkedin|profile)\s+(?:for\s+)?([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+    ]
+
+    # Pattern for factual questions (answer endpoint)
+    FACTUAL_PATTERNS = [
+        r"(?i)^(?:what|when|where|who|how many|how much)\s+",
+        r"(?i)^(?:is|are|was|were|did|does|do|has|have)\s+",
+    ]
+
+    # Entity cache (1 hour TTL)
+    _entity_cache: dict[str, tuple[Any, float]] = {}
+    _CACHE_TTL_SECONDS = 3600  # 1 hour
+
+    def __init__(self) -> None:
+        """Initialize the web grounding service with lazy Exa provider."""
+        self._exa_provider: Any = None
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("WebGroundingService: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning(
+                    "WebGroundingService: Failed to initialize ExaEnrichmentProvider: %s", e
+                )
+        return self._exa_provider
+
+    def _get_cached(self, key: str) -> Any | None:
+        """Get a cached value if not expired."""
+        if key in self._entity_cache:
+            value, timestamp = self._entity_cache[key]
+            if time.time() - timestamp < self._CACHE_TTL_SECONDS:
+                return value
+            del self._entity_cache[key]
+        return None
+
+    def _set_cached(self, key: str, value: Any) -> None:
+        """Cache a value with current timestamp."""
+        self._entity_cache[key] = (value, time.time())
+
+    async def detect_and_ground(self, message: str) -> dict[str, Any] | None:
+        """Detect query type and fetch web-grounded context.
+
+        Args:
+            message: The user's message to analyze.
+
+        Returns:
+            Dict with grounding results, or None if no grounding needed/failed.
+        """
+        exa = self._get_exa_provider()
+        if not exa:
+            return None
+
+        grounding_start = time.perf_counter()
+
+        try:
+            # Check for factual question first (highest priority for answer endpoint)
+            for pattern in self.FACTUAL_PATTERNS:
+                if re.search(pattern, message):
+                    logger.info(
+                        "WebGroundingService: Detected factual question",
+                        extra={"message_preview": message[:100]},
+                    )
+                    return await self._ground_factual(message)
+
+            # Check for company query
+            for pattern in self.COMPANY_PATTERNS:
+                match = re.search(pattern, message)
+                if match:
+                    company_name = match.group(1)
+                    logger.info(
+                        "WebGroundingService: Detected company query",
+                        extra={"company": company_name, "message_preview": message[:100]},
+                    )
+                    return await self._ground_company(company_name)
+
+            # Check for person query
+            for pattern in self.PERSON_PATTERNS:
+                match = re.search(pattern, message)
+                if match:
+                    entity = match.group(1)
+                    logger.info(
+                        "WebGroundingService: Detected person query",
+                        extra={"entity": entity, "message_preview": message[:100]},
+                    )
+                    return await self._ground_person(entity, message)
+
+            # General web grounding for queries with question words
+            question_words = ["what", "who", "when", "where", "how", "which", "latest", "recent"]
+            if any(word in message.lower() for word in question_words):
+                logger.info(
+                    "WebGroundingService: Detected general question",
+                    extra={"message_preview": message[:100]},
+                )
+                return await self._ground_general(message)
+
+        except Exception as e:
+            logger.warning(
+                "WebGroundingService: Grounding failed",
+                extra={"error": str(e), "message_preview": message[:100]},
+            )
+            return None
+
+        grounding_ms = (time.perf_counter() - grounding_start) * 1000
+        logger.debug(
+            "WebGroundingService: No grounding needed",
+            extra={"message_preview": message[:100], "detection_ms": round(grounding_ms, 2)},
+        )
+        return None
+
+    async def _ground_factual(self, question: str) -> dict[str, Any] | None:
+        """Get a direct factual answer using Exa answer endpoint."""
+        exa = self._get_exa_provider()
+        if not exa:
+            return None
+
+        # Check cache
+        cache_key = f"answer:{question}"
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
+
+        try:
+            answer = await exa.answer(question=question)
+            if answer:
+                result = {
+                    "type": "factual_answer",
+                    "question": question,
+                    "answer": answer,
+                    "source": "exa_answer",
+                }
+                self._set_cached(cache_key, result)
+                logger.info(
+                    "WebGroundingService: Got factual answer",
+                    extra={"answer_length": len(answer)},
+                )
+                return result
+        except Exception as e:
+            logger.warning("WebGroundingService: Factual answer failed: %s", e)
+
+        return None
+
+    async def _ground_company(self, company_name: str) -> dict[str, Any] | None:
+        """Get company intelligence using Exa search_company endpoint."""
+        exa = self._get_exa_provider()
+        if not exa:
+            return None
+
+        # Check cache
+        cache_key = f"company:{company_name.lower()}"
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
+
+        try:
+            enrichment = await exa.search_company(company_name)
+
+            result = {
+                "type": "company_intelligence",
+                "company_name": company_name,
+                "description": enrichment.description[:500] if enrichment.description else None,
+                "domain": enrichment.domain,
+                "recent_news": enrichment.recent_news[:3] if enrichment.recent_news else [],
+                "funding": enrichment.latest_funding_round,
+                "confidence": enrichment.confidence,
+                "source": "exa_company",
+            }
+
+            self._set_cached(cache_key, result)
+            logger.info(
+                "WebGroundingService: Got company intelligence",
+                extra={
+                    "company": company_name,
+                    "has_description": bool(enrichment.description),
+                    "news_count": len(enrichment.recent_news or []),
+                },
+            )
+            return result
+
+        except Exception as e:
+            logger.warning(
+                "WebGroundingService: Company search failed: %s",
+                e,
+                extra={"company": company_name},
+            )
+
+        return None
+
+    async def _ground_person(self, name: str, context: str) -> dict[str, Any] | None:
+        """Get person intelligence using Exa search_person endpoint."""
+        exa = self._get_exa_provider()
+        if not exa:
+            return None
+
+        # Check cache
+        cache_key = f"person:{name.lower()}"
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
+
+        try:
+            # Extract company from context if present
+            company = ""
+            at_match = re.search(r"(?:at|@)\s+([A-Z][a-zA-Z]+)", context)
+            if at_match:
+                company = at_match.group(1)
+
+            enrichment = await exa.search_person(name=name, company=company)
+
+            result = {
+                "type": "person_intelligence",
+                "name": name,
+                "title": enrichment.title,
+                "company": enrichment.company,
+                "linkedin_url": enrichment.linkedin_url,
+                "bio": enrichment.bio[:500] if enrichment.bio else None,
+                "web_mentions": enrichment.web_mentions[:3] if enrichment.web_mentions else [],
+                "confidence": enrichment.confidence,
+                "source": "exa_person",
+            }
+
+            self._set_cached(cache_key, result)
+            logger.info(
+                "WebGroundingService: Got person intelligence",
+                extra={
+                    "name": name,
+                    "has_linkedin": bool(enrichment.linkedin_url),
+                    "has_bio": bool(enrichment.bio),
+                },
+            )
+            return result
+
+        except Exception as e:
+            logger.warning(
+                "WebGroundingService: Person search failed: %s",
+                e,
+                extra={"name": name},
+            )
+
+        return None
+
+    async def _ground_general(self, query: str) -> dict[str, Any] | None:
+        """Get general web results using Exa search_instant endpoint."""
+        exa = self._get_exa_provider()
+        if not exa:
+            return None
+
+        try:
+            results = await exa.search_instant(query=query, num_results=3)
+
+            if results:
+                formatted_results = [
+                    {
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": r.text[:300] if r.text else "",
+                        "published_date": r.published_date,
+                    }
+                    for r in results
+                ]
+
+                result = {
+                    "type": "web_results",
+                    "query": query,
+                    "results": formatted_results,
+                    "source": "exa_instant",
+                }
+
+                logger.info(
+                    "WebGroundingService: Got instant results",
+                    extra={"query": query[:50], "result_count": len(results)},
+                )
+                return result
+
+        except Exception as e:
+            logger.warning(
+                "WebGroundingService: Instant search failed: %s",
+                e,
+                extra={"query": query[:50]},
+            )
+
+        return None
+
+
+# Web grounding context template for LLM
+WEB_GROUNDING_TEMPLATE = """## Real-Time Web Information
+
+The following information was retrieved from the web to provide accurate, up-to-date context:
+
+{web_context}
+
+Use this information to provide a grounded, accurate response. Cite specific facts when relevant."""
 
 # System prompt template for ARIA
 ARIA_SYSTEM_PROMPT = """You are ARIA (Autonomous Reasoning & Intelligence Agent), an AI-powered Department Director for Life Sciences commercial teams. You are helpful, professional, and focused on helping sales representatives be more effective.
@@ -138,6 +470,9 @@ class ChatService:
         self._skill_registry: Any = None
         self._skill_orchestrator: Any = None
         self._skill_registry_initialized = False
+
+        # Web grounding — lazily initialized on first use
+        self._web_grounding: WebGroundingService | None = None
 
     async def _get_skill_registry(self) -> Any:
         """Lazily initialize and return the SkillRegistry.
@@ -670,6 +1005,17 @@ class ChatService:
         )
         memory_ms = (time.perf_counter() - memory_start) * 1000
 
+        # Web grounding: Detect and fetch real-time web data
+        web_grounding_start = time.perf_counter()
+        web_context: dict[str, Any] | None = None
+        try:
+            if self._web_grounding is None:
+                self._web_grounding = WebGroundingService()
+            web_context = await self._web_grounding.detect_and_ground(message)
+        except Exception as e:
+            logger.warning("Web grounding failed: %s", e)
+        web_grounding_ms = (time.perf_counter() - web_grounding_start) * 1000
+
         # Get proactive insights to volunteer
         proactive_start = time.perf_counter()
         proactive_insights = await self._get_proactive_insights(
@@ -696,6 +1042,7 @@ class ChatService:
             personality,
             style_guidelines,
             priming_context,
+            web_context,
         )
 
         logger.info(
@@ -708,6 +1055,9 @@ class ChatService:
                 "message_count": len(conversation_messages),
                 "memory_query_ms": memory_ms,
                 "proactive_query_ms": proactive_ms,
+                "web_grounding_ms": web_grounding_ms,
+                "has_web_context": web_context is not None,
+                "web_context_type": web_context.get("type") if web_context else None,
                 "cognitive_load_level": load_state.level.value,
                 "has_style_guidelines": style_guidelines is not None,
                 "has_priming_context": priming_context is not None,
@@ -845,6 +1195,7 @@ class ChatService:
             "timing": {
                 "memory_query_ms": round(memory_ms, 2),
                 "proactive_query_ms": round(proactive_ms, 2),
+                "web_grounding_ms": round(web_grounding_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
@@ -986,6 +1337,7 @@ class ChatService:
         personality: PersonalityCalibration | None = None,
         style_guidelines: str | None = None,
         priming_context: ConversationContext | None = None,
+        web_context: dict[str, Any] | None = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -996,6 +1348,7 @@ class ChatService:
             personality: Optional personality calibration from Digital Twin.
             style_guidelines: Optional writing style fingerprint from Digital Twin.
             priming_context: Optional conversation priming context.
+            web_context: Optional web-grounded context from Exa.
 
         Returns:
             Formatted system prompt string.
@@ -1088,6 +1441,13 @@ class ChatService:
             )
             base_prompt = base_prompt + "\n\n" + proactive_context
 
+        # Add web-grounded context if available
+        if web_context:
+            web_context_str = self._format_web_context(web_context)
+            if web_context_str:
+                web_section = WEB_GROUNDING_TEMPLATE.format(web_context=web_context_str)
+                base_prompt = base_prompt + "\n\n" + web_section
+
         # Add high load instruction if needed
         if load_state and load_state.level in [LoadLevel.HIGH, LoadLevel.CRITICAL]:
             base_prompt = HIGH_LOAD_INSTRUCTION + "\n\n" + base_prompt
@@ -1107,3 +1467,57 @@ class ChatService:
             }
             for mem in memories
         ]
+
+    def _format_web_context(self, web_context: dict[str, Any]) -> str:
+        """Format web grounding context for LLM inclusion.
+
+        Args:
+            web_context: Dict from WebGroundingService.detect_and_ground().
+
+        Returns:
+            Formatted string for LLM context, or empty string if no content.
+        """
+        context_type = web_context.get("type", "")
+
+        if context_type == "factual_answer":
+            return f"**Direct Answer:** {web_context.get('answer', '')}"
+
+        elif context_type == "company_intelligence":
+            parts = []
+            if web_context.get("description"):
+                parts.append(f"**Company:** {web_context['description']}")
+            if web_context.get("domain"):
+                parts.append(f"**Website:** {web_context['domain']}")
+            if web_context.get("funding"):
+                parts.append(f"**Funding:** {web_context['funding']}")
+            if web_context.get("recent_news"):
+                news_items = [
+                    f"- {n.get('title', '')} ({n.get('published_date', 'recent')})"
+                    for n in web_context["recent_news"][:2]
+                ]
+                parts.append(f"**Recent News:**\n" + "\n".join(news_items))
+            return "\n\n".join(parts) if parts else ""
+
+        elif context_type == "person_intelligence":
+            parts = []
+            if web_context.get("title"):
+                parts.append(f"**Title:** {web_context['title']}")
+            if web_context.get("company"):
+                parts.append(f"**Company:** {web_context['company']}")
+            if web_context.get("linkedin_url"):
+                parts.append(f"**LinkedIn:** {web_context['linkedin_url']}")
+            if web_context.get("bio"):
+                parts.append(f"**Background:** {web_context['bio'][:400]}")
+            return "\n\n".join(parts) if parts else ""
+
+        elif context_type == "web_results":
+            results = web_context.get("results", [])
+            if results:
+                formatted = []
+                for r in results[:3]:
+                    date_str = f" ({r.get('published_date', '')})" if r.get("published_date") else ""
+                    formatted.append(f"- **{r.get('title', 'Source')}**{date_str}\n  {r.get('snippet', '')}")
+                return "**Web Results:**\n" + "\n".join(formatted)
+            return ""
+
+        return ""

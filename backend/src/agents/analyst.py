@@ -41,7 +41,8 @@ class AnalystAgent(SkillAwareAgent):
 
     The Analyst agent searches scientific databases to provide
     domain expertise, literature reviews, and data extraction
-    from biomedical APIs.
+    from biomedical APIs. Now includes Exa web research for
+    competitive analysis and general web intelligence.
     """
 
     name = "Analyst"
@@ -69,12 +70,27 @@ class AnalystAgent(SkillAwareAgent):
         """
         self._research_cache: dict[str, Any] = {}
         self._http_client: httpx.AsyncClient | None = None
+        self._exa_provider: Any = None
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
         )
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("AnalystAgent: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("AnalystAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
+        return self._exa_provider
 
     def _register_tools(self) -> dict[str, Any]:
         """Register Analyst agent's research tools.
@@ -87,6 +103,8 @@ class AnalystAgent(SkillAwareAgent):
             "clinical_trials_search": self._clinical_trials_search,
             "fda_drug_search": self._fda_drug_search,
             "chembl_search": self._chembl_search,
+            "web_research": self._web_research,
+            "answer_question": self._answer_question,
         }
 
     def validate_input(self, task: dict[str, Any]) -> bool:
@@ -637,3 +655,117 @@ class AnalystAgent(SkillAwareAgent):
         except Exception as e:
             logger.error(f"ChEMBL search failed: {e}")
             return {"error": str(e), "molecules": [], "total_count": 0}
+
+    async def _web_research(
+        self,
+        query: str,
+        depth: str = "standard",
+        max_results: int = 10,
+    ) -> dict[str, Any]:
+        """Perform web research using Exa for competitive analysis and general intel.
+
+        Uses Exa's research endpoint for comprehensive depth or fast search
+        for standard depth. Useful for battle card generation and competitive
+        intelligence.
+
+        Args:
+            query: Research query string.
+            depth: "standard" for fast search, "comprehensive" for deep research.
+            max_results: Maximum number of results to return.
+
+        Returns:
+            Dictionary with query, results, and summary.
+        """
+        logger.info(f"Web research for: {query} (depth={depth})")
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for web research")
+            return {"error": "Exa provider not available", "results": []}
+
+        try:
+            if depth == "comprehensive":
+                results = await exa.research(query=query)
+            else:
+                results = await exa.search_fast(query=query, num_results=max_results)
+
+            formatted_results = [
+                {
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": (r.text or "")[:500],
+                    "published_date": r.published_date,
+                    "score": r.score,
+                }
+                for r in results[:max_results]
+            ]
+
+            # Generate a brief summary of findings
+            if formatted_results:
+                summary_text = "\n".join([
+                    f"- {r['title']}: {r['snippet'][:200]}"
+                    for r in formatted_results[:5]
+                ])
+            else:
+                summary_text = "No results found."
+
+            result = {
+                "query": query,
+                "depth": depth,
+                "result_count": len(formatted_results),
+                "results": formatted_results,
+                "summary": summary_text,
+                "source": "exa_research" if depth == "comprehensive" else "exa_search",
+            }
+
+            logger.info(
+                f"Web research returned {len(formatted_results)} results for: {query}",
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Web research failed: {e}")
+            return {"error": str(e), "results": []}
+
+    async def _answer_question(
+        self,
+        question: str,
+    ) -> dict[str, Any]:
+        """Get a direct factual answer to a question using Exa.
+
+        Useful for competitive questions, market data, and factual queries
+        that need up-to-date information.
+
+        Args:
+            question: The question to answer.
+
+        Returns:
+            Dictionary with question, answer, and source.
+        """
+        logger.info(f"Answering question: {question[:100]}")
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for answer")
+            return {"error": "Exa provider not available", "answer": ""}
+
+        try:
+            answer = await exa.answer(question=question)
+
+            result = {
+                "question": question,
+                "answer": answer,
+                "source": "exa_answer",
+                "confidence": 0.8 if answer else 0.0,
+            }
+
+            logger.info(
+                f"Answer returned {len(answer)} chars for: {question[:50]}",
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Answer question failed: {e}")
+            return {"error": str(e), "answer": ""}

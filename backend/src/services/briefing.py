@@ -3,7 +3,7 @@
 This service generates daily briefings containing:
 - Calendar overview for the day
 - Lead status summary
-- Market signals
+- Market signals (enhanced with real-time news via Exa)
 - Task status
 - LLM-generated executive summary
 """
@@ -26,6 +26,22 @@ class BriefingService:
         """Initialize briefing service with dependencies."""
         self._db = SupabaseClient.get_client()
         self._llm = LLMClient()
+        # Lazy init for Exa provider
+        self._exa_provider: Any = None
+
+    def _get_exa_provider(self) -> Any:
+        """Lazily initialize and return the ExaEnrichmentProvider."""
+        if self._exa_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                self._exa_provider = ExaEnrichmentProvider()
+                logger.info("BriefingService: ExaEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("BriefingService: Failed to initialize ExaEnrichmentProvider: %s", e)
+        return self._exa_provider
 
     async def generate_briefing(
         self, user_id: str, briefing_date: date | None = None
@@ -471,7 +487,10 @@ class BriefingService:
         }
 
     async def _get_signal_data(self, user_id: str) -> dict[str, Any]:
-        """Get market signals from market_signals table.
+        """Get market signals from market_signals table and real-time Exa news.
+
+        Enhances database signals with real-time news for tracked accounts
+        and competitor monitoring via Exa search_news and find_similar.
 
         Args:
             user_id: The user's ID.
@@ -530,10 +549,101 @@ class BriefingService:
             if isinstance(s, dict) and s.get("signal_type") in competitive_types
         ][:5]
 
+        # Enhance with real-time Exa news for tracked accounts
+        exa = self._get_exa_provider()
+        if exa:
+            try:
+                # Get tracked companies from lead_memories
+                tracked_result = (
+                    self._db.table("lead_memories")
+                    .select("company_name, website")
+                    .eq("user_id", user_id)
+                    .eq("status", "active")
+                    .order("health_score", desc=True)
+                    .limit(5)
+                    .execute()
+                )
+
+                tracked_companies = tracked_result.data or []
+
+                for company in tracked_companies:
+                    company_name = company.get("company_name", "")
+                    website = company.get("website", "")
+
+                    if not company_name:
+                        continue
+
+                    # Get recent news for this company (last 1 day for daily briefing)
+                    try:
+                        news_results = await exa.search_news(
+                            query=f"{company_name} news announcement",
+                            num_results=3,
+                            days_back=1,
+                        )
+
+                        for item in news_results:
+                            # Avoid duplicates
+                            headline = item.title
+                            if any(h.get("headline") == headline for h in company_news):
+                                continue
+
+                            company_news.append({
+                                "id": f"exa-{hash(item.url) % 10000}",
+                                "company_name": company_name,
+                                "headline": headline,
+                                "summary": item.text[:300] if item.text else "",
+                                "relevance_score": 0.75,
+                                "detected_at": item.published_date or datetime.now(UTC).isoformat(),
+                                "source": "exa_realtime",
+                                "url": item.url,
+                            })
+
+                        # Get similar companies for competitive intel
+                        if website and len(competitive_intel) < 10:
+                            similar_results = await exa.find_similar(
+                                url=website,
+                                num_results=3,
+                                exclude_domains=[website.split("//")[1].split("/")[0]] if "://" in website else None,
+                            )
+
+                            for item in similar_results:
+                                # Extract competitor name from URL
+                                competitor_name = item.title.split(" - ")[0] if " - " in item.title else item.title[:50]
+                                competitive_intel.append({
+                                    "id": f"exa-similar-{hash(item.url) % 10000}",
+                                    "company_name": competitor_name,
+                                    "headline": f"Similar to {company_name}: {item.title}",
+                                    "summary": item.text[:200] if item.text else "",
+                                    "relevance_score": 0.6,
+                                    "detected_at": datetime.now(UTC).isoformat(),
+                                    "source": "exa_similar",
+                                    "url": item.url,
+                                })
+
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to get Exa news for company '%s': %s",
+                            company_name,
+                            e,
+                        )
+                        continue
+
+                logger.info(
+                    "BriefingService: Enhanced signals with Exa",
+                    extra={
+                        "user_id": user_id,
+                        "company_news_count": len(company_news),
+                        "competitive_intel_count": len(competitive_intel),
+                    },
+                )
+
+            except Exception as e:
+                logger.warning("BriefingService: Exa enhancement failed: %s", e)
+
         return {
-            "company_news": company_news,
+            "company_news": company_news[:8],
             "market_trends": market_trends,
-            "competitive_intel": competitive_intel,
+            "competitive_intel": competitive_intel[:8],
         }
 
     async def _get_task_data(self, user_id: str) -> dict[str, Any]:
