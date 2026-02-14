@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # Exa API (web research for enrichment — optional)
     EXA_API_KEY: str = ""
+    EXA_WEBHOOK_SECRET: str = ""  # Webhook signature verification secret
 
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")

@@ -157,6 +157,7 @@ class HunterAgent(SkillAwareAgent):
             "find_contacts": self._find_contacts,
             "score_fit": self._score_fit,
             "find_similar_companies": self._find_similar_companies,
+            "search_territory_leads": self.search_territory_leads,
         }
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
@@ -762,7 +763,11 @@ class HunterAgent(SkillAwareAgent):
                             "title": enrichment.title or target_role,
                             "email": "",  # Don't fake emails
                             "linkedin_url": enrichment.linkedin_url or "",
-                            "seniority": "C-Level" if "C" in target_role else "VP-Level" if "VP" in target_role else "Director-Level",
+                            "seniority": "C-Level"
+                            if "C" in target_role
+                            else "VP-Level"
+                            if "VP" in target_role
+                            else "Director-Level",
                             "department": self._infer_department(target_role),
                             "bio": enrichment.bio[:200] if enrichment.bio else "",
                             "confidence": enrichment.confidence,
@@ -914,23 +919,171 @@ class HunterAgent(SkillAwareAgent):
                     if len(parts) > 2:
                         result_domain = parts[2].removeprefix("www.")
 
-                similar_companies.append({
-                    "name": result.title.split(" - ")[0] if " - " in result.title else result.title[:50],
-                    "domain": result_domain,
-                    "description": (result.text or "")[:300],
-                    "website": result.url,
-                    "similarity_score": result.score,
-                    "source": "exa_find_similar",
-                })
+                similar_companies.append(
+                    {
+                        "name": result.title.split(" - ")[0]
+                        if " - " in result.title
+                        else result.title[:50],
+                        "domain": result_domain,
+                        "description": (result.text or "")[:300],
+                        "website": result.url,
+                        "similarity_score": result.score,
+                        "source": "exa_find_similar",
+                    }
+                )
 
-            logger.info(
-                f"Found {len(similar_companies)} similar companies to '{website}'"
-            )
+            logger.info(f"Found {len(similar_companies)} similar companies to '{website}'")
             return similar_companies
 
         except Exception as e:
             logger.warning(f"find_similar failed for '{website}': {e}")
             return []
+
+    async def search_territory_leads(
+        self,
+        query: str,
+        territory: str,
+        goal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Territory-wide lead generation using Websets.
+
+        Creates an Exa Webset for asynchronous bulk company discovery
+        in a specific territory. Results are imported via background
+        polling job and appear in the Pipeline page.
+
+        Example: "Build CDMO pipeline in Northeast" creates a Webset
+        that finds CDMOs in the Northeast region.
+
+        Args:
+            query: Search query for companies (e.g., "CDMO manufacturing").
+            territory: Geographic territory (e.g., "Northeast", "Boston area").
+            goal_id: Optional goal ID to link results to.
+
+        Returns:
+            Dict with webset_id, job_id, and status information.
+        """
+        logger.info(
+            "search_territory_leads: query='%s' territory='%s' goal_id=%s",
+            query,
+            territory,
+            goal_id,
+        )
+
+        exa = self._get_exa_provider()
+        if not exa:
+            logger.warning("ExaEnrichmentProvider not available for territory leads")
+            return {
+                "webset_id": None,
+                "job_id": None,
+                "status": "failed",
+                "error": "Exa API not configured",
+            }
+
+        try:
+            # Build search query with territory context
+            search_query = f"{query} {territory} life sciences"
+
+            # Create Webset via Exa API
+            webset_result = await exa.create_webset(
+                search_query=search_query,
+                entity_type="company",
+                external_id=goal_id,
+            )
+
+            webset_id = webset_result.get("id")
+            if not webset_id:
+                logger.error("Webset creation failed: no ID returned")
+                return {
+                    "webset_id": None,
+                    "job_id": None,
+                    "status": "failed",
+                    "error": webset_result.get("error", "Unknown error"),
+                }
+
+            logger.info(
+                "Created Webset %s for territory leads",
+                webset_id,
+            )
+
+            # Add enrichment for contact discovery
+            await exa.create_enrichment(
+                webset_id=webset_id,
+                description=(
+                    "Find key contacts at this company: CEO, VP of Sales, "
+                    "VP of Business Development, or Director of Operations. "
+                    "Extract names, titles, emails, and LinkedIn profiles."
+                ),
+                format="text",
+            )
+
+            # Add enrichment for company details
+            await exa.create_enrichment(
+                webset_id=webset_id,
+                description=(
+                    "Extract company details: employee count range, "
+                    "revenue range, funding stage, year founded, and headquarters location."
+                ),
+                format="text",
+            )
+
+            # Store job in database for tracking
+            from datetime import UTC, datetime
+            from uuid import uuid4
+
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+            job_id = str(uuid4())
+            now = datetime.now(UTC).isoformat()
+
+            job_data = {
+                "id": job_id,
+                "webset_id": webset_id,
+                "user_id": self.user_id,
+                "goal_id": goal_id,
+                "status": webset_result.get("status", "pending"),
+                "entity_type": "company",
+                "search_query": search_query,
+                "items_imported": 0,
+                "created_at": now,
+                "updated_at": now,
+            }
+
+            try:
+                db.table("webset_jobs").insert(job_data).execute()
+                logger.info(
+                    "Created webset_job %s for webset %s",
+                    job_id,
+                    webset_id,
+                )
+            except Exception as db_error:
+                logger.warning(
+                    "Failed to store webset_job (continuing): %s",
+                    db_error,
+                )
+                # Continue even if DB insert fails - Webset is still created
+
+            return {
+                "webset_id": webset_id,
+                "job_id": job_id,
+                "status": webset_result.get("status", "pending"),
+                "message": f"Webset created for '{query}' in {territory}. "
+                f"Results will appear in Pipeline as they're discovered.",
+            }
+
+        except Exception as e:
+            logger.error(
+                "search_territory_leads failed: query='%s' error='%s'",
+                query,
+                str(e),
+                exc_info=True,
+            )
+            return {
+                "webset_id": None,
+                "job_id": None,
+                "status": "failed",
+                "error": str(e),
+            }
 
     async def _score_fit(
         self,

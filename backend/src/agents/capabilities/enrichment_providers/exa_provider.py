@@ -7,7 +7,7 @@ LinkedIn profiles, bios, press mentions, and scientific publications.
 
 Rate limited to 100 req/min via a sliding-window token bucket.
 
-New endpoints (Feb 2026):
+Search endpoints (Feb 2026):
 - search_instant: Sub-200ms for real-time chat
 - search_fast: <350ms for interactive workflows
 - search_deep: ~3.5s for highest quality
@@ -16,6 +16,13 @@ New endpoints (Feb 2026):
 - answer: Direct factual answer
 - research: Deep agentic research
 - get_contents: Get full page contents
+
+Websets endpoints (Phase 3):
+- create_webset: Create bulk entity discovery job
+- get_webset: Get Webset status
+- list_webset_items: List discovered entities
+- create_enrichment: Add enrichment task to Webset
+- register_webhook: Register webhook for Webset events
 """
 
 import asyncio
@@ -52,6 +59,7 @@ class ExaSearchResult(BaseModel):
     published_date: str | None = None
     author: str | None = None
     score: float = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Rate limiter (sliding window, 100 req/min)
@@ -732,9 +740,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             # Calculate start date filter
             from datetime import timedelta
 
-            start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime(
-                "%Y-%m-%d"
-            )
+            start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
             async with httpx.AsyncClient(
                 timeout=20.0,
@@ -946,9 +952,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
 
                 # If research endpoint not available, fall back to deep search
                 if resp.status_code == 404:
-                    logger.info(
-                        "Exa research endpoint not available, falling back to deep search"
-                    )
+                    logger.info("Exa research endpoint not available, falling back to deep search")
                     return await self.search_deep(query, num_results=15)
 
                 if resp.status_code != 200:
@@ -1140,3 +1144,371 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                 exc_info=True,
             )
             return []
+
+    # ── Websets API (Phase 3) ─────────────────────────────────────────────
+
+    async def create_webset(
+        self,
+        search_query: str,
+        entity_type: str = "company",
+        external_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Webset for bulk entity discovery.
+
+        Websets are asynchronous bulk discovery jobs that find companies
+        or people matching a query. Results are retrieved via polling
+        or webhooks.
+
+        Args:
+            search_query: Natural language query for entity discovery.
+            entity_type: Type of entity to find ('company' or 'person').
+            external_id: Optional external ID to link to goal_id.
+
+        Returns:
+            Dict with Webset ID and status information.
+        """
+        logger.info(
+            "Exa create_webset: query='%s' entity_type=%s",
+            search_query[:100],
+            entity_type,
+        )
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping webset creation")
+            return {"id": "", "status": "failed", "error": "API key not configured"}
+
+        await _wait_for_rate_limit()
+
+        try:
+            payload: dict[str, Any] = {
+                "search": {
+                    "query": search_query,
+                    "entityType": entity_type,
+                },
+            }
+            if external_id:
+                payload["externalId"] = external_id
+
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/websets/v0/websets",
+                    json=payload,
+                )
+                if resp.status_code not in (200, 201):
+                    logger.error(
+                        "Exa create_webset failed: status=%d query='%s'",
+                        resp.status_code,
+                        search_query[:100],
+                    )
+                    return {
+                        "id": "",
+                        "status": "failed",
+                        "error": f"API returned {resp.status_code}",
+                    }
+
+                data = resp.json()
+                webset_id = data.get("id", "")
+                status = data.get("status", "pending")
+                items_count = data.get("itemsCount", 0)
+
+                logger.info(
+                    "Exa create_webset: created webset_id=%s status=%s",
+                    webset_id,
+                    status,
+                )
+
+                return {
+                    "id": webset_id,
+                    "status": status,
+                    "items_count": items_count,
+                    "created_at": data.get("createdAt"),
+                }
+
+        except Exception as e:
+            logger.error(
+                "Exa create_webset exception: query='%s' error='%s'",
+                search_query[:100],
+                str(e),
+                exc_info=True,
+            )
+            return {"id": "", "status": "failed", "error": str(e)}
+
+    async def get_webset(self, webset_id: str) -> dict[str, Any]:
+        """Get Webset status and metadata.
+
+        Args:
+            webset_id: The Exa Webset ID.
+
+        Returns:
+            Dict with Webset status, item counts, and metadata.
+        """
+        logger.info("Exa get_webset: webset_id=%s", webset_id)
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping webset get")
+            return {"id": webset_id, "status": "unknown"}
+
+        await _wait_for_rate_limit()
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.get(
+                    f"{self._base_url}/websets/v0/websets/{webset_id}",
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa get_webset failed: status=%d webset_id=%s",
+                        resp.status_code,
+                        webset_id,
+                    )
+                    return {"id": webset_id, "status": "unknown"}
+
+                data = resp.json()
+                return {
+                    "id": data.get("id", webset_id),
+                    "status": data.get("status", "unknown"),
+                    "items_count": data.get("itemsCount", 0),
+                    "created_at": data.get("createdAt"),
+                    "updated_at": data.get("updatedAt"),
+                }
+
+        except Exception as e:
+            logger.error(
+                "Exa get_webset exception: webset_id=%s error='%s'",
+                webset_id,
+                str(e),
+                exc_info=True,
+            )
+            return {"id": webset_id, "status": "unknown", "error": str(e)}
+
+    async def list_webset_items(
+        self,
+        webset_id: str,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List items in a Webset with pagination.
+
+        Args:
+            webset_id: The Exa Webset ID.
+            cursor: Pagination cursor for next page.
+            limit: Maximum number of items to return.
+
+        Returns:
+            Dict with items list and pagination info.
+        """
+        logger.info(
+            "Exa list_webset_items: webset_id=%s limit=%d",
+            webset_id,
+            limit,
+        )
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping webset items")
+            return {"items": [], "next_cursor": None, "has_more": False}
+
+        await _wait_for_rate_limit()
+
+        try:
+            params: dict[str, Any] = {"limit": limit}
+            if cursor:
+                params["cursor"] = cursor
+
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.get(
+                    f"{self._base_url}/websets/v0/websets/{webset_id}/items",
+                    params=params,
+                )
+                if resp.status_code != 200:
+                    logger.error(
+                        "Exa list_webset_items failed: status=%d webset_id=%s",
+                        resp.status_code,
+                        webset_id,
+                    )
+                    return {"items": [], "next_cursor": None, "has_more": False}
+
+                data = resp.json()
+                items = data.get("results", [])
+
+                logger.info(
+                    "Exa list_webset_items: returned %d items for webset_id=%s",
+                    len(items),
+                    webset_id,
+                )
+
+                return {
+                    "items": items,
+                    "next_cursor": data.get("nextCursor"),
+                    "has_more": data.get("hasMore", False),
+                }
+
+        except Exception as e:
+            logger.error(
+                "Exa list_webset_items exception: webset_id=%s error='%s'",
+                webset_id,
+                str(e),
+                exc_info=True,
+            )
+            return {"items": [], "next_cursor": None, "has_more": False}
+
+    async def create_enrichment(
+        self,
+        webset_id: str,
+        description: str,
+        format: str = "text",
+    ) -> dict[str, Any]:
+        """Add enrichment task to process each Webset item.
+
+        Enrichments run against each item in the Webset to extract
+        additional data like contact info, funding, etc.
+
+        Args:
+            webset_id: The Exa Webset ID.
+            description: Natural language description (1-5000 chars).
+            format: Expected format ('text', 'email', 'phone', 'url', etc.).
+
+        Returns:
+            Dict with enrichment ID and status.
+        """
+        logger.info(
+            "Exa create_enrichment: webset_id=%s format=%s",
+            webset_id,
+            format,
+        )
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping enrichment creation")
+            return {"id": "", "status": "failed"}
+
+        await _wait_for_rate_limit()
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/websets/v0/websets/{webset_id}/enrichments",
+                    json={
+                        "description": description,
+                        "format": format,
+                    },
+                )
+                if resp.status_code not in (200, 201):
+                    logger.error(
+                        "Exa create_enrichment failed: status=%d webset_id=%s",
+                        resp.status_code,
+                        webset_id,
+                    )
+                    return {"id": "", "status": "failed"}
+
+                data = resp.json()
+                enrichment_id = data.get("id", "")
+
+                logger.info(
+                    "Exa create_enrichment: created enrichment_id=%s",
+                    enrichment_id,
+                )
+
+                return {
+                    "id": enrichment_id,
+                    "webset_id": webset_id,
+                    "status": data.get("status", "pending"),
+                    "description": description,
+                    "created_at": data.get("createdAt"),
+                }
+
+        except Exception as e:
+            logger.error(
+                "Exa create_enrichment exception: webset_id=%s error='%s'",
+                webset_id,
+                str(e),
+                exc_info=True,
+            )
+            return {"id": "", "status": "failed", "error": str(e)}
+
+    async def register_webhook(
+        self,
+        webhook_url: str,
+        events: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Register webhook for Webset events.
+
+        Webhooks provide real-time notifications when items are completed
+        or when a Webset finishes processing.
+
+        Args:
+            webhook_url: URL to receive webhook POST requests.
+            events: List of event types (default: webset.items.completed).
+
+        Returns:
+            Dict with webhook ID and secret for signature verification.
+        """
+        if events is None:
+            events = ["webset.items.completed"]
+
+        logger.info(
+            "Exa register_webhook: url='%s' events=%s",
+            webhook_url,
+            events,
+        )
+
+        if not self._api_key:
+            logger.warning("EXA_API_KEY not configured; skipping webhook registration")
+            return {"id": "", "url": webhook_url, "secret": None}
+
+        await _wait_for_rate_limit()
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                headers=self._get_headers(),
+            ) as client:
+                resp = await client.post(
+                    f"{self._base_url}/websets/v0/webhooks",
+                    json={
+                        "url": webhook_url,
+                        "events": events,
+                    },
+                )
+                if resp.status_code not in (200, 201):
+                    logger.error(
+                        "Exa register_webhook failed: status=%d url='%s'",
+                        resp.status_code,
+                        webhook_url[:100],
+                    )
+                    return {"id": "", "url": webhook_url, "secret": None}
+
+                data = resp.json()
+                webhook_id = data.get("id", "")
+
+                logger.info(
+                    "Exa register_webhook: registered webhook_id=%s",
+                    webhook_id,
+                )
+
+                return {
+                    "id": webhook_id,
+                    "url": webhook_url,
+                    "events": events,
+                    "secret": data.get("secret"),
+                    "created_at": data.get("createdAt"),
+                }
+
+        except Exception as e:
+            logger.error(
+                "Exa register_webhook exception: url='%s' error='%s'",
+                webhook_url[:100],
+                str(e),
+                exc_info=True,
+            )
+            return {"id": "", "url": webhook_url, "secret": None, "error": str(e)}

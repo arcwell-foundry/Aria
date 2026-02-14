@@ -394,6 +394,30 @@ async def _run_working_memory_sync() -> None:
         logger.exception("Working memory sync failed")
 
 
+async def _run_webset_polling() -> None:
+    """Import new leads from pending Websets.
+
+    Polls Exa Websets for completed items and imports them into
+    discovered_leads for user review.
+    """
+    try:
+        from src.services.webset_service import WebsetService
+
+        service = WebsetService()
+        result = await service.poll_pending_websets()
+
+        if result["total_jobs"] > 0:
+            logger.info(
+                "Webset polling complete: %d jobs, %d items imported, %d completed, %d errors",
+                result["total_jobs"],
+                result["items_imported"],
+                result["jobs_completed"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Webset polling scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -452,6 +476,13 @@ async def start_scheduler() -> None:
             name="Prospective memory task trigger checks",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_webset_polling,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="webset_polling",
+            name="Webset polling for bulk lead import",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -470,7 +501,8 @@ async def start_scheduler() -> None:
             "OODA goal monitoring every 30 min, "
             "medium action timeout every 5 min, "
             "prospective memory checks every 5 min, "
-            "working memory sync every 30 sec"
+            "working memory sync every 30 sec, "
+            "webset polling every 5 min"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
