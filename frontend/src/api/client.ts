@@ -79,6 +79,11 @@ apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    // Debug: Log token being sent (truncated for security)
+    const tokenPreview = token.length > 30 ? `${token.substring(0, 20)}...${token.slice(-10)}` : token;
+    console.log(`[API] Sending request to ${config.url} with token: ${tokenPreview} (length=${token.length})`);
+  } else {
+    console.warn(`[API] No access_token found in localStorage for request to ${config.url}`);
   }
   return config;
 });

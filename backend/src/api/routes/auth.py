@@ -388,7 +388,10 @@ async def refresh_token(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(current_user: CurrentUser) -> dict[str, Any]:
+async def get_current_user_profile(
+    request: Request,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
     """Get the current user's profile.
 
     Returns profile data from user_profiles if it exists, otherwise falls back
@@ -396,6 +399,7 @@ async def get_current_user_profile(current_user: CurrentUser) -> dict[str, Any]:
     haven't gone through onboarding yet.
 
     Args:
+        request: FastAPI request object.
         current_user: The authenticated user.
 
     Returns:
@@ -404,6 +408,21 @@ async def get_current_user_profile(current_user: CurrentUser) -> dict[str, Any]:
     Raises:
         HTTPException: If an unexpected error occurs.
     """
+    # Debug: Log incoming request details
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        token_preview = f"{token[:20]}...{token[-10:]}" if len(token) > 30 else f"{token[:10]}..."
+        logger.info(
+            "AUTH/ME: Request received with token: %s (length=%d)",
+            token_preview,
+            len(token),
+        )
+    else:
+        logger.warning("AUTH/ME: Request received without valid Authorization header")
+
+    logger.info("AUTH/ME: Processing request for user_id=%s", current_user.id)
+
     try:
         profile = await SupabaseClient.get_user_by_id(current_user.id)
 

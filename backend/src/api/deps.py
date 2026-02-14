@@ -33,6 +33,7 @@ async def get_current_user(
         HTTPException: If authentication fails.
     """
     if credentials is None:
+        logger.warning("AUTH: No credentials provided in request")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -40,24 +41,34 @@ async def get_current_user(
         )
 
     token = credentials.credentials
+    # Log token prefix for debugging (don't log full token)
+    token_preview = f"{token[:20]}...{token[-10:]}" if len(token) > 30 else f"{token[:10]}..."
+    logger.info("AUTH: Validating token: %s (length=%d)", token_preview, len(token))
 
     try:
         client = SupabaseClient.get_client()
         response = client.auth.get_user(token)
 
         if response is None or response.user is None:
+            logger.warning("AUTH: Token validation returned no user")
             raise AuthenticationError("Invalid authentication token")
 
+        logger.info(
+            "AUTH: Token validated successfully for user_id=%s email=%s",
+            response.user.id,
+            response.user.email,
+        )
         return response.user
 
     except AuthenticationError as e:
+        logger.warning("AUTH: AuthenticationError - %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
     except Exception as e:
-        logger.exception("Authentication error")
+        logger.exception("AUTH: Unexpected error during token validation: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
