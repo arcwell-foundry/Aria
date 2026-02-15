@@ -736,13 +736,353 @@ Summary:"""
 
         return context
 
-    async def _get_calendar_context(self, user_id: str, sender_email: str) -> CalendarContext:
-        """Placeholder - implemented in Task 6."""
-        return CalendarContext()
+    # ------------------------------------------------------------------
+    # Calendar Context
+    # ------------------------------------------------------------------
 
-    async def _get_crm_context(self, user_id: str, sender_email: str) -> CRMContext:
-        """Placeholder - implemented in Task 6."""
-        return CRMContext()
+    async def _get_calendar_context(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> CalendarContext:
+        """Get calendar context for meetings with this contact.
+
+        Checks for Google Calendar or Outlook Calendar integration
+        and fetches recent/upcoming meetings with this person.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The contact's email.
+
+        Returns:
+            CalendarContext with meeting info.
+        """
+        context = CalendarContext()
+
+        try:
+            calendar_integration = await self._get_calendar_integration(user_id)
+            if not calendar_integration:
+                return context
+
+            context.connected = True
+
+            from composio import ComposioToolSet
+            from datetime import timedelta
+
+            toolset = ComposioToolSet()
+            entity = toolset.get_entity(id=user_id)
+
+            now = datetime.now(UTC)
+            start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+            end_date = (now + timedelta(days=30)).strftime("%Y-%m-%d")
+
+            provider = calendar_integration.get("integration_type", "").lower()
+
+            if "google" in provider:
+                events = await self._fetch_google_calendar_events(
+                    entity, start_date, end_date, sender_email
+                )
+            else:
+                events = await self._fetch_outlook_calendar_events(
+                    entity, start_date, end_date, sender_email
+                )
+
+            for event in events:
+                event_time_str = event.get("start", "")
+                if event_time_str:
+                    event_time = datetime.fromisoformat(
+                        event_time_str.replace("Z", "+00:00")
+                    )
+                    if event_time < now:
+                        context.recent_meetings.append(event)
+                    else:
+                        context.upcoming_meetings.append(event)
+
+            logger.info(
+                "CONTEXT_GATHERER: Found %d recent, %d upcoming meetings with %s",
+                len(context.recent_meetings),
+                len(context.upcoming_meetings),
+                sender_email,
+            )
+
+        except Exception as e:
+            logger.error(
+                "CONTEXT_GATHERER: Calendar context failed: %s",
+                str(e),
+                exc_info=True,
+            )
+
+        return context
+
+    async def _get_calendar_integration(self, user_id: str) -> dict[str, Any] | None:
+        """Get user's calendar integration."""
+        try:
+            result = (
+                self._db.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "googlecalendar")
+                .maybe_single()
+                .execute()
+            )
+            if result.data:
+                return result.data
+
+            result = (
+                self._db.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "outlook365calendar")
+                .maybe_single()
+                .execute()
+            )
+            return result.data if result.data else None
+
+        except Exception:
+            return None
+
+    async def _fetch_google_calendar_events(
+        self,
+        entity: Any,
+        start_date: str,
+        end_date: str,
+        sender_email: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch Google Calendar events involving the sender."""
+        events = []
+
+        try:
+            response = entity.execute(
+                action="GOOGLECALENDAR_GET_EVENTS",
+                params={
+                    "timeMin": f"{start_date}T00:00:00Z",
+                    "timeMax": f"{end_date}T23:59:59Z",
+                    "maxResults": 50,
+                },
+            )
+
+            if response and response.get("success"):
+                for event in response.get("data", {}).get("items", []):
+                    attendees = event.get("attendees", [])
+                    if any(
+                        sender_email.lower() in a.get("email", "").lower()
+                        for a in attendees
+                    ):
+                        events.append({
+                            "id": event.get("id"),
+                            "title": event.get("summary", ""),
+                            "start": event.get("start", {}).get("dateTime", ""),
+                            "end": event.get("end", {}).get("dateTime", ""),
+                        })
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Google Calendar fetch failed: %s",
+                str(e),
+            )
+
+        return events
+
+    async def _fetch_outlook_calendar_events(
+        self,
+        entity: Any,
+        start_date: str,
+        end_date: str,
+        sender_email: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch Outlook Calendar events involving the sender."""
+        events = []
+
+        try:
+            response = entity.execute(
+                action="OUTLOOK365_CALENDAR_VIEW",
+                params={
+                    "startDateTime": f"{start_date}T00:00:00Z",
+                    "endDateTime": f"{end_date}T23:59:59Z",
+                    "top": 50,
+                },
+            )
+
+            if response and response.get("success"):
+                for event in response.get("data", {}).get("value", []):
+                    attendees = event.get("attendees", [])
+                    if any(
+                        sender_email.lower() in a.get("emailAddress", {}).get("address", "").lower()
+                        for a in attendees
+                    ):
+                        events.append({
+                            "id": event.get("id"),
+                            "title": event.get("subject", ""),
+                            "start": event.get("start", {}).get("dateTime", ""),
+                            "end": event.get("end", {}).get("dateTime", ""),
+                        })
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Outlook Calendar fetch failed: %s",
+                str(e),
+            )
+
+        return events
+
+    # ------------------------------------------------------------------
+    # CRM Context
+    # ------------------------------------------------------------------
+
+    async def _get_crm_context(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> CRMContext:
+        """Get CRM context for this contact.
+
+        Checks for Salesforce or HubSpot integration and fetches
+        deal/account status and recent activities.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The contact's email.
+
+        Returns:
+            CRMContext with deal/account info.
+        """
+        context = CRMContext()
+
+        try:
+            crm_integration = await self._get_crm_integration(user_id)
+            if not crm_integration:
+                return context
+
+            context.connected = True
+
+            from composio import ComposioToolSet
+
+            toolset = ComposioToolSet()
+            entity = toolset.get_entity(id=user_id)
+
+            provider = crm_integration.get("integration_type", "").lower()
+
+            if "salesforce" in provider:
+                await self._fetch_salesforce_context(entity, sender_email, context)
+            elif "hubspot" in provider:
+                await self._fetch_hubspot_context(entity, sender_email, context)
+
+            logger.info(
+                "CONTEXT_GATHERER: CRM context for %s - stage: %s",
+                sender_email,
+                context.lead_stage or "none",
+            )
+
+        except Exception as e:
+            logger.error(
+                "CONTEXT_GATHERER: CRM context failed: %s",
+                str(e),
+                exc_info=True,
+            )
+
+        return context
+
+    async def _get_crm_integration(self, user_id: str) -> dict[str, Any] | None:
+        """Get user's CRM integration."""
+        try:
+            result = (
+                self._db.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "salesforce")
+                .maybe_single()
+                .execute()
+            )
+            if result.data:
+                return result.data
+
+            result = (
+                self._db.table("user_integrations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("integration_type", "hubspot")
+                .maybe_single()
+                .execute()
+            )
+            return result.data if result.data else None
+
+        except Exception:
+            return None
+
+    async def _fetch_salesforce_context(
+        self,
+        entity: Any,
+        sender_email: str,
+        context: CRMContext,
+    ) -> None:
+        """Fetch Salesforce context for contact."""
+        try:
+            response = entity.execute(
+                action="SALESFORCE_SEARCH_RECORDS",
+                params={
+                    "search_string": sender_email,
+                },
+            )
+
+            if response and response.get("success"):
+                records = response.get("data", {}).get("searchRecords", [])
+
+                for record in records:
+                    if record.get("attributes", {}).get("type") == "Contact":
+                        contact_id = record.get("Id")
+
+                        opp_response = entity.execute(
+                            action="SALESFORCE_QUERY",
+                            params={
+                                "query": f"SELECT StageName, Amount FROM Opportunity WHERE ContactId = '{contact_id}' LIMIT 1",
+                            },
+                        )
+
+                        if opp_response and opp_response.get("success"):
+                            opps = opp_response.get("data", {}).get("records", [])
+                            if opps:
+                                context.lead_stage = opps[0].get("StageName")
+                                context.deal_value = opps[0].get("Amount")
+
+                        break
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Salesforce context failed: %s",
+                str(e),
+            )
+
+    async def _fetch_hubspot_context(
+        self,
+        entity: Any,
+        sender_email: str,
+        context: CRMContext,
+    ) -> None:
+        """Fetch HubSpot context for contact."""
+        try:
+            response = entity.execute(
+                action="HUBSPOT_SEARCH_CONTACTS",
+                params={
+                    "query": sender_email,
+                    "limit": 1,
+                },
+            )
+
+            if response and response.get("success"):
+                contacts = response.get("data", {}).get("results", [])
+
+                if contacts:
+                    contact = contacts[0]
+                    properties = contact.get("properties", {})
+
+                    context.lead_stage = properties.get("lifecycle_stage")
+                    context.account_status = properties.get("hubspot_owner_id")
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: HubSpot context failed: %s",
+                str(e),
+            )
 
     async def _save_context(self, context: DraftContext) -> None:
         """Placeholder - implemented in Task 7."""
