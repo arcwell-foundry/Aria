@@ -35,6 +35,16 @@ class EmailDraftStatus(str, Enum):
     FAILED = "failed"
 
 
+class DraftUserAction(str, Enum):
+    """User action on an ARIA-generated draft for learning mode."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    EDITED = "edited"
+    REJECTED = "rejected"
+    IGNORED = "ignored"
+
+
 class EmailDraftCreate(BaseModel):
     """Request model for creating an email draft."""
 
@@ -94,6 +104,22 @@ class EmailDraftResponse(BaseModel):
     saved_to_client_at: datetime | None = Field(None, description="When saved to client")
     in_reply_to: str | None = Field(
         None, description="Message-ID of email being replied to (for threading)"
+    )
+    # Fields for learning mode and feedback tracking
+    user_action: DraftUserAction | None = Field(
+        None, description="User action on draft: pending/approved/edited/rejected/ignored"
+    )
+    user_edited_body: str | None = Field(
+        None, description="If edited, stores the user-modified version"
+    )
+    edit_distance: float | None = Field(
+        None, ge=0.0, le=1.0, description="Levenshtein ratio between original and edited draft"
+    )
+    action_detected_at: datetime | None = Field(
+        None, description="When the user action was detected"
+    )
+    learning_mode_draft: bool | None = Field(
+        None, description="Whether this draft was created during learning mode period"
     )
 
 

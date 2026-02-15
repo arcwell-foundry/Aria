@@ -273,6 +273,27 @@ class PriorityEmailIngestion:
             except Exception as e:
                 logger.warning("Failed to record email bootstrap activity: %s", e)
 
+            # 13. Activate learning mode (restricts drafting to top contacts initially)
+            try:
+                from src.services.learning_mode_service import get_learning_mode_service
+
+                learning_mode = get_learning_mode_service()
+                activation_result = await learning_mode.activate_learning_mode(user_id)
+                if activation_result.get("success"):
+                    logger.info(
+                        "EMAIL_BOOTSTRAP: Learning mode activated for user %s with %d top contacts",
+                        user_id,
+                        activation_result.get("top_contacts_count", 0),
+                    )
+                else:
+                    logger.warning(
+                        "EMAIL_BOOTSTRAP: Failed to activate learning mode for user %s: %s",
+                        user_id,
+                        activation_result.get("error"),
+                    )
+            except Exception as e:
+                logger.warning("EMAIL_BOOTSTRAP: Learning mode activation failed: %s", e)
+
             # Final summary log
             logger.info(
                 "EMAIL_BOOTSTRAP: Complete for user %s. "

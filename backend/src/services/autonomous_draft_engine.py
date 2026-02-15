@@ -31,6 +31,7 @@ from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
+from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ Do not include any text outside the JSON object."""
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
         self._client_writer = EmailClientWriter()
+        self._learning_mode = get_learning_mode_service()
 
     # ------------------------------------------------------------------
     # Public API
@@ -186,10 +188,48 @@ Do not include any text outside the JSON object."""
             # Get user info for signature
             user_name = await self._get_user_name(user_id)
 
-            # 2. Process each email needing reply
+            # 2. Check learning mode status
+            is_learning_mode = await self._learning_mode.is_learning_mode_active(user_id)
+            top_contacts: list[str] = []
+
+            if is_learning_mode:
+                top_contacts = await self._learning_mode.get_top_contacts(user_id)
+                logger.info(
+                    "DRAFT_ENGINE: Learning mode ACTIVE for user %s. "
+                    "Limiting to %d top contacts.",
+                    user_id,
+                    len(top_contacts),
+                )
+
+            # 3. Process each email needing reply
+            emails_processed = 0
+            emails_skipped_learning_mode = 0
+
             for email in scan_result.needs_reply:
+                # Skip if in learning mode and sender not in top contacts
+                if is_learning_mode:
+                    sender_email = email.sender_email.lower().strip()
+                    is_top_contact = any(
+                        c.lower().strip() == sender_email for c in top_contacts
+                    )
+
+                    if not is_top_contact:
+                        logger.debug(
+                            "DRAFT_ENGINE: Skipping email from %s - not in top contacts (learning mode)",
+                            email.sender_email,
+                        )
+                        emails_skipped_learning_mode += 1
+                        continue
+
+                # Increment interaction count for learning mode
+                if is_learning_mode:
+                    await self._learning_mode.increment_draft_interaction(user_id)
+
+                emails_processed += 1
                 try:
-                    draft = await self._process_single_email(user_id, user_name, email)
+                    draft = await self._process_single_email(
+                        user_id, user_name, email, is_learning_mode
+                    )
                     result.drafts.append(draft)
                     if draft.success:
                         result.drafts_generated += 1
@@ -213,9 +253,11 @@ Do not include any text outside the JSON object."""
                 result.status = "failed"
 
             logger.info(
-                "DRAFT_ENGINE: Processing complete. %d drafts generated, %d failed",
+                "DRAFT_ENGINE: Processing complete. %d drafts generated, %d failed, "
+                "%d skipped (learning mode)",
                 result.drafts_generated,
                 result.drafts_failed,
+                emails_skipped_learning_mode,
             )
 
         except Exception as e:
@@ -242,6 +284,7 @@ Do not include any text outside the JSON object."""
         user_id: str,
         user_name: str,
         email: Any,  # EmailCategory from email_analyzer
+        is_learning_mode: bool = False,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -252,7 +295,7 @@ Do not include any text outside the JSON object."""
         d. Generate draft via LLM
         e. Score style match
         f. Calculate confidence level
-        g. Generate ARIA notes
+        g. Generate ARIA notes (with learning mode note if applicable)
         h. Save draft with all metadata
         """
         try:
@@ -290,8 +333,10 @@ Do not include any text outside the JSON object."""
             # f. Calculate confidence
             confidence = self._calculate_confidence(context, style_score)
 
-            # g. Generate ARIA notes
-            aria_notes = await self._generate_aria_notes(email, context, style_score, confidence)
+            # g. Generate ARIA notes (add learning mode note if applicable)
+            aria_notes = await self._generate_aria_notes(
+                email, context, style_score, confidence, is_learning_mode
+            )
 
             # h. Save draft with all metadata
             draft_id = await self._save_draft_with_metadata(
@@ -307,6 +352,7 @@ Do not include any text outside the JSON object."""
                 confidence_level=confidence,
                 aria_notes=aria_notes,
                 urgency=email.urgency,
+                learning_mode_draft=is_learning_mode,
             )
 
             # i. Auto-save to email client (Gmail/Outlook)
@@ -358,6 +404,9 @@ Do not include any text outside the JSON object."""
                 e,
                 exc_info=True,
             )
+            error_notes = f"Failed: {e}"
+            if is_learning_mode:
+                error_notes = f"{self._learning_mode.get_learning_mode_note()} | {error_notes}"
             return DraftResult(
                 draft_id="",
                 recipient_email=email.sender_email,
@@ -366,7 +415,7 @@ Do not include any text outside the JSON object."""
                 body="",
                 style_match_score=0.0,
                 confidence_level=0.0,
-                aria_notes=f"Failed: {e}",
+                aria_notes=error_notes,
                 original_email_id=email.email_id,
                 thread_id=email.thread_id,
                 context_id="",
@@ -595,12 +644,17 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         context: DraftContext,
         style_score: float,
         confidence: float,
+        is_learning_mode: bool = False,
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
         These notes help the user understand why ARIA drafted what it did.
         """
         notes: list[str] = []
+
+        # Add learning mode note first if applicable
+        if is_learning_mode:
+            notes.append(self._learning_mode.get_learning_mode_note())
 
         # Context sources used
         if context.sources_used:
@@ -646,6 +700,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         confidence_level: float,
         aria_notes: str,
         urgency: str,
+        learning_mode_draft: bool = False,
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
@@ -667,6 +722,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 "confidence_level": confidence_level,
                 "aria_notes": aria_notes,
                 "status": "draft",
+                "learning_mode_draft": learning_mode_draft,
             }
         ).execute()
 

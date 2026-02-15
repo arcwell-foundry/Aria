@@ -445,6 +445,62 @@ async def _run_periodic_email_check() -> None:
         logger.exception("Periodic email check scheduler run failed")
 
 
+async def _run_draft_feedback_poll() -> None:
+    """Poll for user feedback on ARIA-generated email drafts.
+
+    Checks email clients to detect:
+    - APPROVED: Draft sent without significant edits
+    - EDITED: Draft sent with user modifications
+    - REJECTED: Draft deleted without sending
+    - IGNORED: Draft older than 7 days with no action
+    """
+    try:
+        from src.jobs.draft_feedback_poll_job import run_draft_feedback_poll
+
+        result = await run_draft_feedback_poll()
+
+        if result["users_checked"] > 0:
+            logger.info(
+                "Draft feedback poll complete: %d users, %d drafts checked. "
+                "Approved: %d, Edited: %d, Rejected: %d, Ignored: %d",
+                result["users_checked"],
+                result["total_checked"],
+                result["total_approved"],
+                result["total_edited"],
+                result["total_rejected"],
+                result["total_ignored"],
+            )
+    except Exception:
+        logger.exception("Draft feedback poll scheduler run failed")
+
+
+async def _run_style_recalibration() -> None:
+    """Run weekly style recalibration for email writing.
+
+    For each user:
+    1. Fetch sent emails from past 7 days
+    2. Fetch edited drafts from past 7 days
+    3. Re-analyze writing style if enough data
+    4. Update fingerprint and recipient profiles
+    """
+    try:
+        from src.jobs.style_recalibration_job import run_style_recalibration_job
+
+        result = await run_style_recalibration_job()
+
+        if result["users_processed"] > 0:
+            logger.info(
+                "Style recalibration complete: %d users processed, "
+                "%d fingerprints updated, %d profiles updated, %d skipped",
+                result["users_processed"],
+                result["fingerprints_updated"],
+                result["profiles_updated"],
+                result["users_skipped_insufficient_data"],
+            )
+    except Exception:
+        logger.exception("Style recalibration scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -517,6 +573,20 @@ async def start_scheduler() -> None:
             name="Periodic inbox check for urgent emails",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_draft_feedback_poll,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="draft_feedback_poll",
+            name="Draft feedback polling for learning mode",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_style_recalibration,
+            trigger=CronTrigger(day_of_week="sun", hour=2, minute=0),  # Sunday 2 AM
+            id="style_recalibration",
+            name="Weekly style recalibration for writing profiles",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -537,7 +607,9 @@ async def start_scheduler() -> None:
             "prospective memory checks every 5 min, "
             "working memory sync every 30 sec, "
             "webset polling every 5 min, "
-            "periodic email check every 30 min"
+            "periodic email check every 30 min, "
+            "draft feedback poll every 30 min, "
+            "style recalibration weekly on Sunday at 2 AM"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
