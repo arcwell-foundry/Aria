@@ -147,3 +147,95 @@ async def test_email_summary_has_required_structure() -> None:
         assert "drafts_waiting" in email_summary
         assert "drafts_high_confidence" in email_summary
         assert "drafts_need_review" in email_summary
+
+
+# Test _get_email_data method
+
+@pytest.mark.asyncio
+async def test_get_email_data_returns_empty_when_no_integration() -> None:
+    """Test _get_email_data returns empty structure when no email integration."""
+    with (
+        patch("src.services.briefing.SupabaseClient") as mock_db_class,
+    ):
+        # Setup DB mock - no email integration
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_email_data(user_id="test-user-123")
+
+        assert result["total_received"] == 0
+        assert result["needs_attention"] == []
+        assert result["fyi_count"] == 0
+        assert result["filtered_count"] == 0
+        assert result["drafts_waiting"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_email_data_processes_inbox() -> None:
+    """Test _get_email_data calls AutonomousDraftEngine and builds summary."""
+    with (
+        patch("src.services.briefing.SupabaseClient") as mock_db_class,
+        patch("src.services.autonomous_draft_engine.AutonomousDraftEngine") as mock_engine_class,
+        patch("src.services.email_analyzer.EmailAnalyzer") as mock_analyzer_class,
+    ):
+        # Setup DB mock - has email integration
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data={"integration_type": "gmail", "status": "active"}
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        # Mock AutonomousDraftEngine
+        mock_draft = MagicMock()
+        mock_draft.draft_id = "draft-123"
+        mock_draft.recipient_email = "sarah@moderna.com"
+        mock_draft.recipient_name = "Sarah Chen"
+        mock_draft.subject = "Re: Pilot Program Proposal"
+        mock_draft.confidence_level = 0.85
+        mock_draft.aria_notes = "High confidence. Matched casual tone."
+        mock_draft.success = True
+
+        mock_engine = MagicMock()
+        mock_engine.process_inbox = AsyncMock(return_value=MagicMock(
+            run_id="run-123",
+            emails_scanned=23,
+            drafts=[mock_draft],
+            drafts_generated=1,
+            drafts_failed=0,
+        ))
+        mock_engine_class.return_value = mock_engine
+
+        # Mock EmailAnalyzer for FYI/skipped counts
+        mock_fyi = MagicMock()
+        mock_fyi.subject = "Q2 all-hands meeting scheduled"
+        mock_fyi.topic_summary = "Meeting announcement"
+
+        mock_skipped = MagicMock()
+        mock_skipped.reason = "Automated no-reply address"
+
+        mock_analyzer = MagicMock()
+        mock_analyzer.scan_inbox = AsyncMock(return_value=MagicMock(
+            total_emails=23,
+            needs_reply=[MagicMock()],
+            fyi=[mock_fyi],
+            skipped=[mock_skipped],
+        ))
+        mock_analyzer_class.return_value = mock_analyzer
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service._get_email_data(user_id="test-user-123")
+
+        assert result["total_received"] == 23
+        assert result["drafts_waiting"] == 1
+        assert result["drafts_high_confidence"] == 1  # confidence >= 0.75
+        assert len(result["needs_attention"]) == 1
+        assert result["needs_attention"][0]["sender"] == "Sarah Chen"
+        assert result["needs_attention"][0]["draft_confidence"] == "HIGH"

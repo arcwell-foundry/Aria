@@ -784,3 +784,172 @@ Be concise and actionable. Start with "Good morning!"
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
         )
+
+    async def _get_email_data(self, user_id: str) -> dict[str, Any]:
+        """Get email intelligence summary from overnight processing.
+
+        Checks for email integration, runs AutonomousDraftEngine if available,
+        and builds the email_summary structure for the briefing.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Dict with email_summary fields.
+        """
+        empty_result: dict[str, Any] = {
+            "total_received": 0,
+            "needs_attention": [],
+            "fyi_count": 0,
+            "fyi_highlights": [],
+            "filtered_count": 0,
+            "filtered_reason": None,
+            "drafts_waiting": 0,
+            "drafts_high_confidence": 0,
+            "drafts_need_review": 0,
+        }
+
+        try:
+            # Check if user has email integration
+            integration_result = (
+                self._db.table("user_integrations")
+                .select("integration_type, status")
+                .eq("user_id", user_id)
+                .in_("integration_type", ["gmail", "outlook"])
+                .maybe_single()
+                .execute()
+            )
+
+            if not integration_result or not integration_result.data:
+                logger.debug(
+                    "No email integration for user, skipping email summary",
+                    extra={"user_id": user_id},
+                )
+                return empty_result
+
+            # Run email processing via AutonomousDraftEngine
+            from src.services.autonomous_draft_engine import AutonomousDraftEngine
+
+            engine = AutonomousDraftEngine()
+            processing_result = await engine.process_inbox(user_id, since_hours=24)
+
+            # Also get FYI/skipped data from EmailAnalyzer
+            from src.services.email_analyzer import EmailAnalyzer
+
+            analyzer = EmailAnalyzer()
+            scan_result = await analyzer.scan_inbox(user_id, since_hours=24)
+
+            # Build needs_attention list from drafts
+            needs_attention: list[dict[str, Any]] = []
+            drafts_high_confidence = 0
+            drafts_need_review = 0
+
+            for draft in processing_result.drafts:
+                if not draft.success:
+                    continue
+
+                # Determine confidence label
+                if draft.confidence_level >= 0.75:
+                    confidence_label = "HIGH"
+                    drafts_high_confidence += 1
+                elif draft.confidence_level >= 0.5:
+                    confidence_label = "MEDIUM"
+                    drafts_need_review += 1
+                else:
+                    confidence_label = "LOW"
+                    drafts_need_review += 1
+
+                # Look up company from relationship or sender domain
+                company = await self._get_company_for_sender(user_id, draft.recipient_email)
+
+                needs_attention.append({
+                    "sender": draft.recipient_name or draft.recipient_email,
+                    "company": company,
+                    "subject": draft.subject,
+                    "summary": await self._summarize_draft_context(draft),
+                    "urgency": "NORMAL",
+                    "draft_status": "saved_to_drafts",
+                    "draft_confidence": confidence_label,
+                    "aria_notes": draft.aria_notes,
+                    "draft_id": draft.draft_id,
+                })
+
+            # Build FYI highlights from scan result
+            fyi_highlights: list[str] = []
+            for fyi_email in scan_result.fyi[:5]:
+                if fyi_email.topic_summary:
+                    fyi_highlights.append(fyi_email.topic_summary)
+                elif fyi_email.subject:
+                    fyi_highlights.append(fyi_email.subject)
+
+            # Build filtered reason summary
+            filtered_reasons: list[str] = []
+            for skipped in scan_result.skipped[:10]:
+                if skipped.reason and skipped.reason not in filtered_reasons:
+                    filtered_reasons.append(skipped.reason)
+
+            filtered_reason = ", ".join(filtered_reasons[:3]) if filtered_reasons else None
+
+            return {
+                "total_received": scan_result.total_emails,
+                "needs_attention": needs_attention,
+                "fyi_count": len(scan_result.fyi),
+                "fyi_highlights": fyi_highlights[:5],
+                "filtered_count": len(scan_result.skipped),
+                "filtered_reason": filtered_reason,
+                "drafts_waiting": processing_result.drafts_generated,
+                "drafts_high_confidence": drafts_high_confidence,
+                "drafts_need_review": drafts_need_review,
+            }
+
+        except Exception:
+            logger.warning(
+                "Failed to gather email data for briefing",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            return empty_result
+
+    async def _get_company_for_sender(self, user_id: str, sender_email: str) -> str | None:
+        """Look up company name for a sender from memory or email domain."""
+        try:
+            # Check semantic memory for company info
+            result = (
+                self._db.table("memory_semantic")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .ilike("fact", f"%{sender_email}%")
+                .limit(1)
+                .execute()
+            )
+
+            if result and result.data:
+                import json
+                metadata_raw = result.data[0].get("metadata")
+                if metadata_raw:
+                    metadata = (
+                        json.loads(metadata_raw)
+                        if isinstance(metadata_raw, str)
+                        else metadata_raw
+                    )
+                    if metadata.get("company"):
+                        return metadata["company"]
+
+            # Fallback: extract company from email domain
+            if "@" in sender_email:
+                domain = sender_email.split("@")[-1]
+                company_part = domain.split(".")[0]
+                return company_part.title() if len(company_part) > 2 else None
+
+        except Exception:
+            pass
+
+        return None
+
+    async def _summarize_draft_context(self, draft: Any) -> str:
+        """Generate a one-line summary of what the draft is about."""
+        subject = draft.subject or ""
+        if subject.lower().startswith("re:"):
+            subject = subject[3:].strip()
+
+        return subject[:100] if subject else "Email reply draft"
