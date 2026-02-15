@@ -244,6 +244,7 @@ class PriorityEmailIngestion:
             await self._store_commitments(user_id, commitments)
             await self._refine_writing_style(user_id, writing_samples)
             await self._store_patterns(user_id, result.communication_patterns)
+            await self._build_recipient_profiles(user_id, emails)
             logger.info("EMAIL_BOOTSTRAP: All results stored for user %s", user_id)
 
             # 10. Update readiness
@@ -879,6 +880,28 @@ class PriorityEmailIngestion:
             await service.analyze_samples(user_id, samples)
         except Exception as e:
             logger.warning("Writing style refinement failed: %s", e)
+
+    async def _build_recipient_profiles(self, user_id: str, emails: list[dict[str, Any]]) -> None:
+        """Build per-recipient writing style profiles from sent emails.
+
+        Args:
+            user_id: User whose profiles to build.
+            emails: Sent email dicts with 'to', 'body', 'date', 'subject'.
+        """
+        if not emails:
+            return
+        try:
+            from src.onboarding.writing_analysis import WritingAnalysisService
+
+            service = WritingAnalysisService()
+            profiles = await service.analyze_recipient_samples(user_id, emails)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Built %d recipient writing profiles for user %s",
+                len(profiles),
+                user_id,
+            )
+        except Exception as e:
+            logger.warning("Recipient profile building failed: %s", e)
 
     async def _store_patterns(self, user_id: str, patterns: CommunicationPatterns) -> None:
         """Store communication patterns in Digital Twin.
