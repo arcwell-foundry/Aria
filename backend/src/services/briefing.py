@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
 
 
@@ -56,6 +57,7 @@ class BriefingService:
         """Initialize briefing service with dependencies."""
         self._db = SupabaseClient.get_client()
         self._llm = LLMClient()
+        self._personality_calibrator = PersonalityCalibrator()
         # Lazy init for Exa provider
         self._exa_provider: Any = None
 
@@ -155,9 +157,20 @@ class BriefingService:
             )
             email_data = empty_email
 
+        # Get personality calibration for tone-matched briefing
+        try:
+            calibration = await self._personality_calibrator.get_calibration(user_id)
+            tone_guidance = calibration.tone_guidance if calibration else ""
+        except Exception:
+            logger.warning(
+                "Failed to get personality calibration", extra={"user_id": user_id}, exc_info=True
+            )
+            tone_guidance = ""
+
         # Generate summary using LLM
         summary = await self._generate_summary(
-            calendar_data, lead_data, signal_data, task_data, email_data
+            calendar_data, lead_data, signal_data, task_data, email_data,
+            tone_guidance=tone_guidance,
         )
 
         content: dict[str, Any] = {
@@ -808,6 +821,7 @@ class BriefingService:
         signals: dict[str, Any],
         tasks: dict[str, Any],
         email_data: dict[str, Any],
+        tone_guidance: str = "",
     ) -> str:
         """Generate executive summary using LLM.
 
@@ -817,6 +831,7 @@ class BriefingService:
             signals: Signal data dict.
             tasks: Task data dict.
             email_data: Email data dict.
+            tone_guidance: Personality-calibrated tone guidance.
 
         Returns:
             Generated summary string.
@@ -849,6 +864,10 @@ Drafts waiting for review: {drafts_waiting}
 
 Be concise and actionable. Start with "Good morning!"
 """
+
+        # Inject tone guidance if available
+        if tone_guidance:
+            prompt = f"TONE: {tone_guidance}\n\n{prompt}"
 
         return await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],

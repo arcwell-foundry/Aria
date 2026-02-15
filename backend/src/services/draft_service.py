@@ -12,6 +12,7 @@ from src.db.supabase import SupabaseClient
 from src.integrations.oauth import get_oauth_client
 from src.memory.digital_twin import DigitalTwin
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
+from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class DraftService:
         """Initialize the DraftService with required dependencies."""
         self._llm = LLMClient()
         self._digital_twin = DigitalTwin()
+        self._personality_calibrator = PersonalityCalibrator()
 
     async def create_draft(
         self,
@@ -92,6 +94,10 @@ class DraftService:
             # Get user's style guidelines from Digital Twin
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
+            # Get personality calibration for tone guidance
+            calibration = await self._personality_calibrator.get_calibration(user_id)
+            tone_guidance = calibration.tone_guidance if calibration else ""
+
             # Build the generation prompt
             generation_prompt = self._build_generation_prompt(
                 recipient_email=recipient_email,
@@ -102,6 +108,7 @@ class DraftService:
                 context=context,
                 lead_context=lead_context,
                 style_guidelines=style_guidelines,
+                tone_guidance=tone_guidance,
             )
 
             # Generate email content via LLM
@@ -346,6 +353,10 @@ class DraftService:
             # Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
+            # Get personality calibration for tone guidance
+            calibration = await self._personality_calibrator.get_calibration(user_id)
+            tone_guidance = calibration.tone_guidance if calibration else ""
+
             # Combine original context with additional context
             original_context = draft.get("context", {}).get("user_context", "")
             combined_context = (
@@ -364,6 +375,7 @@ class DraftService:
                 context=combined_context,
                 lead_context=lead_context,
                 style_guidelines=style_guidelines,
+                tone_guidance=tone_guidance,
             )
 
             # Generate with slightly higher temperature for variation
@@ -558,6 +570,7 @@ class DraftService:
         context: str | None,
         lead_context: dict[str, Any] | None,
         style_guidelines: str,
+        tone_guidance: str = "",
     ) -> str:
         """Build the generation prompt for the LLM.
 
@@ -570,6 +583,7 @@ class DraftService:
             context: Additional context provided by the user.
             lead_context: Context from lead memory.
             style_guidelines: User's writing style guidelines.
+            tone_guidance: Personality-calibrated tone guidance.
 
         Returns:
             The formatted generation prompt.
@@ -596,6 +610,9 @@ class DraftService:
                 parts.append(f"Relationship stage: {stage}")
 
         parts.append(f"\n--- WRITING STYLE GUIDELINES ---\n{style_guidelines}")
+
+        if tone_guidance:
+            parts.append(f"\n--- TONE GUIDANCE ---\n{tone_guidance}")
 
         return "\n".join(parts)
 
