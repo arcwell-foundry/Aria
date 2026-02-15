@@ -15,6 +15,7 @@ class EmailDraftPurpose(str, Enum):
     PROPOSAL = "proposal"
     THANK_YOU = "thank_you"
     CHECK_IN = "check_in"
+    REPLY = "reply"
     OTHER = "other"
 
 
@@ -77,6 +78,14 @@ class EmailDraftResponse(BaseModel):
     error_message: str | None = Field(None, description="Error message if sending failed")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
+    # Fields for autonomous reply drafts
+    original_email_id: str | None = Field(None, description="ID of original email this replies to")
+    thread_id: str | None = Field(None, description="Email thread ID")
+    confidence_level: float | None = Field(
+        None, ge=0.0, le=1.0, description="ARIA confidence in draft quality"
+    )
+    aria_notes: str | None = Field(None, description="Internal ARIA reasoning notes")
+    draft_context_id: str | None = Field(None, description="Reference to full context used")
 
 
 class EmailDraftListResponse(BaseModel):
