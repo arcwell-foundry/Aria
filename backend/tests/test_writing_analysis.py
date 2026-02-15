@@ -629,3 +629,115 @@ class TestRecipientStyleAnalysis:
             profiles = await service.analyze_recipient_samples("user-123", emails)
 
         assert profiles == []
+
+
+class TestGetRecipientStyle:
+    """Tests for WritingAnalysisService.get_recipient_style."""
+
+    @pytest.mark.asyncio
+    async def test_returns_profile_when_found(self):
+        """Returns recipient-specific profile from database."""
+        service = WritingAnalysisService.__new__(WritingAnalysisService)
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_query.eq = MagicMock(return_value=mock_query)
+        mock_query.maybe_single.return_value = mock_query
+        mock_query.execute.return_value = MagicMock(data={
+            "recipient_email": "sarah@team.com",
+            "recipient_name": "Sarah",
+            "relationship_type": "internal_team",
+            "formality_level": 0.3,
+            "average_message_length": 45,
+            "greeting_style": "Hey Sarah,",
+            "signoff_style": "Thanks,",
+            "tone": "casual",
+            "uses_emoji": True,
+            "email_count": 15,
+            "last_email_date": "2026-02-10T10:00:00+00:00",
+        })
+        mock_db.table.return_value.select.return_value = mock_query
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            result = await service.get_recipient_style("user-123", "sarah@team.com")
+
+        assert result is not None
+        profile, is_recipient_specific = result
+        assert is_recipient_specific is True
+        assert profile.recipient_email == "sarah@team.com"
+        assert profile.tone == "casual"
+        assert profile.formality_level == 0.3
+
+    @pytest.mark.asyncio
+    async def test_returns_global_fallback_when_not_found(self):
+        """Returns global style as fallback when no recipient profile exists."""
+        service = WritingAnalysisService.__new__(WritingAnalysisService)
+        service.llm = AsyncMock()
+        service.episodic = AsyncMock()
+
+        mock_db = MagicMock()
+        # Recipient query returns None
+        mock_query_recipient = MagicMock()
+        mock_query_recipient.eq = MagicMock(return_value=mock_query_recipient)
+        mock_query_recipient.maybe_single.return_value = mock_query_recipient
+        mock_query_recipient.execute.return_value = MagicMock(data=None)
+
+        # Global fingerprint query returns data
+        mock_query_global = MagicMock()
+        mock_query_global.eq = MagicMock(return_value=mock_query_global)
+        mock_query_global.maybe_single.return_value = mock_query_global
+        mock_query_global.execute.return_value = MagicMock(data={
+            "preferences": {
+                "digital_twin": {
+                    "writing_style": {
+                        "formality_index": 0.6,
+                        "opening_style": "Hi,",
+                        "closing_style": "Best,",
+                        "warmth": 0.5,
+                        "emoji_usage": "never",
+                        "confidence": 0.8,
+                    }
+                }
+            }
+        })
+
+        def table_side_effect(name):
+            mock_table = MagicMock()
+            if name == "recipient_writing_profiles":
+                mock_table.select.return_value = mock_query_recipient
+            else:
+                mock_table.select.return_value = mock_query_global
+            return mock_table
+
+        mock_db.table = MagicMock(side_effect=table_side_effect)
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            result = await service.get_recipient_style("user-123", "unknown@newcontact.com")
+
+        assert result is not None
+        profile, is_recipient_specific = result
+        assert is_recipient_specific is False
+        assert profile.formality_level == 0.6
+        assert profile.greeting_style == "Hi,"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_data_at_all(self):
+        """Returns None when neither recipient nor global profile exists."""
+        service = WritingAnalysisService.__new__(WritingAnalysisService)
+        service.llm = AsyncMock()
+        service.episodic = AsyncMock()
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_query.eq = MagicMock(return_value=mock_query)
+        mock_query.maybe_single.return_value = mock_query
+        mock_query.execute.return_value = MagicMock(data=None)
+        mock_db.table.return_value.select.return_value = mock_query
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            result = await service.get_recipient_style("user-123", "nobody@nowhere.com")
+
+        assert result is None

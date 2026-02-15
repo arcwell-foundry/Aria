@@ -546,3 +546,92 @@ class WritingAnalysisService:
 
         except Exception as e:
             logger.warning("Failed to store recipient profiles: %s", e)
+
+    async def get_recipient_style(
+        self,
+        user_id: str,
+        recipient_email: str,
+    ) -> tuple[RecipientWritingProfile, bool] | None:
+        """Get writing style adapted for a specific recipient.
+
+        Looks up per-recipient profile first. If not found, falls back
+        to global WritingStyleFingerprint converted to a RecipientWritingProfile.
+
+        Args:
+            user_id: The user whose style to look up.
+            recipient_email: The recipient to get style for.
+
+        Returns:
+            Tuple of (RecipientWritingProfile, is_recipient_specific) or None
+            if no style data exists at all. is_recipient_specific is True when
+            a per-recipient profile was found, False when falling back to global.
+        """
+        try:
+            db = SupabaseClient.get_client()
+
+            # Try recipient-specific profile first
+            result = (
+                db.table("recipient_writing_profiles")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("recipient_email", recipient_email.lower().strip())
+                .maybe_single()
+                .execute()
+            )
+
+            if result and result.data:
+                data = cast(dict[str, Any], result.data)
+                profile = RecipientWritingProfile(
+                    recipient_email=data.get("recipient_email", recipient_email),
+                    recipient_name=data.get("recipient_name"),
+                    relationship_type=data.get("relationship_type", "unknown"),
+                    formality_level=float(data.get("formality_level", 0.5)),
+                    average_message_length=int(data.get("average_message_length", 0)),
+                    greeting_style=data.get("greeting_style", ""),
+                    signoff_style=data.get("signoff_style", ""),
+                    tone=data.get("tone", "balanced"),
+                    uses_emoji=bool(data.get("uses_emoji", False)),
+                    email_count=int(data.get("email_count", 0)),
+                    last_email_date=data.get("last_email_date"),
+                )
+                return profile, True
+
+            # Fall back to global fingerprint
+            global_fp = await self.get_fingerprint(user_id)
+            if global_fp:
+                # Convert global fingerprint to a RecipientWritingProfile
+                profile = RecipientWritingProfile(
+                    recipient_email=recipient_email,
+                    relationship_type="new_contact",
+                    formality_level=global_fp.formality_index,
+                    greeting_style=global_fp.opening_style,
+                    signoff_style=global_fp.closing_style,
+                    tone=self._map_tone_from_fingerprint(global_fp),
+                    uses_emoji=global_fp.emoji_usage != "never",
+                )
+                return profile, False
+
+        except Exception as e:
+            logger.warning("Failed to get recipient style: %s", e)
+
+        return None
+
+    @staticmethod
+    def _map_tone_from_fingerprint(fp: WritingStyleFingerprint) -> str:
+        """Map global fingerprint tone metrics to a single tone label.
+
+        Args:
+            fp: The global writing style fingerprint.
+
+        Returns:
+            One of: warm, direct, formal, casual, balanced.
+        """
+        if fp.formality_index >= 0.7:
+            return "formal"
+        if fp.warmth >= 0.7:
+            return "warm"
+        if fp.directness >= 0.7:
+            return "direct"
+        if fp.formality_index <= 0.3:
+            return "casual"
+        return "balanced"
