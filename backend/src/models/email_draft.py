@@ -86,6 +86,15 @@ class EmailDraftResponse(BaseModel):
     )
     aria_notes: str | None = Field(None, description="Internal ARIA reasoning notes")
     draft_context_id: str | None = Field(None, description="Reference to full context used")
+    # Fields for email client sync (Gmail/Outlook)
+    client_draft_id: str | None = Field(None, description="ID of draft in Gmail/Outlook")
+    client_provider: str | None = Field(
+        None, description="Email client where draft is saved (gmail or outlook)"
+    )
+    saved_to_client_at: datetime | None = Field(None, description="When saved to client")
+    in_reply_to: str | None = Field(
+        None, description="Message-ID of email being replied to (for threading)"
+    )
 
 
 class EmailDraftListResponse(BaseModel):

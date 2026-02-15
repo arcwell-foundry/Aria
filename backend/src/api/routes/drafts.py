@@ -1,6 +1,7 @@
 """Drafts API routes for email draft management."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -17,6 +18,7 @@ from src.models.email_draft import (
     EmailSendResponse,
 )
 from src.services.draft_service import get_draft_service
+from src.services.email_client_writer import DraftSaveError, get_email_client_writer
 
 logger = logging.getLogger(__name__)
 
@@ -235,3 +237,71 @@ async def send_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except EmailSendError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+
+
+class SaveToClientResponse(BaseModel):
+    """Response model for saving draft to email client."""
+
+    success: bool = Field(..., description="Whether the save was successful")
+    saved_at: str = Field(..., description="Timestamp when saved")
+    client_draft_id: str | None = Field(None, description="ID in Gmail/Outlook")
+    provider: str | None = Field(None, description="Email client (gmail or outlook)")
+    already_saved: bool = Field(False, description="Whether draft was already saved before")
+
+
+@router.post("/{draft_id}/save-to-client", response_model=SaveToClientResponse)
+async def save_draft_to_client(
+    current_user: CurrentUser,
+    draft_id: str,
+) -> dict[str, Any]:
+    """Save an existing draft to the user's email client (Gmail/Outlook).
+
+    ARIA NEVER sends - this only saves to the Drafts folder for user to review
+    and manually send.
+
+    Args:
+        current_user: The authenticated user.
+        draft_id: The ID of the draft to save.
+
+    Returns:
+        Save result with client draft ID and provider.
+
+    Raises:
+        HTTPException: If draft not found or save fails.
+    """
+    try:
+        client_writer = get_email_client_writer()
+        result = await client_writer.save_draft_to_client(
+            user_id=current_user.id,
+            draft_id=draft_id,
+        )
+        logger.info(
+            "Draft saved to client",
+            extra={
+                "user_id": current_user.id,
+                "draft_id": draft_id,
+                "provider": result.get("provider"),
+            },
+        )
+        return {
+            "success": True,
+            "saved_at": datetime.now(UTC).isoformat(),
+            "client_draft_id": result.get("client_draft_id"),
+            "provider": result.get("provider"),
+            "already_saved": result.get("already_saved", False),
+        }
+    except DraftSaveError as e:
+        logger.warning(
+            "Failed to save draft to client",
+            extra={"user_id": current_user.id, "draft_id": draft_id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Unexpected error saving draft to client")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save draft to email client: {e}",
+        ) from e

@@ -26,6 +26,7 @@ from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services.email_analyzer import EmailAnalyzer
+from src.services.email_client_writer import DraftSaveError, EmailClientWriter
 from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
@@ -132,6 +133,7 @@ Do not include any text outside the JSON object."""
         self._context_gatherer = EmailContextGatherer()
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
+        self._client_writer = EmailClientWriter()
 
     # ------------------------------------------------------------------
     # Public API
@@ -187,9 +189,7 @@ Do not include any text outside the JSON object."""
             # 2. Process each email needing reply
             for email in scan_result.needs_reply:
                 try:
-                    draft = await self._process_single_email(
-                        user_id, user_name, email
-                    )
+                    draft = await self._process_single_email(user_id, user_name, email)
                     result.drafts.append(draft)
                     if draft.success:
                         result.drafts_generated += 1
@@ -285,17 +285,13 @@ Do not include any text outside the JSON object."""
             )
 
             # e. Score style match
-            style_score = await self._digital_twin.score_style_match(
-                user_id, draft_content.body
-            )
+            style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
             # f. Calculate confidence
             confidence = self._calculate_confidence(context, style_score)
 
             # g. Generate ARIA notes
-            aria_notes = await self._generate_aria_notes(
-                email, context, style_score, confidence
-            )
+            aria_notes = await self._generate_aria_notes(email, context, style_score, confidence)
 
             # h. Save draft with all metadata
             draft_id = await self._save_draft_with_metadata(
@@ -312,6 +308,26 @@ Do not include any text outside the JSON object."""
                 aria_notes=aria_notes,
                 urgency=email.urgency,
             )
+
+            # i. Auto-save to email client (Gmail/Outlook)
+            # Non-fatal: draft stays in ARIA database even if client save fails
+            try:
+                client_result = await self._client_writer.save_draft_to_client(
+                    user_id=user_id,
+                    draft_id=draft_id,
+                )
+                if client_result.get("success") and not client_result.get("already_saved"):
+                    logger.info(
+                        "DRAFT_ENGINE: Auto-saved draft %s to %s",
+                        draft_id,
+                        client_result.get("provider"),
+                    )
+            except DraftSaveError as e:
+                logger.warning(
+                    "DRAFT_ENGINE: Could not auto-save draft %s to client: %s",
+                    draft_id,
+                    e,
+                )
 
             logger.info(
                 "DRAFT_ENGINE: Draft %s created (confidence: %.2f, style: %.2f)",
@@ -434,7 +450,9 @@ Body: {email.snippet}""")
 
         # Thread context
         if context.thread_context and context.thread_context.messages:
-            thread_summary = context.thread_context.summary or f"{context.thread_context.message_count} messages"
+            thread_summary = (
+                context.thread_context.summary or f"{context.thread_context.message_count} messages"
+            )
             recent_messages = context.thread_context.messages[-3:]
             recent = "\n".join(
                 f"- {m.sender_name}: {m.body[:200]}{'...' if len(m.body) > 200 else ''}"
@@ -461,9 +479,7 @@ Recent messages:
         # Relationship history
         if context.relationship_history and context.relationship_history.memory_facts:
             facts = context.relationship_history.memory_facts[:3]
-            fact_lines = "\n".join(
-                f"- {f.get('fact', str(f))}" for f in facts
-            )
+            fact_lines = "\n".join(f"- {f.get('fact', str(f))}" for f in facts)
             sections.append(f"""=== RELATIONSHIP HISTORY ===
 Total interactions: {context.relationship_history.total_emails}
 Key facts:
@@ -474,7 +490,7 @@ Key facts:
             sections.append(f"""=== RECIPIENT'S COMMUNICATION STYLE ===
 Formality: {context.recipient_style.formality_level:.1f}/1.0
 Tone: {context.recipient_style.tone}
-Uses emoji: {'Yes' if context.recipient_style.uses_emoji else 'No'}""")
+Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
 
         # User's style
         sections.append(f"""=== YOUR WRITING STYLE (MATCH THIS) ===
@@ -489,8 +505,7 @@ Uses emoji: {'Yes' if context.recipient_style.uses_emoji else 'No'}""")
         if context.calendar_context and context.calendar_context.upcoming_meetings:
             meetings = context.calendar_context.upcoming_meetings[:2]
             meeting_lines = "\n".join(
-                f"- {m.get('summary', 'Meeting')} on {m.get('start', 'TBD')}"
-                for m in meetings
+                f"- {m.get('summary', 'Meeting')} on {m.get('start', 'TBD')}" for m in meetings
             )
             sections.append(f"""=== UPCOMING MEETINGS ===
 {meeting_lines}""")
@@ -607,9 +622,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
 
         # Confidence level
         confidence_label = (
-            "HIGH" if confidence >= 0.75
-            else "MEDIUM" if confidence >= 0.5
-            else "LOW"
+            "HIGH" if confidence >= 0.75 else "MEDIUM" if confidence >= 0.5 else "LOW"
         )
         notes.append(f"Confidence: {confidence_label} ({confidence:.2f})")
 
@@ -637,23 +650,25 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
 
-        self._db.table("email_drafts").insert({
-            "id": draft_id,
-            "user_id": user_id,
-            "recipient_email": recipient_email,
-            "recipient_name": recipient_name,
-            "subject": subject,
-            "body": body,
-            "purpose": "reply",
-            "tone": "urgent" if urgency == "URGENT" else "friendly",
-            "original_email_id": original_email_id,
-            "thread_id": thread_id,
-            "draft_context_id": context_id,
-            "style_match_score": style_match_score,
-            "confidence_level": confidence_level,
-            "aria_notes": aria_notes,
-            "status": "draft",
-        }).execute()
+        self._db.table("email_drafts").insert(
+            {
+                "id": draft_id,
+                "user_id": user_id,
+                "recipient_email": recipient_email,
+                "recipient_name": recipient_name,
+                "subject": subject,
+                "body": body,
+                "purpose": "reply",
+                "tone": "urgent" if urgency == "URGENT" else "friendly",
+                "original_email_id": original_email_id,
+                "thread_id": thread_id,
+                "draft_context_id": context_id,
+                "style_match_score": style_match_score,
+                "confidence_level": confidence_level,
+                "aria_notes": aria_notes,
+                "status": "draft",
+            }
+        ).execute()
 
         return draft_id
 
@@ -683,12 +698,14 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     ) -> None:
         """Create processing run record."""
         try:
-            self._db.table("email_processing_runs").insert({
-                "id": run_id,
-                "user_id": user_id,
-                "started_at": started_at.isoformat(),
-                "status": "running",
-            }).execute()
+            self._db.table("email_processing_runs").insert(
+                {
+                    "id": run_id,
+                    "user_id": user_id,
+                    "started_at": started_at.isoformat(),
+                    "status": "running",
+                }
+            ).execute()
         except Exception as e:
             logger.error("DRAFT_ENGINE: Failed to create processing run: %s", e)
 
@@ -700,18 +717,20 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 delta = result.completed_at - result.started_at
                 processing_time_ms = int(delta.total_seconds() * 1000)
 
-            self._db.table("email_processing_runs").update({
-                "completed_at": (
-                    result.completed_at.isoformat() if result.completed_at else None
-                ),
-                "emails_scanned": result.emails_scanned,
-                "emails_needing_reply": result.emails_needing_reply,
-                "drafts_generated": result.drafts_generated,
-                "drafts_failed": result.drafts_failed,
-                "status": result.status,
-                "error_message": result.error_message,
-                "processing_time_ms": processing_time_ms,
-            }).eq("id", result.run_id).execute()
+            self._db.table("email_processing_runs").update(
+                {
+                    "completed_at": (
+                        result.completed_at.isoformat() if result.completed_at else None
+                    ),
+                    "emails_scanned": result.emails_scanned,
+                    "emails_needing_reply": result.emails_needing_reply,
+                    "drafts_generated": result.drafts_generated,
+                    "drafts_failed": result.drafts_failed,
+                    "status": result.status,
+                    "error_message": result.error_message,
+                    "processing_time_ms": processing_time_ms,
+                }
+            ).eq("id", result.run_id).execute()
         except Exception as e:
             logger.error("DRAFT_ENGINE: Failed to update processing run: %s", e)
 
