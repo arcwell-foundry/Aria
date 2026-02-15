@@ -18,6 +18,7 @@ from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
+from src.services.activity_service import ActivityService
 
 
 class NeedsAttentionItem(BaseModel):
@@ -58,6 +59,7 @@ class BriefingService:
         self._db = SupabaseClient.get_client()
         self._llm = LLMClient()
         self._personality_calibrator = PersonalityCalibrator()
+        self._activity_service = ActivityService()
         # Lazy init for Exa provider
         self._exa_provider: Any = None
 
@@ -222,6 +224,37 @@ class BriefingService:
             user_id=user_id,
             briefing_date=briefing_date.isoformat(),
         )
+
+        # Log briefing generation to activity feed (non-blocking)
+        drafts_count = email_data.get("drafts_waiting", 0)
+        signals_count = (
+            len(signal_data.get("company_news", [])) +
+            len(signal_data.get("market_trends", [])) +
+            len(signal_data.get("competitive_intel", []))
+        )
+
+        try:
+            await self._activity_service.record(
+                user_id=user_id,
+                agent="strategist",
+                activity_type="briefing_generated",
+                title="Morning briefing ready",
+                description=f"Includes {drafts_count} email drafts and {signals_count} market signals",
+                confidence=0.9,
+                metadata={
+                    "briefing_date": briefing_date.isoformat(),
+                    "meeting_count": calendar_data.get("meeting_count", 0),
+                    "drafts_count": drafts_count,
+                    "signals_count": signals_count,
+                    "leads_needs_attention": len(lead_data.get("needs_attention", [])),
+                    "tasks_overdue": len(task_data.get("overdue", [])),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "BRIEFING: Failed to log briefing activity: %s",
+                e,
+            )
 
         return content
 

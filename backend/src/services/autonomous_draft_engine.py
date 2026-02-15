@@ -31,6 +31,7 @@ from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
+from src.services.activity_service import ActivityService
 from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ Do not include any text outside the JSON object."""
         self._personality_calibrator = PersonalityCalibrator()
         self._client_writer = EmailClientWriter()
         self._learning_mode = get_learning_mode_service()
+        self._activity_service = ActivityService()
 
     # ------------------------------------------------------------------
     # Public API
@@ -184,6 +186,28 @@ Do not include any text outside the JSON object."""
                 result.emails_scanned,
                 result.emails_needing_reply,
             )
+
+            # Log inbox scan to activity feed (non-blocking)
+            try:
+                await self._activity_service.record(
+                    user_id=user_id,
+                    agent="scout",
+                    activity_type="inbox_scanned",
+                    title=f"Inbox scanned: {result.emails_scanned} emails",
+                    description=f"{result.emails_needing_reply} need attention, {len(scan_result.fyi)} FYI, {len(scan_result.skipped)} filtered",
+                    confidence=0.95,
+                    metadata={
+                        "emails_scanned": result.emails_scanned,
+                        "needs_reply": result.emails_needing_reply,
+                        "fyi_count": len(scan_result.fyi),
+                        "filtered_count": len(scan_result.skipped),
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "DRAFT_ENGINE: Failed to log inbox scan activity: %s",
+                    e,
+                )
 
             # Get user info for signature
             user_name = await self._get_user_name(user_id)
@@ -414,6 +438,37 @@ Do not include any text outside the JSON object."""
                 confidence,
                 style_score,
             )
+
+            # Determine confidence label for activity log
+            confidence_label = (
+                "HIGH" if confidence >= 0.75 else "MEDIUM" if confidence >= 0.5 else "LOW"
+            )
+
+            # Log draft generation to activity feed (non-blocking)
+            try:
+                await self._activity_service.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="email_drafted",
+                    title=f"Drafted reply to {email.sender_name or email.sender_email}",
+                    description=f"Re: {draft_content.subject} - {confidence_label} confidence, {style_score:.0%} style match",
+                    reasoning=aria_notes,
+                    confidence=confidence,
+                    related_entity_type="email_draft",
+                    related_entity_id=draft_id,
+                    metadata={
+                        "recipient_email": email.sender_email,
+                        "style_match_score": style_score,
+                        "confidence_level": confidence,
+                        "original_email_id": email.email_id,
+                        "thread_id": email.thread_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "DRAFT_ENGINE: Failed to log draft activity: %s",
+                    e,
+                )
 
             return DraftResult(
                 draft_id=draft_id,
