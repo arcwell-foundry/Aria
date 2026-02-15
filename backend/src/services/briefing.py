@@ -12,9 +12,39 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from pydantic import BaseModel
+
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.services import notification_integration
+
+
+class NeedsAttentionItem(BaseModel):
+    """A single email that needs attention with draft details."""
+
+    sender: str
+    company: str | None = None
+    subject: str
+    summary: str
+    urgency: str  # URGENT, NORMAL, LOW
+    draft_status: str  # saved_to_drafts, draft_failed, no_draft_needed
+    draft_confidence: str | None = None  # HIGH, MEDIUM, LOW
+    aria_notes: str | None = None
+    draft_id: str | None = None
+
+
+class EmailSummary(BaseModel):
+    """Email intelligence summary for daily briefing."""
+
+    total_received: int = 0
+    needs_attention: list[NeedsAttentionItem] = []
+    fyi_count: int = 0
+    fyi_highlights: list[str] = []
+    filtered_count: int = 0
+    filtered_reason: str | None = None
+    drafts_waiting: int = 0
+    drafts_high_confidence: int = 0
+    drafts_need_review: int = 0
 
 logger = logging.getLogger(__name__)
 
