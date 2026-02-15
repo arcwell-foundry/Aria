@@ -443,13 +443,20 @@ class PriorityEmailIngestion:
                     },
                     user_id=user_id,
                 )
+                # Log Composio response structure for debugging
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Composio response - success=%s, data_keys=%s",
+                    response.get("successful"),
+                    list(response.get("data", {}).keys()) if response.get("data") else None,
+                )
                 # Outlook returns messages in 'data.value'
                 if response.get("successful") and response.get("data"):
                     emails = response["data"].get("value", [])
                 else:
                     logger.warning(
-                        "EMAIL_BOOTSTRAP: Outlook fetch failed: %s",
+                        "EMAIL_BOOTSTRAP: Outlook fetch failed: %s, response=%s",
                         response.get("error"),
+                        response,
                     )
                     emails = []
             else:
@@ -467,13 +474,23 @@ class PriorityEmailIngestion:
                     },
                     user_id=user_id,
                 )
+                # Log Composio response structure for debugging
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Composio response - success=%s, data_keys=%s",
+                    response.get("successful"),
+                    list(response.get("data", {}).keys()) if response.get("data") else None,
+                )
                 # Gmail returns emails in 'data.emails'
                 if response.get("successful") and response.get("data"):
                     emails = response["data"].get("emails", [])
+                    # Try alternate key if 'emails' is empty
+                    if not emails:
+                        emails = response["data"].get("messages", [])
                 else:
                     logger.warning(
-                        "EMAIL_BOOTSTRAP: Gmail fetch failed: %s",
+                        "EMAIL_BOOTSTRAP: Gmail fetch failed: %s, response=%s",
                         response.get("error"),
+                        response,
                     )
                     emails = []
 
@@ -843,9 +860,13 @@ class PriorityEmailIngestion:
             user_id: Owner of the contacts.
             contacts: Up to 50 contacts to store.
         """
-        for contact in contacts[:50]:
+        contacts_to_store = contacts[:50]
+        stored_count = 0
+        failed_count = 0
+
+        for contact in contacts_to_store:
             try:
-                self._db.table("memory_semantic").insert(
+                result = self._db.table("memory_semantic").insert(
                     {
                         "user_id": user_id,
                         "fact": (
@@ -866,8 +887,29 @@ class PriorityEmailIngestion:
                         },
                     }
                 ).execute()
+                if result.data:
+                    stored_count += 1
+                else:
+                    failed_count += 1
+                    logger.warning(
+                        "EMAIL_BOOTSTRAP: Contact insert returned no data for %s",
+                        contact.email,
+                    )
             except Exception as e:
-                logger.warning("Failed to store contact: %s", e)
+                failed_count += 1
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Failed to store contact %s: %s",
+                    contact.email,
+                    e,
+                )
+
+        logger.info(
+            "EMAIL_BOOTSTRAP: Stored %d/%d contacts for user %s (%d failed)",
+            stored_count,
+            len(contacts_to_store),
+            user_id,
+            failed_count,
+        )
 
     async def _store_threads(self, user_id: str, threads: list[ActiveThread]) -> None:
         """Store active threads — deal threads become Lead Memory entries.
@@ -936,14 +978,71 @@ class PriorityEmailIngestion:
             samples: Raw email body text samples.
         """
         if not samples:
+            logger.info(
+                "EMAIL_BOOTSTRAP: No writing samples provided for user %s",
+                user_id,
+            )
             return
         try:
             from src.onboarding.writing_analysis import WritingAnalysisService
 
             service = WritingAnalysisService()
             await service.analyze_samples(user_id, samples)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Writing style refined for user %s with %d samples",
+                user_id,
+                len(samples),
+            )
+
+            # Verify writing style was stored
+            stored = await self._verify_writing_style_stored(user_id)
+            if stored:
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Verified writing style stored for user %s",
+                    user_id,
+                )
+            else:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Writing style not found after refinement for user %s",
+                    user_id,
+                )
         except Exception as e:
-            logger.warning("Writing style refinement failed: %s", e)
+            logger.warning(
+                "EMAIL_BOOTSTRAP: Writing style refinement failed for user %s: %s",
+                user_id,
+                e,
+                exc_info=True,
+            )
+
+    async def _verify_writing_style_stored(self, user_id: str) -> bool:
+        """Verify that writing style was stored in user_settings.
+
+        Args:
+            user_id: User to verify.
+
+        Returns:
+            True if writing style is present, False otherwise.
+        """
+        try:
+            result = (
+                self._db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                prefs = result.data.get("preferences", {})
+                digital_twin = prefs.get("digital_twin", {})
+                writing_style = digital_twin.get("writing_style")
+                return writing_style is not None
+        except Exception as e:
+            logger.warning(
+                "EMAIL_BOOTSTRAP: Failed to verify writing style for user %s: %s",
+                user_id,
+                e,
+            )
+        return False
 
     async def _build_recipient_profiles(self, user_id: str, emails: list[dict[str, Any]]) -> None:
         """Build per-recipient writing style profiles from sent emails.

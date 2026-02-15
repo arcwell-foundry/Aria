@@ -225,6 +225,14 @@ Do not include any text outside the JSON object."""
                     len(top_contacts),
                 )
 
+                if not top_contacts:
+                    logger.warning(
+                        "DRAFT_ENGINE: No top contacts in learning mode for user %s. "
+                        "This is expected for new users - will populate after first email interactions. "
+                        "Processing first 3 emails anyway to bootstrap.",
+                        user_id,
+                    )
+
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
 
@@ -261,7 +269,8 @@ Do not include any text outside the JSON object."""
                     continue
 
                 # Apply learning mode filter
-                if is_learning_mode:
+                # If no top contacts yet, process first 3 emails to bootstrap
+                if is_learning_mode and top_contacts:
                     sender_email = email.sender_email.lower().strip()
                     is_top_contact = any(
                         c.lower().strip() == sender_email for c in top_contacts
@@ -282,7 +291,7 @@ Do not include any text outside the JSON object."""
                 emails_processed += 1
                 try:
                     draft = await self._process_single_email(
-                        user_id, user_name, email, is_learning_mode
+                        user_id, user_name, email, is_learning_mode, run_id
                     )
                     result.drafts.append(draft)
                     if draft.success:
@@ -342,6 +351,7 @@ Do not include any text outside the JSON object."""
         user_name: str,
         email: Any,  # EmailCategory from email_analyzer
         is_learning_mode: bool = False,
+        run_id: str | None = None,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -362,15 +372,36 @@ Do not include any text outside the JSON object."""
                 email.sender_email,
             )
 
-            # a. Gather context
-            context = await self._context_gatherer.gather_context(
-                user_id=user_id,
-                email_id=email.email_id,
-                thread_id=email.thread_id,
-                sender_email=email.sender_email,
-                sender_name=email.sender_name,
-                subject=email.subject,
-            )
+            # a. Gather context (with fallback on error)
+            try:
+                context = await self._context_gatherer.gather_context(
+                    user_id=user_id,
+                    email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    sender_email=email.sender_email,
+                    sender_name=email.sender_name,
+                    subject=email.subject,
+                )
+            except Exception as e:
+                logger.error(
+                    "DRAFT_ENGINE: Context gathering failed for email %s: %s",
+                    email.email_id,
+                    e,
+                    exc_info=True,
+                )
+                # Create minimal fallback context
+                context = DraftContext(
+                    user_id=user_id,
+                    email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    sender_email=email.sender_email,
+                    subject=email.subject or "(no subject)",
+                    sources_used=["fallback_minimal"],
+                )
+                logger.info(
+                    "DRAFT_ENGINE: Using fallback context for email %s",
+                    email.email_id,
+                )
 
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
@@ -410,6 +441,7 @@ Do not include any text outside the JSON object."""
                 aria_notes=aria_notes,
                 urgency=email.urgency,
                 learning_mode_draft=is_learning_mode,
+                processing_run_id=run_id,
             )
 
             # i. Auto-save to email client (Gmail/Outlook)
@@ -789,30 +821,47 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         aria_notes: str,
         urgency: str,
         learning_mode_draft: bool = False,
+        processing_run_id: str | None = None,
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
 
-        self._db.table("email_drafts").insert(
-            {
-                "id": draft_id,
-                "user_id": user_id,
-                "recipient_email": recipient_email,
-                "recipient_name": recipient_name,
-                "subject": subject,
-                "body": body,
-                "purpose": "reply",
-                "tone": "urgent" if urgency == "URGENT" else "friendly",
-                "original_email_id": original_email_id,
-                "thread_id": thread_id,
-                "draft_context_id": context_id,
-                "style_match_score": style_match_score,
-                "confidence_level": confidence_level,
-                "aria_notes": aria_notes,
-                "status": "draft",
-                "learning_mode_draft": learning_mode_draft,
-            }
-        ).execute()
+        insert_data = {
+            "id": draft_id,
+            "user_id": user_id,
+            "recipient_email": recipient_email,
+            "recipient_name": recipient_name,
+            "subject": subject,
+            "body": body,
+            "purpose": "reply",
+            "tone": "urgent" if urgency == "URGENT" else "friendly",
+            "original_email_id": original_email_id,
+            "thread_id": thread_id,
+            "draft_context_id": context_id,
+            "style_match_score": style_match_score,
+            "confidence_level": confidence_level,
+            "aria_notes": aria_notes,
+            "status": "draft",
+            "learning_mode_draft": learning_mode_draft,
+            "processing_run_id": processing_run_id,
+        }
+
+        try:
+            result = self._db.table("email_drafts").insert(insert_data).execute()
+            if not result.data:
+                logger.error(
+                    "DRAFT_ENGINE: Insert returned no data for draft %s",
+                    draft_id,
+                )
+        except Exception as e:
+            logger.error(
+                "DRAFT_ENGINE: Draft insert FAILED for user %s, recipient %s: %s",
+                user_id,
+                recipient_email,
+                e,
+                exc_info=True,
+            )
+            raise
 
         return draft_id
 
