@@ -29,6 +29,7 @@ import {
 import {
   connectEmail,
   getEmailStatus,
+  getBootstrapStatus,
   type EmailProvider,
 } from "@/api/emailIntegration";
 
@@ -50,6 +51,7 @@ export const documentKeys = {
 export const emailKeys = {
   all: ["email"] as const,
   status: () => [...emailKeys.all, "status"] as const,
+  bootstrapStatus: () => [...emailKeys.all, "bootstrap-status"] as const,
 };
 
 export const goalKeys = {
@@ -207,6 +209,33 @@ export function useEmailStatus(enabled: boolean) {
   }, [queryClient]);
 
   return { ...query, resetAttempts };
+}
+
+/**
+ * Hook for polling email bootstrap status.
+ * Polls every 2 seconds while status is "not_started" or "processing".
+ * Stops polling when status is "complete" or "error".
+ */
+export function useEmailBootstrapStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: emailKeys.bootstrapStatus(),
+    queryFn: getBootstrapStatus,
+    enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+
+      // Stop polling if complete or error
+      if (data?.status === "complete" || data?.status === "error") {
+        return false;
+      }
+
+      // Poll every 2 seconds while processing
+      return 2000;
+    },
+    staleTime: 2000,
+    gcTime: 5 * 60 * 1000,
+    retry: 3,
+  });
 }
 
 // --- First goal hooks ---

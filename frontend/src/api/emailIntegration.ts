@@ -74,12 +74,24 @@ export async function saveEmailPrivacy(
   return response.data;
 }
 
+export interface CommunicationPatterns {
+  avg_response_time_hours: number;
+  peak_send_hours: number[];
+  peak_send_days: string[];
+  emails_per_day_avg: number;
+  follow_up_cadence_days: number;
+  top_recipients: string[];
+}
+
 export interface BootstrapStatus {
-  status: "idle" | "processing" | "complete" | "failed";
-  emails_processed?: number;
-  emails_total?: number;
-  contacts_found?: number;
-  deals_found?: number;
+  status: "not_started" | "processing" | "complete" | "error";
+  emails_processed: number;
+  contacts_discovered: number;
+  active_threads: number;
+  commitments_detected: number;
+  writing_samples_extracted: number;
+  communication_patterns: CommunicationPatterns | null;
+  error_message?: string;
 }
 
 export interface SavedEmailPreferences {

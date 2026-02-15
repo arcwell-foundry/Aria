@@ -34,6 +34,7 @@ import {
   useDocuments,
   useEmailConnect,
   useEmailStatus,
+  useEmailBootstrapStatus,
   useFirstGoalSuggestions,
   useCreateFirstGoal,
   useActivateAria,
@@ -51,6 +52,7 @@ import { recordEmailConnection } from "@/api/emailIntegration";
 import type { CompanyDocument } from "@/api/documents";
 import type { IntegrationAppName, IntegrationStatus } from "@/api/onboarding";
 import { IntelligenceMoment } from "@/components/onboarding/IntelligenceMoment";
+import { EmailBootstrapProgress } from "@/components/onboarding/EmailBootstrapProgress";
 
 // --- Animation direction type ---
 type AnimationDirection = "forward" | "backward" | "none";
@@ -1109,13 +1111,10 @@ function EmailIntegrationPanel({
   // EmailIntegrationPanel is only rendered when on email_integration step,
   // so always enable status checking here
   const statusQuery = useEmailStatus(true);
-  const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
-  const [showIntelligence, setShowIntelligence] = useState(false);
-  const [intelligenceData, setIntelligenceData] = useState<{
-    emailProvider?: string;
-    contactCount?: number;
-    priorityContacts?: number;
-  }>({});
+
+  // Bootstrap status - only poll after privacy config is saved
+  const [showBootstrapProgress, setShowBootstrapProgress] = useState(false);
+  const bootstrapStatusQuery = useEmailBootstrapStatus(showBootstrapProgress);
 
   // Privacy config state
   const [ingestionScopeDays, setIngestionScopeDays] = useState(60);
@@ -1138,12 +1137,8 @@ function EmailIntegrationPanel({
     [connectMutation],
   );
 
-  const handleContinue = useCallback(async () => {
+  const handleSavePrivacyAndStartBootstrap = useCallback(async () => {
     const provider = googleConnected ? "google" : "microsoft";
-
-    // Start intelligence moment
-    setShowIntelligence(true);
-    setIntelligenceData({ emailProvider: provider });
 
     // Build privacy exclusions from inputs
     const privacyExclusions: PrivacyExclusion[] = [];
@@ -1170,8 +1165,7 @@ function EmailIntegrationPanel({
       });
     }
 
-    // First save privacy config
-    setIsSavingPrivacy(true);
+    // Save privacy config
     try {
       await saveEmailPrivacyConfig({
         provider,
@@ -1179,39 +1173,36 @@ function EmailIntegrationPanel({
         ingestion_scope_days: ingestionScopeDays,
         attachment_ingestion: attachmentIngestion,
       });
-      // Update with placeholder data - would come from email scan
-      setIntelligenceData({
-        emailProvider: provider,
-        contactCount: 127,
-        priorityContacts: 12,
-      });
     } catch (error) {
       console.error("Failed to save email privacy config:", error);
       // Continue anyway - privacy config is optional
-    } finally {
-      setIsSavingPrivacy(false);
     }
 
-    // Then complete the step
-    const response = await completeStep("email_integration", { provider });
-    onComplete(response);
+    // Show bootstrap progress - backend triggers bootstrap automatically after record-connection
+    setShowBootstrapProgress(true);
   }, [
     googleConnected,
-    onComplete,
     excludedDomains,
     excludedSenders,
     ingestionScopeDays,
     attachmentIngestion,
   ]);
 
-  // Show intelligence moment during processing
-  if (showIntelligence) {
+  const handleBootstrapComplete = useCallback(async () => {
+    const provider = googleConnected ? "google" : "microsoft";
+    // Complete the step
+    const response = await completeStep("email_integration", { provider });
+    onComplete(response);
+  }, [googleConnected, onComplete]);
+
+  // Show bootstrap progress after privacy config is saved
+  if (showBootstrapProgress && bootstrapStatusQuery.data) {
     return (
-      <IntelligenceMoment
-        step="email_integration"
-        responseData={intelligenceData}
-        isLoading={isSavingPrivacy}
-        minDuration={2000}
+      <EmailBootstrapProgress
+        status={bootstrapStatusQuery.data}
+        provider={googleConnected ? "google" : "microsoft"}
+        onContinue={() => void handleBootstrapComplete()}
+        onSkip={onSkip}
       />
     );
   }
@@ -1335,18 +1326,11 @@ function EmailIntegrationPanel({
 
       <div className="flex items-center gap-3">
         <button
-          onClick={() => void handleContinue()}
-          disabled={!anyConnected || isSavingPrivacy}
+          onClick={() => void handleSavePrivacyAndStartBootstrap()}
+          disabled={!anyConnected}
           className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
         >
-          {isSavingPrivacy ? (
-            <span className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Saving...
-            </span>
-          ) : (
-            "Continue"
-          )}
+          Continue
         </button>
         <button
           onClick={onSkip}

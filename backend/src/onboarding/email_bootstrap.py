@@ -123,6 +123,9 @@ class PriorityEmailIngestion:
 
         logger.info("EMAIL_BOOTSTRAP: Starting for user %s", user_id)
 
+        # Store initial processing status
+        await self._store_bootstrap_status(user_id, "processing")
+
         try:
             # 1. Load privacy exclusions
             logger.info("EMAIL_BOOTSTRAP: Loading privacy exclusions for user %s", user_id)
@@ -291,10 +294,17 @@ class PriorityEmailIngestion:
                     }
                 )
 
+            # Store final complete status
+            await self._store_bootstrap_status(user_id, "complete", result)
+
             return result
 
         except Exception as e:
             logger.error("Email bootstrap failed: %s", e, exc_info=True)
+            # Store error status
+            await self._store_bootstrap_status(
+                user_id, "error", error_message=str(e)
+            )
             return result
 
     # ------------------------------------------------------------------
@@ -883,6 +893,72 @@ class PriorityEmailIngestion:
             ).eq("user_id", user_id).execute()
         except Exception as e:
             logger.warning("Failed to store patterns: %s", e)
+
+    async def _store_bootstrap_status(
+        self,
+        user_id: str,
+        status: str,
+        result: EmailBootstrapResult | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Store bootstrap status in onboarding_state metadata.
+
+        This allows the frontend to poll for progress.
+
+        Args:
+            user_id: User whose bootstrap status to update.
+            status: Current status ("processing", "complete", "error").
+            result: Bootstrap result (required when status is "complete").
+            error_message: Error message (required when status is "error").
+        """
+        try:
+            # Build the status object
+            status_data: dict[str, Any] = {"status": status}
+
+            if status == "complete" and result:
+                status_data.update(
+                    {
+                        "emails_processed": result.emails_processed,
+                        "contacts_discovered": result.contacts_discovered,
+                        "active_threads": result.active_threads,
+                        "commitments_detected": result.commitments_detected,
+                        "writing_samples_extracted": result.writing_samples_extracted,
+                        "communication_patterns": (
+                            result.communication_patterns.model_dump()
+                            if result.communication_patterns
+                            else None
+                        ),
+                    }
+                )
+            elif status == "error" and error_message:
+                status_data["error_message"] = error_message
+
+            # Fetch current metadata
+            current = (
+                self._db.table("onboarding_state")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            # Merge with existing metadata
+            existing_metadata: dict[str, Any] = {}
+            if current and current.data:
+                existing_metadata = current.data.get("metadata", {})  # type: ignore[union-attr]
+
+            existing_metadata["email_bootstrap"] = status_data
+
+            # Update the metadata
+            self._db.table("onboarding_state").update(
+                {"metadata": existing_metadata}
+            ).eq("user_id", user_id).execute()
+
+            logger.info(
+                "EMAIL_BOOTSTRAP: Stored status '%s' for user %s", status, user_id
+            )
+        except Exception as e:
+            logger.warning("Failed to store bootstrap status: %s", e)
 
     # ------------------------------------------------------------------
     # Readiness & episodic
