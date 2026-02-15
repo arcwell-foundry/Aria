@@ -13,6 +13,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from pydantic import BaseModel
+
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)

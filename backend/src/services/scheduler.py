@@ -474,6 +474,30 @@ async def _run_draft_feedback_poll() -> None:
         logger.exception("Draft feedback poll scheduler run failed")
 
 
+async def _run_deferred_draft_retry() -> None:
+    """Retry deferred email drafts.
+
+    Checks deferred_email_drafts for threads that were postponed due to
+    active conversations and retries draft generation if conditions allow.
+    """
+    try:
+        from src.jobs.deferred_draft_retry_job import run_deferred_draft_retry
+
+        result = await run_deferred_draft_retry()
+
+        if result["total_checked"] > 0:
+            logger.info(
+                "Deferred draft retry: %d checked, %d processed, %d skipped, %d expired, %d errors",
+                result["total_checked"],
+                result["processed"],
+                result["skipped"],
+                result["expired"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Deferred draft retry scheduler run failed")
+
+
 async def _run_style_recalibration() -> None:
     """Run weekly style recalibration for email writing.
 
@@ -581,6 +605,13 @@ async def start_scheduler() -> None:
             replace_existing=True,
         )
         _scheduler.add_job(
+            _run_deferred_draft_retry,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="deferred_draft_retry",
+            name="Retry deferred email drafts for deduplication",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
             _run_style_recalibration,
             trigger=CronTrigger(day_of_week="sun", hour=2, minute=0),  # Sunday 2 AM
             id="style_recalibration",
@@ -609,6 +640,7 @@ async def start_scheduler() -> None:
             "webset polling every 5 min, "
             "periodic email check every 30 min, "
             "draft feedback poll every 30 min, "
+            "deferred draft retry every 15 min, "
             "style recalibration weekly on Sunday at 2 AM"
         )
     except ImportError:

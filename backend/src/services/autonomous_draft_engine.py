@@ -201,12 +201,42 @@ Do not include any text outside the JSON object."""
                     len(top_contacts),
                 )
 
-            # 3. Process each email needing reply
+            # 3. Group emails by thread and deduplicate
+            grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
+
             emails_processed = 0
             emails_skipped_learning_mode = 0
+            emails_skipped_existing_draft = 0
+            emails_deferred_active_conversation = 0
 
-            for email in scan_result.needs_reply:
-                # Skip if in learning mode and sender not in top contacts
+            for thread_id, thread_emails in grouped_emails.items():
+                # Check for existing draft first
+                if await self._check_existing_draft(user_id, thread_id):
+                    logger.info(
+                        "DRAFT_ENGINE: Skipped: existing draft already generated for thread %s",
+                        thread_id,
+                    )
+                    await self._log_skip_decision(user_id, thread_id, "existing_draft")
+                    emails_skipped_existing_draft += 1
+                    continue
+
+                # Get only the latest email in thread
+                email = await self._get_latest_email_in_thread(thread_emails)
+
+                # Check for active conversation (rapid-fire)
+                if await self._is_active_conversation(user_id, thread_id):
+                    logger.info(
+                        "DRAFT_ENGINE: Deferred: active conversation in thread %s",
+                        thread_id,
+                    )
+                    await self._defer_draft(user_id, thread_id, email, "active_conversation")
+                    await self._log_skip_decision(
+                        user_id, thread_id, "active_conversation", email.email_id
+                    )
+                    emails_deferred_active_conversation += 1
+                    continue
+
+                # Apply learning mode filter
                 if is_learning_mode:
                     sender_email = email.sender_email.lower().strip()
                     is_top_contact = any(
@@ -254,9 +284,12 @@ Do not include any text outside the JSON object."""
 
             logger.info(
                 "DRAFT_ENGINE: Processing complete. %d drafts generated, %d failed, "
+                "%d skipped (existing draft), %d deferred (active conversation), "
                 "%d skipped (learning mode)",
                 result.drafts_generated,
                 result.drafts_failed,
+                emails_skipped_existing_draft,
+                emails_deferred_active_conversation,
                 emails_skipped_learning_mode,
             )
 
@@ -789,6 +822,225 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             ).eq("id", result.run_id).execute()
         except Exception as e:
             logger.error("DRAFT_ENGINE: Failed to update processing run: %s", e)
+
+    # ------------------------------------------------------------------
+    # Deduplication Methods
+    # ------------------------------------------------------------------
+
+    async def _check_existing_draft(self, user_id: str, thread_id: str) -> bool:
+        """Check if a draft already exists for this thread.
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+
+        Returns:
+            True if a draft exists, False otherwise.
+        """
+        try:
+            result = (
+                self._db.table("email_drafts")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .in_("status", ["draft", "saved_to_client"])
+                .maybe_single()
+                .execute()
+            )
+            return result.data is not None
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to check existing draft for thread %s: %s",
+                thread_id,
+                e,
+            )
+            return False
+
+    async def _group_emails_by_thread(self, emails: list[Any]) -> dict[str, list[Any]]:
+        """Group emails by thread_id for deduplication.
+
+        Args:
+            emails: List of EmailCategory objects.
+
+        Returns:
+            Dict mapping thread_id to list of emails in that thread.
+        """
+        grouped: dict[str, list[Any]] = {}
+        for email in emails:
+            # Use thread_id if available, fallback to email_id
+            tid = email.thread_id or email.email_id
+            if tid not in grouped:
+                grouped[tid] = []
+            grouped[tid].append(email)
+        return grouped
+
+    async def _get_latest_email_in_thread(self, emails: list[Any]) -> Any:
+        """Get the most recent email from a thread group.
+
+        Args:
+            emails: List of emails in the same thread.
+
+        Returns:
+            The most recent email (by scanned_at or email_id as fallback).
+        """
+        if len(emails) == 1:
+            return emails[0]
+
+        # Sort by scanned_at if available, otherwise by email_id
+        def sort_key(email: Any) -> Any:
+            if hasattr(email, "scanned_at") and email.scanned_at:
+                return email.scanned_at
+            return email.email_id
+
+        return max(emails, key=sort_key)
+
+    async def _is_active_conversation(self, user_id: str, thread_id: str) -> bool:
+        """Check if thread has rapid back-and-forth activity (3+ messages in last hour).
+
+        Reuses the logic from EmailAnalyzer._is_rapid_thread().
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+
+        Returns:
+            True if active conversation detected, False otherwise.
+        """
+        try:
+            from datetime import timedelta
+
+            one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+
+            # Query email_scan_log for messages in this thread
+            result = (
+                self._db.table("email_scan_log")
+                .select("sender_email, scanned_at")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .gte("scanned_at", one_hour_ago.isoformat())
+                .order("scanned_at", desc=True)
+                .execute()
+            )
+
+            if not result.data or len(result.data) < 3:
+                return False
+
+            # Check if there are at least 2 different senders (back-and-forth)
+            unique_senders = {msg["sender_email"].lower() for msg in result.data}
+
+            if len(unique_senders) >= 2 and len(result.data) >= 3:
+                logger.info(
+                    "DRAFT_ENGINE: Active conversation detected in thread %s (%d messages, %d senders)",
+                    thread_id,
+                    len(result.data),
+                    len(unique_senders),
+                )
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Active conversation check failed for thread %s: %s",
+                thread_id,
+                e,
+            )
+            return False
+
+    async def _defer_draft(
+        self,
+        user_id: str,
+        thread_id: str,
+        email: Any,
+        reason: str,
+    ) -> str:
+        """Add thread to deferred queue for later processing.
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+            email: The email object with details to store.
+            reason: The deferral reason ('active_conversation', etc.).
+
+        Returns:
+            The ID of the deferred draft record.
+        """
+        from datetime import timedelta
+
+        deferred_id = str(uuid4())
+        deferred_until = datetime.now(UTC) + timedelta(minutes=30)
+
+        try:
+            self._db.table("deferred_email_drafts").insert(
+                {
+                    "id": deferred_id,
+                    "user_id": user_id,
+                    "thread_id": thread_id,
+                    "latest_email_id": email.email_id,
+                    "subject": email.subject,
+                    "sender_email": email.sender_email,
+                    "deferred_until": deferred_until.isoformat(),
+                    "reason": reason,
+                    "status": "pending",
+                }
+            ).execute()
+
+            logger.info(
+                "DRAFT_ENGINE: Deferred thread %s until %s (reason: %s)",
+                thread_id,
+                deferred_until.isoformat(),
+                reason,
+            )
+
+        except Exception as e:
+            logger.error(
+                "DRAFT_ENGINE: Failed to defer draft for thread %s: %s",
+                thread_id,
+                e,
+            )
+
+        return deferred_id
+
+    async def _log_skip_decision(
+        self,
+        user_id: str,
+        thread_id: str,
+        reason: str,
+        email_id: str | None = None,
+    ) -> None:
+        """Log skip/defer decision to email_scan_log for transparency.
+
+        This enables the "why didn't ARIA draft?" feature.
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+            reason: The skip reason ('existing_draft', 'active_conversation', etc.).
+            email_id: Optional email ID (uses thread prefix if not provided).
+        """
+        try:
+            log_id = str(uuid4())
+            self._db.table("email_scan_log").insert(
+                {
+                    "id": log_id,
+                    "user_id": user_id,
+                    "email_id": email_id or f"thread:{thread_id}",
+                    "thread_id": thread_id,
+                    "sender_email": "system",
+                    "subject": f"Draft skipped: {reason}",
+                    "category": "SKIP",
+                    "urgency": "LOW",
+                    "needs_draft": False,
+                    "reason": reason,
+                    "scanned_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to log skip decision for thread %s: %s",
+                thread_id,
+                e,
+            )
 
 
 # ---------------------------------------------------------------------------
