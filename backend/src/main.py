@@ -37,6 +37,7 @@ from src.api.routes import (
     goals,
     insights,
     integrations,
+    intelligence,  # Phase 7: Causal intelligence routes
     leads,
     meetings,
     memory,
@@ -192,6 +193,7 @@ app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
 app.include_router(insights.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
+app.include_router(intelligence.router, prefix="/api/v1")  # Phase 7: Causal intelligence
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
