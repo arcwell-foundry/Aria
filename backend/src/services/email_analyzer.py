@@ -333,7 +333,8 @@ class EmailAnalyzer:
     ) -> str:
         """Detect time-sensitive emails that need immediate attention.
 
-        Checks keyword signals, VIP contacts, and calendar proximity.
+        Checks keyword signals, VIP contacts, calendar proximity,
+        overdue responses, and rapid thread activity.
 
         Args:
             email: Raw email dict.
@@ -345,6 +346,7 @@ class EmailAnalyzer:
         subject = email.get("subject", "")
         body = email.get("body", email.get("snippet", ""))
         text = f"{subject} {body}".lower()
+        sender_email = self._extract_sender_email(email)
 
         # Keyword urgency signals
         urgent_keywords = [
@@ -371,11 +373,215 @@ class EmailAnalyzer:
             return "URGENT"
 
         # VIP sender check
-        sender_email = self._extract_sender_email(email)
         if await self._is_vip_sender(user_id, sender_email):
             return "URGENT"
 
+        # NEW: Calendar proximity check (meeting with sender in next 2 hours)
+        if await self._is_sender_in_upcoming_meeting(user_id, sender_email):
+            return "URGENT"
+
+        # NEW: Overdue response check (reply to user's email >48 hours ago)
+        if await self._is_overdue_response(user_id, email):
+            return "URGENT"
+
+        # NEW: Rapid thread activity (3+ rapid back-and-forth in last hour)
+        thread_id = email.get("thread_id", email.get("conversationId", ""))
+        if thread_id and await self._is_rapid_thread(user_id, thread_id):
+            return "URGENT"
+
         return "NORMAL"
+
+    async def _is_sender_in_upcoming_meeting(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> bool:
+        """Check if sender is in a meeting with user in the next 2 hours.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The sender's email address.
+
+        Returns:
+            True if sender is in an upcoming meeting within 2 hours.
+        """
+        try:
+            from datetime import timedelta
+
+            now = datetime.now(UTC)
+            two_hours_from_now = now + timedelta(hours=2)
+
+            # Query calendar_events for upcoming meetings
+            result = (
+                self._db.table("calendar_events")
+                .select("attendees, start_time")
+                .eq("user_id", user_id)
+                .gte("start_time", now.isoformat())
+                .lte("start_time", two_hours_from_now.isoformat())
+                .execute()
+            )
+
+            if not result.data:
+                return False
+
+            sender_lower = sender_email.lower()
+
+            for event in result.data:
+                attendees = event.get("attendees", [])
+                if isinstance(attendees, list):
+                    for attendee in attendees:
+                        if isinstance(attendee, dict):
+                            attendee_email = attendee.get("email", "").lower()
+                        elif isinstance(attendee, str):
+                            attendee_email = attendee.lower()
+                        else:
+                            continue
+                        if sender_lower in attendee_email or attendee_email in sender_lower:
+                            logger.info(
+                                "EMAIL_ANALYZER: Urgency detected - sender %s in upcoming meeting",
+                                sender_email,
+                            )
+                            return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Calendar proximity check failed for %s: %s",
+                sender_email,
+                e,
+            )
+            return False
+
+    async def _is_overdue_response(
+        self,
+        user_id: str,
+        email: dict[str, Any],
+    ) -> bool:
+        """Check if this is a reply to user's email sent >48 hours ago.
+
+        Args:
+            user_id: The user's ID.
+            email: The incoming email dict.
+
+        Returns:
+            True if this is an overdue response to user's email.
+        """
+        try:
+            from datetime import timedelta
+
+            # Check if this email is a reply (has In-Reply-To or References header)
+            headers = email.get("headers", {})
+            if isinstance(headers, dict):
+                in_reply_to = headers.get("In-Reply-To", "") or headers.get("References", "")
+                if not in_reply_to:
+                    return False
+
+            # Look up the original email in email_scan_log
+            # Find emails FROM user that this might be a reply to
+            user_email = await self._get_user_email(user_id)
+            if not user_email:
+                return False
+
+            # Check email date
+            email_date_str = email.get("date", email.get("received_at", ""))
+            if not email_date_str:
+                return False
+
+            try:
+                # Parse the incoming email date
+                if isinstance(email_date_str, str):
+                    # Handle ISO format or RFC 2822
+                    email_date = datetime.fromisoformat(
+                        email_date_str.replace("Z", "+00:00")
+                    )
+                else:
+                    return False
+            except (ValueError, TypeError):
+                return False
+
+            # Look for a sent email from user >48 hours before this reply
+            cutoff_date = email_date - timedelta(hours=48)
+
+            result = (
+                self._db.table("email_scan_log")
+                .select("created_at, sender_email")
+                .eq("user_id", user_id)
+                .eq("sender_email", user_email.lower())
+                .lte("created_at", cutoff_date.isoformat())
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+
+            if result.data:
+                logger.info(
+                    "EMAIL_ANALYZER: Urgency detected - overdue response to user's email"
+                )
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Overdue response check failed: %s",
+                e,
+            )
+            return False
+
+    async def _is_rapid_thread(
+        self,
+        user_id: str,
+        thread_id: str,
+    ) -> bool:
+        """Check if there's rapid back-and-forth activity (3+ messages in last hour).
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+
+        Returns:
+            True if 3+ messages in the last hour with different senders.
+        """
+        try:
+            from datetime import timedelta
+
+            one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+
+            # Query email_scan_log for messages in this thread
+            result = (
+                self._db.table("email_scan_log")
+                .select("sender_email, scanned_at")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .gte("scanned_at", one_hour_ago.isoformat())
+                .order("scanned_at", desc=True)
+                .execute()
+            )
+
+            if not result.data or len(result.data) < 3:
+                return False
+
+            # Check if there are at least 2 different senders (back-and-forth)
+            unique_senders = {msg["sender_email"].lower() for msg in result.data}
+
+            if len(unique_senders) >= 2 and len(result.data) >= 3:
+                logger.info(
+                    "EMAIL_ANALYZER: Urgency detected - rapid thread activity (%d messages, %d senders)",
+                    len(result.data),
+                    len(unique_senders),
+                )
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Rapid thread check failed for thread %s: %s",
+                thread_id,
+                e,
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Email fetching

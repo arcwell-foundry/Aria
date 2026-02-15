@@ -418,6 +418,33 @@ async def _run_webset_polling() -> None:
         logger.exception("Webset polling scheduler run failed")
 
 
+async def _run_periodic_email_check() -> None:
+    """Run periodic inbox check for urgent emails during business hours.
+
+    For each user with email integration:
+    1. Check if within business hours (8 AM - 7 PM)
+    2. Get watermark from last processing run
+    3. Scan inbox for new emails since watermark
+    4. Trigger real-time notifications for urgent emails
+    """
+    try:
+        from src.jobs.periodic_email_check import run_periodic_email_check
+
+        result = await run_periodic_email_check()
+
+        if result["users_checked"] > 0:
+            logger.info(
+                "Periodic email check complete: %d users checked, %d with urgent, "
+                "%d total urgent emails, %d notifications sent",
+                result["users_checked"],
+                result["users_with_urgent"],
+                result["total_urgent_emails"],
+                result["notifications_sent"],
+            )
+    except Exception:
+        logger.exception("Periodic email check scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -483,6 +510,13 @@ async def start_scheduler() -> None:
             name="Webset polling for bulk lead import",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_periodic_email_check,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="periodic_email_check",
+            name="Periodic inbox check for urgent emails",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -502,7 +536,8 @@ async def start_scheduler() -> None:
             "medium action timeout every 5 min, "
             "prospective memory checks every 5 min, "
             "working memory sync every 30 sec, "
-            "webset polling every 5 min"
+            "webset polling every 5 min, "
+            "periodic email check every 30 min"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")

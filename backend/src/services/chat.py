@@ -355,6 +355,258 @@ class WebGroundingService:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Email Check Service
+# ---------------------------------------------------------------------------
+
+
+class EmailCheckService:
+    """Detects email check requests and triggers inbox scanning.
+
+    Uses regex-based pattern matching (<50ms) for request detection,
+    routing to EmailAnalyzer for real-time inbox scanning.
+
+    Design decisions:
+    - Regex over LLM for speed (<50ms vs >500ms)
+    - Direct scan trigger with natural language response
+    - Integrates with RealtimeEmailNotifier for urgent emails
+    """
+
+    # Patterns for detecting email check requests
+    EMAIL_CHECK_PATTERNS = [
+        r"(?i)check my email",
+        r"(?i)check my emails",
+        r"(?i)scan my inbox",
+        r"(?i)scan my email",
+        r"(?i)any new emails?",
+        r"(?i)any new email",
+        r"(?i)what'?s in my inbox",
+        r"(?i)what is in my inbox",
+        r"(?i)do i have (?:any )?emails",
+        r"(?i)do i have (?:any )?urgent emails",
+        r"(?i)show me my emails",
+        r"(?i)read my email",
+        r"(?i)check for new mail",
+        r"(?i)inbox check",
+    ]
+
+    # Pattern for urgent-specific requests
+    URGENT_CHECK_PATTERNS = [
+        r"(?i)any urgent",
+        r"(?i)urgent emails?",
+        r"(?i)anything urgent",
+        r"(?i)urgent mail",
+    ]
+
+    def __init__(self) -> None:
+        """Initialize the email check service with lazy dependencies."""
+        self._email_analyzer: Any = None
+        self._realtime_notifier: Any = None
+
+    def _get_email_analyzer(self) -> Any:
+        """Lazily initialize and return the EmailAnalyzer."""
+        if self._email_analyzer is None:
+            try:
+                from src.services.email_analyzer import EmailAnalyzer
+
+                self._email_analyzer = EmailAnalyzer()
+                logger.info("EmailCheckService: EmailAnalyzer initialized")
+            except Exception as e:
+                logger.warning(
+                    "EmailCheckService: Failed to initialize EmailAnalyzer: %s", e
+                )
+        return self._email_analyzer
+
+    def _get_realtime_notifier(self) -> Any:
+        """Lazily initialize and return the RealtimeEmailNotifier."""
+        if self._realtime_notifier is None:
+            try:
+                from src.services.realtime_email_notifier import get_realtime_email_notifier
+
+                self._realtime_notifier = get_realtime_email_notifier()
+                logger.info("EmailCheckService: RealtimeEmailNotifier initialized")
+            except Exception as e:
+                logger.warning(
+                    "EmailCheckService: Failed to initialize RealtimeEmailNotifier: %s", e
+                )
+        return self._realtime_notifier
+
+    def detect_email_check_request(self, message: str) -> bool:
+        """Detect if the message is an email check request.
+
+        Args:
+            message: The user's message to analyze.
+
+        Returns:
+            True if this is an email check request.
+        """
+        for pattern in self.EMAIL_CHECK_PATTERNS:
+            if re.search(pattern, message):
+                return True
+        return False
+
+    def is_urgent_specific(self, message: str) -> bool:
+        """Check if the request is specifically about urgent emails.
+
+        Args:
+            message: The user's message to analyze.
+
+        Returns:
+            True if this is an urgent-specific request.
+        """
+        for pattern in self.URGENT_CHECK_PATTERNS:
+            if re.search(pattern, message):
+                return True
+        return False
+
+    async def check_email(
+        self,
+        user_id: str,
+        message: str,
+    ) -> dict[str, Any] | None:
+        """Handle an email check request and return natural language summary.
+
+        Args:
+            user_id: The user's ID.
+            message: The user's original message.
+
+        Returns:
+            Dict with email check results and response text, or None if failed.
+        """
+        analyzer = self._get_email_analyzer()
+        if not analyzer:
+            return None
+
+        check_start = time.perf_counter()
+
+        try:
+            logger.info(
+                "EmailCheckService: Processing email check for user %s",
+                user_id,
+            )
+
+            # Scan inbox (last 24 hours)
+            scan_result = await analyzer.scan_inbox(user_id, since_hours=24)
+
+            scan_ms = (time.perf_counter() - check_start) * 1000
+
+            # Build response based on results
+            response_text = self._build_response_text(
+                scan_result.total_emails,
+                len(scan_result.needs_reply),
+                scan_result.urgent,
+                self.is_urgent_specific(message),
+            )
+
+            # Process urgent emails with notifications
+            urgent_details: list[dict[str, Any]] = []
+            if scan_result.urgent:
+                notifier = self._get_realtime_notifier()
+                if notifier:
+                    notifications = await notifier.process_and_notify(
+                        user_id=user_id,
+                        urgent_emails=scan_result.urgent,
+                        generate_drafts=True,
+                    )
+                    urgent_details = [
+                        {
+                            "email_id": n.email_id,
+                            "sender": n.sender_name,
+                            "subject": n.subject,
+                            "draft_saved": n.draft_saved,
+                        }
+                        for n in notifications
+                    ]
+
+            logger.info(
+                "EmailCheckService: Scan complete for user %s - %d total, %d urgent, %.0fms",
+                user_id,
+                scan_result.total_emails,
+                len(scan_result.urgent),
+                scan_ms,
+            )
+
+            return {
+                "type": "email_check_result",
+                "total_emails": scan_result.total_emails,
+                "needs_reply": len(scan_result.needs_reply),
+                "urgent_count": len(scan_result.urgent),
+                "urgent_details": urgent_details,
+                "response_text": response_text,
+                "scan_ms": scan_ms,
+            }
+
+        except Exception as e:
+            logger.warning(
+                "EmailCheckService: Email check failed for user %s: %s",
+                user_id,
+                e,
+                exc_info=True,
+            )
+            return {
+                "type": "email_check_result",
+                "error": str(e),
+                "response_text": "I encountered an error checking your email. Please try again.",
+            }
+
+    def _build_response_text(
+        self,
+        total: int,
+        needs_reply: int,
+        urgent: list[Any],
+        urgent_specific: bool,
+    ) -> str:
+        """Build natural language response for email check.
+
+        Args:
+            total: Total emails scanned.
+            needs_reply: Count of emails needing reply.
+            urgent: List of urgent emails.
+            urgent_specific: Whether user specifically asked about urgent.
+
+        Returns:
+            Natural language response string.
+        """
+        if total == 0:
+            return "Your inbox is clear - no new emails to process."
+
+        if urgent_specific:
+            if not urgent:
+                return f"Good news - no urgent emails found. I scanned {total} emails and none require immediate attention."
+            else:
+                urgent_senders = [e.sender_name or e.sender_email for e in urgent[:3]]
+                senders_str = ", ".join(urgent_senders)
+                if len(urgent) == 1:
+                    return f"You have 1 urgent email from {senders_str}. I've drafted a reply and it's ready for review."
+                else:
+                    return f"You have {len(urgent)} urgent emails from {senders_str}{' and others' if len(urgent) > 3 else ''}. I've drafted replies and they're ready for review."
+
+        if urgent:
+            urgent_senders = [e.sender_name or e.sender_email for e in urgent[:3]]
+            senders_str = ", ".join(urgent_senders)
+            if len(urgent) == 1:
+                return (
+                    f"I scanned {total} emails. You have 1 urgent email from {senders_str}. "
+                    f"I've drafted a reply and it's ready for review. "
+                    f"{needs_reply - 1} other emails need replies but aren't time-sensitive."
+                )
+            else:
+                return (
+                    f"I scanned {total} emails. You have {len(urgent)} urgent emails from "
+                    f"{senders_str}{' and others' if len(urgent) > 3 else ''}. "
+                    f"I've drafted replies and they're ready for review. "
+                    f"{needs_reply - len(urgent)} other emails need replies but aren't time-sensitive."
+                )
+
+        if needs_reply > 0:
+            return (
+                f"I scanned {total} emails. {needs_reply} {'need' if needs_reply > 1 else 'needs'} "
+                f"a reply, but nothing is urgent. Would you like me to draft responses?"
+            )
+
+        return f"I scanned {total} emails. Nothing needs a reply right now - you're all caught up!"
+
+
 # Web grounding context template for LLM
 WEB_GROUNDING_TEMPLATE = """## Real-Time Web Information
 
@@ -473,6 +725,9 @@ class ChatService:
 
         # Web grounding — lazily initialized on first use
         self._web_grounding: WebGroundingService | None = None
+
+        # Email check — lazily initialized on first use
+        self._email_check: EmailCheckService | None = None
 
     async def _get_skill_registry(self) -> Any:
         """Lazily initialize and return the SkillRegistry.
@@ -1016,6 +1271,64 @@ class ChatService:
             logger.warning("Web grounding failed: %s", e)
         web_grounding_ms = (time.perf_counter() - web_grounding_start) * 1000
 
+        # Email check: Detect and handle email check requests
+        email_check_start = time.perf_counter()
+        email_check_result: dict[str, Any] | None = None
+        try:
+            if self._email_check is None:
+                self._email_check = EmailCheckService()
+            if self._email_check.detect_email_check_request(message):
+                email_check_result = await self._email_check.check_email(user_id, message)
+                # If email check was successful, return early with the response
+                if email_check_result and email_check_result.get("response_text"):
+                    email_check_ms = (time.perf_counter() - email_check_start) * 1000
+                    # Build early response for email check
+                    working_memory.add_message("assistant", email_check_result["response_text"])
+                    await self.persist_turn(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        user_message=message,
+                        assistant_message=email_check_result["response_text"],
+                        assistant_metadata={"email_check": True},
+                        conversation_context=conversation_messages[-2:],
+                    )
+                    return {
+                        "message": email_check_result["response_text"],
+                        "citations": [],
+                        "conversation_id": conversation_id,
+                        "rich_content": [
+                            {
+                                "type": "email_check_result",
+                                "data": {
+                                    "total_emails": email_check_result.get("total_emails", 0),
+                                    "needs_reply": email_check_result.get("needs_reply", 0),
+                                    "urgent_count": email_check_result.get("urgent_count", 0),
+                                    "urgent_details": email_check_result.get("urgent_details", []),
+                                },
+                            }
+                        ],
+                        "ui_commands": [],
+                        "suggestions": ["Review drafts", "Reply to urgent", "Check specific sender"],
+                        "timing": {
+                            "memory_query_ms": 0,
+                            "proactive_query_ms": 0,
+                            "web_grounding_ms": 0,
+                            "email_check_ms": round(email_check_ms, 2),
+                            "skill_detection_ms": 0,
+                            "llm_response_ms": 0,
+                            "total_ms": round((time.perf_counter() - total_start) * 1000, 2),
+                        },
+                        "cognitive_load": {
+                            "level": load_state.level.value,
+                            "score": round(load_state.score, 3),
+                            "recommendation": load_state.recommendation,
+                        },
+                        "proactive_insights": [],
+                    }
+        except Exception as e:
+            logger.warning("Email check failed: %s", e)
+        email_check_ms = (time.perf_counter() - email_check_start) * 1000
+
         # Get proactive insights to volunteer
         proactive_start = time.perf_counter()
         proactive_insights = await self._get_proactive_insights(
@@ -1196,6 +1509,7 @@ class ChatService:
                 "memory_query_ms": round(memory_ms, 2),
                 "proactive_query_ms": round(proactive_ms, 2),
                 "web_grounding_ms": round(web_grounding_ms, 2),
+                "email_check_ms": round(email_check_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
