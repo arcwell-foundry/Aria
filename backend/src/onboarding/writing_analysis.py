@@ -120,6 +120,33 @@ Analyze and return a JSON object with these fields:
 Return ONLY the JSON object, no other text. Be precise. \
 Base your analysis on actual patterns in the text, not assumptions."""
 
+_RECIPIENT_ANALYSIS_PROMPT = """Analyze how this person writes to different recipients.
+Below are groups of sent emails, organized by recipient. For each recipient, analyze the
+writing style the sender uses SPECIFICALLY with that person.
+
+{recipient_groups}
+
+For each recipient, return a JSON array with objects containing:
+[
+  {{
+    "recipient_email": "<email address>",
+    "recipient_name": "<inferred name or null>",
+    "relationship_type": "<internal_team|external_executive|external_peer|vendor|new_contact>",
+    "formality_level": <float 0-1: 0=very casual, 1=very formal>,
+    "average_message_length": <int: average words per email to this person>,
+    "greeting_style": "<exact greeting pattern used, e.g. 'Hi Sarah,' or 'Dear Dr. Fischer,'>",
+    "signoff_style": "<exact sign-off pattern used, e.g. 'Best,' or 'Thanks,'>",
+    "tone": "<warm|direct|formal|casual|balanced>",
+    "uses_emoji": <bool: whether emojis appear in messages to this person>
+  }}
+]
+
+IMPORTANT:
+- Base analysis on ACTUAL patterns in the emails, not assumptions
+- relationship_type should be inferred from email domain, greeting formality, and content
+- greeting_style and signoff_style should reflect what the sender ACTUALLY writes
+- Return ONLY the JSON array, no other text"""
+
 
 class WritingAnalysisService:
     """Analyzes writing samples to build Digital Twin style fingerprint.
@@ -351,3 +378,171 @@ class WritingAnalysisService:
         except Exception as e:
             logger.warning("Failed to get fingerprint: %s", e)
         return None
+
+    async def analyze_recipient_samples(
+        self,
+        user_id: str,
+        sent_emails: list[dict[str, Any]],
+    ) -> list[RecipientWritingProfile]:
+        """Analyze sent emails grouped by recipient to build per-contact profiles.
+
+        Groups emails by primary recipient, takes the top 20 by frequency,
+        and uses LLM to analyze writing style differences per recipient.
+
+        Args:
+            user_id: The user whose emails to analyze.
+            sent_emails: List of email dicts with 'to', 'body', 'date', 'subject'.
+
+        Returns:
+            List of RecipientWritingProfile for analyzed recipients.
+        """
+        if not sent_emails:
+            return []
+
+        # Group emails by primary recipient
+        recipient_emails: dict[str, list[dict[str, Any]]] = {}
+        for email in sent_emails:
+            recipients = email.get("to", [])
+            if not recipients:
+                continue
+            # Use first recipient as primary
+            primary = recipients[0] if isinstance(recipients[0], str) else recipients[0].get("email", "")
+            primary = primary.lower().strip()
+            if not primary:
+                continue
+            if primary not in recipient_emails:
+                recipient_emails[primary] = []
+            recipient_emails[primary].append(email)
+
+        if not recipient_emails:
+            return []
+
+        # Sort by email count descending, take top 20
+        sorted_recipients = sorted(
+            recipient_emails.items(),
+            key=lambda x: len(x[1]),
+            reverse=True,
+        )[:20]
+
+        # Build prompt with grouped samples
+        groups: list[str] = []
+        recipient_counts: dict[str, int] = {}
+        recipient_last_dates: dict[str, str] = {}
+
+        for recipient, emails in sorted_recipients:
+            recipient_counts[recipient] = len(emails)
+            # Track last email date
+            dates = [e.get("date", "") for e in emails if e.get("date")]
+            if dates:
+                recipient_last_dates[recipient] = max(dates)
+
+            # Include up to 5 sample bodies per recipient (cap at 500 chars each)
+            sample_bodies = []
+            for e in emails[:5]:
+                body = e.get("body", "")[:500]
+                if body:
+                    sample_bodies.append(body)
+
+            if sample_bodies:
+                group_text = (
+                    f"--- RECIPIENT: {recipient} ({len(emails)} emails) ---\n"
+                    + "\n\n".join(sample_bodies)
+                )
+                groups.append(group_text)
+
+        if not groups:
+            return []
+
+        prompt = _RECIPIENT_ANALYSIS_PROMPT.format(
+            recipient_groups="\n\n".join(groups)
+        )
+
+        # Call LLM
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4000,
+                temperature=0.3,
+            )
+
+            # Strip markdown fences
+            text = response.strip()
+            if text.startswith("```"):
+                first_newline = text.index("\n")
+                text = text[first_newline + 1:]
+            if text.endswith("```"):
+                text = text[:-3].rstrip()
+
+            raw_profiles: list[dict[str, Any]] = json.loads(text)
+        except Exception as e:
+            logger.warning("Recipient style analysis failed: %s", e)
+            return []
+
+        # Build profiles and store
+        profiles: list[RecipientWritingProfile] = []
+        for raw in raw_profiles:
+            email_addr = raw.get("recipient_email", "").lower().strip()
+            if not email_addr:
+                continue
+
+            profile = RecipientWritingProfile(
+                recipient_email=email_addr,
+                recipient_name=raw.get("recipient_name"),
+                relationship_type=raw.get("relationship_type", "unknown"),
+                formality_level=float(raw.get("formality_level", 0.5)),
+                average_message_length=int(raw.get("average_message_length", 0)),
+                greeting_style=raw.get("greeting_style", ""),
+                signoff_style=raw.get("signoff_style", ""),
+                tone=raw.get("tone", "balanced"),
+                uses_emoji=bool(raw.get("uses_emoji", False)),
+                email_count=recipient_counts.get(email_addr, 0),
+                last_email_date=recipient_last_dates.get(email_addr),
+            )
+            profiles.append(profile)
+
+        # Store profiles in database
+        await self._store_recipient_profiles(user_id, profiles)
+
+        return profiles
+
+    async def _store_recipient_profiles(
+        self,
+        user_id: str,
+        profiles: list[RecipientWritingProfile],
+    ) -> None:
+        """Store recipient writing profiles in database.
+
+        Uses upsert with (user_id, recipient_email) as conflict key.
+
+        Args:
+            user_id: The user who owns these profiles.
+            profiles: List of profiles to store.
+        """
+        if not profiles:
+            return
+
+        try:
+            db = SupabaseClient.get_client()
+
+            for profile in profiles:
+                row = {
+                    "user_id": user_id,
+                    "recipient_email": profile.recipient_email,
+                    "recipient_name": profile.recipient_name,
+                    "relationship_type": profile.relationship_type,
+                    "formality_level": profile.formality_level,
+                    "average_message_length": profile.average_message_length,
+                    "greeting_style": profile.greeting_style,
+                    "signoff_style": profile.signoff_style,
+                    "tone": profile.tone,
+                    "uses_emoji": profile.uses_emoji,
+                    "email_count": profile.email_count,
+                    "last_email_date": profile.last_email_date,
+                }
+                db.table("recipient_writing_profiles").upsert(
+                    row,
+                    on_conflict="user_id,recipient_email",
+                ).execute()
+
+        except Exception as e:
+            logger.warning("Failed to store recipient profiles: %s", e)

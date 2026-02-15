@@ -484,3 +484,148 @@ class TestWritingAnalysisServiceGetFingerprint:
             result = await service.get_fingerprint("user-123")
 
         assert result is None
+
+
+class TestRecipientStyleAnalysis:
+    """Tests for WritingAnalysisService.analyze_recipient_samples."""
+
+    @pytest.mark.asyncio
+    async def test_empty_email_list_returns_empty(self):
+        """No emails produces no recipient profiles."""
+        service, _, mock_db = _make_service_with_mocks()
+        result = await service.analyze_recipient_samples("user-123", [])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_groups_emails_by_recipient(self):
+        """Emails are grouped by recipient before analysis."""
+        service, mock_llm, mock_db = _make_service_with_mocks()
+
+        # Build LLM response for recipient analysis
+        recipient_response = json.dumps([
+            {
+                "recipient_email": "sarah@team.com",
+                "recipient_name": "Sarah",
+                "relationship_type": "internal_team",
+                "formality_level": 0.3,
+                "average_message_length": 45,
+                "greeting_style": "Hey Sarah,",
+                "signoff_style": "Thanks,",
+                "tone": "casual",
+                "uses_emoji": True,
+            },
+            {
+                "recipient_email": "dr.fischer@novartis.com",
+                "recipient_name": "Dr. Fischer",
+                "relationship_type": "external_executive",
+                "formality_level": 0.9,
+                "average_message_length": 180,
+                "greeting_style": "Dear Dr. Fischer,",
+                "signoff_style": "Regards,",
+                "tone": "formal",
+                "uses_emoji": False,
+            },
+        ])
+        mock_llm.generate_response = AsyncMock(return_value=recipient_response)
+
+        emails = [
+            {"to": ["sarah@team.com"], "body": "Hey Sarah, quick sync?", "date": "2026-02-10T10:00:00Z", "subject": "sync"},
+            {"to": ["sarah@team.com"], "body": "Hey Sarah, done with the deck!", "date": "2026-02-11T10:00:00Z", "subject": "deck"},
+            {"to": ["sarah@team.com"], "body": "Hey Sarah, see you at standup", "date": "2026-02-12T10:00:00Z", "subject": "standup"},
+            {"to": ["dr.fischer@novartis.com"], "body": "Dear Dr. Fischer, Regarding our partnership...", "date": "2026-02-10T14:00:00Z", "subject": "partnership"},
+            {"to": ["dr.fischer@novartis.com"], "body": "Dear Dr. Fischer, Please find attached...", "date": "2026-02-11T14:00:00Z", "subject": "attachment"},
+        ]
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            profiles = await service.analyze_recipient_samples("user-123", emails)
+
+        assert len(profiles) == 2
+        # LLM was called to analyze recipients
+        mock_llm.generate_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_top_20_recipients_only(self):
+        """Only top 20 recipients by email count are analyzed."""
+        service, mock_llm, mock_db = _make_service_with_mocks()
+
+        # Create 25 recipients, each with varying email counts
+        emails = []
+        for i in range(25):
+            count = 25 - i  # First recipient has most emails
+            for j in range(count):
+                emails.append({
+                    "to": [f"user{i}@example.com"],
+                    "body": f"Hello user {i}, message {j}",
+                    "date": f"2026-02-{10 + (j % 5):02d}T10:00:00Z",
+                    "subject": f"msg {j}",
+                })
+
+        mock_llm.generate_response = AsyncMock(return_value="[]")
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            await service.analyze_recipient_samples("user-123", emails)
+
+        # Verify LLM prompt only includes 20 recipients
+        call_args = mock_llm.generate_response.call_args
+        prompt_text = call_args[1]["messages"][0]["content"]
+        # user0 has most emails (25), should be included
+        assert "user0@example.com" in prompt_text
+        assert "user19@example.com" in prompt_text
+        # user20 has only 5 emails and is the 21st recipient - excluded
+        assert "user20@example.com" not in prompt_text
+
+    @pytest.mark.asyncio
+    async def test_profiles_stored_in_database(self):
+        """Analyzed profiles are upserted into recipient_writing_profiles table."""
+        service, mock_llm, mock_db = _make_service_with_mocks()
+
+        recipient_response = json.dumps([
+            {
+                "recipient_email": "sarah@team.com",
+                "recipient_name": "Sarah",
+                "relationship_type": "internal_team",
+                "formality_level": 0.3,
+                "average_message_length": 45,
+                "greeting_style": "Hey Sarah,",
+                "signoff_style": "Thanks,",
+                "tone": "casual",
+                "uses_emoji": True,
+            },
+        ])
+        mock_llm.generate_response = AsyncMock(return_value=recipient_response)
+
+        # Set up upsert mock
+        mock_upsert = MagicMock()
+        mock_upsert.execute.return_value = MagicMock(data=[{}])
+        mock_db.table.return_value.upsert.return_value = mock_upsert
+
+        emails = [
+            {"to": ["sarah@team.com"], "body": "Hey Sarah, quick note", "date": "2026-02-10T10:00:00Z", "subject": "note"},
+            {"to": ["sarah@team.com"], "body": "Hey Sarah, see you!", "date": "2026-02-11T10:00:00Z", "subject": "bye"},
+        ]
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            await service.analyze_recipient_samples("user-123", emails)
+
+        # Verify upsert was called on the right table
+        mock_db.table.assert_any_call("recipient_writing_profiles")
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_empty(self):
+        """LLM returning invalid JSON produces empty results."""
+        service, mock_llm, mock_db = _make_service_with_mocks()
+        mock_llm.generate_response = AsyncMock(return_value="not json")
+
+        emails = [
+            {"to": ["a@b.com"], "body": "Hello there", "date": "2026-02-10T10:00:00Z", "subject": "hi"},
+            {"to": ["a@b.com"], "body": "How are you", "date": "2026-02-11T10:00:00Z", "subject": "check"},
+        ]
+
+        with patch("src.onboarding.writing_analysis.SupabaseClient") as mock_supa:
+            mock_supa.get_client.return_value = mock_db
+            profiles = await service.analyze_recipient_samples("user-123", emails)
+
+        assert profiles == []
