@@ -541,17 +541,200 @@ Summary:"""
         """Placeholder - implemented in Task 4."""
         return None
 
-    async def _get_recipient_style(self, user_id: str, sender_email: str) -> RecipientWritingStyle:
-        """Placeholder - implemented in Task 5."""
-        return RecipientWritingStyle()
+    # ------------------------------------------------------------------
+    # Per-Recipient Writing Style
+    # ------------------------------------------------------------------
 
-    async def _get_relationship_history(self, user_id: str, sender_email: str) -> RelationshipHistory:
-        """Placeholder - implemented in Task 5."""
-        return RelationshipHistory(sender_email=sender_email)
+    async def _get_recipient_style(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> RecipientWritingStyle:
+        """Get user's writing style profile for this recipient.
 
-    async def _get_corporate_memory(self, user_id: str, topic: str) -> CorporateMemoryContext:
-        """Placeholder - implemented in Task 5."""
-        return CorporateMemoryContext()
+        Args:
+            user_id: The user's ID.
+            sender_email: The recipient's email.
+
+        Returns:
+            RecipientWritingStyle profile or default.
+        """
+        style = RecipientWritingStyle()
+
+        try:
+            result = (
+                self._db.table("recipient_writing_profiles")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("recipient_email", sender_email.lower())
+                .maybe_single()
+                .execute()
+            )
+
+            if result.data:
+                data = result.data
+                style.exists = True
+                style.formality_level = data.get("formality_level", 0.5)
+                style.greeting_style = data.get("greeting_style", "")
+                style.signoff_style = data.get("signoff_style", "")
+                style.tone = data.get("tone", "balanced")
+                style.uses_emoji = data.get("uses_emoji", False)
+                style.email_count = data.get("email_count", 0)
+
+                logger.info(
+                    "CONTEXT_GATHERER: Found style profile for %s (%d prior emails)",
+                    sender_email,
+                    style.email_count,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Failed to get recipient style: %s",
+                str(e),
+            )
+
+        return style
+
+    # ------------------------------------------------------------------
+    # Relationship History (memory_semantic)
+    # ------------------------------------------------------------------
+
+    async def _get_relationship_history(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> RelationshipHistory:
+        """Get relationship history from semantic memory.
+
+        Queries memory_semantic for facts mentioning this contact,
+        including interaction count, relationship type, and topics.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The contact's email.
+
+        Returns:
+            RelationshipHistory with memory facts.
+        """
+        history = RelationshipHistory(sender_email=sender_email)
+
+        try:
+            # Query facts about this contact
+            result = (
+                self._db.table("memory_semantic")
+                .select("*")
+                .eq("user_id", user_id)
+                .ilike("fact", f"%{sender_email}%")
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+
+            if result.data:
+                for row in result.data:
+                    # Parse metadata for structured data
+                    metadata = row.get("metadata") or {}
+
+                    history.memory_facts.append({
+                        "id": row.get("id"),
+                        "fact": row.get("fact"),
+                        "confidence": row.get("confidence"),
+                        "source": row.get("source"),
+                        "created_at": row.get("created_at"),
+                    })
+                    history.memory_fact_ids.append(row.get("id"))
+
+                    # Extract relationship type if present
+                    rel_type = metadata.get("relationship_type")
+                    if rel_type and history.relationship_type == "unknown":
+                        history.relationship_type = rel_type
+
+                # Count interactions from email bootstrap data
+                history.total_emails = len([
+                    f for f in history.memory_facts
+                    if f.get("source") == "email_bootstrap"
+                ])
+
+                # Get last interaction date
+                if history.memory_facts:
+                    history.last_interaction = history.memory_facts[0].get("created_at")
+
+                logger.info(
+                    "CONTEXT_GATHERER: Found %d memory facts for %s",
+                    len(history.memory_facts),
+                    sender_email,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Failed to get relationship history: %s",
+                str(e),
+            )
+
+        return history
+
+    # ------------------------------------------------------------------
+    # Corporate Memory
+    # ------------------------------------------------------------------
+
+    async def _get_corporate_memory(
+        self,
+        user_id: str,
+        topic: str,
+    ) -> CorporateMemoryContext:
+        """Get relevant facts about user's own company.
+
+        Queries memory_semantic for corporate facts that might be
+        relevant to the email topic (products, partnerships, etc.).
+
+        Args:
+            user_id: The user's ID.
+            topic: The email subject/topic for relevance.
+
+        Returns:
+            CorporateMemoryContext with relevant facts.
+        """
+        context = CorporateMemoryContext()
+
+        try:
+            # Search for corporate facts with topic keywords
+            keywords = topic.split()[:5] if topic else []
+            search_terms = " | ".join(keywords) if keywords else ""
+
+            result = (
+                self._db.table("memory_semantic")
+                .select("*")
+                .eq("user_id", user_id)
+                .in_("source", ["company_facts", "corporate_memory", "onboarding"])
+                .or_(f"fact.ilike.%{search_terms}%" if search_terms else "fact.ilike.%")
+                .order("confidence", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if result.data:
+                for row in result.data:
+                    context.facts.append({
+                        "id": row.get("id"),
+                        "fact": row.get("fact"),
+                        "confidence": row.get("confidence"),
+                        "source": row.get("source"),
+                    })
+                    context.fact_ids.append(row.get("id"))
+
+                logger.info(
+                    "CONTEXT_GATHERER: Found %d corporate memory facts for topic '%s'",
+                    len(context.facts),
+                    topic[:50],
+                )
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Failed to get corporate memory: %s",
+                str(e),
+            )
+
+        return context
 
     async def _get_calendar_context(self, user_id: str, sender_email: str) -> CalendarContext:
         """Placeholder - implemented in Task 6."""
