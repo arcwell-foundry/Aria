@@ -536,10 +536,111 @@ Summary:"""
             )
             return f"Thread with {len(messages)} messages"
 
-    # Placeholder methods - will be implemented in subsequent tasks
-    async def _research_recipient(self, sender_email: str, sender_name: str | None) -> RecipientResearch | None:
-        """Placeholder - implemented in Task 4."""
-        return None
+    # ------------------------------------------------------------------
+    # Recipient Research (Exa)
+    # ------------------------------------------------------------------
+
+    async def _research_recipient(
+        self,
+        sender_email: str,
+        sender_name: str | None,
+    ) -> RecipientResearch | None:
+        """Research the email sender via Exa API.
+
+        Performs:
+        1. People search for LinkedIn profile and bio
+        2. Company search if company can be inferred
+
+        Args:
+            sender_email: The sender's email address.
+            sender_name: The sender's display name.
+
+        Returns:
+            RecipientResearch with gathered intelligence, or None.
+        """
+        research = RecipientResearch(sender_email=sender_email, sender_name=sender_name)
+
+        try:
+            from src.agents.capabilities.enrichment_providers.exa_provider import (
+                ExaEnrichmentProvider,
+            )
+
+            exa = ExaEnrichmentProvider()
+
+            # Extract name parts for search
+            name_parts = (sender_name or "").split()
+            first_name = name_parts[0] if name_parts else ""
+            last_name = name_parts[-1] if len(name_parts) > 1 else ""
+
+            # Extract company from email domain
+            domain = sender_email.split("@")[-1] if "@" in sender_email else ""
+            # Skip common email providers
+            common_providers = {"gmail.com", "outlook.com", "yahoo.com", "hotmail.com"}
+            company_from_email = "" if domain in common_providers else domain.split(".")[0]
+
+            # Search for person
+            if sender_name:
+                logger.info(
+                    "CONTEXT_GATHERER: Searching Exa for person: %s",
+                    sender_name,
+                )
+
+                person_result = await exa.search_person(
+                    name=sender_name,
+                    company=company_from_email,
+                    role="",  # Unknown role
+                )
+
+                research.sender_name = person_result.name or sender_name
+                research.sender_title = person_result.title
+                research.sender_company = person_result.company or company_from_email
+                research.linkedin_url = person_result.linkedin_url
+                research.bio = person_result.bio
+
+                for mention in person_result.web_mentions[:5]:
+                    research.web_mentions.append({
+                        "title": mention.get("title", ""),
+                        "url": mention.get("url", ""),
+                        "snippet": mention.get("snippet", "")[:200],
+                    })
+                    research.exa_sources_used.append(mention.get("url", ""))
+
+            # Search for company if we have one
+            company_name = research.sender_company or company_from_email
+            if company_name:
+                logger.info(
+                    "CONTEXT_GATHERER: Searching Exa for company: %s",
+                    company_name,
+                )
+
+                company_result = await exa.search_company(company_name)
+
+                research.company_description = company_result.description
+
+                for news in company_result.recent_news[:3]:
+                    research.company_news.append({
+                        "title": news.get("title", ""),
+                        "url": news.get("url", ""),
+                        "snippet": news.get("snippet", "")[:200],
+                        "date": news.get("published_date", ""),
+                    })
+                    research.exa_sources_used.append(news.get("url", ""))
+
+            logger.info(
+                "CONTEXT_GATHERER: Recipient research complete for %s, %d sources",
+                sender_email,
+                len(research.exa_sources_used),
+            )
+
+            return research
+
+        except Exception as e:
+            logger.error(
+                "CONTEXT_GATHERER: Recipient research failed: %s",
+                str(e),
+                exc_info=True,
+            )
+            return research  # Return partial results
 
     # ------------------------------------------------------------------
     # Per-Recipient Writing Style
