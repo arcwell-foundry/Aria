@@ -1185,6 +1185,125 @@ Summary:"""
                 str(e),
             )
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     async def _save_context(self, context: DraftContext) -> None:
-        """Placeholder - implemented in Task 7."""
-        pass
+        """Persist context to draft_context table.
+
+        Args:
+            context: The DraftContext to save.
+        """
+        try:
+            self._db.table("draft_context").insert(
+                context.to_db_dict()
+            ).execute()
+
+            logger.info(
+                "CONTEXT_GATHERER: Saved context %s for email %s",
+                context.id,
+                context.email_id,
+            )
+
+        except Exception as e:
+            logger.error(
+                "CONTEXT_GATHERER: Failed to save context: %s",
+                str(e),
+                exc_info=True,
+            )
+
+    async def get_existing_context(
+        self,
+        user_id: str,
+        thread_id: str,
+    ) -> DraftContext | None:
+        """Get existing context for a thread if recently created.
+
+        Useful for avoiding re-fetching context for multiple drafts
+        in the same thread.
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The thread ID.
+
+        Returns:
+            DraftContext if found and recent, None otherwise.
+        """
+        try:
+            from datetime import timedelta
+
+            cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+
+            result = (
+                self._db.table("draft_context")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .gte("created_at", cutoff)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+
+            if result.data:
+                return self._row_to_context(result.data)
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Failed to get existing context: %s",
+                str(e),
+            )
+
+        return None
+
+    def _row_to_context(self, row: dict[str, Any]) -> DraftContext:
+        """Convert database row to DraftContext object."""
+        context = DraftContext(
+            id=row.get("id"),
+            user_id=row.get("user_id"),
+            email_id=row.get("email_id"),
+            thread_id=row.get("thread_id"),
+            sender_email=row.get("sender_email"),
+            subject=row.get("subject"),
+            sources_used=row.get("sources_used", []),
+            created_at=row.get("created_at"),
+        )
+
+        # Reconstruct nested objects
+        if row.get("thread_context"):
+            context.thread_context = ThreadContext(**row["thread_context"])
+        if row.get("recipient_research"):
+            context.recipient_research = RecipientResearch(**row["recipient_research"])
+        if row.get("recipient_style"):
+            context.recipient_style = RecipientWritingStyle(**row["recipient_style"])
+        if row.get("relationship_history"):
+            context.relationship_history = RelationshipHistory(**row["relationship_history"])
+        if row.get("corporate_memory"):
+            context.corporate_memory = CorporateMemoryContext(**row["corporate_memory"])
+        if row.get("calendar_context"):
+            context.calendar_context = CalendarContext(**row["calendar_context"])
+        if row.get("crm_context"):
+            context.crm_context = CRMContext(**row["crm_context"])
+
+        return context
+
+
+# ---------------------------------------------------------------------------
+# Singleton Access
+# ---------------------------------------------------------------------------
+
+_gatherer: EmailContextGatherer | None = None
+
+
+def get_email_context_gatherer() -> EmailContextGatherer:
+    """Get or create the EmailContextGatherer singleton.
+
+    Returns:
+        The EmailContextGatherer singleton instance.
+    """
+    global _gatherer
+    if _gatherer is None:
+        _gatherer = EmailContextGatherer()
+    return _gatherer
