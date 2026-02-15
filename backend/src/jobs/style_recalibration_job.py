@@ -294,48 +294,78 @@ async def _fetch_recent_sent_emails(user_id: str, days: int) -> list[dict[str, A
     try:
         db = SupabaseClient.get_client()
 
-        # Get email provider
+        # Get email provider and connection_id
+        # Prefer Outlook as it's more commonly working in enterprise
         result = (
             db.table("user_integrations")
-            .select("integration_type")
+            .select("integration_type, composio_connection_id")
             .eq("user_id", user_id)
-            .in_("integration_type", ["gmail", "outlook"])
-            .maybe_single()
+            .eq("integration_type", "outlook")
+            .limit(1)
             .execute()
         )
+
+        if not result.data:
+            # Fall back to Gmail
+            result = (
+                db.table("user_integrations")
+                .select("integration_type, composio_connection_id")
+                .eq("user_id", user_id)
+                .eq("integration_type", "gmail")
+                .limit(1)
+                .execute()
+            )
 
         if not result or not result.data:
             return []
 
-        provider = result.data.get("integration_type", "").lower()
+        integration = result.data[0]
+        provider = integration.get("integration_type", "").lower()
+        connection_id = integration.get("composio_connection_id")
 
-        from composio import ComposioToolSet
+        if not connection_id:
+            logger.warning(
+                "STYLE_RECALIBRATION: No connection_id for user %s",
+                user_id,
+            )
+            return []
 
-        toolset = ComposioToolSet()
-        entity = toolset.get_entity(id=user_id)
+        from src.integrations.oauth import get_oauth_client
+
+        oauth_client = get_oauth_client()
 
         since_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
         if provider == "outlook":
-            response = entity.execute(
-                action="OUTLOOK365_FETCH_EMAILS",
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
                 params={
-                    "folder": "sentitems",
-                    "start_date": since_date,
-                    "max_results": MAX_EMAILS_TO_ANALYZE,
+                    "mail_folder_id": "sentitems",
+                    "$top": MAX_EMAILS_TO_ANALYZE,
+                    "$filter": f"sentDateTime ge {since_date}",
                 },
+                user_id=user_id,
             )
+            if response.get("successful") and response.get("data"):
+                emails = response["data"].get("value", [])
+            else:
+                emails = []
         else:
-            response = entity.execute(
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
                 action="GMAIL_FETCH_EMAILS",
                 params={
                     "label": "SENT",
-                    "after": since_date,
                     "max_results": MAX_EMAILS_TO_ANALYZE,
                 },
+                user_id=user_id,
             )
+            if response.get("successful") and response.get("data"):
+                emails = response["data"].get("emails", [])
+            else:
+                emails = []
 
-        emails = response.get("emails", []) if isinstance(response, dict) else []
         return emails
 
     except Exception as e:

@@ -605,15 +605,28 @@ class EmailAnalyzer:
             List of email dicts.
         """
         try:
-            # Detect provider
+            # Get the email integration with connection_id
+            # Prefer Outlook as it's more commonly working in enterprise
+            # First try Outlook, then fall back to Gmail
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type")
+                .select("integration_type, composio_connection_id")
                 .eq("user_id", user_id)
-                .in_("integration_type", ["gmail", "outlook"])
-                .maybe_single()
+                .eq("integration_type", "outlook")
+                .limit(1)
                 .execute()
             )
+
+            if not result.data:
+                # Fall back to Gmail
+                result = (
+                    self._db.table("user_integrations")
+                    .select("integration_type, composio_connection_id")
+                    .eq("user_id", user_id)
+                    .eq("integration_type", "gmail")
+                    .limit(1)
+                    .execute()
+                )
 
             if not result or not result.data:
                 logger.warning(
@@ -622,49 +635,96 @@ class EmailAnalyzer:
                 )
                 return []
 
-            provider = result.data.get("integration_type", "").lower()
+            integration = result.data[0]
+            provider = integration.get("integration_type", "").lower()
+            connection_id = integration.get("composio_connection_id")
+
+            if not connection_id:
+                logger.warning(
+                    "EMAIL_ANALYZER: No connection_id for user %s provider %s",
+                    user_id,
+                    provider,
+                )
+                return []
+
             logger.info(
-                "EMAIL_ANALYZER: Detected email provider '%s' for user %s",
+                "EMAIL_ANALYZER: Detected email provider '%s' for user %s (connection: %s)",
                 provider,
                 user_id,
+                connection_id[:12] + "...",
             )
 
-            from composio import ComposioToolSet
+            from src.integrations.oauth import get_oauth_client
 
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            oauth_client = get_oauth_client()
 
             since_date = (datetime.now(UTC) - timedelta(hours=since_hours)).isoformat()
 
             if provider == "outlook":
                 logger.info(
-                    "EMAIL_ANALYZER: Using OUTLOOK365_FETCH_EMAILS (inbox) for user %s",
+                    "EMAIL_ANALYZER: Using OUTLOOK_LIST_MESSAGES for user %s",
                     user_id,
                 )
-                response = entity.execute(
-                    action="OUTLOOK365_FETCH_EMAILS",
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_LIST_MESSAGES",
                     params={
-                        "folder": "inbox",
-                        "start_date": since_date,
-                        "max_results": 200,
+                        "$top": 200,
+                        "$orderby": "receivedDateTime desc",
+                        "$filter": f"receivedDateTime ge {since_date}",
                     },
+                    user_id=user_id,
                 )
+                # Outlook returns messages in 'data.value'
+                if response.get("successful") and response.get("data"):
+                    raw_emails = response["data"].get("value", [])
+                    # Normalize Outlook format to match Gmail-style dict
+                    emails = []
+                    for msg in raw_emails:
+                        from_addr = msg.get("from", {}).get("emailAddress", {})
+                        body_content = msg.get("body", {}).get("content", "")
+                        emails.append({
+                            "id": msg.get("id"),
+                            "message_id": msg.get("internetMessageId"),
+                            "thread_id": msg.get("conversationId"),
+                            "subject": msg.get("subject", "(no subject)"),
+                            "body": body_content,
+                            "snippet": msg.get("bodyPreview", body_content[:200] if body_content else ""),
+                            "sender_email": from_addr.get("address", ""),
+                            "sender_name": from_addr.get("name", ""),
+                            "date": msg.get("receivedDateTime", ""),
+                        })
+                else:
+                    logger.warning(
+                        "EMAIL_ANALYZER: Outlook fetch failed: %s",
+                        response.get("error"),
+                    )
+                    emails = []
             else:
                 # Default to Gmail
                 logger.info(
-                    "EMAIL_ANALYZER: Using GMAIL_FETCH_EMAILS (inbox) for user %s",
+                    "EMAIL_ANALYZER: Using GMAIL_FETCH_EMAILS for user %s",
                     user_id,
                 )
-                response = entity.execute(
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
                     action="GMAIL_FETCH_EMAILS",
                     params={
                         "label": "INBOX",
-                        "after": since_date,
                         "max_results": 200,
                     },
+                    user_id=user_id,
                 )
+                # Gmail returns emails in 'data.emails'
+                if response.get("successful") and response.get("data"):
+                    emails = response["data"].get("emails", [])
+                else:
+                    logger.warning(
+                        "EMAIL_ANALYZER: Gmail fetch failed: %s",
+                        response.get("error"),
+                    )
+                    emails = []
 
-            emails = response.get("emails", []) if isinstance(response, dict) else []
             logger.info(
                 "EMAIL_ANALYZER: Composio returned %d inbox emails for user %s",
                 len(emails),

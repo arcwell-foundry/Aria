@@ -297,15 +297,14 @@ class DraftFeedbackTracker:
             Sent email dict if found, None otherwise.
         """
         try:
-            # Get user's email provider
-            provider = await self._get_email_provider(user_id)
-            if not provider:
+            # Get user's email provider and connection_id
+            provider, connection_id = await self._get_email_integration(user_id)
+            if not provider or not connection_id:
                 return None
 
-            from composio import ComposioToolSet
+            from src.integrations.oauth import get_oauth_client
 
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            oauth_client = get_oauth_client()
 
             recipient_email = draft.get("recipient_email", "").lower()
             subject = draft.get("subject", "")
@@ -315,25 +314,34 @@ class DraftFeedbackTracker:
             since_date = created_at[:10] if created_at else None
 
             if provider == "outlook":
-                response = entity.execute(
-                    action="OUTLOOK365_FETCH_EMAILS",
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
                     params={
-                        "folder": "sentitems",
-                        "start_date": since_date,
-                        "max_results": 50,
+                        "mail_folder_id": "sentitems",
+                        "$top": 50,
+                        "$filter": f"sentDateTime ge {since_date}" if since_date else None,
                     },
+                    user_id=user_id,
                 )
+                if response.get("successful") and response.get("data"):
+                    emails = response["data"].get("value", [])
+                else:
+                    emails = []
             else:
-                response = entity.execute(
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
                     action="GMAIL_FETCH_EMAILS",
                     params={
                         "label": "SENT",
-                        "after": since_date,
                         "max_results": 50,
                     },
+                    user_id=user_id,
                 )
-
-            emails = response.get("emails", []) if isinstance(response, dict) else []
+                if response.get("successful") and response.get("data"):
+                    emails = response["data"].get("emails", [])
+                else:
+                    emails = []
 
             # Look for matching email
             for email in emails:
@@ -383,28 +391,31 @@ class DraftFeedbackTracker:
                 # No client draft ID - assume exists (can't verify)
                 return True
 
-            provider = await self._get_email_provider(user_id)
-            if not provider:
+            provider, connection_id = await self._get_email_integration(user_id)
+            if not provider or not connection_id:
                 return True
 
-            from composio import ComposioToolSet
+            from src.integrations.oauth import get_oauth_client
 
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            oauth_client = get_oauth_client()
 
             if provider == "outlook":
-                response = entity.execute(
-                    action="OUTLOOK365_GET_DRAFT",
-                    params={"draft_id": client_draft_id},
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_GET_MESSAGE",
+                    params={"message_id": client_draft_id},
+                    user_id=user_id,
                 )
             else:
-                response = entity.execute(
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
                     action="GMAIL_GET_DRAFT",
                     params={"draft_id": client_draft_id},
+                    user_id=user_id,
                 )
 
             # If we get a response without error, draft exists
-            return bool(response and not response.get("error"))
+            return bool(response.get("successful") and response.get("data"))
 
         except Exception as e:
             logger.debug(
@@ -490,32 +501,51 @@ class DraftFeedbackTracker:
                 e,
             )
 
-    async def _get_email_provider(self, user_id: str) -> str | None:
-        """Get the email provider for a user.
+    async def _get_email_integration(
+        self, user_id: str
+    ) -> tuple[str | None, str | None]:
+        """Get the email provider and connection_id for a user.
 
         Args:
             user_id: The user ID.
 
         Returns:
-            'gmail' or 'outlook' or None.
+            Tuple of (provider, connection_id) or (None, None).
         """
         try:
+            # Prefer Outlook as it's more commonly working in enterprise
+            # First try Outlook, then fall back to Gmail
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type")
+                .select("integration_type, composio_connection_id")
                 .eq("user_id", user_id)
-                .in_("integration_type", ["gmail", "outlook"])
-                .maybe_single()
+                .eq("integration_type", "outlook")
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                return result.data.get("integration_type")
+            if not result.data:
+                # Fall back to Gmail
+                result = (
+                    self._db.table("user_integrations")
+                    .select("integration_type, composio_connection_id")
+                    .eq("user_id", user_id)
+                    .eq("integration_type", "gmail")
+                    .limit(1)
+                    .execute()
+                )
 
-            return None
+            if result and result.data:
+                integration = result.data[0]
+                return (
+                    integration.get("integration_type"),
+                    integration.get("composio_connection_id"),
+                )
+
+            return None, None
 
         except Exception:
-            return None
+            return None, None
 
 
 # ---------------------------------------------------------------------------

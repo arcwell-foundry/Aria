@@ -196,31 +196,67 @@ class ComposioOAuthClient:
         connection_id: str,
         action: str,
         params: dict[str, Any],
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute an action via Composio.
 
         Args:
             connection_id: The Composio connection nanoid.
-            action: The tool slug (e.g., 'gmail_send_email').
+            action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_LIST_MESSAGES').
             params: Parameters for the action.
+            user_id: Optional user/entity ID for the action.
 
         Returns:
-            Action result dict.
+            Action result dict with 'successful', 'data', and 'error' keys.
         """
 
         def _execute() -> Any:
-            return self._client.client.tools.execute(
-                tool_slug=action,
+            return self._client.tools.execute(
+                slug=action,
                 connected_account_id=connection_id,
+                user_id=user_id,
                 arguments=params,
+                dangerously_skip_version_check=True,
             )
 
         result = await asyncio.to_thread(_execute)
-        # The SDK returns various response types; normalize to dict
-        if hasattr(result, "model_dump"):
-            return dict(result.model_dump())
+        # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):
             return result
+        if hasattr(result, "model_dump"):
+            return dict(result.model_dump())
+        return {"result": str(result)}
+
+    def execute_action_sync(
+        self,
+        connection_id: str,
+        action: str,
+        params: dict[str, Any],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute an action via Composio (synchronous version).
+
+        Args:
+            connection_id: The Composio connection nanoid.
+            action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_LIST_MESSAGES').
+            params: Parameters for the action.
+            user_id: Optional user/entity ID for the action.
+
+        Returns:
+            Action result dict with 'successful', 'data', and 'error' keys.
+        """
+        result = self._client.tools.execute(
+            slug=action,
+            connected_account_id=connection_id,
+            user_id=user_id,
+            arguments=params,
+            dangerously_skip_version_check=True,
+        )
+        # The SDK returns a dict with 'successful', 'data', 'error' keys
+        if isinstance(result, dict):
+            return result
+        if hasattr(result, "model_dump"):
+            return dict(result.model_dump())
         return {"result": str(result)}
 
     async def close(self) -> None:

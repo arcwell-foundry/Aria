@@ -265,11 +265,6 @@ class EmailContextGatherer:
     ) -> ThreadContext | None:
         """Fetch full email thread via Composio."""
         try:
-            from composio import ComposioToolSet
-
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
-
             integration = await self._get_email_integration(user_id)
             if not integration:
                 logger.warning(
@@ -279,12 +274,25 @@ class EmailContextGatherer:
                 return None
 
             provider = integration.get("integration_type", "").lower()
+            connection_id = integration.get("composio_connection_id")
+
+            if not connection_id:
+                logger.warning(
+                    "CONTEXT_GATHERER: No connection_id for user %s",
+                    user_id,
+                )
+                return None
+
             messages: list[ThreadMessage] = []
 
             if provider == "outlook":
-                messages = await self._fetch_outlook_thread(entity, thread_id)
+                messages = await self._fetch_outlook_thread(
+                    user_id, connection_id, thread_id
+                )
             else:
-                messages = await self._fetch_gmail_thread(entity, thread_id)
+                messages = await self._fetch_gmail_thread(
+                    user_id, connection_id, thread_id
+                )
 
             if not messages:
                 logger.warning(
@@ -312,22 +320,28 @@ class EmailContextGatherer:
 
     async def _fetch_gmail_thread(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         thread_id: str,
     ) -> list[ThreadMessage]:
-        """Fetch Gmail thread using GMAIL_GET_THREAD."""
+        """Fetch Gmail thread using GMAIL_FETCH_MESSAGE_BY_THREAD_ID."""
+        from src.integrations.oauth import get_oauth_client
+
         messages: list[ThreadMessage] = []
 
         try:
-            response = entity.execute(
-                action="GMAIL_GET_THREAD",
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
                 params={"thread_id": thread_id},
+                user_id=user_id,
             )
 
-            if not response or not response.get("success"):
+            if not response.get("successful"):
                 logger.error(
-                    "CONTEXT_GATHERER: GMAIL_GET_THREAD failed: %s",
-                    response.get("error", "Unknown error") if response else "No response",
+                    "CONTEXT_GATHERER: GMAIL_FETCH_MESSAGE_BY_THREAD_ID failed: %s",
+                    response.get("error"),
                 )
                 return messages
 
@@ -367,26 +381,32 @@ class EmailContextGatherer:
 
     async def _fetch_outlook_thread(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         thread_id: str,
     ) -> list[ThreadMessage]:
         """Fetch Outlook conversation thread."""
+        from src.integrations.oauth import get_oauth_client
+
         messages: list[ThreadMessage] = []
 
         try:
-            response = entity.execute(
-                action="OUTLOOK365_LIST_MESSAGES",
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_LIST_MESSAGES",
                 params={
-                    "filter": f"conversationId eq '{thread_id}'",
-                    "orderby": "receivedDateTime asc",
-                    "top": 50,
+                    "$filter": f"conversationId eq '{thread_id}'",
+                    "$orderby": "receivedDateTime asc",
+                    "$top": 50,
                 },
+                user_id=user_id,
             )
 
-            if not response or not response.get("success"):
+            if not response.get("successful"):
                 logger.error(
-                    "CONTEXT_GATHERER: OUTLOOK365_LIST_MESSAGES failed: %s",
-                    response.get("error", "Unknown error") if response else "No response",
+                    "CONTEXT_GATHERER: OUTLOOK_LIST_MESSAGES failed: %s",
+                    response.get("error"),
                 )
                 return messages
 
@@ -470,13 +490,14 @@ class EmailContextGatherer:
         return getattr(self, "_cached_user_email", "")
 
     async def _get_email_integration(self, user_id: str) -> dict[str, Any] | None:
-        """Get user's email integration (Gmail or Outlook)."""
+        """Get user's email integration (Outlook or Gmail)."""
         try:
+            # Check Outlook first as it's more commonly working in enterprise
             result = (
                 self._db.table("user_integrations")
                 .select("*")
                 .eq("user_id", user_id)
-                .eq("integration_type", "gmail")
+                .eq("integration_type", "outlook")
                 .maybe_single()
                 .execute()
             )
@@ -487,7 +508,7 @@ class EmailContextGatherer:
                 self._db.table("user_integrations")
                 .select("*")
                 .eq("user_id", user_id)
-                .eq("integration_type", "outlook")
+                .eq("integration_type", "gmail")
                 .maybe_single()
                 .execute()
             )
@@ -864,10 +885,12 @@ Summary:"""
 
             from datetime import timedelta
 
-            from composio import ComposioToolSet
-
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            connection_id = calendar_integration.get("composio_connection_id")
+            if not connection_id:
+                logger.warning(
+                    "CONTEXT_GATHERER: No connection_id for calendar integration"
+                )
+                return context
 
             now = datetime.now(UTC)
             start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -877,11 +900,11 @@ Summary:"""
 
             if "google" in provider:
                 events = await self._fetch_google_calendar_events(
-                    entity, start_date, end_date, sender_email
+                    user_id, connection_id, start_date, end_date, sender_email
                 )
             else:
                 events = await self._fetch_outlook_calendar_events(
-                    entity, start_date, end_date, sender_email
+                    user_id, connection_id, start_date, end_date, sender_email
                 )
 
             for event in events:
@@ -940,25 +963,31 @@ Summary:"""
 
     async def _fetch_google_calendar_events(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         start_date: str,
         end_date: str,
         sender_email: str,
     ) -> list[dict[str, Any]]:
         """Fetch Google Calendar events involving the sender."""
+        from src.integrations.oauth import get_oauth_client
+
         events = []
 
         try:
-            response = entity.execute(
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
                 action="GOOGLECALENDAR_GET_EVENTS",
                 params={
                     "timeMin": f"{start_date}T00:00:00Z",
                     "timeMax": f"{end_date}T23:59:59Z",
                     "maxResults": 50,
                 },
+                user_id=user_id,
             )
 
-            if response and response.get("success"):
+            if response.get("successful"):
                 for event in response.get("data", {}).get("items", []):
                     attendees = event.get("attendees", [])
                     if any(
@@ -982,25 +1011,31 @@ Summary:"""
 
     async def _fetch_outlook_calendar_events(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         start_date: str,
         end_date: str,
         sender_email: str,
     ) -> list[dict[str, Any]]:
         """Fetch Outlook Calendar events involving the sender."""
+        from src.integrations.oauth import get_oauth_client
+
         events = []
 
         try:
-            response = entity.execute(
-                action="OUTLOOK365_CALENDAR_VIEW",
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_GET_CALENDAR_VIEW",
                 params={
                     "startDateTime": f"{start_date}T00:00:00Z",
                     "endDateTime": f"{end_date}T23:59:59Z",
-                    "top": 50,
+                    "$top": 50,
                 },
+                user_id=user_id,
             )
 
-            if response and response.get("success"):
+            if response.get("successful"):
                 for event in response.get("data", {}).get("value", []):
                     attendees = event.get("attendees", [])
                     if any(
@@ -1052,17 +1087,23 @@ Summary:"""
 
             context.connected = True
 
-            from composio import ComposioToolSet
-
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            connection_id = crm_integration.get("composio_connection_id")
+            if not connection_id:
+                logger.warning(
+                    "CONTEXT_GATHERER: No connection_id for CRM integration"
+                )
+                return context
 
             provider = crm_integration.get("integration_type", "").lower()
 
             if "salesforce" in provider:
-                await self._fetch_salesforce_context(entity, sender_email, context)
+                await self._fetch_salesforce_context(
+                    user_id, connection_id, sender_email, context
+                )
             elif "hubspot" in provider:
-                await self._fetch_hubspot_context(entity, sender_email, context)
+                await self._fetch_hubspot_context(
+                    user_id, connection_id, sender_email, context
+                )
 
             logger.info(
                 "CONTEXT_GATHERER: CRM context for %s - stage: %s",
@@ -1108,34 +1149,42 @@ Summary:"""
 
     async def _fetch_salesforce_context(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         sender_email: str,
         context: CRMContext,
     ) -> None:
         """Fetch Salesforce context for contact."""
+        from src.integrations.oauth import get_oauth_client
+
         try:
-            response = entity.execute(
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
                 action="SALESFORCE_SEARCH_RECORDS",
                 params={
                     "search_string": sender_email,
                 },
+                user_id=user_id,
             )
 
-            if response and response.get("success"):
+            if response.get("successful"):
                 records = response.get("data", {}).get("searchRecords", [])
 
                 for record in records:
                     if record.get("attributes", {}).get("type") == "Contact":
                         contact_id = record.get("Id")
 
-                        opp_response = entity.execute(
+                        opp_response = oauth_client.execute_action_sync(
+                            connection_id=connection_id,
                             action="SALESFORCE_QUERY",
                             params={
                                 "query": f"SELECT StageName, Amount FROM Opportunity WHERE ContactId = '{contact_id}' LIMIT 1",
                             },
+                            user_id=user_id,
                         )
 
-                        if opp_response and opp_response.get("success"):
+                        if opp_response.get("successful"):
                             opps = opp_response.get("data", {}).get("records", [])
                             if opps:
                                 context.lead_stage = opps[0].get("StageName")
@@ -1151,21 +1200,27 @@ Summary:"""
 
     async def _fetch_hubspot_context(
         self,
-        entity: Any,
+        user_id: str,
+        connection_id: str,
         sender_email: str,
         context: CRMContext,
     ) -> None:
         """Fetch HubSpot context for contact."""
+        from src.integrations.oauth import get_oauth_client
+
         try:
-            response = entity.execute(
+            oauth_client = get_oauth_client()
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
                 action="HUBSPOT_SEARCH_CONTACTS",
                 params={
                     "query": sender_email,
                     "limit": 1,
                 },
+                user_id=user_id,
             )
 
-            if response and response.get("success"):
+            if response.get("successful"):
                 contacts = response.get("data", {}).get("results", [])
 
                 if contacts:

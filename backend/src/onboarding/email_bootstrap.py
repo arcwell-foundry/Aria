@@ -373,15 +373,28 @@ class PriorityEmailIngestion:
             List of email dicts with: to, cc, subject, body, date, thread_id.
         """
         try:
-            # Detect provider from user_integrations
+            # Get provider and connection_id from user_integrations
+            # Prefer Outlook as it's more commonly working in enterprise
+            # First try Outlook, then fall back to Gmail
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type")
+                .select("integration_type, composio_connection_id")
                 .eq("user_id", user_id)
-                .in_("integration_type", ["gmail", "outlook"])
-                .maybe_single()
+                .eq("integration_type", "outlook")
+                .limit(1)
                 .execute()
             )
+
+            if not result.data:
+                # Fall back to Gmail
+                result = (
+                    self._db.table("user_integrations")
+                    .select("integration_type, composio_connection_id")
+                    .eq("user_id", user_id)
+                    .eq("integration_type", "gmail")
+                    .limit(1)
+                    .execute()
+                )
 
             if not result or not result.data:
                 logger.warning(
@@ -390,50 +403,80 @@ class PriorityEmailIngestion:
                 )
                 return []
 
-            provider = result.data.get("integration_type", "").lower()
+            integration = result.data[0]
+            provider = integration.get("integration_type", "").lower()
+            connection_id = integration.get("composio_connection_id")
+
+            if not connection_id:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: No connection_id for user %s provider %s",
+                    user_id,
+                    provider,
+                )
+                return []
+
             logger.info(
                 "EMAIL_BOOTSTRAP: Detected email provider '%s' for user %s",
                 provider,
                 user_id,
             )
 
-            from composio import ComposioToolSet
+            from src.integrations.oauth import get_oauth_client
 
-            toolset = ComposioToolSet()
-            entity = toolset.get_entity(id=user_id)
+            oauth_client = get_oauth_client()
 
             since_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
             # Use appropriate Composio action based on provider
             if provider == "outlook":
                 logger.info(
-                    "EMAIL_BOOTSTRAP: Using OUTLOOK365_FETCH_EMAILS for user %s",
+                    "EMAIL_BOOTSTRAP: Using OUTLOOK_LIST_MAIL_FOLDER_MESSAGES for user %s",
                     user_id,
                 )
-                response = entity.execute(
-                    action="OUTLOOK365_FETCH_EMAILS",
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
                     params={
-                        "folder": "sentitems",
-                        "start_date": since_date,
-                        "max_results": 500,
+                        "mail_folder_id": "sentitems",
+                        "$top": 500,
+                        "$filter": f"sentDateTime ge {since_date}",
                     },
+                    user_id=user_id,
                 )
+                # Outlook returns messages in 'data.value'
+                if response.get("successful") and response.get("data"):
+                    emails = response["data"].get("value", [])
+                else:
+                    logger.warning(
+                        "EMAIL_BOOTSTRAP: Outlook fetch failed: %s",
+                        response.get("error"),
+                    )
+                    emails = []
             else:
                 # Default to Gmail
                 logger.info(
                     "EMAIL_BOOTSTRAP: Using GMAIL_FETCH_EMAILS for user %s",
                     user_id,
                 )
-                response = entity.execute(
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
                     action="GMAIL_FETCH_EMAILS",
                     params={
                         "label": "SENT",
-                        "after": since_date,
                         "max_results": 500,
                     },
+                    user_id=user_id,
                 )
+                # Gmail returns emails in 'data.emails'
+                if response.get("successful") and response.get("data"):
+                    emails = response["data"].get("emails", [])
+                else:
+                    logger.warning(
+                        "EMAIL_BOOTSTRAP: Gmail fetch failed: %s",
+                        response.get("error"),
+                    )
+                    emails = []
 
-            emails = response.get("emails", []) if isinstance(response, dict) else []
             logger.info(
                 "EMAIL_BOOTSTRAP: Composio returned %d emails for user %s",
                 len(emails),
