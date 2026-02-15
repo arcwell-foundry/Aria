@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.onboarding.writing_analysis import (
+    RecipientWritingProfile,
     WritingAnalysisService,
     WritingStyleFingerprint,
 )
@@ -75,6 +76,57 @@ class TestWritingStyleFingerprint:
         assert fp.confidence == 0.4
         # defaults fill in
         assert fp.directness == 0.5
+
+
+class TestRecipientWritingProfile:
+    """Tests for the RecipientWritingProfile Pydantic model."""
+
+    def test_default_values(self):
+        """Test that required fields must be provided and defaults work."""
+        profile = RecipientWritingProfile(
+            recipient_email="sarah@example.com",
+        )
+        assert profile.recipient_email == "sarah@example.com"
+        assert profile.recipient_name is None
+        assert profile.relationship_type == "unknown"
+        assert profile.formality_level == 0.5
+        assert profile.average_message_length == 0
+        assert profile.greeting_style == ""
+        assert profile.signoff_style == ""
+        assert profile.tone == "balanced"
+        assert profile.uses_emoji is False
+        assert profile.email_count == 0
+        assert profile.last_email_date is None
+
+    def test_round_trip_serialization(self):
+        """Test model_dump and reconstruction preserve all fields."""
+        profile = RecipientWritingProfile(
+            recipient_email="dr.fischer@novartis.com",
+            recipient_name="Dr. Fischer",
+            relationship_type="external_executive",
+            formality_level=0.9,
+            average_message_length=185,
+            greeting_style="Dear Dr. Fischer,",
+            signoff_style="Regards,",
+            tone="formal",
+            uses_emoji=False,
+            email_count=12,
+            last_email_date="2026-02-10T14:30:00+00:00",
+        )
+        data = profile.model_dump()
+        restored = RecipientWritingProfile(**data)
+        assert restored == profile
+
+    def test_partial_construction(self):
+        """Test creating profile with minimal fields."""
+        profile = RecipientWritingProfile(
+            recipient_email="team@internal.com",
+            tone="casual",
+            email_count=5,
+        )
+        assert profile.tone == "casual"
+        assert profile.email_count == 5
+        assert profile.formality_level == 0.5  # default
 
 
 # --- Service tests ---

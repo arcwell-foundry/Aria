@@ -66,6 +66,26 @@ class WritingStyleFingerprint(BaseModel):
     confidence: float = 0.0  # How confident in the fingerprint (based on sample quality)
 
 
+class RecipientWritingProfile(BaseModel):
+    """Per-recipient writing style profile.
+
+    Captures how the user adapts their writing style for a specific
+    recipient, enabling ARIA to match tone per-contact.
+    """
+
+    recipient_email: str
+    recipient_name: str | None = None
+    relationship_type: str = "unknown"  # internal_team, external_executive, external_peer, vendor, new_contact
+    formality_level: float = 0.5  # 0=very casual, 1=very formal
+    average_message_length: int = 0  # words
+    greeting_style: str = ""  # e.g., "Hi Sarah,", "Dear Dr. Fischer,"
+    signoff_style: str = ""  # e.g., "Best,", "Thanks,", "Regards,"
+    tone: str = "balanced"  # warm, direct, formal, casual, balanced
+    uses_emoji: bool = False
+    email_count: int = 0
+    last_email_date: str | None = None  # ISO datetime string
+
+
 _ANALYSIS_PROMPT = """Analyze these writing samples from a life sciences professional \
 and extract their writing style fingerprint.
 
