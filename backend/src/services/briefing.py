@@ -107,6 +107,17 @@ class BriefingService:
             "competitive_intel": [],
         }
         empty_tasks: dict[str, Any] = {"overdue": [], "due_today": []}
+        empty_email: dict[str, Any] = {
+            "total_received": 0,
+            "needs_attention": [],
+            "fyi_count": 0,
+            "fyi_highlights": [],
+            "filtered_count": 0,
+            "filtered_reason": None,
+            "drafts_waiting": 0,
+            "drafts_high_confidence": 0,
+            "drafts_need_review": 0,
+        }
 
         try:
             calendar_data = await self._get_calendar_data(user_id, briefing_date)
@@ -136,8 +147,18 @@ class BriefingService:
             logger.warning("Failed to gather task data", extra={"user_id": user_id}, exc_info=True)
             task_data = empty_tasks
 
+        try:
+            email_data = await self._get_email_data(user_id)
+        except Exception:
+            logger.warning(
+                "Failed to gather email data", extra={"user_id": user_id}, exc_info=True
+            )
+            email_data = empty_email
+
         # Generate summary using LLM
-        summary = await self._generate_summary(calendar_data, lead_data, signal_data, task_data)
+        summary = await self._generate_summary(
+            calendar_data, lead_data, signal_data, task_data, email_data
+        )
 
         content: dict[str, Any] = {
             "summary": summary,
@@ -145,19 +166,18 @@ class BriefingService:
             "leads": lead_data,
             "signals": signal_data,
             "tasks": task_data,
+            "email_summary": email_data,
             "generated_at": datetime.now(UTC).isoformat(),
         }
 
         # Build rich content cards, UI commands, and suggestions
-        rich_content = self._build_rich_content(calendar_data, lead_data, signal_data, task_data)
-        briefing_ui_commands = self._build_briefing_ui_commands(
-            calendar_data, lead_data, signal_data
+        rich_content = self._build_rich_content(
+            calendar_data, lead_data, signal_data, task_data, email_data
         )
-        briefing_suggestions = [
-            "Focus on the critical meeting",
-            "Show me the buying signals",
-            "Update me on competitor activity",
-        ]
+        briefing_ui_commands = self._build_briefing_ui_commands(
+            calendar_data, lead_data, signal_data, email_data
+        )
+        briefing_suggestions = self._build_briefing_suggestions(email_data)
         content["rich_content"] = rich_content
         content["ui_commands"] = briefing_ui_commands
         content["suggestions"] = briefing_suggestions
@@ -267,6 +287,7 @@ class BriefingService:
         leads: dict[str, Any],
         signals: dict[str, Any],
         tasks: dict[str, Any],
+        email_data: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Build rich content cards from briefing data.
 
@@ -277,6 +298,8 @@ class BriefingService:
             calendar: Calendar data with key_meetings.
             leads: Lead data with hot_leads.
             signals: Signal data with competitive_intel.
+            tasks: Task data with overdue items.
+            email_data: Email data with needs_attention items.
             tasks: Task data with overdue items.
 
         Returns:
@@ -352,6 +375,7 @@ class BriefingService:
         calendar: dict[str, Any],
         leads: dict[str, Any],
         signals: dict[str, Any],
+        email_data: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Build UI commands for sidebar badges from briefing data.
 
@@ -362,6 +386,7 @@ class BriefingService:
             calendar: Calendar data with meeting_count.
             leads: Lead data with needs_attention list.
             signals: Signal data with competitive_intel, company_news, market_trends.
+            email_data: Email data with drafts_waiting, needs_attention.
 
         Returns:
             List of UI command dicts for sidebar badge updates.
@@ -373,6 +398,7 @@ class BriefingService:
             + len(signals.get("company_news", []))
             + len(signals.get("market_trends", []))
         )
+        drafts_waiting = email_data.get("drafts_waiting", 0)
 
         ui_commands: list[dict[str, Any]] = []
 
@@ -403,7 +429,45 @@ class BriefingService:
                 }
             )
 
+        if drafts_waiting > 0:
+            ui_commands.append(
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "communications",
+                    "badge_count": drafts_waiting,
+                }
+            )
+
         return ui_commands
+
+    def _build_briefing_suggestions(self, email_data: dict[str, Any]) -> list[str]:
+        """Build suggestion prompts based on briefing data.
+
+        Args:
+            email_data: Email data with drafts_waiting, needs_attention.
+
+        Returns:
+            List of suggestion strings for the user.
+        """
+        suggestions: list[str] = []
+
+        # Add email-related suggestions if there are drafts waiting
+        drafts_waiting = email_data.get("drafts_waiting", 0)
+        drafts_high_confidence = email_data.get("drafts_high_confidence", 0)
+
+        if drafts_waiting > 0 and drafts_high_confidence > 0:
+            suggestions.append(f"Review {drafts_high_confidence} high-confidence email drafts")
+        elif drafts_waiting > 0:
+            suggestions.append(f"Review {drafts_waiting} email drafts")
+
+        # Add default suggestions
+        suggestions.extend([
+            "Focus on the critical meeting",
+            "Show me the buying signals",
+            "Update me on competitor activity",
+        ])
+
+        return suggestions[:5]  # Limit to 5 suggestions
 
     async def _get_calendar_data(
         self,
@@ -743,6 +807,7 @@ class BriefingService:
         leads: dict[str, Any],
         signals: dict[str, Any],
         tasks: dict[str, Any],
+        email_data: dict[str, Any],
     ) -> str:
         """Generate executive summary using LLM.
 
@@ -751,6 +816,7 @@ class BriefingService:
             leads: Lead data dict.
             signals: Signal data dict.
             tasks: Task data dict.
+            email_data: Email data dict.
 
         Returns:
             Generated summary string.
@@ -759,7 +825,9 @@ class BriefingService:
         attention_count = len(leads.get("needs_attention", []))
         signal_count = len(signals.get("company_news", []))
         overdue_count = len(tasks.get("overdue", []))
-        total_activity = meeting_count + attention_count + signal_count + overdue_count
+        email_count = email_data.get("total_received", 0)
+        drafts_waiting = email_data.get("drafts_waiting", 0)
+        total_activity = meeting_count + attention_count + signal_count + overdue_count + email_count
 
         if total_activity == 0:
             prompt = (
@@ -776,6 +844,8 @@ Calendar: {meeting_count} meetings today
 Leads needing attention: {attention_count}
 New signals: {signal_count}
 Overdue tasks: {overdue_count}
+Emails received: {email_count}
+Drafts waiting for review: {drafts_waiting}
 
 Be concise and actionable. Start with "Good morning!"
 """

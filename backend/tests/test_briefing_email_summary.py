@@ -239,3 +239,132 @@ async def test_get_email_data_processes_inbox() -> None:
         assert len(result["needs_attention"]) == 1
         assert result["needs_attention"][0]["sender"] == "Sarah Chen"
         assert result["needs_attention"][0]["draft_confidence"] == "HIGH"
+
+
+# Test integration into generate_briefing
+
+@pytest.mark.asyncio
+async def test_generate_briefing_includes_email_summary() -> None:
+    """Test generate_briefing includes email_summary in content."""
+    with (
+        patch("src.services.briefing.SupabaseClient") as mock_db_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
+        patch("src.services.autonomous_draft_engine.AutonomousDraftEngine") as mock_engine_class,
+        patch("src.services.email_analyzer.EmailAnalyzer") as mock_analyzer_class,
+    ):
+        # Setup DB mock
+        mock_db = MagicMock()
+        mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(
+            data=[{"id": "briefing-123"}]
+        )
+        # No email integration
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Good morning!"
+        )
+
+        # Mock engine
+        mock_engine = MagicMock()
+        mock_engine.process_inbox = AsyncMock(return_value=MagicMock(
+            emails_scanned=0, drafts=[], drafts_generated=0, drafts_failed=0
+        ))
+        mock_engine_class.return_value = mock_engine
+
+        # Mock analyzer
+        mock_analyzer = MagicMock()
+        mock_analyzer.scan_inbox = AsyncMock(return_value=MagicMock(
+            total_emails=0, needs_reply=[], fyi=[], skipped=[]
+        ))
+        mock_analyzer_class.return_value = mock_analyzer
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+        result = await service.generate_briefing(user_id="test-user-123")
+
+        # Verify email_summary is included
+        assert "email_summary" in result
+        assert result["email_summary"]["total_received"] == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_briefing_includes_real_email_data() -> None:
+    """Test generate_briefing includes real email data when integration exists."""
+    with (
+        patch("src.services.briefing.SupabaseClient") as mock_db_class,
+        patch("src.services.briefing.LLMClient") as mock_llm_class,
+    ):
+        # Setup DB mock with simple mock chains
+        mock_db = MagicMock()
+
+        # Setup upsert mock
+        mock_upsert = MagicMock()
+        mock_upsert.return_value.execute.return_value = MagicMock(data=[{"id": "briefing-123"}])
+        mock_db.table.return_value.upsert = mock_upsert
+
+        # Setup select chains to return empty data for most queries
+        def make_empty_chain():
+            chain = MagicMock()
+            chain.eq.return_value = chain
+            chain.in_.return_value = chain
+            chain.gte.return_value = chain
+            chain.lte.return_value = chain
+            chain.lt.return_value = chain
+            chain.order.return_value = chain
+            chain.limit.return_value = chain
+            chain.maybe_single.return_value = chain
+            chain.is_.return_value = chain
+            chain.ilike.return_value = chain
+            chain.execute.return_value = MagicMock(data=None)
+            return chain
+
+        mock_db.table.return_value.select.return_value = make_empty_chain()
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_llm_class.return_value.generate_response = AsyncMock(
+            return_value="Good morning! You have emails to review."
+        )
+
+        from src.services.briefing import BriefingService
+
+        service = BriefingService()
+
+        # Mock _get_email_data to return real email data
+        email_data = {
+            "total_received": 15,
+            "needs_attention": [
+                {
+                    "sender": "John Smith",
+                    "company": "Biogen",
+                    "subject": "Re: Q3 Partnership",
+                    "summary": "Partnership discussion",
+                    "urgency": "NORMAL",
+                    "draft_status": "saved_to_drafts",
+                    "draft_confidence": "HIGH",
+                    "aria_notes": "Existing contact, high confidence",
+                    "draft_id": "draft-456",
+                }
+            ],
+            "fyi_count": 0,
+            "fyi_highlights": [],
+            "filtered_count": 0,
+            "filtered_reason": None,
+            "drafts_waiting": 1,
+            "drafts_high_confidence": 1,
+            "drafts_need_review": 0,
+        }
+
+        with patch.object(service, "_get_email_data", new_callable=AsyncMock) as mock_get_email:
+            mock_get_email.return_value = email_data
+
+            result = await service.generate_briefing(user_id="test-user-123")
+
+            # Verify real email data
+            assert result["email_summary"]["total_received"] == 15
+            assert result["email_summary"]["drafts_waiting"] == 1
+            assert result["email_summary"]["drafts_high_confidence"] == 1
+            assert len(result["email_summary"]["needs_attention"]) == 1

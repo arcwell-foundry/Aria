@@ -421,8 +421,9 @@ async def test_generate_summary_calls_llm_with_context(
         leads = {"needs_attention": ["lead-1", "lead-2"]}
         signals = {"company_news": ["news-1"]}
         tasks = {"overdue": ["task-1"]}
+        email_data = {"total_received": 5, "drafts_waiting": 2}
 
-        result = await service._generate_summary(calendar, leads, signals, tasks)
+        result = await service._generate_summary(calendar, leads, signals, tasks, email_data)
 
         # Verify LLM was called
         mock_llm_class.return_value.generate_response.assert_called_once()
@@ -677,5 +678,5 @@ async def test_get_signal_data_returns_categorized_signals() -> None:
         # Verify market_trends is empty (no matching signal types)
         assert len(result["market_trends"]) == 0
 
-        # Verify the market_signals table was queried
-        mock_db.table.assert_called_with("market_signals")
+        # Verify the market_signals table was queried (among other tables for Exa enrichment)
+        mock_db.table.assert_any_call("market_signals")
