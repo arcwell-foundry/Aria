@@ -567,11 +567,6 @@ Summary:"""
 
             exa = ExaEnrichmentProvider()
 
-            # Extract name parts for search
-            name_parts = (sender_name or "").split()
-            first_name = name_parts[0] if name_parts else ""
-            last_name = name_parts[-1] if len(name_parts) > 1 else ""
-
             # Extract company from email domain
             domain = sender_email.split("@")[-1] if "@" in sender_email else ""
             # Skip common email providers
@@ -867,8 +862,9 @@ Summary:"""
 
             context.connected = True
 
-            from composio import ComposioToolSet
             from datetime import timedelta
+
+            from composio import ComposioToolSet
 
             toolset = ComposioToolSet()
             entity = toolset.get_entity(id=user_id)
