@@ -328,7 +328,7 @@ class TestCreateWorkflow:
             assert data["name"] == "New Workflow"
 
     def test_create_workflow_validates_trigger(self, test_client: TestClient) -> None:
-        """Test POST /workflows returns 422 for invalid trigger."""
+        """Test POST /workflows returns 400 for invalid trigger."""
         response = test_client.post(
             "/api/v1/workflows/",
             json={
@@ -338,7 +338,7 @@ class TestCreateWorkflow:
                 "metadata": {"category": "productivity"},
             },
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == 400  # App custom handler returns 400 for validation errors
 
 
 # ---------------------------------------------------------------------------

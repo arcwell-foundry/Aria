@@ -88,7 +88,8 @@ def test_chat_endpoint_requires_message(test_client: TestClient) -> None:
         "/api/v1/chat",
         json={"conversation_id": "conv-123"},
     )
-    assert response.status_code == 422
+    # App has custom RequestValidationError handler returning 400
+    assert response.status_code == 400
 
 
 def test_chat_endpoint_generates_conversation_id(test_client: TestClient) -> None:

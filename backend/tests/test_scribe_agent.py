@@ -37,8 +37,8 @@ def test_scribe_agent_initializes_with_llm_and_user() -> None:
     assert isinstance(agent._templates, dict)
 
 
-def test_scribe_agent_registers_four_tools() -> None:
-    """Test ScribeAgent._register_tools returns dict with 4 tools."""
+def test_scribe_agent_registers_tools() -> None:
+    """Test ScribeAgent._register_tools returns dict with 5 tools."""
     from src.agents.scribe import ScribeAgent
 
     mock_llm = MagicMock()
@@ -46,11 +46,12 @@ def test_scribe_agent_registers_four_tools() -> None:
 
     tools = agent.tools
 
-    assert len(tools) == 4
+    assert len(tools) == 5
     assert "draft_email" in tools
     assert "draft_document" in tools
     assert "personalize" in tools
     assert "apply_template" in tools
+    assert "research_recipient" in tools
 
 
 def test_validate_input_accepts_valid_email_task() -> None:

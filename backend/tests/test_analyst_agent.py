@@ -85,8 +85,8 @@ def test_analyst_agent_initializes_with_llm_and_user() -> None:
     assert agent._research_cache == {}
 
 
-def test_analyst_agent_registers_four_tools() -> None:
-    """Test AnalystAgent._register_tools returns dict with 4 tools."""
+def test_analyst_agent_registers_tools() -> None:
+    """Test AnalystAgent._register_tools returns dict with all tools."""
     from src.agents.analyst import AnalystAgent
 
     mock_llm = MagicMock()
@@ -94,11 +94,13 @@ def test_analyst_agent_registers_four_tools() -> None:
 
     tools = agent.tools
 
-    assert len(tools) == 4
+    assert len(tools) == 6
     assert "pubmed_search" in tools
     assert "clinical_trials_search" in tools
     assert "fda_drug_search" in tools
     assert "chembl_search" in tools
+    assert "answer_question" in tools
+    assert "web_research" in tools
 
 
 # Task 5: PubMed article details fetcher tests

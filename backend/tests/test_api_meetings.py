@@ -229,7 +229,7 @@ def test_generate_brief_requires_meeting_time(test_client: TestClient) -> None:
             },
         )
 
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 400  # App custom handler returns 400 for validation errors
 
 
 def test_meetings_endpoints_require_authentication() -> None:

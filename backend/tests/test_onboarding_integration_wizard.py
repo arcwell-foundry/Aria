@@ -77,8 +77,13 @@ async def test_get_status_no_connections(
     chain = _build_chain([])
     mock_db.table.return_value = chain
 
-    with patch.object(
-        service, "_get_preferences", new_callable=AsyncMock, return_value=IntegrationPreferences()
+    with (
+        patch.object(
+            service, "_get_preferences", new_callable=AsyncMock, return_value=IntegrationPreferences()
+        ),
+        patch.object(
+            service, "_sync_composio_connections", new_callable=AsyncMock
+        ),
     ):
         status = await service.get_integration_status("user-123")
 

@@ -77,7 +77,7 @@ def test_submit_response_feedback_success(test_client: TestClient) -> None:
 
 
 def test_submit_response_feedback_invalid_rating(test_client: TestClient) -> None:
-    """Test POST /api/v1/feedback/response with invalid rating returns 422."""
+    """Test POST /api/v1/feedback/response with invalid rating returns 400."""
     response = test_client.post(
         "/api/v1/feedback/response",
         json={
@@ -87,7 +87,7 @@ def test_submit_response_feedback_invalid_rating(test_client: TestClient) -> Non
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400  # App custom handler returns 400 for validation errors
 
 
 def test_submit_general_feedback_success(test_client: TestClient) -> None:
@@ -135,7 +135,7 @@ def test_submit_general_feedback_success(test_client: TestClient) -> None:
 
 
 def test_submit_general_feedback_missing_message(test_client: TestClient) -> None:
-    """Test POST /api/v1/feedback/general without message returns 422."""
+    """Test POST /api/v1/feedback/general without message returns 400."""
     response = test_client.post(
         "/api/v1/feedback/general",
         json={
@@ -144,7 +144,7 @@ def test_submit_general_feedback_missing_message(test_client: TestClient) -> Non
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
 
 
 def test_submit_response_feedback_unauthorized() -> None:

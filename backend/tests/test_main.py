@@ -67,7 +67,7 @@ def test_login_validation_error(client: TestClient) -> None:
         "/api/v1/auth/login",
         json={"email": "invalid-email", "password": "password123"},
     )
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 400  # App custom handler returns 400 for validation errors
 
 
 def test_signup_validation_error(client: TestClient) -> None:
@@ -76,7 +76,7 @@ def test_signup_validation_error(client: TestClient) -> None:
         "/api/v1/auth/signup",
         json={"email": "test@example.com", "password": "short"},  # Password too short
     )
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 400
 
 
 def test_health_check_neo4j_not_configured(client: TestClient) -> None:

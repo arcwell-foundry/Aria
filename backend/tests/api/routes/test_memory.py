@@ -343,7 +343,8 @@ class TestQueryMemoryEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
         # Should fail validation - missing required q param
-        assert response.status_code in [401, 422]  # 401 if auth fails first, 422 if validation
+        # App custom handler returns 400 for validation errors
+        assert response.status_code in [401, 400]  # 401 if auth fails first, 400 if validation
 
 
 class TestQueryMemoryIntegration:
@@ -458,7 +459,7 @@ class TestQueryMemoryIntegration:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestCreateEpisodeRequestModel:
@@ -639,7 +640,7 @@ class TestStoreEpisodeEndpoint:
         assert "id" in data
 
     def test_store_episode_validation_error_empty_content(self, app_with_mocked_auth: Any) -> None:
-        """Test that empty content returns 422."""
+        """Test that empty content returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -651,12 +652,12 @@ class TestStoreEpisodeEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_episode_validation_error_empty_event_type(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that empty event_type returns 422."""
+        """Test that empty event_type returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -668,10 +669,10 @@ class TestStoreEpisodeEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_episode_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
-        """Test that missing required fields returns 422."""
+        """Test that missing required fields returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -683,7 +684,7 @@ class TestStoreEpisodeEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_episode_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
@@ -938,7 +939,7 @@ class TestStoreFactEndpoint:
         assert "id" in data
 
     def test_store_fact_validation_error_empty_subject(self, app_with_mocked_auth: Any) -> None:
-        """Test that empty subject returns 422."""
+        """Test that empty subject returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -951,10 +952,10 @@ class TestStoreFactEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_fact_validation_error_invalid_source(self, app_with_mocked_auth: Any) -> None:
-        """Test that invalid source returns 422."""
+        """Test that invalid source returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -968,12 +969,12 @@ class TestStoreFactEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_fact_validation_error_confidence_out_of_bounds(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that confidence > 1.0 returns 422."""
+        """Test that confidence > 1.0 returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -987,10 +988,10 @@ class TestStoreFactEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_fact_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
-        """Test that missing required fields returns 422."""
+        """Test that missing required fields returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1003,7 +1004,7 @@ class TestStoreFactEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_fact_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
@@ -1295,7 +1296,7 @@ class TestStoreTaskEndpoint:
         assert task.related_lead_id == "lead-xyz"
 
     def test_store_task_validation_error_empty_task(self, app_with_mocked_auth: Any) -> None:
-        """Test that empty task returns 422."""
+        """Test that empty task returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1308,12 +1309,12 @@ class TestStoreTaskEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_task_validation_error_invalid_trigger_type(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that invalid trigger_type returns 422."""
+        """Test that invalid trigger_type returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1326,10 +1327,10 @@ class TestStoreTaskEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_task_validation_error_invalid_priority(self, app_with_mocked_auth: Any) -> None:
-        """Test that invalid priority returns 422."""
+        """Test that invalid priority returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1343,10 +1344,10 @@ class TestStoreTaskEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_task_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
-        """Test that missing required fields returns 422."""
+        """Test that missing required fields returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1358,7 +1359,7 @@ class TestStoreTaskEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_task_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
@@ -1621,7 +1622,7 @@ class TestStoreWorkflowEndpoint:
     def test_store_workflow_validation_error_empty_workflow_name(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that empty workflow_name returns 422."""
+        """Test that empty workflow_name returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1634,12 +1635,12 @@ class TestStoreWorkflowEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_workflow_validation_error_empty_description(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that empty description returns 422."""
+        """Test that empty description returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1652,10 +1653,10 @@ class TestStoreWorkflowEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_workflow_validation_error_empty_steps(self, app_with_mocked_auth: Any) -> None:
-        """Test that empty steps list returns 422."""
+        """Test that empty steps list returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1668,10 +1669,10 @@ class TestStoreWorkflowEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_workflow_missing_required_fields(self, app_with_mocked_auth: Any) -> None:
-        """Test that missing required fields returns 422."""
+        """Test that missing required fields returns 400."""
         client = TestClient(app_with_mocked_auth)
 
         response = client.post(
@@ -1683,7 +1684,7 @@ class TestStoreWorkflowEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_store_workflow_storage_failure_returns_503(self, app_with_mocked_auth: Any) -> None:
         """Test that storage failure returns 503 Service Unavailable."""
@@ -2120,7 +2121,7 @@ class TestAnalyzeSampleEndpoint:
     def test_analyze_sample_validation_error_text_too_short(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that text too short returns 422."""
+        """Test that text too short returns 400."""
         client = TestClient(app_with_mocked_auth)
         response = client.post(
             "/api/v1/memory/fingerprint/analyze",
@@ -2131,12 +2132,12 @@ class TestAnalyzeSampleEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_analyze_sample_validation_error_invalid_text_type(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that invalid text_type returns 422."""
+        """Test that invalid text_type returns 400."""
         client = TestClient(app_with_mocked_auth)
         response = client.post(
             "/api/v1/memory/fingerprint/analyze",
@@ -2147,7 +2148,7 @@ class TestAnalyzeSampleEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_analyze_sample_service_unavailable(
         self, app_with_mocked_auth: Any, mock_digital_twin: Any
@@ -2365,7 +2366,7 @@ class TestScoreStyleMatchEndpoint:
     def test_score_style_match_validation_error_empty_text(
         self, app_with_mocked_auth: Any
     ) -> None:
-        """Test that empty text returns 422."""
+        """Test that empty text returns 400."""
         client = TestClient(app_with_mocked_auth)
         response = client.post(
             "/api/v1/memory/fingerprint/score",
@@ -2373,7 +2374,7 @@ class TestScoreStyleMatchEndpoint:
             headers={"Authorization": "Bearer test-token"},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_score_style_match_service_unavailable(
         self, app_with_mocked_auth: Any, mock_digital_twin: Any

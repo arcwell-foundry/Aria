@@ -261,8 +261,27 @@ class TestProcessInbox:
             urgent=[],
         )
 
-        # Make context gathering fail
+        # Make the entire _process_single_email fail so it counts as a draft failure
         engine._context_gatherer.gather_context.side_effect = Exception("API error")
+        # Mock the LLM to also fail (so fallback context path still fails)
+        engine._llm.generate_response.side_effect = Exception("LLM error")
+        engine._digital_twin.get_style_guidelines.side_effect = Exception("Twin error")
+
+        # Mock _check_existing_draft to return False (no existing draft)
+        engine._check_existing_draft = AsyncMock(return_value=False)
+        # Mock _is_active_conversation to return False
+        engine._is_active_conversation = AsyncMock(return_value=False)
+        # Mock _get_user_name to return a name
+        engine._get_user_name = AsyncMock(return_value="Test User")
+        # Mock _create_processing_run and _update_processing_run
+        engine._create_processing_run = AsyncMock()
+        engine._update_processing_run = AsyncMock()
+        # Mock activity service (non-blocking, should not affect flow)
+        engine._activity_service = AsyncMock()
+        # Mock learning mode to be inactive
+        engine._learning_mode = MagicMock()
+        engine._learning_mode.is_learning_mode_active = AsyncMock(return_value=False)
+
         engine._db.table().insert().execute = MagicMock()
         engine._db.table().update().eq().execute = MagicMock()
 

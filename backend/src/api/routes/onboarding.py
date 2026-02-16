@@ -1241,7 +1241,7 @@ async def activate_aria(
     logger.info("ARIA activated for user %s", user_id)
 
     # Fire all post-activation work as non-blocking background tasks
-    async def _run_post_activation(uid: str) -> None:
+    async def _run_post_activation(uid: str, onboarding_data: dict[str, Any]) -> None:
         """Run all post-activation pipelines, catching errors individually."""
         try:
             from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -1257,6 +1257,15 @@ async def activate_aria(
         except Exception as e:
             logger.warning("Memory construction failed: %s", e)
 
+        # Create agent activation goals BEFORE running the pipeline that executes them
+        try:
+            from src.onboarding.activation import OnboardingCompletionOrchestrator
+
+            activator = OnboardingCompletionOrchestrator()
+            await activator.activate(uid, onboarding_data)
+        except Exception as e:
+            logger.warning("Agent activation (goal creation) failed: %s", e)
+
         try:
             from src.onboarding.activation import OnboardingCompletionOrchestrator
 
@@ -1264,7 +1273,7 @@ async def activate_aria(
         except Exception as e:
             logger.warning("Post-activation pipeline failed: %s", e)
 
-    asyncio.create_task(_run_post_activation(user_id))
+    asyncio.create_task(_run_post_activation(user_id, state.get("step_data", {})))
 
     return {"status": "activated", "redirect": "/dashboard"}
 

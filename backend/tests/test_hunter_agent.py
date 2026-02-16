@@ -37,8 +37,8 @@ def test_hunter_agent_initializes_with_llm_and_user() -> None:
     assert agent._company_cache == {}
 
 
-def test_hunter_agent_registers_four_tools() -> None:
-    """Test HunterAgent._register_tools returns dict with 4 tools."""
+def test_hunter_agent_registers_tools() -> None:
+    """Test HunterAgent._register_tools returns dict with 6 tools."""
     from src.agents.hunter import HunterAgent
 
     mock_llm = MagicMock()
@@ -46,11 +46,13 @@ def test_hunter_agent_registers_four_tools() -> None:
 
     tools = agent.tools
 
-    assert len(tools) == 4
+    assert len(tools) == 6
     assert "search_companies" in tools
     assert "enrich_company" in tools
     assert "find_contacts" in tools
     assert "score_fit" in tools
+    assert "find_similar_companies" in tools
+    assert "search_territory_leads" in tools
 
 
 def test_validate_input_accepts_valid_task() -> None:

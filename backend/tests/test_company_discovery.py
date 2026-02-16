@@ -336,19 +336,40 @@ class TestSubmitCompanyDiscovery:
         assert result["type"] == "email_validation"
         assert "corporate email" in result["error"].lower()
 
-    async def test_non_life_sciences_waitlisted(self, service, mock_db, mock_llm):
-        """Non-life sciences company is added to waitlist."""
+    async def test_non_life_sciences_still_succeeds(self, service, mock_db, mock_llm):
+        """Non-life sciences company still goes through (gate is informational, not blocking)."""
         mock_llm.generate_response.return_value = json.dumps(
             {"is_life_sciences": False, "confidence": 0.85, "reasoning": "Tech company"}
         )
-        mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[])
+        # Mock no existing company
+        mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.side_effect = [
+            MagicMock(data=None),  # check_existing_company
+        ]
+        # Mock company creation
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": "new-id",
+                    "name": "Tech Corp",
+                    "domain": "techcorp.io",
+                    "settings": {},
+                }
+            ]
+        )
 
         with (
             patch("src.onboarding.company_discovery.LLMClient", return_value=mock_llm),
             patch(
                 "src.onboarding.company_discovery.SupabaseClient.get_client", return_value=mock_db
             ),
+            patch("src.onboarding.company_discovery.EpisodicMemory") as mock_memory,
+            patch("src.onboarding.orchestrator.OnboardingOrchestrator") as mock_orch,
         ):
+            mock_memory_instance = AsyncMock()
+            mock_memory.return_value = mock_memory_instance
+            mock_orch_instance = AsyncMock()
+            mock_orch.return_value = mock_orch_instance
+
             result = await service.submit_company_discovery(
                 user_id="user-123",
                 company_name="Tech Corp",
@@ -356,11 +377,10 @@ class TestSubmitCompanyDiscovery:
                 email="user@techcorp.io",
             )
 
-        assert result["success"] is False
-        assert result["type"] == "vertical_mismatch"
-        assert result["error"] == "life_sciences_gate"
-        assert "waitlist" in result["message"].lower()
-        assert "life sciences" in result["message"].lower()
+        # Gate no longer blocks; company is created regardless
+        assert result["success"] is True
+        assert result["company"]["id"] == "new-id"
+        assert result["enrichment_status"] == "queued"
 
     async def test_existing_company_cross_user_acceleration(self, service, mock_db, mock_llm):
         """User #2+ gets linked to existing company."""

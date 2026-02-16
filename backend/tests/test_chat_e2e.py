@@ -296,6 +296,12 @@ class TestLLMCalledWithSystemPrompt:
             return_value="Be direct and concise. Avoid jargon."
         )
 
+        # Ensure companion orchestrator is disabled so fallback to digital twin is used
+        service._companion_orchestrator = MagicMock()
+        service._companion_orchestrator.build_full_context = AsyncMock(
+            side_effect=Exception("companion disabled for test")
+        )
+
         await _run_process_message(service)
 
         call_kwargs = mocks["llm_generate"].call_args.kwargs

@@ -161,13 +161,12 @@ class TestCheckExistingDraft:
         """Returns True when a draft exists for the thread."""
         engine = AutonomousDraftEngine()
 
-        # Create a proper async mock response
-        async def mock_execute():
-            return MagicMock(data={"id": "draft-123"})
+        # Create a sync mock response (supabase client is synchronous)
+        mock_execute_result = MagicMock(data={"id": "draft-123"})
 
         # Build the mock chain
         mock_maybe_single = MagicMock()
-        mock_maybe_single.execute = mock_execute
+        mock_maybe_single.execute = MagicMock(return_value=mock_execute_result)
 
         mock_in = MagicMock()
         mock_in.maybe_single = MagicMock(return_value=mock_maybe_single)
@@ -254,17 +253,16 @@ class TestIsActiveConversation:
         """Returns True when 3+ messages from 2+ senders in last hour."""
         engine = AutonomousDraftEngine()
 
-        # Create a proper async mock response
-        async def mock_execute():
-            return MagicMock(data=[
-                {"sender_email": "alice@example.com", "scanned_at": datetime.now(UTC).isoformat()},
-                {"sender_email": "bob@example.com", "scanned_at": datetime.now(UTC).isoformat()},
-                {"sender_email": "alice@example.com", "scanned_at": datetime.now(UTC).isoformat()},
-            ])
+        # Create a sync mock response (supabase client is synchronous)
+        mock_execute_result = MagicMock(data=[
+            {"sender_email": "alice@example.com", "scanned_at": datetime.now(UTC).isoformat()},
+            {"sender_email": "bob@example.com", "scanned_at": datetime.now(UTC).isoformat()},
+            {"sender_email": "alice@example.com", "scanned_at": datetime.now(UTC).isoformat()},
+        ])
 
         # Build the mock chain
         mock_order = MagicMock()
-        mock_order.execute = mock_execute
+        mock_order.execute = MagicMock(return_value=mock_execute_result)
 
         mock_gte = MagicMock()
         mock_gte.order = MagicMock(return_value=mock_order)

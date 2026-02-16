@@ -215,7 +215,7 @@ async def test_execute_action(mock_composio):
 
     mock_result = MagicMock()
     mock_result.model_dump.return_value = {"success": True, "data": {"id": "msg-1"}}
-    mock_composio.client.tools.execute.return_value = mock_result
+    mock_composio.tools.execute.return_value = mock_result
 
     result = await client.execute_action(
         connection_id="conn-1",
@@ -224,10 +224,12 @@ async def test_execute_action(mock_composio):
     )
 
     assert result == {"success": True, "data": {"id": "msg-1"}}
-    mock_composio.client.tools.execute.assert_called_once_with(
-        tool_slug="gmail_send_email",
+    mock_composio.tools.execute.assert_called_once_with(
+        slug="gmail_send_email",
         connected_account_id="conn-1",
+        user_id=None,
         arguments={"to": "test@example.com", "body": "Hello"},
+        dangerously_skip_version_check=True,
     )
 
 
