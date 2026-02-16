@@ -6,6 +6,8 @@ export { BattleCardDetail } from './BattleCardDetail';
 export { CommunicationsPage } from './CommunicationsPage';
 export { DraftDetailPage } from './DraftDetailPage';
 export { ActionsPage } from './ActionsPage';
+export { ActivityPage } from './ActivityPage';
+export { AnalyticsPage } from './AnalyticsPage';
 export { SettingsPage } from './SettingsPage';
 export { LoginPage } from './LoginPage';
 export { SignupPage } from './SignupPage';

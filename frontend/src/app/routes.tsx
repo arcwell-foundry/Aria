@@ -9,6 +9,8 @@ import {
   IntelligencePage,
   CommunicationsPage,
   ActionsPage,
+  ActivityPage,
+  AnalyticsPage,
   SettingsPage,
   OnboardingPage,
 } from '@/components/pages';
@@ -48,6 +50,8 @@ export function AppRoutes() {
         <Route path="communications/drafts/:draftId" element={<CommunicationsPage />} />
         <Route path="actions" element={<ActionsPage />} />
         <Route path="actions/goals/:goalId" element={<ActionsPage />} />
+        <Route path="activity" element={<ActivityPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/:section" element={<SettingsPage />} />
       </Route>
