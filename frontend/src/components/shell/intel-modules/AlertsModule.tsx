@@ -1,4 +1,5 @@
 import { AlertTriangle, Clock, UserX } from 'lucide-react';
+import { useSignals, formatRelativeTime } from '@/hooks/useIntelPanelData';
 
 interface Alert {
   severity: 'critical' | 'warning' | 'info';
@@ -6,27 +7,6 @@ interface Alert {
   source: string;
   time: string;
 }
-
-const PLACEHOLDER_ALERTS: Alert[] = [
-  {
-    severity: 'critical',
-    message: 'Lonza deal velocity dropped 40% — champion unresponsive',
-    source: 'Analyst',
-    time: '2h ago',
-  },
-  {
-    severity: 'warning',
-    message: 'Catalent RFP deadline in 3 days — proposal not started',
-    source: 'Strategist',
-    time: '4h ago',
-  },
-  {
-    severity: 'info',
-    message: 'BioConnect champion went silent (14 days)',
-    source: 'Scout',
-    time: '1d ago',
-  },
-];
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: 'var(--critical)',
@@ -40,11 +20,62 @@ const SEVERITY_ICONS: Record<string, typeof AlertTriangle> = {
   info: UserX,
 };
 
+function mapSignalToSeverity(signalType: string): 'critical' | 'warning' | 'info' {
+  const critical = ['deal_risk', 'champion_silent', 'deadline_approaching', 'competitor_threat'];
+  const warning = ['price_change', 'engagement_drop', 'timeline_risk', 'budget_risk'];
+  if (critical.includes(signalType)) return 'critical';
+  if (warning.includes(signalType)) return 'warning';
+  return 'info';
+}
+
+function AlertsSkeleton() {
+  return (
+    <div className="space-y-2">
+      <div className="h-3 w-24 rounded bg-[var(--border)] animate-pulse" />
+      <div className="h-16 rounded-lg bg-[var(--border)] animate-pulse" />
+      <div className="h-16 rounded-lg bg-[var(--border)] animate-pulse" />
+      <div className="h-16 rounded-lg bg-[var(--border)] animate-pulse" />
+    </div>
+  );
+}
+
 export interface AlertsModuleProps {
   alerts?: Alert[];
 }
 
-export function AlertsModule({ alerts = PLACEHOLDER_ALERTS }: AlertsModuleProps) {
+export function AlertsModule({ alerts: propAlerts }: AlertsModuleProps) {
+  const { data: signals, isLoading } = useSignals({ limit: 5 });
+
+  if (isLoading && !propAlerts) return <AlertsSkeleton />;
+
+  const alerts: Alert[] = propAlerts ?? (signals ?? []).map((s) => ({
+    severity: mapSignalToSeverity(s.signal_type),
+    message: s.content,
+    source: s.source ?? 'ARIA',
+    time: formatRelativeTime(s.created_at),
+  }));
+
+  if (alerts.length === 0) {
+    return (
+      <div data-aria-id="intel-alerts" className="space-y-2">
+        <h3
+          className="font-sans text-[11px] font-medium uppercase tracking-wider mb-3"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Pipeline Alerts
+        </h3>
+        <div
+          className="rounded-lg border p-4"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+        >
+          <p className="font-sans text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+            No active alerts. ARIA is monitoring your pipeline.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-aria-id="intel-alerts" className="space-y-2">
       <h3

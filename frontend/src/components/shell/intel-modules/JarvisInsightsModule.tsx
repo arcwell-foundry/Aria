@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Zap, Shield, TrendingUp, ThumbsUp, ThumbsDown, Clock } from 'lucide-react';
+import { useIntelligenceInsights, useInsightFeedback } from '@/hooks/useIntelPanelData';
 
 interface JarvisInsightData {
   id: string;
@@ -8,30 +9,6 @@ interface JarvisInsightData {
   confidence: number;
   time_horizon: string | null;
 }
-
-const PLACEHOLDER_INSIGHTS: JarvisInsightData[] = [
-  {
-    id: '1',
-    content: 'Lonza Q2 capacity expansion creates window for renegotiating supply terms before competitors react',
-    classification: 'opportunity',
-    confidence: 0.87,
-    time_horizon: 'short_term',
-  },
-  {
-    id: '2',
-    content: 'FDA advisory committee vote on biosimilar pathway may impact 3 active pipeline deals',
-    classification: 'threat',
-    confidence: 0.72,
-    time_horizon: 'medium_term',
-  },
-  {
-    id: '3',
-    content: 'Cross-domain connection detected between Catalent logistics delay and Lonza opportunity',
-    classification: 'neutral',
-    confidence: 0.65,
-    time_horizon: null,
-  },
-];
 
 const CLASSIFICATION_STYLES: Record<string, { color: string; icon: typeof Zap }> = {
   opportunity: { color: 'var(--success)', icon: TrendingUp },
@@ -46,17 +23,63 @@ const HORIZON_LABELS: Record<string, string> = {
   long_term: 'Long-term',
 };
 
+function JarvisInsightsSkeleton() {
+  return (
+    <div className="space-y-2">
+      <div className="h-3 w-32 rounded bg-[var(--border)] animate-pulse" />
+      <div className="space-y-2">
+        <div className="h-24 rounded-lg bg-[var(--border)] animate-pulse" />
+        <div className="h-24 rounded-lg bg-[var(--border)] animate-pulse" />
+        <div className="h-24 rounded-lg bg-[var(--border)] animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 export interface JarvisInsightsModuleProps {
   insights?: JarvisInsightData[];
 }
 
-export function JarvisInsightsModule({ insights = PLACEHOLDER_INSIGHTS }: JarvisInsightsModuleProps) {
+export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsModuleProps) {
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, string>>({});
+  const { data: apiInsights, isLoading } = useIntelligenceInsights({ limit: 5 });
+  const feedbackMutation = useInsightFeedback();
+
+  if (isLoading && !propInsights) return <JarvisInsightsSkeleton />;
+
+  const insights: JarvisInsightData[] = propInsights ?? (apiInsights ?? []).map((i) => ({
+    id: i.id,
+    content: i.content,
+    classification: i.classification,
+    confidence: i.confidence,
+    time_horizon: i.time_horizon,
+  }));
 
   const handleFeedback = (insightId: string, feedback: string) => {
     setFeedbackGiven((prev) => ({ ...prev, [insightId]: feedback }));
-    // In production, this would call PATCH /intelligence/insights/{id}/feedback
+    feedbackMutation.mutate({ insightId, feedback });
   };
+
+  if (insights.length === 0) {
+    return (
+      <div data-aria-id="intel-jarvis-insights" className="space-y-2">
+        <h3
+          className="font-sans text-[11px] font-medium uppercase tracking-wider mb-3"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Intelligence Insights
+        </h3>
+        <div
+          className="rounded-lg border p-4"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+        >
+          <p className="font-sans text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+            No intelligence insights yet. ARIA&apos;s Jarvis engine is analyzing your market.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-aria-id="intel-jarvis-insights" className="space-y-2">
@@ -178,7 +201,7 @@ export function JarvisInsightsModule({ insights = PLACEHOLDER_INSIGHTS }: Jarvis
                         className="font-mono text-[10px]"
                         style={{ color: 'var(--text-secondary)' }}
                       >
-                        {hasFeedback === 'helpful' ? 'Noted' : 'Noted'}
+                        Noted
                       </span>
                     )}
                   </div>

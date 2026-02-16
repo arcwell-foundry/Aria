@@ -1,4 +1,5 @@
 import { AgentAvatar } from '@/components/common/AgentAvatar';
+import { useIntelGoals } from '@/hooks/useIntelPanelData';
 
 interface AgentStatus {
   name: string;
@@ -6,26 +7,64 @@ interface AgentStatus {
   task: string;
 }
 
-const PLACEHOLDER_AGENTS: AgentStatus[] = [
-  { name: 'Hunter', status: 'active', task: 'Scanning 12 job boards for expansion signals' },
-  { name: 'Analyst', status: 'active', task: 'Processing Lonza Q4 financials' },
-  { name: 'Strategist', status: 'idle', task: 'Waiting for Analyst output' },
-  { name: 'Scribe', status: 'active', task: 'Drafting Catalent follow-up email' },
-  { name: 'Operator', status: 'idle', task: 'No pending tasks' },
-  { name: 'Scout', status: 'active', task: 'Monitoring 23 LinkedIn profiles' },
-];
-
 const STATUS_COLORS: Record<string, string> = {
   active: 'var(--success)',
   idle: 'var(--text-secondary)',
   error: 'var(--critical)',
 };
 
+const ALL_AGENTS = ['Hunter', 'Analyst', 'Strategist', 'Scribe', 'Operator', 'Scout'];
+
+function AgentStatusSkeleton() {
+  return (
+    <div className="space-y-2">
+      <div className="h-3 w-24 rounded bg-[var(--border)] animate-pulse" />
+      <div className="space-y-1">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-10 rounded bg-[var(--border)] animate-pulse" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export interface AgentStatusModuleProps {
   agents?: AgentStatus[];
 }
 
-export function AgentStatusModule({ agents = PLACEHOLDER_AGENTS }: AgentStatusModuleProps) {
+export function AgentStatusModule({ agents: propAgents }: AgentStatusModuleProps) {
+  const { data: goals, isLoading } = useIntelGoals('active');
+
+  if (isLoading && !propAgents) return <AgentStatusSkeleton />;
+
+  let agents: AgentStatus[];
+  if (propAgents) {
+    agents = propAgents;
+  } else {
+    const activeAgentMap = new Map<string, string>();
+
+    if (goals) {
+      for (const goal of goals) {
+        if (goal.goal_agents) {
+          for (const ga of goal.goal_agents) {
+            const agentName = ga.agent_type.charAt(0).toUpperCase() + ga.agent_type.slice(1).toLowerCase();
+            if (ga.status === 'running' || ga.status === 'pending') {
+              activeAgentMap.set(agentName, goal.title);
+            }
+          }
+        }
+      }
+    }
+
+    agents = ALL_AGENTS.map((name) => {
+      const task = activeAgentMap.get(name);
+      if (task) {
+        return { name, status: 'active' as const, task };
+      }
+      return { name, status: 'idle' as const, task: 'No active tasks' };
+    });
+  }
+
   return (
     <div data-aria-id="intel-agent-status" className="space-y-2">
       <h3

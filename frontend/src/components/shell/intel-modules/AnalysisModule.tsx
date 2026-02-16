@@ -1,4 +1,5 @@
 import { BarChart3 } from 'lucide-react';
+import { useIntelDrafts } from '@/hooks/useIntelPanelData';
 
 interface CommStats {
   openRate: number;
@@ -7,18 +8,63 @@ interface CommStats {
   trend: string;
 }
 
-const PLACEHOLDER_STATS: CommStats = {
-  openRate: 68,
-  replyRate: 34,
-  avgResponseTime: '4.2 hours',
-  trend: 'Reply rates up 12% since adopting ARIA suggestions',
-};
+function AnalysisSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="h-3 w-36 rounded bg-[var(--border)] animate-pulse" />
+      <div className="h-32 rounded-lg bg-[var(--border)] animate-pulse" />
+    </div>
+  );
+}
 
 export interface AnalysisModuleProps {
   stats?: CommStats;
 }
 
-export function AnalysisModule({ stats = PLACEHOLDER_STATS }: AnalysisModuleProps) {
+export function AnalysisModule({ stats: propStats }: AnalysisModuleProps) {
+  const { data: drafts, isLoading } = useIntelDrafts();
+
+  if (isLoading && !propStats) return <AnalysisSkeleton />;
+
+  let stats: CommStats;
+  if (propStats) {
+    stats = propStats;
+  } else if (drafts && drafts.length > 0) {
+    const total = drafts.length;
+    const sent = drafts.filter((d) => d.status === 'sent').length;
+    const sentRate = total > 0 ? Math.round((sent / total) * 100) : 0;
+    const avgScore = drafts.reduce((sum, d) => sum + (d.style_match_score ?? 0), 0);
+    const avgMatch = total > 0 ? Math.round(avgScore / total) : 0;
+
+    stats = {
+      openRate: sentRate,
+      replyRate: avgMatch,
+      avgResponseTime: `${total} drafts`,
+      trend: sent > 0
+        ? `${sent} of ${total} drafts sent. Average style match: ${avgMatch}%.`
+        : `${total} drafts created. None sent yet.`,
+    };
+  } else {
+    return (
+      <div data-aria-id="intel-analysis" className="space-y-3">
+        <h3
+          className="font-sans text-[11px] font-medium uppercase tracking-wider"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Communication Analysis
+        </h3>
+        <div
+          className="rounded-lg border p-4"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+        >
+          <p className="font-sans text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+            No communication data yet. Metrics will appear as ARIA drafts and sends emails.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-aria-id="intel-analysis" className="space-y-3">
       <h3
@@ -43,7 +89,7 @@ export function AnalysisModule({ stats = PLACEHOLDER_STATS }: AnalysisModuleProp
               {stats.openRate}%
             </p>
             <p className="font-mono text-[9px] uppercase" style={{ color: 'var(--text-secondary)' }}>
-              Open Rate
+              Sent Rate
             </p>
           </div>
           <div>
@@ -51,7 +97,7 @@ export function AnalysisModule({ stats = PLACEHOLDER_STATS }: AnalysisModuleProp
               {stats.replyRate}%
             </p>
             <p className="font-mono text-[9px] uppercase" style={{ color: 'var(--text-secondary)' }}>
-              Reply Rate
+              Style Match
             </p>
           </div>
           <div>
@@ -59,7 +105,7 @@ export function AnalysisModule({ stats = PLACEHOLDER_STATS }: AnalysisModuleProp
               {stats.avgResponseTime}
             </p>
             <p className="font-mono text-[9px] uppercase" style={{ color: 'var(--text-secondary)' }}>
-              Avg Response
+              Total
             </p>
           </div>
         </div>

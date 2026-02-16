@@ -1,4 +1,5 @@
 import { Newspaper } from 'lucide-react';
+import { useSignals, formatRelativeTime } from '@/hooks/useIntelPanelData';
 
 interface NewsItem {
   headline: string;
@@ -7,26 +8,53 @@ interface NewsItem {
   impact: string;
 }
 
-const PLACEHOLDER_NEWS: NewsItem[] = [
-  {
-    headline: 'FDA approves new biologics pathway — potential impact on CMO demand',
-    source: 'BioPharma Dive',
-    time: '3h ago',
-    impact: 'Your pipeline accounts may accelerate procurement timelines',
-  },
-  {
-    headline: 'Life Sciences M&A activity up 23% QoQ',
-    source: 'FiercePharma',
-    time: '8h ago',
-    impact: 'Watch for consolidation among mid-tier CDMO prospects',
-  },
-];
+function NewsAlertsSkeleton() {
+  return (
+    <div className="space-y-2">
+      <div className="h-3 w-24 rounded bg-[var(--border)] animate-pulse" />
+      <div className="h-24 rounded-lg bg-[var(--border)] animate-pulse" />
+      <div className="h-24 rounded-lg bg-[var(--border)] animate-pulse" />
+    </div>
+  );
+}
 
 export interface NewsAlertsModuleProps {
   news?: NewsItem[];
 }
 
-export function NewsAlertsModule({ news = PLACEHOLDER_NEWS }: NewsAlertsModuleProps) {
+export function NewsAlertsModule({ news: propNews }: NewsAlertsModuleProps) {
+  const { data: signals, isLoading } = useSignals({ limit: 5 });
+
+  if (isLoading && !propNews) return <NewsAlertsSkeleton />;
+
+  const news: NewsItem[] = propNews ?? (signals ?? []).map((s) => ({
+    headline: s.content,
+    source: s.source ?? 'Market Intelligence',
+    time: formatRelativeTime(s.created_at),
+    impact: s.company_name ? `Relevant to ${s.company_name}` : 'Relevant to your pipeline',
+  }));
+
+  if (news.length === 0) {
+    return (
+      <div data-aria-id="intel-news" className="space-y-2">
+        <h3
+          className="font-sans text-[11px] font-medium uppercase tracking-wider mb-3"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Industry News
+        </h3>
+        <div
+          className="rounded-lg border p-4"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+        >
+          <p className="font-sans text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+            No industry news yet. ARIA is monitoring your market.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-aria-id="intel-news" className="space-y-2">
       <h3
