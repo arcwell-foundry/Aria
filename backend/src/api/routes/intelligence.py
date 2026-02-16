@@ -2119,3 +2119,102 @@ async def get_intelligence_metrics(
             status_code=500,
             detail=f"Metrics retrieval failed: {str(e)}",
         ) from e
+
+
+# ==============================================================================
+# METACOGNITION ENDPOINTS (US-803)
+# ==============================================================================
+
+
+class MetacognitionResponse(BaseModel):
+    """Response model for metacognition assessment."""
+
+    topic: str
+    confidence: float
+    knowledge_source: str
+    last_updated: str
+    reliability_notes: str
+    should_research: bool
+    fact_count: int
+    uncertainty_acknowledgment: str | None
+
+
+@router.get("/metacognition", response_model=MetacognitionResponse)
+async def get_metacognition(
+    current_user: CurrentUser,
+    topic: str = Query(..., min_length=1, max_length=500, description="Topic to assess"),
+    use_cache: bool = Query(True, description="Use cached assessment if available"),
+) -> MetacognitionResponse:
+    """Assess ARIA's knowledge confidence on a specific topic.
+
+    This endpoint enables ARIA to understand what she knows and doesn't know,
+    acknowledge uncertainty appropriately, and calibrate confidence based on
+    her track record.
+
+    Args:
+        current_user: Authenticated user
+        topic: Topic to assess knowledge confidence for
+        use_cache: Whether to use cached assessment if available
+
+    Returns:
+        MetacognitionResponse with confidence, source, and uncertainty acknowledgment
+
+    Raises:
+        HTTPException: If assessment fails
+    """
+    try:
+        from src.companion.metacognition import MetacognitionService
+
+        service = MetacognitionService()
+
+        # Check cache first if enabled
+        if use_cache:
+            cached = await service.get_cached_assessment(str(current_user.id), topic)
+            if cached:
+                acknowledgment = service.acknowledge_uncertainty(cached)
+                return MetacognitionResponse(
+                    topic=cached.topic,
+                    confidence=cached.confidence,
+                    knowledge_source=cached.knowledge_source.value,
+                    last_updated=cached.last_updated.isoformat(),
+                    reliability_notes=cached.reliability_notes,
+                    should_research=cached.should_research,
+                    fact_count=cached.fact_count,
+                    uncertainty_acknowledgment=acknowledgment,
+                )
+
+        # Perform fresh assessment
+        assessment = await service.assess_knowledge(str(current_user.id), topic)
+        acknowledgment = service.acknowledge_uncertainty(assessment)
+
+        logger.info(
+            "Metacognition assessment completed",
+            extra={
+                "user_id": current_user.id,
+                "topic": topic,
+                "confidence": assessment.confidence,
+                "knowledge_source": assessment.knowledge_source.value,
+                "fact_count": assessment.fact_count,
+            },
+        )
+
+        return MetacognitionResponse(
+            topic=assessment.topic,
+            confidence=assessment.confidence,
+            knowledge_source=assessment.knowledge_source.value,
+            last_updated=assessment.last_updated.isoformat(),
+            reliability_notes=assessment.reliability_notes,
+            should_research=assessment.should_research,
+            fact_count=assessment.fact_count,
+            uncertainty_acknowledgment=acknowledgment,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Metacognition assessment failed",
+            extra={"user_id": current_user.id, "topic": topic},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Metacognition assessment failed: {str(e)}",
+        ) from e

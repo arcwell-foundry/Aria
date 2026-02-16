@@ -1,10 +1,16 @@
-"""Companion personality and theory of mind system for ARIA.
+"""Companion personality and cognitive systems for ARIA.
 
 This module provides:
 - ARIA's consistent character with opinions, pushback capability, and personality traits
 - Theory of Mind module for understanding user mental states
+- Metacognition service for knowledge self-assessment and uncertainty acknowledgment
 """
 
+from src.companion.metacognition import (
+    KnowledgeAssessment,
+    KnowledgeSource,
+    MetacognitionService,
+)
 from src.companion.personality import (
     OpinionResult,
     PersonalityProfile,
@@ -20,6 +26,10 @@ from src.companion.theory_of_mind import (
 )
 
 __all__ = [
+    # Metacognition
+    "KnowledgeAssessment",
+    "KnowledgeSource",
+    "MetacognitionService",
     # Personality
     "OpinionResult",
     "PersonalityProfile",
