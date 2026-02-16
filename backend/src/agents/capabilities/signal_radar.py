@@ -501,6 +501,9 @@ class SignalRadarCapability(BaseCapability):
         client = SupabaseClient.get_client()
 
         for signal in signals:
+            # Run new causal implication engine analysis first
+            await self._run_causal_implication_analysis(signal, user_id)
+
             # Run implication analysis before notification — this may create
             # a richer, implication-aware notification instead of a plain one.
             try:
@@ -581,6 +584,67 @@ class SignalRadarCapability(BaseCapability):
                         signal.id,
                         exc,
                     )
+
+    async def _run_causal_implication_analysis(self, signal: Signal, user_id: str) -> None:
+        """Run causal chain analysis and implication reasoning for a signal.
+
+        Uses the new ImplicationEngine (US-702) to derive actionable insights
+        from the signal through causal chain traversal and goal matching.
+
+        Args:
+            signal: The signal to analyze.
+            user_id: User UUID.
+        """
+        try:
+            from src.core.llm import LLMClient
+            from src.intelligence.causal.engine import CausalChainEngine
+            from src.intelligence.causal.implication_engine import ImplicationEngine
+
+            llm = LLMClient()
+            db = SupabaseClient.get_client()
+
+            causal_engine = CausalChainEngine(
+                graphiti_client=None,
+                llm_client=llm,
+                db_client=db,
+            )
+
+            implication_engine = ImplicationEngine(
+                causal_engine=causal_engine,
+                db_client=db,
+                llm_client=llm,
+            )
+
+            # Analyze signal for implications
+            event_description = f"{signal.headline}\n\n{signal.summary}"
+            implications = await implication_engine.analyze_event(
+                user_id=user_id,
+                event=event_description,
+                max_hops=4,
+                include_neutral=False,
+                min_score=0.4,
+            )
+
+            # Save top implications as insights
+            for implication in implications[:3]:
+                await implication_engine.save_insight(
+                    user_id=user_id,
+                    implication=implication,
+                )
+
+            if implications:
+                logger.info(
+                    "Causal implication analysis found %d insights for signal %s",
+                    len(implications),
+                    signal.id,
+                )
+
+        except Exception as exc:
+            logger.warning(
+                "Causal implication analysis failed for signal %s: %s",
+                signal.id,
+                exc,
+            )
 
     # ── Source scanners (private) ────────────────────────────────────
 

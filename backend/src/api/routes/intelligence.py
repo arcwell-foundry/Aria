@@ -2,9 +2,11 @@
 
 This module provides endpoints for causal chain traversal and analysis,
 enabling ARIA to trace how events propagate through connected entities.
+Also provides implication reasoning endpoints for deriving actionable insights.
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +22,12 @@ from src.intelligence.causal import (
     CausalChainStore,
     CausalTraversalRequest,
     CausalTraversalResponse,
+)
+from src.intelligence.causal.implication_engine import ImplicationEngine
+from src.intelligence.causal.models import (
+    ImplicationRequest,
+    ImplicationResponse,
+    InsightUpdateRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,4 +331,336 @@ async def get_chains_by_entity(
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve causal chains by entity",
+        ) from e
+
+
+# ==============================================================================
+# IMPLICATION REASONING ENDPOINTS (US-702)
+# ==============================================================================
+
+
+class InsightResponse(BaseModel):
+    """Response model for a single insight."""
+
+    id: str
+    user_id: str
+    insight_type: str
+    trigger_event: str
+    content: str
+    classification: str
+    impact_score: float
+    confidence: float
+    urgency: float
+    combined_score: float
+    causal_chain: list[dict[str, Any]]
+    affected_goals: list[str]
+    recommended_actions: list[str]
+    status: str
+    feedback_text: str | None
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_db(cls, data: dict[str, Any]) -> "InsightResponse":
+        """Create response from database row."""
+        return cls(
+            id=str(data["id"]),
+            user_id=str(data["user_id"]),
+            insight_type=data["insight_type"],
+            trigger_event=data["trigger_event"],
+            content=data["content"],
+            classification=data["classification"],
+            impact_score=data["impact_score"],
+            confidence=data["confidence"],
+            urgency=data["urgency"],
+            combined_score=data["combined_score"],
+            causal_chain=data["causal_chain"] or [],
+            affected_goals=data["affected_goals"] or [],
+            recommended_actions=data["recommended_actions"] or [],
+            status=data["status"],
+            feedback_text=data.get("feedback_text"),
+            created_at=data["created_at"],
+            updated_at=data["updated_at"],
+        )
+
+
+class InsightsListResponse(BaseModel):
+    """Response model for listing insights."""
+
+    insights: list[InsightResponse]
+    total: int
+
+
+@router.post("/implications", response_model=ImplicationResponse)
+async def analyze_implications(
+    current_user: CurrentUser,
+    request: ImplicationRequest,
+    save_insights: bool = Query(True, description="Whether to save insights to database"),
+) -> ImplicationResponse:
+    """Analyze an event for implications affecting user's goals.
+
+    Traverses causal chains from the event, matches endpoints to the
+    user's active goals, classifies as opportunity/threat/neutral,
+    and generates LLM-powered explanations and recommendations.
+
+    Args:
+        current_user: Authenticated user
+        request: Implication request with event and parameters
+        save_insights: Whether to persist top insights to database
+
+    Returns:
+        ImplicationResponse with implications and processing metadata
+
+    Raises:
+        HTTPException: If analysis fails
+    """
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        # Create engines
+        causal_engine = CausalChainEngine(
+            graphiti_client=None,
+            llm_client=llm,
+            db_client=db,
+        )
+        implication_engine = ImplicationEngine(
+            causal_engine=causal_engine,
+            db_client=db,
+            llm_client=llm,
+        )
+
+        # Analyze event for implications
+        response = await implication_engine.analyze_with_metadata(
+            user_id=current_user.id,
+            request=request,
+        )
+
+        # Optionally save top insights
+        if save_insights and response.implications:
+            # Save only top 5 insights by score
+            for implication in response.implications[:5]:
+                try:
+                    await implication_engine.save_insight(
+                        user_id=current_user.id,
+                        implication=implication,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save insight: {e}")
+
+        logger.info(
+            "Implication analysis completed",
+            extra={
+                "user_id": current_user.id,
+                "implications_found": len(response.implications),
+                "chains_analyzed": response.chains_analyzed,
+                "goals_considered": response.goals_considered,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Implication analysis failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Implication analysis failed: {str(e)}",
+        ) from e
+
+
+@router.get("/insights", response_model=InsightsListResponse)
+async def list_insights(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Maximum insights to return"),
+    status: str | None = Query(
+        None, description="Filter by status (new, engaged, dismissed, feedback)"
+    ),
+    classification: str | None = Query(
+        None, description="Filter by classification (opportunity, threat, neutral)"
+    ),
+    insight_type: str | None = Query(None, description="Filter by insight type"),
+) -> InsightsListResponse:
+    """List insights for the current user.
+
+    Returns insights ordered by combined_score descending, then by
+    created_at descending for equal scores.
+
+    Args:
+        current_user: Authenticated user
+        limit: Maximum number of insights to return
+        status: Optional filter by engagement status
+        classification: Optional filter by classification type
+        insight_type: Optional filter by insight type
+
+    Returns:
+        List of insights with total count
+    """
+    try:
+        db = get_supabase_client()
+
+        query = db.table("jarvis_insights").select("*").eq("user_id", current_user.id)
+
+        if status:
+            query = query.eq("status", status)
+        if classification:
+            query = query.eq("classification", classification)
+        if insight_type:
+            query = query.eq("insight_type", insight_type)
+
+        result = (
+            query.order("combined_score", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        insights = result.data or []
+
+        return InsightsListResponse(
+            insights=[InsightResponse.from_db(insight) for insight in insights],
+            total=len(insights),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to list insights",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve insights",
+        ) from e
+
+
+@router.patch("/insights/{insight_id}", response_model=InsightResponse)
+async def update_insight(
+    current_user: CurrentUser,
+    insight_id: UUID,
+    request: InsightUpdateRequest,
+) -> InsightResponse:
+    """Update an insight's status or add feedback.
+
+    Allows marking insights as engaged, dismissed, or adding feedback.
+
+    Args:
+        current_user: Authenticated user
+        insight_id: UUID of the insight to update
+        request: Update request with new status or feedback
+
+    Returns:
+        Updated insight
+
+    Raises:
+        HTTPException: If insight not found or update fails
+    """
+    try:
+        db = get_supabase_client()
+
+        # Build update data
+        update_data: dict[str, Any] = {"updated_at": datetime.utcnow().isoformat()}
+
+        if request.status:
+            valid_statuses = {"new", "engaged", "dismissed", "feedback"}
+            if request.status not in valid_statuses:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status. Must be one of: {valid_statuses}",
+                )
+            update_data["status"] = request.status
+
+        if request.feedback_text is not None:
+            update_data["feedback_text"] = request.feedback_text
+            if request.status is None:
+                update_data["status"] = "feedback"
+
+        # Perform update
+        result = (
+            db.table("jarvis_insights")
+            .update(update_data)
+            .eq("id", str(insight_id))
+            .eq("user_id", current_user.id)
+            .execute()
+        )
+
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insight {insight_id} not found",
+            )
+
+        logger.info(
+            "Insight updated",
+            extra={
+                "user_id": current_user.id,
+                "insight_id": str(insight_id),
+                "status": update_data.get("status"),
+            },
+        )
+
+        return InsightResponse.from_db(result.data[0])
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Failed to update insight",
+            extra={"user_id": current_user.id, "insight_id": str(insight_id)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update insight",
+        ) from e
+
+
+@router.get("/insights/{insight_id}", response_model=InsightResponse)
+async def get_insight(
+    current_user: CurrentUser,
+    insight_id: UUID,
+) -> InsightResponse:
+    """Get a specific insight by ID.
+
+    Args:
+        current_user: Authenticated user
+        insight_id: UUID of the insight to retrieve
+
+    Returns:
+        The requested insight
+
+    Raises:
+        HTTPException: If insight not found
+    """
+    try:
+        db = get_supabase_client()
+
+        result = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("id", str(insight_id))
+            .eq("user_id", current_user.id)
+            .single()
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insight {insight_id} not found",
+            )
+
+        return InsightResponse.from_db(result.data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Failed to get insight",
+            extra={"user_id": current_user.id, "insight_id": str(insight_id)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve insight",
         ) from e
