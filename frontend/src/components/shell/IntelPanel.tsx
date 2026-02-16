@@ -126,6 +126,28 @@ function getPanelConfig(pathname: string): PanelConfig {
     };
   }
 
+  if (pathname.startsWith('/activity')) {
+    return {
+      title: 'Agent Status',
+      modules: [
+        <AgentStatusModule key="agents" />,
+        <NextBestActionModule key="action" />,
+      ],
+      chatContext: 'activity',
+    };
+  }
+
+  if (pathname.startsWith('/analytics')) {
+    return {
+      title: 'ARIA Insights',
+      modules: [
+        <JarvisInsightsModule key="jarvis" />,
+        <NextBestActionModule key="action" />,
+      ],
+      chatContext: 'analytics',
+    };
+  }
+
   // Default: briefing, settings, etc.
   return {
     title: 'ARIA Intelligence',
