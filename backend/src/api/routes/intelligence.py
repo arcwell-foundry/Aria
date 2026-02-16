@@ -64,6 +64,8 @@ from src.intelligence.simulation import (
 )
 from src.intelligence.temporal import (
     ImplicationWithTiming,
+    TemporalAnalysis,
+    TemporalAnalysisRequest,
     TimeHorizon,
     TimelineView,
 )
@@ -1815,4 +1817,72 @@ async def quick_simulation(
         raise HTTPException(
             status_code=500,
             detail=f"Quick simulation failed: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# MULTI-SCALE TEMPORAL REASONING ENDPOINTS (US-709)
+# ==============================================================================
+
+
+@router.post("/temporal-analysis", response_model=TemporalAnalysis)
+async def analyze_decision_temporal(
+    current_user: CurrentUser,
+    request: TemporalAnalysisRequest,
+) -> TemporalAnalysis:
+    """Analyze a decision across all time scales.
+
+    Enables ARIA to reason simultaneously across different time horizons
+    (immediate, tactical, strategic, visionary), detect cross-scale conflicts,
+    and generate time-appropriate recommendations.
+
+    This is particularly useful for:
+    - Decisions with short-term benefits but long-term risks
+    - Resource allocation across competing time horizons
+    - Strategic planning that needs to balance immediate and future needs
+
+    Args:
+        current_user: Authenticated user
+        request: Temporal analysis request with decision and parameters
+
+    Returns:
+        TemporalAnalysis with cross-scale impacts, conflicts, and recommendations
+
+    Raises:
+        HTTPException: If analysis fails
+    """
+    try:
+        from src.intelligence.temporal import MultiScaleTemporalReasoner
+
+        reasoner = MultiScaleTemporalReasoner(
+            llm_client=LLMClient(),
+            db_client=get_supabase_client(),
+        )
+
+        response = await reasoner.analyze_with_metadata(
+            user_id=str(current_user.id),
+            request=request,
+        )
+
+        logger.info(
+            "Temporal analysis completed",
+            extra={
+                "user_id": current_user.id,
+                "primary_scale": response.primary_scale.value,
+                "conflicts_found": len(response.conflicts),
+                "overall_alignment": response.overall_alignment,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Temporal analysis failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Temporal analysis failed: {str(e)}",
         ) from e

@@ -8,16 +8,25 @@ Key components:
 - TimeHorizon: Enum for immediate/short/medium/long term
 - ActionTiming: Optimal timing recommendations
 - TimelineView: API response for timeline endpoint
+- MultiScaleTemporalReasoner: Reasoning across multiple time scales (US-709)
 """
 
 from src.intelligence.temporal.models import (
     ActionTiming,
+    CrossScaleImpact,
     ImplicationWithTiming,
+    ScaleContext,
+    ScaleRecommendation,
+    TemporalAnalysis,
+    TemporalAnalysisRequest,
+    TemporalConflict,
     TimeHorizon,
     TimeHorizonCategorization,
+    TimeScale,
     TimelineRequest,
     TimelineView,
 )
+from src.intelligence.temporal.multi_scale import MultiScaleTemporalReasoner
 from src.intelligence.temporal.time_horizon import TimeHorizonAnalyzer
 
 __all__ = [
@@ -30,4 +39,13 @@ __all__ = [
     "TimelineRequest",
     "TimelineView",
     "ImplicationWithTiming",
+    # Multi-scale temporal reasoning (US-709)
+    "MultiScaleTemporalReasoner",
+    "TimeScale",
+    "ScaleContext",
+    "CrossScaleImpact",
+    "ScaleRecommendation",
+    "TemporalConflict",
+    "TemporalAnalysis",
+    "TemporalAnalysisRequest",
 ]

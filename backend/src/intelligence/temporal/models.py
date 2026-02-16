@@ -12,6 +12,7 @@ Key components:
 
 from datetime import date, datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -221,3 +222,221 @@ CONFERENCE_SCHEDULES = {
     "bio_international": "June",
     "ahip": "June",
 }
+
+
+# ==============================================================================
+# MULTI-SCALE TEMPORAL REASONING MODELS (US-709)
+# ==============================================================================
+
+
+class TimeScale(str, Enum):
+    """Time scales for multi-scale reasoning.
+
+    Different from TimeHorizon which is about urgency/when impact materializes.
+    TimeScale is about the scope of concern and planning horizon.
+    """
+
+    IMMEDIATE = "immediate"  # Hours/today - operational concerns
+    TACTICAL = "tactical"  # Days/this week - weekly planning
+    STRATEGIC = "strategic"  # Weeks/quarter - quarterly objectives
+    VISIONARY = "visionary"  # Months+/year - annual vision
+
+
+class ScaleContext(BaseModel):
+    """Context for a specific time scale.
+
+    Gathers relevant concerns, decisions, goals, and constraints
+    at a particular planning horizon.
+    """
+
+    scale: TimeScale = Field(..., description="The time scale for this context")
+    active_concerns: list[str] = Field(
+        default_factory=list,
+        description="Current concerns at this time scale",
+    )
+    decisions_pending: list[str] = Field(
+        default_factory=list,
+        description="Decisions that need to be made at this scale",
+    )
+    goals: list[str] = Field(
+        default_factory=list,
+        description="Goals relevant to this time scale",
+    )
+    constraints: list[str] = Field(
+        default_factory=list,
+        description="Constraints or limitations at this scale",
+    )
+    calendar_events: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Calendar events relevant to this scale",
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional scale-specific metadata",
+    )
+
+
+class CrossScaleImpact(BaseModel):
+    """Impact of a decision from one scale on another.
+
+    Captures how a decision made at one time horizon affects
+    outcomes at a different time horizon.
+    """
+
+    source_scale: TimeScale = Field(
+        ...,
+        description="The scale at which the decision is made",
+    )
+    target_scale: TimeScale = Field(
+        ...,
+        description="The scale being affected",
+    )
+    source_decision: str = Field(
+        ...,
+        description="The decision being analyzed",
+    )
+    impact_on_target: str = Field(
+        ...,
+        description="Description of the impact on target scale",
+    )
+    alignment: str = Field(
+        ...,
+        description="Whether impact supports, conflicts, or is neutral to target scale",
+    )
+    explanation: str = Field(
+        ...,
+        description="Detailed explanation of the cross-scale relationship",
+    )
+    confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in this impact assessment",
+    )
+
+
+class ScaleRecommendation(BaseModel):
+    """Recommendation tailored to a specific time scale.
+
+    Provides actionable advice appropriate for the planning horizon.
+    """
+
+    scale: TimeScale = Field(
+        ...,
+        description="The time scale for this recommendation",
+    )
+    recommendation: str = Field(
+        ...,
+        description="The recommended action",
+    )
+    rationale: str = Field(
+        ...,
+        description="Why this recommendation is appropriate for this scale",
+    )
+    priority: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Priority of this recommendation (0-1)",
+    )
+
+
+class TemporalConflict(BaseModel):
+    """Detected conflict between time scales.
+
+    Identifies when a decision that looks good at one time scale
+    has negative consequences at another time scale.
+    """
+
+    conflict_type: str = Field(
+        ...,
+        description="Type of conflict (short_vs_long, resource_contention, etc.)",
+    )
+    scales_involved: list[TimeScale] = Field(
+        ...,
+        description="The time scales in conflict",
+    )
+    description: str = Field(
+        ...,
+        description="Human-readable description of the conflict",
+    )
+    severity: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Severity of the conflict (0-1)",
+    )
+    potential_resolutions: list[str] = Field(
+        default_factory=list,
+        description="Possible ways to resolve the conflict",
+    )
+
+
+class TemporalAnalysis(BaseModel):
+    """Complete temporal analysis of a decision.
+
+    Analyzes a decision across all time scales, identifies cross-scale
+    impacts and conflicts, and provides scale-appropriate recommendations.
+    """
+
+    decision: str = Field(
+        ...,
+        description="The decision being analyzed",
+    )
+    primary_scale: TimeScale = Field(
+        ...,
+        description="The primary time scale of this decision",
+    )
+    scale_contexts: dict[str, ScaleContext] = Field(
+        default_factory=dict,
+        description="Context gathered at each time scale",
+    )
+    cross_scale_impacts: list[CrossScaleImpact] = Field(
+        default_factory=list,
+        description="Impacts of decision across scales",
+    )
+    conflicts: list[TemporalConflict] = Field(
+        default_factory=list,
+        description="Detected conflicts between scales",
+    )
+    recommendations: dict[str, ScaleRecommendation] = Field(
+        default_factory=dict,
+        description="Recommendations per time scale",
+    )
+    reconciliation_advice: str | None = Field(
+        default=None,
+        description="Advice for reconciling conflicts if any exist",
+    )
+    overall_alignment: str = Field(
+        default="aligned",
+        description="Overall alignment status (aligned, needs_reconciliation, conflicted)",
+    )
+    confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence in the analysis",
+    )
+    processing_time_ms: float = Field(
+        default=0.0,
+        description="Time taken to process the analysis",
+    )
+
+
+class TemporalAnalysisRequest(BaseModel):
+    """Request model for temporal analysis."""
+
+    decision: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="The decision to analyze across time scales",
+    )
+    context_hint: str | None = Field(
+        default=None,
+        description="Optional context hint for the analysis",
+    )
+    include_reconciliation: bool = Field(
+        default=True,
+        description="Whether to include reconciliation advice for conflicts",
+    )

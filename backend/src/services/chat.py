@@ -1408,6 +1408,72 @@ class ChatService:
             logger.warning("Skill detection/routing error: %s", e)
         skill_ms = (time.perf_counter() - skill_start) * 1000
 
+        # Temporal analysis: Detect if user is making a decision and run cross-scale analysis
+        temporal_result: dict[str, Any] | None = None
+        temporal_ms = 0.0
+        decision_indicators = [
+            "should i",
+            "thinking about",
+            "considering",
+            "deciding between",
+            "weighing",
+            "need to decide",
+            "my options are",
+            "trying to choose",
+            "which option",
+            "better to",
+            "go with",
+        ]
+
+        if any(indicator in message.lower() for indicator in decision_indicators):
+            temporal_start = time.perf_counter()
+            try:
+                from src.intelligence.temporal import (
+                    MultiScaleTemporalReasoner,
+                    TemporalAnalysisRequest,
+                )
+
+                reasoner = MultiScaleTemporalReasoner(
+                    llm_client=self._llm_client,
+                    db_client=get_supabase_client(),
+                )
+
+                temporal_analysis = await reasoner.analyze_decision(
+                    user_id=user_id,
+                    decision=message,
+                )
+
+                temporal_result = {
+                    "primary_scale": temporal_analysis.primary_scale.value,
+                    "conflicts": [
+                        {
+                            "type": c.conflict_type,
+                            "description": c.description,
+                            "severity": c.severity,
+                        }
+                        for c in temporal_analysis.conflicts
+                    ],
+                    "recommendations": {
+                        scale: rec.recommendation
+                        for scale, rec in temporal_analysis.recommendations.items()
+                    },
+                    "overall_alignment": temporal_analysis.overall_alignment,
+                }
+
+                logger.info(
+                    "Temporal analysis completed for decision",
+                    extra={
+                        "user_id": user_id,
+                        "primary_scale": temporal_analysis.primary_scale.value,
+                        "conflicts": len(temporal_analysis.conflicts),
+                        "alignment": temporal_analysis.overall_alignment,
+                    },
+                )
+
+            except Exception as e:
+                logger.warning("Temporal analysis failed: %s", e)
+            temporal_ms = (time.perf_counter() - temporal_start) * 1000
+
         # If skill execution produced results, inject them into the LLM context
         if skill_result and skill_result.get("skill_summaries"):
             skill_context = (
@@ -1417,6 +1483,24 @@ class ChatService:
                 f"{skill_result['skill_summaries']}"
             )
             system_prompt = system_prompt + skill_context
+
+        # If temporal analysis was performed, inject insights into LLM context
+        if temporal_result and temporal_result.get("conflicts"):
+            temporal_context = (
+                "\n\n## Multi-Scale Temporal Analysis\n"
+                f"The user appears to be making a decision. Analysis across time scales shows:\n"
+                f"- Primary time scale: {temporal_result['primary_scale']}\n"
+                f"- Overall alignment: {temporal_result['overall_alignment']}\n"
+                f"- Conflicts detected: {len(temporal_result['conflicts'])}\n\n"
+                "Detected conflicts:\n"
+                + "\n".join(
+                    f"- {c['description']} (severity: {c['severity']:.0%})"
+                    for c in temporal_result["conflicts"]
+                )
+                + "\n\nConsider these cross-scale implications in your response. "
+                "If there are conflicts, suggest ways to balance short-term and long-term considerations."
+            )
+            system_prompt = system_prompt + temporal_context
 
         # Generate response from LLM with timing
         llm_start = time.perf_counter()
@@ -1498,6 +1582,20 @@ class ChatService:
                             }
                         )
 
+        # Add temporal analysis to rich_content if conflicts were found
+        if temporal_result and temporal_result.get("conflicts"):
+            rich_content.append(
+                {
+                    "type": "temporal_analysis",
+                    "data": {
+                        "primary_scale": temporal_result["primary_scale"],
+                        "conflicts": temporal_result["conflicts"],
+                        "recommendations": temporal_result["recommendations"],
+                        "overall_alignment": temporal_result["overall_alignment"],
+                    },
+                }
+            )
+
         result: dict[str, Any] = {
             "message": response_text,
             "citations": citations,
@@ -1511,6 +1609,7 @@ class ChatService:
                 "web_grounding_ms": round(web_grounding_ms, 2),
                 "email_check_ms": round(email_check_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
+                "temporal_analysis_ms": round(temporal_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
             },
