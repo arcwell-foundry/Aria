@@ -341,3 +341,107 @@ class InsightUpdateRequest(BaseModel):
         None,
         description="User feedback on the insight",
     )
+
+
+# ==============================================================================
+# BUTTERFLY EFFECT DETECTION MODELS (US-703)
+# ==============================================================================
+
+
+class WarningLevel(str, Enum):
+    """Warning level for butterfly effects based on amplification factor.
+
+    The warning level indicates the severity of a detected butterfly effect,
+    determined by how much the cascade amplifies beyond the initial event.
+    """
+
+    LOW = "low"  # 3-5x amplification
+    MEDIUM = "medium"  # 5-7x amplification
+    HIGH = "high"  # 7-10x amplification
+    CRITICAL = "critical"  # >10x amplification
+
+
+class ButterflyEffect(BaseModel):
+    """Detected butterfly effect with cascade analysis.
+
+    A butterfly effect occurs when a small event triggers a cascade of
+    implications that amplify significantly beyond the initial trigger.
+    The amplification factor is the sum of all implication impact scores.
+    """
+
+    trigger_event: str = Field(..., description="The original event that triggered the cascade")
+    amplification_factor: float = Field(
+        ...,
+        ge=0.0,
+        description="Sum of implication impact scores (amplification ratio)",
+    )
+    cascade_depth: int = Field(
+        ...,
+        ge=0,
+        description="Maximum hop depth across all causal chains",
+    )
+    time_to_full_impact: str = Field(
+        ...,
+        description="Estimated time until cascade completes (e.g., '2-4 weeks')",
+    )
+    final_implications: list[str] = Field(
+        default_factory=list,
+        description="Top 5 implication descriptions from the cascade",
+    )
+    warning_level: WarningLevel = Field(
+        ...,
+        description="Warning level based on amplification factor",
+    )
+    affected_goal_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of unique goals affected by the cascade",
+    )
+    combined_impact_score: float = Field(
+        ...,
+        ge=0.0,
+        description="Sum of all implication combined scores",
+    )
+
+
+class ButterflyDetectionRequest(BaseModel):
+    """Request to check an event for butterfly effects.
+
+    Specifies the event to analyze and how deep to traverse causal chains
+    when detecting cascade amplification.
+    """
+
+    event: str = Field(
+        ...,
+        description="Description of the event to analyze for butterfly effects",
+        min_length=10,
+        max_length=2000,
+    )
+    max_hops: int = Field(
+        default=4,
+        ge=1,
+        le=6,
+        description="Maximum causal hops to traverse for cascade detection",
+    )
+
+
+class ButterflyDetectionResponse(BaseModel):
+    """Response from butterfly effect detection.
+
+    Contains the detected butterfly effect if amplification exceeds threshold,
+    along with metadata about the analysis performed.
+    """
+
+    butterfly_effect: ButterflyEffect | None = Field(
+        None,
+        description="Detected butterfly effect, or None if below threshold",
+    )
+    implications_analyzed: int = Field(
+        ...,
+        ge=0,
+        description="Number of implications analyzed for cascade detection",
+    )
+    processing_time_ms: float = Field(
+        ...,
+        description="Time taken to perform detection in milliseconds",
+    )

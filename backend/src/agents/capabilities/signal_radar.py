@@ -23,13 +23,16 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
+
+if TYPE_CHECKING:
+    from src.intelligence.causal.models import ButterflyEffect
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +593,8 @@ class SignalRadarCapability(BaseCapability):
 
         Uses the new ImplicationEngine (US-702) to derive actionable insights
         from the signal through causal chain traversal and goal matching.
+        Also checks for butterfly effects (US-703) and creates notifications
+        for high/critical cascade amplification.
 
         Args:
             signal: The signal to analyze.
@@ -597,8 +602,10 @@ class SignalRadarCapability(BaseCapability):
         """
         try:
             from src.core.llm import LLMClient
+            from src.intelligence.causal.butterfly_detector import ButterflyDetector
             from src.intelligence.causal.engine import CausalChainEngine
             from src.intelligence.causal.implication_engine import ImplicationEngine
+            from src.intelligence.causal.models import WarningLevel
 
             llm = LLMClient()
             db = SupabaseClient.get_client()
@@ -639,12 +646,90 @@ class SignalRadarCapability(BaseCapability):
                     signal.id,
                 )
 
+            # Check for butterfly effects
+            butterfly_detector = ButterflyDetector(
+                implication_engine=implication_engine,
+                db_client=db,
+                llm_client=llm,
+            )
+
+            butterfly = await butterfly_detector.detect(
+                user_id=user_id,
+                event=event_description,
+                max_hops=4,
+            )
+
+            if butterfly:
+                # Save butterfly insight
+                await butterfly_detector.save_butterfly_insight(
+                    user_id=user_id,
+                    butterfly=butterfly,
+                )
+
+                # Create notification for high/critical warnings
+                if butterfly.warning_level in [WarningLevel.HIGH, WarningLevel.CRITICAL]:
+                    await self._create_butterfly_notification(
+                        user_id=user_id,
+                        butterfly=butterfly,
+                        signal=signal,
+                    )
+
+                    logger.info(
+                        "Butterfly effect detected for signal %s: %.1fx amplification, %s warning",
+                        signal.id,
+                        butterfly.amplification_factor,
+                        butterfly.warning_level.value,
+                    )
+
         except Exception as exc:
             logger.warning(
                 "Causal implication analysis failed for signal %s: %s",
                 signal.id,
                 exc,
             )
+
+    async def _create_butterfly_notification(
+        self,
+        user_id: str,
+        butterfly: "ButterflyEffect",
+        signal: Signal,
+    ) -> None:
+        """Create notification for high/critical butterfly effects.
+
+        Args:
+            user_id: User UUID.
+            butterfly: Detected butterfly effect.
+            signal: The source signal.
+        """
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        client = SupabaseClient.get_client()
+        try:
+            client.table("notifications").insert(
+                {
+                    "id": str(uuid4()),
+                    "user_id": user_id,
+                    "type": "butterfly_effect",
+                    "title": f"⚠️ {butterfly.warning_level.value.upper()}: Cascade Effect Detected",
+                    "message": (
+                        f"Signal '{signal.headline[:80]}...' shows {butterfly.amplification_factor:.1f}x "
+                        f"amplification across {butterfly.cascade_depth} cascade levels. "
+                        f"Full impact expected in {butterfly.time_to_full_impact}."
+                    ),
+                    "link": signal.source_url,
+                    "metadata": {
+                        "signal_id": signal.id,
+                        "amplification_factor": butterfly.amplification_factor,
+                        "cascade_depth": butterfly.cascade_depth,
+                        "warning_level": butterfly.warning_level.value,
+                        "affected_goal_count": butterfly.affected_goal_count,
+                    },
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
+        except Exception as exc:
+            logger.warning("Failed to create butterfly notification: %s", exc)
 
     # ── Source scanners (private) ────────────────────────────────────
 

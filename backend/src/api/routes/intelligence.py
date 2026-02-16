@@ -2,11 +2,13 @@
 
 This module provides endpoints for causal chain traversal and analysis,
 enabling ARIA to trace how events propagate through connected entities.
-Also provides implication reasoning endpoints for deriving actionable insights.
+Also provides implication reasoning and butterfly effect detection endpoints.
 """
 
 import logging
-from datetime import datetime
+import time
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -17,14 +19,19 @@ from src.api.deps import CurrentUser
 from src.core.llm import LLMClient
 from src.db.supabase import get_supabase_client
 from src.intelligence.causal import (
+    ButterflyDetectionRequest,
+    ButterflyDetectionResponse,
+    ButterflyDetector,
     CausalChain,
     CausalChainEngine,
     CausalChainStore,
     CausalTraversalRequest,
     CausalTraversalResponse,
+    WarningLevel,
 )
 from src.intelligence.causal.implication_engine import ImplicationEngine
 from src.intelligence.causal.models import (
+    ButterflyEffect,
     ImplicationRequest,
     ImplicationResponse,
     InsightUpdateRequest,
@@ -664,3 +671,157 @@ async def get_insight(
             status_code=500,
             detail="Failed to retrieve insight",
         ) from e
+
+
+# ==============================================================================
+# BUTTERFLY EFFECT DETECTION ENDPOINTS (US-703)
+# ==============================================================================
+
+
+@router.post("/detect-butterfly", response_model=ButterflyDetectionResponse)
+async def detect_butterfly_effect(
+    current_user: CurrentUser,
+    request: ButterflyDetectionRequest,
+    save_insight: bool = Query(True, description="Whether to save butterfly insight"),
+    create_notification: bool = Query(
+        True, description="Create notification for high/critical warnings"
+    ),
+) -> ButterflyDetectionResponse:
+    """Detect if an event has butterfly effect potential.
+
+    Analyzes an event through causal chain traversal and implication
+    reasoning to identify cascade amplification. Events with total
+    implication impact >3x the base event are flagged as butterfly effects.
+
+    Args:
+        current_user: Authenticated user
+        request: Detection request with event description
+        save_insight: Whether to persist the butterfly effect insight
+        create_notification: Whether to create notifications for high warnings
+
+    Returns:
+        ButterflyDetectionResponse with detected butterfly effect or None
+
+    Raises:
+        HTTPException: If detection fails
+    """
+    start_time = time.monotonic()
+
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        # Create engines
+        causal_engine = CausalChainEngine(
+            graphiti_client=None,
+            llm_client=llm,
+            db_client=db,
+        )
+        implication_engine = ImplicationEngine(
+            causal_engine=causal_engine,
+            db_client=db,
+            llm_client=llm,
+        )
+        butterfly_detector = ButterflyDetector(
+            implication_engine=implication_engine,
+            db_client=db,
+            llm_client=llm,
+        )
+
+        # Detect butterfly effect
+        butterfly = await butterfly_detector.detect(
+            user_id=current_user.id,
+            event=request.event,
+            max_hops=request.max_hops,
+        )
+
+        # Count implications analyzed
+        implications = await implication_engine.analyze_event(
+            user_id=current_user.id,
+            event=request.event,
+            max_hops=request.max_hops,
+        )
+
+        # Save insight and create notification if applicable
+        if butterfly and save_insight:
+            await butterfly_detector.save_butterfly_insight(
+                user_id=current_user.id,
+                butterfly=butterfly,
+            )
+
+            # Create notification for high/critical warnings
+            if create_notification and butterfly.warning_level in [
+                WarningLevel.HIGH,
+                WarningLevel.CRITICAL,
+            ]:
+                await _create_butterfly_notification(
+                    db=db,
+                    user_id=current_user.id,
+                    butterfly=butterfly,
+                )
+
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+
+        logger.info(
+            "Butterfly detection completed",
+            extra={
+                "user_id": current_user.id,
+                "butterfly_detected": butterfly is not None,
+                "warning_level": butterfly.warning_level.value if butterfly else None,
+                "amplification": butterfly.amplification_factor if butterfly else None,
+                "processing_time_ms": elapsed_ms,
+            },
+        )
+
+        return ButterflyDetectionResponse(
+            butterfly_effect=butterfly,
+            implications_analyzed=len(implications),
+            processing_time_ms=elapsed_ms,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Butterfly detection failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Butterfly detection failed: {str(e)}",
+        ) from e
+
+
+async def _create_butterfly_notification(
+    db: Any,
+    user_id: str,
+    butterfly: ButterflyEffect,
+) -> None:
+    """Create a notification for high/critical butterfly effects.
+
+    Args:
+        db: Supabase client
+        user_id: User ID
+        butterfly: Detected butterfly effect
+    """
+    try:
+        db.table("notifications").insert(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "type": "butterfly_effect",
+                "title": f"⚠️ {butterfly.warning_level.value.upper()}: Cascade Effect Detected",
+                "message": (
+                    f"Event '{butterfly.trigger_event[:100]}...' shows {butterfly.amplification_factor:.1f}x "
+                    f"amplification across {butterfly.cascade_depth} cascade levels. "
+                    f"Full impact expected in {butterfly.time_to_full_impact}."
+                ),
+                "metadata": {
+                    "amplification_factor": butterfly.amplification_factor,
+                    "cascade_depth": butterfly.cascade_depth,
+                    "warning_level": butterfly.warning_level.value,
+                    "affected_goal_count": butterfly.affected_goal_count,
+                },
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        ).execute()
+    except Exception as e:
+        logger.warning("Failed to create butterfly notification: %s", e)
