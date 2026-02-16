@@ -64,7 +64,13 @@ from src.api.routes.companion import (
     emotional_router as companion_emotional_router,  # US-804: Emotional Intelligence
 )
 from src.api.routes.companion import (
+    reflection_router as companion_reflection_router,  # US-806: Self-Reflection
+)
+from src.api.routes.companion import (
     strategy_router as companion_strategy_router,  # US-805: Strategic Planning
+)
+from src.api.routes.companion import (
+    narrative_router as companion_narrative_router,  # US-807: Narrative Identity
 )
 from src.api.routes.companion import user_router as companion_user_router  # US-802: Theory of Mind
 from src.core.exceptions import ARIAException, RateLimitError
@@ -196,6 +202,8 @@ app.include_router(companion.router, prefix="/api/v1")  # Phase 8: Companion per
 app.include_router(companion_user_router, prefix="/api/v1")  # US-802: Theory of Mind
 app.include_router(companion_emotional_router, prefix="/api/v1")  # US-804: Emotional Intelligence
 app.include_router(companion_strategy_router, prefix="/api/v1")  # US-805: Strategic Planning
+app.include_router(companion_reflection_router, prefix="/api/v1")  # US-806: Self-Reflection
+app.include_router(companion_narrative_router, prefix="/api/v1")  # US-807: Narrative Identity
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")

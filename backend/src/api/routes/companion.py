@@ -8,6 +8,9 @@ Provides endpoints for:
 - Getting behavioral patterns
 - Generating emotional responses
 - Strategic planning (US-805)
+- Self-reflection and self-correction (US-806)
+- Narrative identity (US-807)
+- Digital twin writing style (US-808)
 """
 
 import logging
@@ -23,12 +26,28 @@ from src.companion.emotional import (
     EmotionalResponseRequest,
     EmotionalResponseResponse,
 )
+from src.companion.narrative import (
+    MilestoneType,
+    NarrativeIdentityEngine,
+    NarrativeState,
+    RelationshipMilestone,
+)
 from src.companion.personality import PersonalityService
+from src.companion.self_reflection import (
+    AcknowledgeMistakeRequest,
+    AcknowledgeMistakeResponse,
+    DailyReflectionResponse,
+    ImprovementPlanResponse,
+    ReflectRequest,
+    SelfAssessmentResponse,
+    SelfReflectionService,
+)
 from src.companion.strategic import (
     PlanType,
     StrategicPlanningService,
 )
 from src.companion.theory_of_mind import TheoryOfMindModule
+from src.memory.digital_twin import DigitalTwin
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +140,40 @@ class StatePatternsResponse(BaseModel):
     patterns: list[StatePattern] = Field(
         default_factory=list, description="List of detected patterns"
     )
+
+
+# Digital Twin Response Models (US-808)
+
+
+class WritingStyleResponse(BaseModel):
+    """Response model for writing style profile."""
+
+    average_sentence_length: float = Field(..., description="Average words per sentence")
+    vocabulary_level: str = Field(
+        ..., description="Vocabulary level: simple, moderate, or advanced"
+    )
+    formality_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Formality score (0.0 informal to 1.0 formal)"
+    )
+    common_phrases: list[str] = Field(
+        default_factory=list, description="Common phrases used by the user"
+    )
+    greeting_style: str = Field(
+        default="", description="Typical greeting style (e.g., 'Hi', 'Dear')"
+    )
+    sign_off_style: str = Field(
+        default="", description="Typical sign-off style (e.g., 'Best', 'Regards')"
+    )
+    emoji_usage: bool = Field(..., description="Whether user typically uses emojis")
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Confidence level of the fingerprint"
+    )
+    samples_analyzed: int = Field(..., ge=0, description="Number of text samples analyzed")
+    style_guidelines: str = Field(
+        ..., description="Prompt-ready style instructions for content generation"
+    )
+    created_at: datetime | None = Field(None, description="When the fingerprint was created")
+    updated_at: datetime | None = Field(None, description="When the fingerprint was last updated")
 
 
 @router.get("/profile", response_model=PersonalityProfileResponse)
@@ -338,6 +391,65 @@ async def get_state_patterns(
             for p in patterns
         ]
     )
+
+
+# ── Digital Twin Endpoints (US-808) ─────────────────────────────────────────────
+
+
+@user_router.get("/writing-style", response_model=WritingStyleResponse | None)
+async def get_writing_style(
+    current_user: CurrentUser,
+) -> WritingStyleResponse | None:
+    """Get the user's writing style profile from Digital Twin.
+
+    Returns the user's writing style fingerprint if available, including
+    vocabulary level, formality score, common phrases, and style guidelines
+    that can be used for generating style-matched content.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        WritingStyleResponse with the user's style profile, or None if no
+        fingerprint exists yet.
+
+    Raises:
+        HTTPException: If retrieval fails unexpectedly.
+    """
+    twin = DigitalTwin()
+
+    try:
+        fingerprint = await twin.get_fingerprint(current_user.id)
+
+        if not fingerprint:
+            return None
+
+        guidelines = await twin.get_style_guidelines(current_user.id)
+
+        return WritingStyleResponse(
+            average_sentence_length=fingerprint.average_sentence_length,
+            vocabulary_level=fingerprint.vocabulary_level,
+            formality_score=fingerprint.formality_score,
+            common_phrases=fingerprint.common_phrases,
+            greeting_style=fingerprint.greeting_style,
+            sign_off_style=fingerprint.sign_off_style,
+            emoji_usage=fingerprint.emoji_usage,
+            confidence=fingerprint.confidence,
+            samples_analyzed=fingerprint.samples_analyzed,
+            style_guidelines=guidelines,
+            created_at=fingerprint.created_at,
+            updated_at=fingerprint.updated_at,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get writing style",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve writing style profile",
+        ) from e
 
 
 # ── Emotional Intelligence Endpoints ───────────────────────────────────────────
@@ -815,3 +927,441 @@ async def get_strategic_concerns(
         )
         for c in concerns
     ]
+
+
+# ── Self-Reflection Endpoints (US-806) ─────────────────────────────────────────
+
+reflection_router = APIRouter(prefix="/reflection", tags=["companion"])
+
+
+@reflection_router.post("/reflect", response_model=DailyReflectionResponse)
+async def trigger_reflection(
+    current_user: CurrentUser,
+    _request: ReflectRequest,
+) -> DailyReflectionResponse:
+    """Trigger a manual reflection on ARIA's recent performance.
+
+    Analyzes today's interactions, feedback, and actions to generate
+    a reflection with positive/negative outcomes and improvement opportunities.
+
+    Args:
+        current_user: The authenticated user.
+        request: The reflection request with period.
+
+    Returns:
+        DailyReflectionResponse with reflection data.
+
+    Raises:
+        HTTPException: If reflection generation fails.
+    """
+    service = SelfReflectionService()
+
+    try:
+        reflection = await service.run_daily_reflection(current_user.id)
+
+        return DailyReflectionResponse(
+            id=reflection["id"],
+            reflection_date=reflection["reflection_date"],
+            total_interactions=reflection["total_interactions"],
+            positive_outcomes=reflection["positive_outcomes"],
+            negative_outcomes=reflection["negative_outcomes"],
+            patterns_detected=reflection["patterns_detected"],
+            improvement_opportunities=reflection["improvement_opportunities"],
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to generate reflection",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate reflection",
+        ) from e
+
+
+@reflection_router.get("/self-assessment", response_model=SelfAssessmentResponse)
+async def get_self_assessment(
+    current_user: CurrentUser,
+) -> SelfAssessmentResponse:
+    """Get the latest self-assessment for ARIA's capabilities.
+
+    Generates or retrieves a weekly assessment including score,
+    strengths, weaknesses, and trend analysis.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        SelfAssessmentResponse with assessment data.
+
+    Raises:
+        HTTPException: If assessment generation fails.
+    """
+    service = SelfReflectionService()
+
+    try:
+        assessment = await service.generate_self_assessment(
+            user_id=current_user.id,
+            period="weekly",
+        )
+
+        return SelfAssessmentResponse(
+            id=assessment["id"],
+            assessment_period=assessment["assessment_period"],
+            overall_score=assessment["overall_score"],
+            strengths=assessment["strengths"],
+            weaknesses=assessment["weaknesses"],
+            mistakes_acknowledged=assessment["mistakes_acknowledged"],
+            improvement_plan=assessment["improvement_plan"],
+            trend=assessment["trend"],
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to generate self-assessment",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate self-assessment",
+        ) from e
+
+
+@reflection_router.get(
+    "/improvement-plan",
+    response_model=ImprovementPlanResponse,
+)
+async def get_improvement_plan(
+    current_user: CurrentUser,
+) -> ImprovementPlanResponse:
+    """Get the current improvement plan with prioritized actions.
+
+    Returns areas for improvement sorted by priority, along with
+    progress indicators from the latest assessment.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        ImprovementPlanResponse with improvement areas and progress.
+
+    Raises:
+        HTTPException: If plan retrieval fails.
+    """
+    service = SelfReflectionService()
+
+    try:
+        plan = await service.get_improvement_plan(current_user.id)
+
+        return ImprovementPlanResponse(
+            areas=plan["areas"],
+            last_updated=plan["last_updated"],
+            progress_indicators=plan["progress_indicators"],
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get improvement plan",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get improvement plan",
+        ) from e
+
+
+@reflection_router.post(
+    "/acknowledge-mistake",
+    response_model=AcknowledgeMistakeResponse,
+)
+async def acknowledge_mistake(
+    current_user: CurrentUser,
+    request: AcknowledgeMistakeRequest,
+) -> AcknowledgeMistakeResponse:
+    """Generate an honest acknowledgment of a mistake.
+
+    Creates an acknowledgment that takes full responsibility without
+    excuses, using "I" statements and committing to improvement.
+
+    Args:
+        current_user: The authenticated user.
+        request: The acknowledgment request with mistake description.
+
+    Returns:
+        AcknowledgeMistakeResponse with the acknowledgment text.
+
+    Raises:
+        HTTPException: If acknowledgment generation fails.
+    """
+    service = SelfReflectionService()
+
+    try:
+        acknowledgment = await service.acknowledge_mistake(
+            user_id=current_user.id,
+            mistake_description=request.mistake_description,
+        )
+
+        return AcknowledgeMistakeResponse(
+            acknowledgment=acknowledgment,
+            recorded=True,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to acknowledge mistake",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to acknowledge mistake",
+        ) from e
+
+
+# ── Narrative Identity Endpoints (US-807) ───────────────────────────────────────
+
+narrative_router = APIRouter(prefix="/narrative", tags=["companion"])
+
+
+class MilestoneResponse(BaseModel):
+    """Response model for a relationship milestone."""
+
+    id: str
+    type: str
+    date: datetime
+    description: str
+    significance: float
+    related_entity_type: str | None
+    related_entity_id: str | None
+    created_at: datetime
+
+
+class NarrativeStateResponse(BaseModel):
+    """Response model for narrative state."""
+
+    relationship_start: datetime
+    total_interactions: int
+    trust_score: float
+    shared_victories: list[dict[str, Any]]
+    shared_challenges: list[dict[str, Any]]
+    inside_references: list[str]
+    updated_at: datetime
+
+
+class RecordMilestoneRequest(BaseModel):
+    """Request model for recording a milestone."""
+
+    milestone_type: str = Field(
+        ...,
+        description="Type of milestone: first_interaction, first_deal, first_challenge, deal_closed, first_goal_completed, first_pushback_accepted",
+    )
+    description: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Description of the milestone",
+    )
+    related_entity_type: str | None = Field(
+        None,
+        description="Optional type of related entity (e.g., deal, goal)",
+    )
+    related_entity_id: str | None = Field(
+        None,
+        description="Optional ID of related entity",
+    )
+    significance: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Importance of milestone (0.0-1.0)",
+    )
+
+
+class ContextualReferencesRequest(BaseModel):
+    """Request model for contextual references."""
+
+    current_topic: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Current conversation topic",
+    )
+
+
+class ContextualReferencesResponse(BaseModel):
+    """Response model for contextual references."""
+
+    references: list[str] = Field(
+        default_factory=list,
+        description="Relevant references from shared history (max 2)",
+    )
+
+
+class AnniversaryResponse(BaseModel):
+    """Response model for anniversary detection."""
+
+    anniversaries: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of detected anniversaries",
+    )
+
+
+def _milestone_to_response(milestone: RelationshipMilestone) -> MilestoneResponse:
+    """Convert RelationshipMilestone to response model."""
+    return MilestoneResponse(
+        id=milestone.id,
+        type=milestone.type,
+        date=milestone.date,
+        description=milestone.description,
+        significance=milestone.significance,
+        related_entity_type=milestone.related_entity_type,
+        related_entity_id=milestone.related_entity_id,
+        created_at=milestone.created_at,
+    )
+
+
+def _state_to_response(state: NarrativeState) -> NarrativeStateResponse:
+    """Convert NarrativeState to response model."""
+    return NarrativeStateResponse(
+        relationship_start=state.relationship_start,
+        total_interactions=state.total_interactions,
+        trust_score=state.trust_score,
+        shared_victories=state.shared_victories,
+        shared_challenges=state.shared_challenges,
+        inside_references=state.inside_references,
+        updated_at=state.updated_at,
+    )
+
+
+@narrative_router.get("/relationship", response_model=NarrativeStateResponse)
+async def get_relationship_narrative(
+    current_user: CurrentUser,
+) -> NarrativeStateResponse:
+    """Get the narrative state of the user-ARIA relationship.
+
+    Returns the current state including trust score, interaction count,
+    shared victories/challenges, and inside references.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        NarrativeStateResponse with relationship details.
+    """
+    engine = NarrativeIdentityEngine()
+    state = await engine.get_narrative_state(current_user.id)
+    return _state_to_response(state)
+
+
+@narrative_router.get("/milestones", response_model=list[MilestoneResponse])
+async def list_milestones(
+    current_user: CurrentUser,
+) -> list[MilestoneResponse]:
+    """List relationship milestones for the user.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        List of MilestoneResponse objects.
+    """
+    engine = NarrativeIdentityEngine()
+    milestones = await engine._get_recent_milestones(current_user.id, limit=50)
+    return [_milestone_to_response(m) for m in milestones]
+
+
+@narrative_router.post("/milestone", response_model=MilestoneResponse)
+async def record_milestone(
+    current_user: CurrentUser,
+    request: RecordMilestoneRequest,
+) -> MilestoneResponse:
+    """Manually record a relationship milestone.
+
+    Records a milestone in the user-ARIA relationship history.
+    Milestones with high significance (>= 0.7) are added to inside references.
+
+    Args:
+        current_user: The authenticated user.
+        request: The milestone recording request.
+
+    Returns:
+        MilestoneResponse with the created milestone.
+
+    Raises:
+        HTTPException: If milestone recording fails.
+    """
+    engine = NarrativeIdentityEngine()
+
+    # Validate milestone type
+    valid_types = [e.value for e in MilestoneType]
+    if request.milestone_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid milestone_type. Must be one of: {valid_types}",
+        )
+
+    try:
+        milestone = await engine.record_milestone(
+            user_id=current_user.id,
+            milestone_type=request.milestone_type,
+            description=request.description,
+            related_entity_type=request.related_entity_type,
+            related_entity_id=request.related_entity_id,
+            significance=request.significance,
+        )
+        return _milestone_to_response(milestone)
+
+    except Exception as e:
+        logger.exception(
+            "Failed to record milestone",
+            extra={"user_id": current_user.id, "milestone_type": request.milestone_type},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to record milestone",
+        ) from e
+
+
+@narrative_router.post("/references", response_model=ContextualReferencesResponse)
+async def get_contextual_references(
+    current_user: CurrentUser,
+    request: ContextualReferencesRequest,
+) -> ContextualReferencesResponse:
+    """Get contextual references from shared history.
+
+    Uses LLM to find relevant shared experiences for the current topic.
+    Returns at most 2 references to avoid overwhelming the response.
+
+    Args:
+        current_user: The authenticated user.
+        request: The request with current topic.
+
+    Returns:
+        ContextualReferencesResponse with relevant references.
+    """
+    engine = NarrativeIdentityEngine()
+    references = await engine.get_contextual_references(
+        user_id=current_user.id,
+        current_topic=request.current_topic,
+    )
+    return ContextualReferencesResponse(references=references)
+
+
+@narrative_router.get("/anniversaries", response_model=AnniversaryResponse)
+async def check_anniversaries(
+    current_user: CurrentUser,
+) -> AnniversaryResponse:
+    """Check for upcoming or current anniversaries.
+
+    Detects work anniversaries and deal/goal anniversaries based on
+    the relationship history and milestone dates.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        AnniversaryResponse with detected anniversaries.
+    """
+    engine = NarrativeIdentityEngine()
+    anniversaries = await engine.check_anniversaries(current_user.id)
+    return AnniversaryResponse(anniversaries=anniversaries)
