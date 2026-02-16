@@ -1,12 +1,15 @@
-"""Companion personality API routes.
+"""Companion personality and theory of mind API routes.
 
 Provides endpoints for:
 - Getting user's personality profile
 - Forming opinions on topics
 - Recording pushback outcomes
+- Getting mental state inference
+- Getting behavioral patterns
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -14,10 +17,12 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.companion.personality import PersonalityService
+from src.companion.theory_of_mind import TheoryOfMindModule
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/personality", tags=["companion"])
+user_router = APIRouter(prefix="/user", tags=["companion"])
 
 
 class PersonalityProfileResponse(BaseModel):
@@ -62,6 +67,48 @@ class PushbackOutcomeRequest(BaseModel):
 
     opinion_id: str = Field(..., min_length=1, description="ID of the opinion")
     user_accepted: bool = Field(..., description="Whether user accepted the pushback")
+
+
+# Theory of Mind Response Models
+
+
+class MentalStateResponse(BaseModel):
+    """Response model for mental state inference."""
+
+    stress_level: str = Field(
+        ..., description="Stress level: relaxed, normal, elevated, high, critical"
+    )
+    confidence: str = Field(
+        ...,
+        description="Confidence level: very_uncertain, uncertain, neutral, confident, very_confident",
+    )
+    current_focus: str = Field(default="", description="Current topic or focus")
+    emotional_tone: str = Field(default="neutral", description="Emotional tone detected")
+    needs_support: bool = Field(default=False, description="Whether user needs emotional support")
+    needs_space: bool = Field(default=False, description="Whether user needs space")
+    recommended_response_style: str = Field(
+        default="standard",
+        description="Recommended response style: concise, detailed, supportive, space, standard",
+    )
+    inferred_at: datetime = Field(..., description="When this state was inferred")
+
+
+class StatePattern(BaseModel):
+    """Response model for a behavioral pattern."""
+
+    pattern_type: str = Field(..., description="Type of pattern")
+    pattern_data: dict[str, Any] = Field(..., description="Pattern-specific data")
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Pattern confidence")
+    observed_count: int = Field(default=1, description="Number of times observed")
+    last_observed: datetime = Field(..., description="When pattern was last observed")
+
+
+class StatePatternsResponse(BaseModel):
+    """Response model for behavioral patterns."""
+
+    patterns: list[StatePattern] = Field(
+        default_factory=list, description="List of detected patterns"
+    )
 
 
 @router.get("/profile", response_model=PersonalityProfileResponse)
@@ -199,3 +246,83 @@ async def record_pushback_outcome(
         ) from e
 
     return {"status": "recorded"}
+
+
+# ── Theory of Mind Endpoints ───────────────────────────────────────────────────
+
+
+@user_router.get("/mental-state", response_model=MentalStateResponse)
+async def get_mental_state(
+    current_user: CurrentUser,
+) -> MentalStateResponse:
+    """Get the inferred mental state for the current user.
+
+    Returns the most recent mental state inference if available,
+    otherwise performs a new inference from recent conversation.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        MentalStateResponse with current mental state inference.
+    """
+    module = TheoryOfMindModule()
+
+    # Try to get the most recent stored state
+    state = await module.get_current_state(current_user.id)
+
+    if state is None:
+        # No stored state - return a default neutral state
+        return MentalStateResponse(
+            stress_level="normal",
+            confidence="neutral",
+            current_focus="",
+            emotional_tone="neutral",
+            needs_support=False,
+            needs_space=False,
+            recommended_response_style="standard",
+            inferred_at=datetime.now(),
+        )
+
+    return MentalStateResponse(
+        stress_level=state.stress_level.value,
+        confidence=state.confidence.value,
+        current_focus=state.current_focus,
+        emotional_tone=state.emotional_tone,
+        needs_support=state.needs_support,
+        needs_space=state.needs_space,
+        recommended_response_style=state.recommended_response_style,
+        inferred_at=datetime.now(),  # Use current time since we don't store inferred_at in MentalState
+    )
+
+
+@user_router.get("/state-patterns", response_model=StatePatternsResponse)
+async def get_state_patterns(
+    current_user: CurrentUser,
+) -> StatePatternsResponse:
+    """Get detected behavioral patterns for the current user.
+
+    Returns patterns detected from mental state history, such as
+    time-based stress patterns or focus trends.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        StatePatternsResponse with list of detected patterns.
+    """
+    module = TheoryOfMindModule()
+    patterns = await module.get_patterns(current_user.id)
+
+    return StatePatternsResponse(
+        patterns=[
+            StatePattern(
+                pattern_type=p.pattern_type,
+                pattern_data=p.pattern_data,
+                confidence=p.confidence,
+                observed_count=p.observed_count,
+                last_observed=p.last_observed,
+            )
+            for p in patterns
+        ]
+    )
