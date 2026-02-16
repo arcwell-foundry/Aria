@@ -10,12 +10,14 @@ Key components:
 - ImplicationEngine: Derives actionable insights from causal chains
 - ButterflyDetector: Detects cascade amplification (butterfly effects)
 - CrossDomainConnectionEngine: Discovers non-obvious connections across domains
+- GoalImpactMapper: Maps insights to goals with impact classification
 - Models: Pydantic models for causal chains, hops, implications, and butterfly effects
 """
 
 from src.intelligence.causal.butterfly_detector import ButterflyDetector
 from src.intelligence.causal.connection_engine import CrossDomainConnectionEngine
 from src.intelligence.causal.engine import CausalChainEngine
+from src.intelligence.causal.goal_impact import GoalImpactMapper
 from src.intelligence.causal.models import (
     ButterflyDetectionRequest,
     ButterflyDetectionResponse,
@@ -29,6 +31,10 @@ from src.intelligence.causal.models import (
     ConnectionScanResponse,
     ConnectionType,
     EntityExtraction,
+    GoalImpact,
+    GoalImpactSummary,
+    GoalWithInsights,
+    ImpactType,
     InferredRelationship,
     WarningLevel,
 )
@@ -56,4 +62,10 @@ __all__ = [
     "ConnectionScanRequest",
     "ConnectionScanResponse",
     "ConnectionType",
+    # Goal impact mapping (US-706)
+    "GoalImpactMapper",
+    "GoalImpact",
+    "GoalImpactSummary",
+    "GoalWithInsights",
+    "ImpactType",
 ]

@@ -32,6 +32,9 @@ from src.intelligence.causal import (
     ConnectionScanRequest,
     ConnectionScanResponse,
     ConnectionType,
+    GoalImpactMapper,
+    GoalImpactSummary,
+    GoalWithInsights,
     WarningLevel,
 )
 from src.intelligence.causal.connection_engine import CrossDomainConnectionEngine
@@ -1168,4 +1171,135 @@ async def get_timeline(
         raise HTTPException(
             status_code=500,
             detail=f"Timeline retrieval failed: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# GOAL IMPACT MAPPING ENDPOINTS (US-706)
+# ==============================================================================
+
+
+@router.get("/goal-impact", response_model=GoalImpactSummary)
+async def get_goal_impact_summary(
+    current_user: CurrentUser,
+    include_draft_goals: bool = Query(True, description="Include draft goals in analysis"),
+    days_back: int = Query(30, ge=1, le=90, description="Days to look back for insights"),
+) -> GoalImpactSummary:
+    """Get goal impact summary showing insights affecting each goal.
+
+    Returns a summary of all goals with their associated insights,
+    including net pressure (opportunities vs threats) and counts.
+
+    Args:
+        current_user: Authenticated user
+        include_draft_goals: Whether to include draft goals
+        days_back: Number of days to look back for insights
+
+    Returns:
+        GoalImpactSummary with goals and their associated insights
+
+    Raises:
+        HTTPException: If summary generation fails
+    """
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        mapper = GoalImpactMapper(
+            db_client=db,
+            llm_client=llm,
+        )
+
+        summary = await mapper.get_goal_impact_summary(
+            user_id=str(current_user.id),
+            include_draft_goals=include_draft_goals,
+            days_back=days_back,
+        )
+
+        logger.info(
+            "Goal impact summary generated",
+            extra={
+                "user_id": current_user.id,
+                "goal_count": len(summary.goals),
+                "total_insights": summary.total_insights_analyzed,
+                "multi_goal_implications": summary.multi_goal_implications,
+                "processing_time_ms": summary.processing_time_ms,
+            },
+        )
+
+        return summary
+
+    except Exception as e:
+        logger.exception(
+            "Goal impact summary failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Goal impact summary failed: {str(e)}",
+        ) from e
+
+
+@router.get("/goal-impact/{goal_id}", response_model=GoalWithInsights)
+async def get_goal_impact(
+    current_user: CurrentUser,
+    goal_id: UUID,
+    limit: int = Query(20, ge=1, le=100, description="Maximum insights to return"),
+) -> GoalWithInsights:
+    """Get insights affecting a specific goal.
+
+    Returns all insights that affect the specified goal,
+    including their classification and impact scores.
+
+    Args:
+        current_user: Authenticated user
+        goal_id: UUID of the goal to get insights for
+        limit: Maximum number of insights to return
+
+    Returns:
+        GoalWithInsights for the specified goal
+
+    Raises:
+        HTTPException: If goal not found or retrieval fails
+    """
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        mapper = GoalImpactMapper(
+            db_client=db,
+            llm_client=llm,
+        )
+
+        result = await mapper.get_goal_insights(
+            user_id=str(current_user.id),
+            goal_id=str(goal_id),
+            limit=limit,
+        )
+
+        logger.info(
+            "Goal impact retrieved",
+            extra={
+                "user_id": current_user.id,
+                "goal_id": str(goal_id),
+                "insight_count": len(result.insights),
+                "net_pressure": result.net_pressure,
+            },
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception(
+            "Goal impact retrieval failed",
+            extra={"user_id": current_user.id, "goal_id": str(goal_id)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Goal impact retrieval failed: {str(e)}",
         ) from e

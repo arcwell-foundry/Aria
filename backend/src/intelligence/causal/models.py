@@ -554,3 +554,102 @@ class ConnectionScanResponse(BaseModel):
     )
     events_scanned: int = Field(..., ge=0, description="Number of events analyzed")
     processing_time_ms: float = Field(..., description="Processing time in ms")
+
+
+# ==============================================================================
+# GOAL IMPACT MAPPING MODELS (US-706)
+# ==============================================================================
+
+
+class ImpactType(str, Enum):
+    """How an implication affects a goal."""
+
+    ACCELERATES = "accelerates"  # The insight helps achieve the goal faster
+    BLOCKS = "blocks"  # The insight creates obstacles for the goal
+    NEUTRAL = "neutral"  # No significant positive or negative impact
+    CREATES_OPPORTUNITY = "creates_opportunity"  # The insight reveals new possibilities
+
+
+class GoalImpact(BaseModel):
+    """Impact of an implication on a specific goal.
+
+    Represents the scored and classified relationship between
+    an intelligence insight and a user's goal.
+    """
+
+    goal_id: str = Field(..., description="ID of the affected goal")
+    goal_title: str = Field(..., description="Title of the affected goal")
+    impact_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="How strongly this insight affects the goal (0-1)",
+    )
+    impact_type: ImpactType = Field(
+        ...,
+        description="Classification of how the insight affects the goal",
+    )
+    explanation: str = Field(
+        ...,
+        description="Why this insight affects the goal in this way",
+    )
+
+
+class GoalWithInsights(BaseModel):
+    """A goal with its associated insights.
+
+    Aggregates all insights that affect a particular goal,
+    including counts of opportunities vs threats.
+    """
+
+    goal_id: str = Field(..., description="ID of the goal")
+    goal_title: str = Field(..., description="Title of the goal")
+    goal_status: str = Field(
+        ...,
+        description="Status of the goal (active, draft, paused, etc.)",
+    )
+    insights: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of insight references affecting this goal",
+    )
+    net_pressure: float = Field(
+        ...,
+        description="Net pressure score (positive = helping, negative = hindering)",
+    )
+    opportunity_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of opportunity-type insights",
+    )
+    threat_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of threat-type insights",
+    )
+
+
+class GoalImpactSummary(BaseModel):
+    """Summary of goal impacts across all active goals.
+
+    Provides a comprehensive view of how insights are affecting
+    all of a user's goals, including multi-goal implications.
+    """
+
+    goals: list[GoalWithInsights] = Field(
+        default_factory=list,
+        description="All goals with their associated insights",
+    )
+    total_insights_analyzed: int = Field(
+        ...,
+        ge=0,
+        description="Total number of insights analyzed for goal impact",
+    )
+    multi_goal_implications: int = Field(
+        ...,
+        ge=0,
+        description="Count of implications affecting 2+ goals",
+    )
+    processing_time_ms: float = Field(
+        ...,
+        description="Time taken to compute the summary in milliseconds",
+    )
