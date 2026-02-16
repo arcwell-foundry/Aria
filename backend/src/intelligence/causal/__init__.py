@@ -9,10 +9,12 @@ Key components:
 - CausalChainStore: Database persistence for causal chains
 - ImplicationEngine: Derives actionable insights from causal chains
 - ButterflyDetector: Detects cascade amplification (butterfly effects)
+- CrossDomainConnectionEngine: Discovers non-obvious connections across domains
 - Models: Pydantic models for causal chains, hops, implications, and butterfly effects
 """
 
 from src.intelligence.causal.butterfly_detector import ButterflyDetector
+from src.intelligence.causal.connection_engine import CrossDomainConnectionEngine
 from src.intelligence.causal.engine import CausalChainEngine
 from src.intelligence.causal.models import (
     ButterflyDetectionRequest,
@@ -22,6 +24,10 @@ from src.intelligence.causal.models import (
     CausalHop,
     CausalTraversalRequest,
     CausalTraversalResponse,
+    ConnectionInsight,
+    ConnectionScanRequest,
+    ConnectionScanResponse,
+    ConnectionType,
     EntityExtraction,
     InferredRelationship,
     WarningLevel,
@@ -44,4 +50,10 @@ __all__ = [
     "ButterflyDetectionResponse",
     "ButterflyEffect",
     "WarningLevel",
+    # Cross-domain connection (US-704)
+    "CrossDomainConnectionEngine",
+    "ConnectionInsight",
+    "ConnectionScanRequest",
+    "ConnectionScanResponse",
+    "ConnectionType",
 ]

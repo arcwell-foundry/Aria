@@ -27,8 +27,13 @@ from src.intelligence.causal import (
     CausalChainStore,
     CausalTraversalRequest,
     CausalTraversalResponse,
+    ConnectionInsight,
+    ConnectionScanRequest,
+    ConnectionScanResponse,
+    ConnectionType,
     WarningLevel,
 )
+from src.intelligence.causal.connection_engine import CrossDomainConnectionEngine
 from src.intelligence.causal.implication_engine import ImplicationEngine
 from src.intelligence.causal.models import (
     ButterflyEffect,
@@ -825,3 +830,160 @@ async def _create_butterfly_notification(
         ).execute()
     except Exception as e:
         logger.warning("Failed to create butterfly notification: %s", e)
+
+
+# ==============================================================================
+# CROSS-DOMAIN CONNECTION ENDPOINTS (US-704)
+# ==============================================================================
+
+
+@router.get("/connections", response_model=ConnectionScanResponse)
+async def list_connection_insights(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Maximum insights to return"),
+) -> ConnectionScanResponse:
+    """List recent cross-domain connection insights.
+
+    Returns connections from jarvis_insights where insight_type='cross_domain_connection'.
+
+    Args:
+        current_user: Authenticated user
+        limit: Maximum number of connections to return
+
+    Returns:
+        ConnectionScanResponse with stored connection insights
+    """
+    try:
+        db = get_supabase_client()
+
+        result = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("user_id", current_user.id)
+            .eq("insight_type", "cross_domain_connection")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        insights = result.data or []
+
+        connections: list[ConnectionInsight] = []
+        for data in insights:
+            events = [
+                hop.get("event", "") for hop in (data.get("causal_chain") or [])
+            ]
+            connections.append(
+                ConnectionInsight(
+                    id=data["id"],
+                    source_events=events,
+                    source_domains=["stored"],
+                    connection_type=ConnectionType.LLM_INFERRED,
+                    entities=[],
+                    novelty_score=data.get("impact_score", 0.5),
+                    actionability_score=data.get("confidence", 0.5),
+                    relevance_score=data.get("urgency", 0.5),
+                    explanation=data.get("content", ""),
+                    recommended_action=(
+                        (data.get("recommended_actions") or [""])[0]
+                        if data.get("recommended_actions")
+                        else None
+                    ),
+                    created_at=data.get("created_at"),
+                )
+            )
+
+        return ConnectionScanResponse(
+            connections=connections,
+            events_scanned=len(connections),
+            processing_time_ms=0,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to list connection insights",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve connection insights",
+        ) from e
+
+
+@router.post("/connections/scan", response_model=ConnectionScanResponse)
+async def scan_for_connections(
+    current_user: CurrentUser,
+    request: ConnectionScanRequest,
+    save_insights: bool = Query(True, description="Save discovered connections"),
+) -> ConnectionScanResponse:
+    """Scan for cross-domain connections between events.
+
+    Analyzes recent events from market signals, lead memories, and
+    episodic memories to find non-obvious connections.
+
+    Args:
+        current_user: Authenticated user
+        request: Scan request with optional events and parameters
+        save_insights: Whether to persist discovered connections
+
+    Returns:
+        ConnectionScanResponse with discovered connections
+
+    Raises:
+        HTTPException: If scan fails
+    """
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        # Create engines
+        causal_engine = CausalChainEngine(
+            graphiti_client=None,
+            llm_client=llm,
+            db_client=db,
+        )
+        connection_engine = CrossDomainConnectionEngine(
+            graphiti_client=None,
+            llm_client=llm,
+            db_client=db,
+            causal_engine=causal_engine,
+        )
+
+        # Run scan
+        response = await connection_engine.scan_with_metadata(
+            user_id=current_user.id,
+            request=request,
+        )
+
+        # Save insights
+        if save_insights and response.connections:
+            for connection in response.connections[:5]:
+                try:
+                    await connection_engine.save_connection_insight(
+                        user_id=current_user.id,
+                        connection=connection,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save connection insight: {e}")
+
+        logger.info(
+            "Cross-domain connection scan completed",
+            extra={
+                "user_id": current_user.id,
+                "connections_found": len(response.connections),
+                "events_scanned": response.events_scanned,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Connection scan failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Connection scan failed: {str(e)}",
+        ) from e

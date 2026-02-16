@@ -445,3 +445,102 @@ class ButterflyDetectionResponse(BaseModel):
         ...,
         description="Time taken to perform detection in milliseconds",
     )
+
+
+# ==============================================================================
+# CROSS-DOMAIN CONNECTION ENGINE MODELS (US-704)
+# ==============================================================================
+
+
+class ConnectionType(str, Enum):
+    """Type of cross-domain connection discovered."""
+
+    ENTITY_OVERLAP = "entity_overlap"  # Direct entity match
+    GRAPHITI_PATH = "graphiti_path"  # Graph path between entities
+    LLM_INFERRED = "llm_inferred"  # LLM-identified relationship
+
+
+class ConnectionInsight(BaseModel):
+    """A discovered connection between seemingly unrelated events.
+
+    Cross-domain connections reveal non-obvious relationships between
+    events from different sources (market signals, leads, memories).
+    """
+
+    id: UUID | None = Field(None, description="Unique identifier")
+    source_events: list[str] = Field(
+        ...,
+        min_length=2,
+        description="Events that are connected",
+    )
+    source_domains: list[str] = Field(
+        ...,
+        description="Domains the events came from (market_signal, lead_memory, episodic)",
+    )
+    connection_type: ConnectionType = Field(
+        ...,
+        description="How the connection was discovered",
+    )
+    entities: list[str] = Field(
+        default_factory=list,
+        description="Entities involved in the connection",
+    )
+    novelty_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="How surprising/non-obvious the connection is (0-1)",
+    )
+    actionability_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Whether user can take action on this (0-1)",
+    )
+    relevance_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Relevance to user's goals (0-1)",
+    )
+    explanation: str = Field(
+        ...,
+        description="Natural language explanation of the connection",
+    )
+    recommended_action: str | None = Field(
+        None,
+        description="Suggested action based on this connection",
+    )
+    created_at: datetime | None = Field(None, description="When discovered")
+
+
+class ConnectionScanRequest(BaseModel):
+    """Request to scan for cross-domain connections."""
+
+    events: list[str] | None = Field(
+        None,
+        description="Specific events to analyze (if None, scans recent events)",
+    )
+    days_back: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="Days to look back for events",
+    )
+    min_novelty: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum novelty score threshold",
+    )
+
+
+class ConnectionScanResponse(BaseModel):
+    """Response from connection scan."""
+
+    connections: list[ConnectionInsight] = Field(
+        default_factory=list,
+        description="Discovered connections sorted by novelty",
+    )
+    events_scanned: int = Field(..., ge=0, description="Number of events analyzed")
+    processing_time_ms: float = Field(..., description="Processing time in ms")
