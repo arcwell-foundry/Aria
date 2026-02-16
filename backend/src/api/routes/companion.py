@@ -33,6 +33,11 @@ from src.companion.narrative import (
     RelationshipMilestone,
 )
 from src.companion.personality import PersonalityService
+from src.companion.self_improvement import (
+    ImprovementCycleResponse,
+    SelfImprovementLoop,
+    WeeklyReportResponse,
+)
 from src.companion.self_reflection import (
     AcknowledgeMistakeRequest,
     AcknowledgeMistakeResponse,
@@ -54,6 +59,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/personality", tags=["companion"])
 user_router = APIRouter(prefix="/user", tags=["companion"])
 emotional_router = APIRouter(prefix="/emotional", tags=["companion"])
+improvement_router = APIRouter(prefix="/improvement", tags=["companion"])
 
 
 class PersonalityProfileResponse(BaseModel):
@@ -1365,3 +1371,89 @@ async def check_anniversaries(
     engine = NarrativeIdentityEngine()
     anniversaries = await engine.check_anniversaries(current_user.id)
     return AnniversaryResponse(anniversaries=anniversaries)
+
+
+# ── Self-Improvement Endpoints (US-809) ──────────────────────────────────────
+
+
+@improvement_router.get("/cycle", response_model=ImprovementCycleResponse)
+async def run_improvement_cycle(
+    current_user: CurrentUser,
+) -> ImprovementCycleResponse:
+    """Run an improvement cycle analyzing recent performance.
+
+    Queries recent daily reflections, identifies capability gaps,
+    and generates an actionable improvement plan.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        ImprovementCycleResponse with areas, action_plan, and trend.
+
+    Raises:
+        HTTPException: If cycle generation fails.
+    """
+    service = SelfImprovementLoop()
+
+    try:
+        result = await service.run_improvement_cycle(current_user.id)
+
+        return ImprovementCycleResponse(
+            areas=result["top_improvement_areas"],
+            action_plan=result["action_plan"],
+            performance_trend=result["performance_trend"],
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to run improvement cycle",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to run improvement cycle",
+        ) from e
+
+
+@improvement_router.get("/weekly-report", response_model=WeeklyReportResponse)
+async def get_weekly_report(
+    current_user: CurrentUser,
+) -> WeeklyReportResponse:
+    """Generate a weekly improvement report with trend analysis.
+
+    Compares this week's performance with the previous week and
+    generates a summary with wins and areas to work on.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        WeeklyReportResponse with summary, metrics, and comparison.
+
+    Raises:
+        HTTPException: If report generation fails.
+    """
+    service = SelfImprovementLoop()
+
+    try:
+        result = await service.generate_weekly_report(current_user.id)
+
+        return WeeklyReportResponse(
+            summary=result["summary"],
+            interaction_count=result["interaction_count"],
+            improvement_metrics=result["improvement_metrics"],
+            wins=result["wins"],
+            areas_to_work_on=result["areas_to_work_on"],
+            week_over_week=result["week_over_week"],
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to generate weekly report",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate weekly report",
+        ) from e

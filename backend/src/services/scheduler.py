@@ -525,6 +525,64 @@ async def _run_style_recalibration() -> None:
         logger.exception("Style recalibration scheduler run failed")
 
 
+async def _run_daily_improvement_cycle() -> None:
+    """Run daily improvement cycle for all active users."""
+    try:
+        from src.companion.self_improvement import SelfImprovementLoop
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        result = (
+            db.table("onboarding_state")
+            .select("user_id")
+            .not_.is_("completed_at", "null")
+            .execute()
+        )
+
+        user_ids: list[str] = [row["user_id"] for row in (result.data or [])]
+        logger.info("Daily improvement cycle: processing %d users", len(user_ids))
+
+        for user_id in user_ids:
+            try:
+                service = SelfImprovementLoop()
+                await service.run_improvement_cycle(user_id)
+            except Exception:
+                logger.warning("Daily improvement cycle failed for user %s", user_id, exc_info=True)
+
+    except Exception:
+        logger.exception("Daily improvement cycle scheduler run failed")
+
+
+async def _run_weekly_improvement_report() -> None:
+    """Generate weekly improvement report for all active users."""
+    try:
+        from src.companion.self_improvement import SelfImprovementLoop
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        result = (
+            db.table("onboarding_state")
+            .select("user_id")
+            .not_.is_("completed_at", "null")
+            .execute()
+        )
+
+        user_ids: list[str] = [row["user_id"] for row in (result.data or [])]
+        logger.info("Weekly improvement report: processing %d users", len(user_ids))
+
+        for user_id in user_ids:
+            try:
+                service = SelfImprovementLoop()
+                await service.generate_weekly_report(user_id)
+            except Exception:
+                logger.warning(
+                    "Weekly improvement report failed for user %s", user_id, exc_info=True
+                )
+
+    except Exception:
+        logger.exception("Weekly improvement report scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -618,6 +676,20 @@ async def start_scheduler() -> None:
             name="Weekly style recalibration for writing profiles",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_daily_improvement_cycle,
+            trigger=CronTrigger(hour=23, minute=30),  # 11:30 PM daily
+            id="daily_improvement_cycle",
+            name="Daily self-improvement cycle analysis",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_weekly_improvement_report,
+            trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),  # Sunday 3 AM
+            id="weekly_improvement_report",
+            name="Weekly self-improvement report generation",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -641,7 +713,9 @@ async def start_scheduler() -> None:
             "periodic email check every 30 min, "
             "draft feedback poll every 30 min, "
             "deferred draft retry every 15 min, "
-            "style recalibration weekly on Sunday at 2 AM"
+            "style recalibration weekly on Sunday at 2 AM, "
+            "daily improvement cycle at 23:30, "
+            "weekly improvement report on Sunday at 3 AM"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")

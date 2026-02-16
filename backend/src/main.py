@@ -70,6 +70,9 @@ from src.api.routes.companion import (
     strategy_router as companion_strategy_router,  # US-805: Strategic Planning
 )
 from src.api.routes.companion import (
+    improvement_router as companion_improvement_router,  # US-809: Self-Improvement
+)
+from src.api.routes.companion import (
     narrative_router as companion_narrative_router,  # US-807: Narrative Identity
 )
 from src.api.routes.companion import user_router as companion_user_router  # US-802: Theory of Mind
@@ -204,6 +207,7 @@ app.include_router(companion_emotional_router, prefix="/api/v1")  # US-804: Emot
 app.include_router(companion_strategy_router, prefix="/api/v1")  # US-805: Strategic Planning
 app.include_router(companion_reflection_router, prefix="/api/v1")  # US-806: Self-Reflection
 app.include_router(companion_narrative_router, prefix="/api/v1")  # US-807: Narrative Identity
+app.include_router(companion_improvement_router, prefix="/api/v1")  # US-809: Self-Improvement
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")

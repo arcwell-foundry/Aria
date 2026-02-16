@@ -17,6 +17,10 @@ from src.companion.personality import (
     PersonalityService,
     TraitLevel,
 )
+from src.companion.self_improvement import (
+    ImprovementArea,
+    SelfImprovementLoop,
+)
 from src.companion.theory_of_mind import (
     ConfidenceLevel,
     MentalState,
@@ -35,6 +39,9 @@ __all__ = [
     "PersonalityProfile",
     "PersonalityService",
     "TraitLevel",
+    # Self-Improvement
+    "ImprovementArea",
+    "SelfImprovementLoop",
     # Theory of Mind
     "ConfidenceLevel",
     "MentalState",
