@@ -128,7 +128,10 @@ class PredictiveEngine:
         for pred_data in raw_predictions:
             try:
                 # Map PredictionCategory to PredictionType for storage
-                pred_type = self._map_category_to_type(pred_data.get("prediction_type"))
+                pred_type_arg = pred_data.get("prediction_type")
+                if pred_type_arg is None:
+                    pred_type_arg = PredictionCategory.TIMING
+                pred_type = self._map_category_to_type(pred_type_arg)
 
                 # Create prediction record
                 create_data = PredictionCreate(
@@ -148,6 +151,17 @@ class PredictiveEngine:
                 # Save via prediction service
                 saved = await self._prediction_service.register(user_id, create_data)
 
+                # Parse dates safely
+                expected_res_date: datetime | None = None
+                expected_res_str = saved.get("expected_resolution_date")
+                if expected_res_str and isinstance(expected_res_str, str):
+                    expected_res_date = datetime.fromisoformat(expected_res_str)
+
+                created_date: datetime | None = None
+                created_str = saved.get("created_at")
+                if created_str and isinstance(created_str, str):
+                    created_date = datetime.fromisoformat(created_str)
+
                 # Convert to Prediction model
                 prediction = Prediction(
                     id=saved.get("id"),
@@ -158,15 +172,12 @@ class PredictiveEngine:
                     confidence=pred_data.get("confidence", 0.5),
                     context=pred_data.get("context"),
                     source_conversation_id=pred_data.get("source_conversation_id"),
-                    expected_resolution_date=datetime.fromisoformat(
-                        saved.get("expected_resolution_date")
-                    )
-                    if saved.get("expected_resolution_date")
-                    else None,
+                    expected_resolution_date=expected_res_date,
                     status=PredictionStatus.ACTIVE,
-                    created_at=datetime.fromisoformat(saved.get("created_at"))
-                    if saved.get("created_at")
-                    else None,
+                    surprise_level=None,
+                    learning_signal=None,
+                    created_at=created_date,
+                    validated_at=None,
                 )
                 predictions.append(prediction)
 
@@ -415,28 +426,44 @@ Return ONLY a JSON array of predictions, max {max_predictions} items:
 
         for row in result.data or []:
             try:
-                pred_type_str = row.get("prediction_type", "timing")
+                if not isinstance(row, dict):
+                    continue
+                row_dict: dict[str, Any] = row
+                pred_type_str = row_dict.get("prediction_type", "timing")
+                if not isinstance(pred_type_str, str):
+                    pred_type_str = "timing"
                 try:
                     pred_type = PredictionCategory(pred_type_str)
                 except ValueError:
                     pred_type = PredictionCategory.TIMING
 
+                # Parse expected_resolution_date safely
+                expected_res: datetime | None = None
+                exp_res_raw = row_dict.get("expected_resolution_date")
+                if exp_res_raw and isinstance(exp_res_raw, str):
+                    expected_res = datetime.fromisoformat(exp_res_raw)
+
+                # Parse created_at safely
+                created_at_val: datetime | None = None
+                created_raw = row_dict.get("created_at")
+                if created_raw and isinstance(created_raw, str):
+                    created_at_val = datetime.fromisoformat(created_raw)
+
                 prediction = Prediction(
-                    id=row.get("id"),
+                    id=row_dict.get("id"),
                     user_id=user_id,
                     prediction_type=pred_type,
-                    prediction_text=row.get("prediction_text", ""),
-                    predicted_outcome=row.get("predicted_outcome"),
-                    confidence=row.get("confidence", 0.5),
-                    context=row.get("context"),
-                    source_conversation_id=row.get("source_conversation_id"),
-                    expected_resolution_date=datetime.fromisoformat(row["expected_resolution_date"])
-                    if row.get("expected_resolution_date")
-                    else None,
+                    prediction_text=row_dict.get("prediction_text", ""),
+                    predicted_outcome=row_dict.get("predicted_outcome"),
+                    confidence=row_dict.get("confidence", 0.5),
+                    context=row_dict.get("context"),
+                    source_conversation_id=row_dict.get("source_conversation_id"),
+                    expected_resolution_date=expected_res,
                     status=PredictionStatus.ACTIVE,
-                    created_at=datetime.fromisoformat(row["created_at"])
-                    if row.get("created_at")
-                    else None,
+                    surprise_level=None,
+                    learning_signal=None,
+                    created_at=created_at_val,
+                    validated_at=None,
                 )
                 predictions.append(prediction)
 
@@ -497,8 +524,14 @@ Return ONLY a JSON array of predictions, max {max_predictions} items:
 
                 if existing.data:
                     # Update existing
-                    current_salience = existing.data[0].get("salience_score", 0.5)
-                    new_salience = min(1.0, current_salience + salience_boost * 0.3)
+                    first_row = existing.data[0]
+                    if not isinstance(first_row, dict):
+                        continue
+                    current_salience = first_row.get("salience_score", 0.5)
+                    if not isinstance(current_salience, (int, float)):
+                        current_salience = 0.5
+                    new_salience = min(1.0, float(current_salience) + salience_boost * 0.3)
+                    row_id = first_row.get("id")
 
                     result = (
                         self._db.table("memory_salience")
@@ -509,11 +542,11 @@ Return ONLY a JSON array of predictions, max {max_predictions} items:
                                 "boost_reason": f"prediction_error:{error.prediction_type.value}",
                             }
                         )
-                        .eq("id", existing.data[0]["id"])
+                        .eq("id", row_id)
                         .execute()
                     )
 
-                    if result.data:
+                    if result.data and isinstance(result.data[0], dict):
                         updated.append(result.data[0])
                 else:
                     # Insert new
@@ -531,7 +564,7 @@ Return ONLY a JSON array of predictions, max {max_predictions} items:
                         .execute()
                     )
 
-                    if result.data:
+                    if result.data and isinstance(result.data[0], dict):
                         updated.append(result.data[0])
 
             except Exception as e:

@@ -211,7 +211,9 @@ class CrossDomainConnectionEngine:
             result = self._db.table("jarvis_insights").insert(data).execute()
 
             if result.data:
-                return result.data[0]["id"]
+                # Explicit cast for mypy strict
+                insight_id: str = result.data[0]["id"]
+                return insight_id
             return None
 
         except Exception:
@@ -368,9 +370,12 @@ Return only the JSON array, no markdown."""
             relevance_score=scores["relevance"],
             explanation=explanation,
             recommended_action=scores.get("recommended_action"),
+            created_at=datetime.now(UTC),
         )
 
-    async def _query_graphiti_path(self, entity_a: str, entity_b: str) -> list | None:
+    async def _query_graphiti_path(
+        self, entity_a: str, entity_b: str
+    ) -> list[dict[str, Any]] | None:
         """Query Graphiti for path between entities."""
         if not self._graphiti:
             return None
@@ -381,7 +386,9 @@ Return only the JSON array, no markdown."""
                 num_results=5,
             )
             if result:
-                return result
+                # Explicit cast for mypy strict
+                typed_result: list[dict[str, Any]] = result
+                return typed_result
         except Exception as e:
             logger.debug(f"Graphiti path query failed: {e}")
         return None
@@ -392,9 +399,9 @@ Return only the JSON array, no markdown."""
         event_b: str,
         entities_a: list[EntityExtraction],
         entities_b: list[EntityExtraction],
-        overlap: set,
-        graphiti_path: list | None,
-    ) -> dict | None:
+        overlap: set[str],
+        graphiti_path: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
         """Use LLM to assess connection novelty, actionability, relevance."""
         entity_names_a = [e.name for e in entities_a]
         entity_names_b = [e.name for e in entities_b]
@@ -433,7 +440,7 @@ Return only JSON, no markdown."""
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
                 cleaned = cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
-            scores = json.loads(cleaned)
+            scores: dict[str, Any] = json.loads(cleaned)
             if scores.get("skip"):
                 return None
             return scores
@@ -448,7 +455,7 @@ Return only JSON, no markdown."""
         entities_a: list[EntityExtraction],
         entities_b: list[EntityExtraction],
         connection_type: ConnectionType,
-        scores: dict,
+        scores: dict[str, Any],
     ) -> str:
         """Generate natural language explanation of the connection."""
         prompt = f"""Explain this cross-domain connection in 2-3 sentences.
@@ -464,7 +471,8 @@ Recommended action: {scores.get("recommended_action", "None")}
 Write a clear, professional explanation suitable for a business context."""
 
         try:
-            return await self._llm.generate_response(prompt)
+            explanation: str = await self._llm.generate_response(prompt)
+            return explanation
         except Exception:
             return f"Connection found between: {event_a[:50]}... and {event_b[:50]}..."
 

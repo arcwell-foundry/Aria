@@ -371,7 +371,9 @@ class GoalImpactMapper:
                 .execute()
             )
 
-            return result.data
+            # Explicit cast for mypy strict - result.data is Any from Supabase
+            data: dict[str, Any] | None = result.data
+            return data
 
         except Exception as e:
             logger.warning(f"Failed to fetch goal {goal_id}: {e}")

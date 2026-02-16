@@ -4,6 +4,7 @@ This module provides persistence for causal chains, allowing them to be
 stored, retrieved, and invalidated as needed.
 """
 
+import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -300,10 +301,8 @@ class CausalChainStore:
             created_at_str = row.get("created_at")
             created_at = None
             if created_at_str:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    pass
 
             source_id_str = row.get("source_id")
             source_id = UUID(source_id_str) if source_id_str else None
