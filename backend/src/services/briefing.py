@@ -169,6 +169,34 @@ class BriefingService:
             )
             tone_guidance = ""
 
+        # Gather Jarvis intelligence insights for the briefing
+        jarvis_insights: list[dict[str, Any]] = []
+        try:
+            from src.intelligence.orchestrator import create_orchestrator
+
+            orchestrator = create_orchestrator()
+            insights = await orchestrator.generate_briefing(
+                user_id=user_id,
+                context={"briefing_date": briefing_date.isoformat()},
+                budget_ms=3000,
+            )
+            jarvis_insights = [
+                {
+                    "content": i.content,
+                    "classification": i.classification,
+                    "impact_score": i.impact_score,
+                    "recommended_actions": i.recommended_actions,
+                    "time_horizon": i.time_horizon,
+                }
+                for i in insights[:5]
+            ]
+        except Exception:
+            logger.warning(
+                "Failed to gather intelligence insights",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
         # Generate summary using LLM
         summary = await self._generate_summary(
             calendar_data, lead_data, signal_data, task_data, email_data,
@@ -182,6 +210,7 @@ class BriefingService:
             "signals": signal_data,
             "tasks": task_data,
             "email_summary": email_data,
+            "intelligence_insights": jarvis_insights,
             "generated_at": datetime.now(UTC).isoformat(),
         }
 

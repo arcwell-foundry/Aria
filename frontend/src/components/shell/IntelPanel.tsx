@@ -34,6 +34,7 @@ import {
   CRMSnapshotModule,
   ChatInputModule,
   SuggestedRefinementsModule,
+  JarvisInsightsModule,
 } from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
@@ -93,6 +94,7 @@ function getPanelConfig(pathname: string): PanelConfig {
     return {
       title: 'ARIA Intel',
       modules: [
+        <JarvisInsightsModule key="jarvis" />,
         <CompetitiveIntelModule key="competitive" />,
         <NewsAlertsModule key="news" />,
         <NextBestActionModule key="action" />,
@@ -128,6 +130,7 @@ function getPanelConfig(pathname: string): PanelConfig {
   return {
     title: 'ARIA Intelligence',
     modules: [
+      <JarvisInsightsModule key="jarvis" />,
       <AlertsModule key="alerts" />,
       <NextBestActionModule key="action" />,
     ],

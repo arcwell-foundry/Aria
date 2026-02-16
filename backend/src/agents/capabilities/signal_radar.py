@@ -589,101 +589,38 @@ class SignalRadarCapability(BaseCapability):
                     )
 
     async def _run_causal_implication_analysis(self, signal: Signal, user_id: str) -> None:
-        """Run causal chain analysis and implication reasoning for a signal.
+        """Run intelligence analysis for a signal via the Jarvis Orchestrator.
 
-        Uses the new ImplicationEngine (US-702) to derive actionable insights
-        from the signal through causal chain traversal and goal matching.
-        Also checks for butterfly effects (US-703) and creates notifications
-        for high/critical cascade amplification.
+        Uses the unified orchestrator (US-710) to process the signal through
+        all intelligence engines: causal chains, implications, butterfly effects,
+        goal impact, time horizon, and more.
 
         Args:
             signal: The signal to analyze.
             user_id: User UUID.
         """
         try:
-            from src.core.llm import LLMClient
-            from src.intelligence.causal.butterfly_detector import ButterflyDetector
-            from src.intelligence.causal.engine import CausalChainEngine
-            from src.intelligence.causal.implication_engine import ImplicationEngine
-            from src.intelligence.causal.models import WarningLevel
+            from src.intelligence.orchestrator import create_orchestrator
 
-            llm = LLMClient()
-            db = SupabaseClient.get_client()
-
-            causal_engine = CausalChainEngine(
-                graphiti_client=None,
-                llm_client=llm,
-                db_client=db,
-            )
-
-            implication_engine = ImplicationEngine(
-                causal_engine=causal_engine,
-                db_client=db,
-                llm_client=llm,
-            )
-
-            # Analyze signal for implications
+            orchestrator = create_orchestrator()
             event_description = f"{signal.headline}\n\n{signal.summary}"
-            implications = await implication_engine.analyze_event(
+            insights = await orchestrator.process_event(
                 user_id=user_id,
                 event=event_description,
-                max_hops=4,
-                include_neutral=False,
-                min_score=0.4,
+                source_context="signal_radar",
+                source_id=str(signal.id),
             )
 
-            # Save top implications as insights
-            for implication in implications[:3]:
-                await implication_engine.save_insight(
-                    user_id=user_id,
-                    implication=implication,
-                )
-
-            if implications:
+            if insights:
                 logger.info(
-                    "Causal implication analysis found %d insights for signal %s",
-                    len(implications),
+                    "Orchestrator analysis produced %d insights for signal %s",
+                    len(insights),
                     signal.id,
                 )
 
-            # Check for butterfly effects
-            butterfly_detector = ButterflyDetector(
-                implication_engine=implication_engine,
-                db_client=db,
-                llm_client=llm,
-            )
-
-            butterfly = await butterfly_detector.detect(
-                user_id=user_id,
-                event=event_description,
-                max_hops=4,
-            )
-
-            if butterfly:
-                # Save butterfly insight
-                await butterfly_detector.save_butterfly_insight(
-                    user_id=user_id,
-                    butterfly=butterfly,
-                )
-
-                # Create notification for high/critical warnings
-                if butterfly.warning_level in [WarningLevel.HIGH, WarningLevel.CRITICAL]:
-                    await self._create_butterfly_notification(
-                        user_id=user_id,
-                        butterfly=butterfly,
-                        signal=signal,
-                    )
-
-                    logger.info(
-                        "Butterfly effect detected for signal %s: %.1fx amplification, %s warning",
-                        signal.id,
-                        butterfly.amplification_factor,
-                        butterfly.warning_level.value,
-                    )
-
         except Exception as exc:
             logger.warning(
-                "Causal implication analysis failed for signal %s: %s",
+                "Orchestrator analysis failed for signal %s: %s",
                 signal.id,
                 exc,
             )

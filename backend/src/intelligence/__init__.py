@@ -10,6 +10,7 @@ from src.intelligence.causal import (
 )
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
+from src.intelligence.orchestrator import JarvisOrchestrator, create_orchestrator
 from src.intelligence.simulation import (
     MentalSimulationEngine,
     OutcomeClassification,
@@ -42,4 +43,7 @@ __all__ = [
     "SimulationResult",
     "SimulationScenario",
     "QuickSimulationResponse",
+    # Phase 7: Intelligence Orchestrator (US-710)
+    "JarvisOrchestrator",
+    "create_orchestrator",
 ]

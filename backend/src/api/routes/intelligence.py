@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.core.llm import LLMClient
@@ -1885,4 +1885,237 @@ async def analyze_decision_temporal(
         raise HTTPException(
             status_code=500,
             detail=f"Temporal analysis failed: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# JARVIS ORCHESTRATOR ENDPOINTS (US-710)
+# ==============================================================================
+
+
+class BriefingRequest(BaseModel):
+    """Request model for intelligence briefing generation."""
+
+    context: dict[str, Any] | None = None
+    budget_ms: int = Field(default=5000, ge=1000, le=15000)
+
+
+class ProcessEventRequest(BaseModel):
+    """Request model for event processing through intelligence pipeline."""
+
+    event: str = Field(..., min_length=10, max_length=2000)
+    source_context: str = Field(default="api_request")
+    source_id: str | None = None
+
+
+class InsightFeedbackRequest(BaseModel):
+    """Request model for recording feedback on an insight."""
+
+    feedback: str = Field(
+        ..., description="Feedback value: helpful, not_helpful, or wrong"
+    )
+
+
+class IntelligenceMetrics(BaseModel):
+    """Response model for intelligence system metrics."""
+
+    total_insights: int
+    by_type: dict[str, int]
+    by_classification: dict[str, int]
+    by_status: dict[str, int]
+    average_score: float
+    last_7_days: int
+    last_30_days: int
+
+
+@router.post("/briefing", response_model=InsightsListResponse)
+async def generate_intelligence_briefing(
+    current_user: CurrentUser,
+    request: BriefingRequest,
+) -> InsightsListResponse:
+    """Generate intelligence insights for a briefing.
+
+    Runs all engines in priority order with time-budgeted execution.
+    Returns up to 10 deduplicated insights sorted by combined score.
+    """
+    try:
+        from src.intelligence.orchestrator import create_orchestrator
+
+        orchestrator = create_orchestrator()
+        insights = await orchestrator.generate_briefing(
+            user_id=str(current_user.id),
+            context=request.context,
+            budget_ms=request.budget_ms,
+        )
+
+        insight_responses = []
+        for i in insights:
+            insight_responses.append(
+                InsightResponse(
+                    id=str(i.id),
+                    user_id=str(i.user_id),
+                    insight_type=i.insight_type,
+                    trigger_event=i.trigger_event,
+                    content=i.content,
+                    classification=i.classification,
+                    impact_score=i.impact_score,
+                    confidence=i.confidence,
+                    urgency=i.urgency,
+                    combined_score=i.combined_score,
+                    causal_chain=i.causal_chain,
+                    affected_goals=i.affected_goals,
+                    recommended_actions=i.recommended_actions,
+                    status=i.status,
+                    feedback_text=i.feedback_text,
+                    created_at=i.created_at.isoformat() if hasattr(i.created_at, "isoformat") else str(i.created_at),
+                    updated_at=i.updated_at.isoformat() if hasattr(i.updated_at, "isoformat") else str(i.updated_at),
+                )
+            )
+
+        return InsightsListResponse(
+            insights=insight_responses,
+            total=len(insight_responses),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Intelligence briefing generation failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Intelligence briefing failed: {str(e)}",
+        ) from e
+
+
+@router.post("/process-event", response_model=InsightsListResponse)
+async def process_intelligence_event(
+    current_user: CurrentUser,
+    request: ProcessEventRequest,
+) -> InsightsListResponse:
+    """Process an event through the full intelligence pipeline.
+
+    Runs causal traversal, implications, butterfly detection,
+    goal impact, and time horizon categorization.
+    """
+    try:
+        from src.intelligence.orchestrator import create_orchestrator
+
+        orchestrator = create_orchestrator()
+        insights = await orchestrator.process_event(
+            user_id=str(current_user.id),
+            event=request.event,
+            source_context=request.source_context,
+            source_id=request.source_id,
+        )
+
+        insight_responses = []
+        for i in insights:
+            insight_responses.append(
+                InsightResponse(
+                    id=str(i.id),
+                    user_id=str(i.user_id),
+                    insight_type=i.insight_type,
+                    trigger_event=i.trigger_event,
+                    content=i.content,
+                    classification=i.classification,
+                    impact_score=i.impact_score,
+                    confidence=i.confidence,
+                    urgency=i.urgency,
+                    combined_score=i.combined_score,
+                    causal_chain=i.causal_chain,
+                    affected_goals=i.affected_goals,
+                    recommended_actions=i.recommended_actions,
+                    status=i.status,
+                    feedback_text=i.feedback_text,
+                    created_at=i.created_at.isoformat() if hasattr(i.created_at, "isoformat") else str(i.created_at),
+                    updated_at=i.updated_at.isoformat() if hasattr(i.updated_at, "isoformat") else str(i.updated_at),
+                )
+            )
+
+        return InsightsListResponse(
+            insights=insight_responses,
+            total=len(insight_responses),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Intelligence event processing failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Event processing failed: {str(e)}",
+        ) from e
+
+
+@router.patch("/insights/{insight_id}/feedback", response_model=InsightResponse)
+async def record_insight_feedback(
+    current_user: CurrentUser,
+    insight_id: str,
+    request: InsightFeedbackRequest,
+) -> InsightResponse:
+    """Record user feedback on an intelligence insight."""
+    try:
+        from src.intelligence.orchestrator import create_orchestrator
+
+        orchestrator = create_orchestrator()
+        await orchestrator.record_feedback(
+            insight_id=insight_id,
+            feedback=request.feedback,
+            user_id=str(current_user.id),
+        )
+
+        # Fetch and return the updated insight
+        db = get_supabase_client()
+        response = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("id", insight_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Insight not found")
+
+        return InsightResponse.from_db(response.data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Insight feedback recording failed",
+            extra={"user_id": current_user.id, "insight_id": insight_id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Feedback recording failed: {str(e)}",
+        ) from e
+
+
+@router.get("/metrics", response_model=IntelligenceMetrics)
+async def get_intelligence_metrics(
+    current_user: CurrentUser,
+) -> IntelligenceMetrics:
+    """Get aggregated metrics for the intelligence system."""
+    try:
+        from src.intelligence.orchestrator import create_orchestrator
+
+        orchestrator = create_orchestrator()
+        metrics = await orchestrator.get_engine_metrics(
+            user_id=str(current_user.id),
+        )
+
+        return IntelligenceMetrics(**metrics)
+
+    except Exception as e:
+        logger.exception(
+            "Intelligence metrics retrieval failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Metrics retrieval failed: {str(e)}",
         ) from e

@@ -1408,6 +1408,37 @@ class ChatService:
             logger.warning("Skill detection/routing error: %s", e)
         skill_ms = (time.perf_counter() - skill_start) * 1000
 
+        # What-if simulation: Detect "what if" questions and run simulation
+        whatif_result: dict[str, Any] | None = None
+        whatif_ms = 0.0
+        whatif_indicators = [
+            "what if",
+            "what would happen",
+            "what happens if",
+            "imagine if",
+            "hypothetically",
+            "suppose",
+            "scenario where",
+            "let's say",
+        ]
+        if any(indicator in message.lower() for indicator in whatif_indicators):
+            whatif_start = time.perf_counter()
+            try:
+                from src.intelligence.simulation import MentalSimulationEngine
+
+                sim_engine = MentalSimulationEngine()
+                quick_result = await sim_engine.quick_simulate(
+                    user_id=user_id, question=message
+                )
+                whatif_result = {
+                    "answer": quick_result.answer,
+                    "key_points": quick_result.key_points,
+                    "confidence": quick_result.confidence,
+                }
+            except Exception as e:
+                logger.warning("What-if simulation failed: %s", e)
+            whatif_ms = (time.perf_counter() - whatif_start) * 1000
+
         # Temporal analysis: Detect if user is making a decision and run cross-scale analysis
         temporal_result: dict[str, Any] | None = None
         temporal_ms = 0.0
@@ -1501,6 +1532,18 @@ class ChatService:
                 "If there are conflicts, suggest ways to balance short-term and long-term considerations."
             )
             system_prompt = system_prompt + temporal_context
+
+        # If what-if simulation produced results, inject them into LLM context
+        if whatif_result:
+            whatif_context = (
+                "\n\n## What-If Simulation Results\n"
+                f"ARIA ran a scenario simulation:\n"
+                f"Answer: {whatif_result['answer']}\n"
+                f"Key points: {', '.join(whatif_result['key_points'])}\n"
+                f"Confidence: {whatif_result['confidence']:.0%}\n"
+                "Incorporate these simulation results into your response."
+            )
+            system_prompt = system_prompt + whatif_context
 
         # Generate response from LLM with timing
         llm_start = time.perf_counter()
@@ -1609,6 +1652,7 @@ class ChatService:
                 "web_grounding_ms": round(web_grounding_ms, 2),
                 "email_check_ms": round(email_check_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
+                "whatif_simulation_ms": round(whatif_ms, 2),
                 "temporal_analysis_ms": round(temporal_ms, 2),
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
