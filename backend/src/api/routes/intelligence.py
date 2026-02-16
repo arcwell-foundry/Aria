@@ -45,6 +45,13 @@ from src.intelligence.causal.models import (
     ImplicationResponse,
     InsightUpdateRequest,
 )
+from src.intelligence.predictive import (
+    ActivePredictionsResponse,
+    CalibrationResponse,
+    PredictionCategory,
+    PredictionErrorDetectionResponse,
+    PredictiveEngine,
+)
 from src.intelligence.temporal import (
     ImplicationWithTiming,
     TimeHorizon,
@@ -1302,4 +1309,172 @@ async def get_goal_impact(
         raise HTTPException(
             status_code=500,
             detail=f"Goal impact retrieval failed: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# PREDICTIVE PROCESSING ENDPOINTS (US-707)
+# ==============================================================================
+
+
+@router.get("/predictions/active", response_model=ActivePredictionsResponse)
+async def get_active_predictions(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Maximum predictions to return"),
+) -> ActivePredictionsResponse:
+    """Get active predictions for the current user.
+
+    Returns all pending predictions that have not yet been validated
+    or expired, ordered by expected resolution date.
+
+    Args:
+        current_user: Authenticated user
+        limit: Maximum number of predictions to return
+
+    Returns:
+        ActivePredictionsResponse with predictions and metadata
+
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        engine = PredictiveEngine()
+
+        response = await engine.get_active_predictions(
+            user_id=str(current_user.id),
+            limit=limit,
+        )
+
+        logger.info(
+            "Active predictions retrieved",
+            extra={
+                "user_id": current_user.id,
+                "prediction_count": response.total_count,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get active predictions",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve predictions: {str(e)}",
+        ) from e
+
+
+@router.get("/predictions/calibration", response_model=CalibrationResponse)
+async def get_prediction_calibration(
+    current_user: CurrentUser,
+    prediction_type: PredictionCategory | None = Query(
+        None, description="Filter by prediction type"
+    ),
+) -> CalibrationResponse:
+    """Get calibration statistics for predictions.
+
+    Returns calibration data showing how well ARIA's confidence
+    matches actual accuracy. Well-calibrated predictions have
+    accuracy within 10% of confidence.
+
+    Args:
+        current_user: Authenticated user
+        prediction_type: Optional filter by prediction type
+
+    Returns:
+        CalibrationResponse with calibration data and overall metrics
+
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        engine = PredictiveEngine()
+
+        response = await engine.get_calibration_response(
+            user_id=str(current_user.id),
+            prediction_type=prediction_type,
+        )
+
+        logger.info(
+            "Prediction calibration retrieved",
+            extra={
+                "user_id": current_user.id,
+                "total_predictions": response.total_predictions,
+                "overall_accuracy": response.overall_accuracy,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get prediction calibration",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve calibration: {str(e)}",
+        ) from e
+
+
+@router.post("/predictions/detect-errors", response_model=PredictionErrorDetectionResponse)
+async def detect_prediction_errors(
+    current_user: CurrentUser,
+    boost_salience: bool = Query(
+        True, description="Boost salience for surprising prediction errors"
+    ),
+) -> PredictionErrorDetectionResponse:
+    """Detect prediction errors (surprises) for the current user.
+
+    Compares pending predictions against actual events to identify
+    prediction errors. High-surprise errors boost entity salience
+    to direct ARIA's attention.
+
+    This implements predictive processing theory where prediction
+    errors drive learning and attention allocation.
+
+    Args:
+        current_user: Authenticated user
+        boost_salience: Whether to boost salience for high-surprise errors
+
+    Returns:
+        PredictionErrorDetectionResponse with detected errors and metadata
+
+    Raises:
+        HTTPException: If detection fails
+    """
+    try:
+        engine = PredictiveEngine()
+
+        response = await engine.detect_errors_with_metadata(
+            user_id=str(current_user.id),
+            boost_salience=boost_salience,
+        )
+
+        logger.info(
+            "Prediction errors detected",
+            extra={
+                "user_id": current_user.id,
+                "errors_detected": len(response.errors_detected),
+                "predictions_validated": response.predictions_validated,
+                "predictions_expired": response.predictions_expired,
+                "salience_boosted": len(response.salience_boosted_entities),
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Failed to detect prediction errors",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to detect prediction errors: {str(e)}",
         ) from e
