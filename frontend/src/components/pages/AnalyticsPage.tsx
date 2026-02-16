@@ -120,7 +120,9 @@ function MetricCard({
       style={{ backgroundColor: 'var(--bg-elevated)' }}
     >
       <div className="flex items-center gap-2 mb-3">
-        <Icon className="w-4 h-4" style={{ color: 'var(--accent)' }} />
+        <span style={{ color: 'var(--accent)' }}>
+          <Icon className="w-4 h-4" />
+        </span>
         <span
           className="text-xs font-medium uppercase tracking-wider"
           style={{ color: 'var(--text-secondary)' }}
