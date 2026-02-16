@@ -25,9 +25,7 @@ from src.companion.emotional import (
 )
 from src.companion.personality import PersonalityService
 from src.companion.strategic import (
-    ConcernType,
     PlanType,
-    RiskSeverity,
     StrategicPlanningService,
 )
 from src.companion.theory_of_mind import TheoryOfMindModule
@@ -527,13 +525,11 @@ def _validate_plan_type(plan_type: str) -> PlanType:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid plan_type. Must be one of: {valid_types}",
-        )
+        ) from None
 
 
 def _plan_to_response(plan: Any) -> PlanResponse:
     """Convert StrategicPlan to response model."""
-    from src.companion.strategic import KeyResult, Risk, Scenario
-
     return PlanResponse(
         id=plan.id,
         title=plan.title,
