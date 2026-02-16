@@ -19,6 +19,8 @@ import {
   Shield,
   Mail,
   Zap,
+  ListChecks,
+  BarChart3,
   Settings,
 } from 'lucide-react';
 import {
@@ -69,6 +71,8 @@ const PRIMARY_NAV: NavEntry[] = [
     route: '/communications',
   },
   { key: 'actions', label: 'Actions', icon: Zap, route: '/actions' },
+  { key: 'activity', label: 'Activity', icon: ListChecks, route: '/activity' },
+  { key: 'analytics', label: 'Analytics', icon: BarChart3, route: '/analytics' },
 ];
 
 const SETTINGS_NAV: NavEntry = {
