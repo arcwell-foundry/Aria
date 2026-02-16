@@ -2,7 +2,8 @@
 
 This module provides endpoints for causal chain traversal and analysis,
 enabling ARIA to trace how events propagate through connected entities.
-Also provides implication reasoning and butterfly effect detection endpoints.
+Also provides implication reasoning, butterfly effect detection, and
+time horizon analysis endpoints.
 """
 
 import logging
@@ -40,6 +41,11 @@ from src.intelligence.causal.models import (
     ImplicationRequest,
     ImplicationResponse,
     InsightUpdateRequest,
+)
+from src.intelligence.temporal import (
+    ImplicationWithTiming,
+    TimeHorizon,
+    TimelineView,
 )
 
 logger = logging.getLogger(__name__)
@@ -870,9 +876,7 @@ async def list_connection_insights(
 
         connections: list[ConnectionInsight] = []
         for data in insights:
-            events = [
-                hop.get("event", "") for hop in (data.get("causal_chain") or [])
-            ]
+            events = [hop.get("event", "") for hop in (data.get("causal_chain") or [])]
             connections.append(
                 ConnectionInsight(
                     id=data["id"],
@@ -986,4 +990,182 @@ async def scan_for_connections(
         raise HTTPException(
             status_code=500,
             detail=f"Connection scan failed: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# TIME HORIZON ANALYSIS ENDPOINTS (US-705)
+# ==============================================================================
+
+
+@router.get("/timeline", response_model=TimelineView)
+async def get_timeline(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Maximum implications per horizon"),
+    horizon_filter: TimeHorizon | None = Query(None, description="Filter to specific time horizon"),
+    include_closing_windows: bool = Query(
+        True, description="Include implications with closing action windows"
+    ),
+    classification: str | None = Query(
+        None, description="Filter by classification (opportunity, threat, neutral)"
+    ),
+    min_score: float = Query(0.3, ge=0.0, le=1.0, description="Minimum combined score"),
+) -> TimelineView:
+    """Get timeline view of implications organized by time horizon.
+
+    Returns implications categorized by when they'll materialize:
+    - immediate: 1-7 days
+    - short_term: 1-4 weeks
+    - medium_term: 1-6 months
+    - long_term: 6+ months
+
+    Also includes a closing_windows list for time-sensitive actions.
+
+    Args:
+        current_user: Authenticated user
+        limit: Maximum implications to return per horizon
+        horizon_filter: Optional filter to specific time horizon
+        include_closing_windows: Whether to include closing window implications
+        classification: Optional filter by classification type
+        min_score: Minimum combined score threshold
+
+    Returns:
+        TimelineView with implications organized by time horizon
+
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    start_time = time.monotonic()
+
+    try:
+        db = get_supabase_client()
+
+        # Build query for jarvis_insights
+        query = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("user_id", current_user.id)
+            .eq("insight_type", "implication")
+            .gte("combined_score", min_score)
+        )
+
+        if classification:
+            query = query.eq("classification", classification)
+
+        # Get all matching insights
+        result = query.order("combined_score", desc=True).limit(limit * 4).execute()
+
+        insights = result.data or []
+
+        # Categorize by time horizon
+        immediate: list[ImplicationWithTiming] = []
+        short_term: list[ImplicationWithTiming] = []
+        medium_term: list[ImplicationWithTiming] = []
+        long_term: list[ImplicationWithTiming] = []
+        closing_windows: list[ImplicationWithTiming] = []
+
+        for insight in insights:
+            # Parse time horizon from insight
+            horizon_str = insight.get("time_horizon")
+            if horizon_str:
+                try:
+                    horizon = TimeHorizon(horizon_str)
+                except ValueError:
+                    horizon = TimeHorizon.MEDIUM_TERM
+            else:
+                # Default based on urgency
+                urgency = insight.get("urgency", 0.5)
+                if urgency >= 0.8:
+                    horizon = TimeHorizon.IMMEDIATE
+                elif urgency >= 0.6:
+                    horizon = TimeHorizon.SHORT_TERM
+                elif urgency >= 0.4:
+                    horizon = TimeHorizon.MEDIUM_TERM
+                else:
+                    horizon = TimeHorizon.LONG_TERM
+
+            # Skip if horizon filter is set and doesn't match
+            if horizon_filter and horizon != horizon_filter:
+                continue
+
+            # Build ImplicationWithTiming
+            impl_with_timing = ImplicationWithTiming(
+                id=insight.get("id"),
+                trigger_event=insight.get("trigger_event", ""),
+                content=insight.get("content", ""),
+                classification=insight.get("classification", "neutral"),
+                impact_score=insight.get("impact_score", 0.5),
+                confidence=insight.get("confidence", 0.5),
+                urgency=insight.get("urgency", 0.5),
+                combined_score=insight.get("combined_score", 0.5),
+                time_horizon=horizon,
+                time_to_impact=insight.get("time_to_impact"),
+                affected_goals=insight.get("affected_goals") or [],
+                recommended_actions=insight.get("recommended_actions") or [],
+                is_closing_window=urgency >= 0.7
+                and horizon
+                in [
+                    TimeHorizon.IMMEDIATE,
+                    TimeHorizon.SHORT_TERM,
+                ],
+                created_at=insight.get("created_at"),
+            )
+
+            # Add to appropriate horizon list
+            if horizon == TimeHorizon.IMMEDIATE:
+                if len(immediate) < limit:
+                    immediate.append(impl_with_timing)
+            elif horizon == TimeHorizon.SHORT_TERM:
+                if len(short_term) < limit:
+                    short_term.append(impl_with_timing)
+            elif horizon == TimeHorizon.MEDIUM_TERM:
+                if len(medium_term) < limit:
+                    medium_term.append(impl_with_timing)
+            else:  # LONG_TERM
+                if len(long_term) < limit:
+                    long_term.append(impl_with_timing)
+
+            # Add to closing windows if applicable
+            if (
+                include_closing_windows
+                and impl_with_timing.is_closing_window
+                and len(closing_windows) < limit
+            ):
+                closing_windows.append(impl_with_timing)
+
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        total_count = len(immediate) + len(short_term) + len(medium_term) + len(long_term)
+
+        logger.info(
+            "Timeline view generated",
+            extra={
+                "user_id": current_user.id,
+                "immediate": len(immediate),
+                "short_term": len(short_term),
+                "medium_term": len(medium_term),
+                "long_term": len(long_term),
+                "closing_windows": len(closing_windows),
+                "total_count": total_count,
+                "processing_time_ms": elapsed_ms,
+            },
+        )
+
+        return TimelineView(
+            immediate=immediate,
+            short_term=short_term,
+            medium_term=medium_term,
+            long_term=long_term,
+            closing_windows=closing_windows,
+            total_count=total_count,
+            processing_time_ms=elapsed_ms,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Timeline retrieval failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Timeline retrieval failed: {str(e)}",
         ) from e

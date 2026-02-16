@@ -243,6 +243,14 @@ class Implication(BaseModel):
         default_factory=list,
         description="1-3 actionable recommendations",
     )
+    time_horizon: str | None = Field(
+        None,
+        description="Time horizon category: immediate, short_term, medium_term, long_term",
+    )
+    time_to_impact: str | None = Field(
+        None,
+        description="Estimated time until impact (e.g., '2-4 weeks')",
+    )
     created_at: datetime | None = Field(None, description="When this implication was created")
 
 
@@ -324,6 +332,8 @@ class JarvisInsight(BaseModel):
     causal_chain: list[dict[str, Any]]
     affected_goals: list[str]
     recommended_actions: list[str]
+    time_horizon: str | None = None  # immediate, short_term, medium_term, long_term
+    time_to_impact: str | None = None
     status: str = Field(default="new")  # new, engaged, dismissed, feedback
     feedback_text: str | None = None
     created_at: datetime

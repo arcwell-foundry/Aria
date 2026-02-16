@@ -9,6 +9,7 @@ Key features:
 - Classify implications as opportunities, threats, or neutral
 - Score via multi-factor algorithm (impact, confidence, urgency)
 - Generate natural language explanations and recommendations via LLM
+- Categorize by time horizon for prioritized action planning
 - Persist top insights to jarvis_insights table for UI consumption
 """
 
@@ -28,6 +29,7 @@ from src.intelligence.causal.models import (
     ImplicationResponse,
     ImplicationType,
 )
+from src.intelligence.temporal import TimeHorizonAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class ImplicationEngine:
         causal_engine: CausalChainEngine,
         db_client: Any,
         llm_client: LLMClient,
+        time_horizon_analyzer: TimeHorizonAnalyzer | None = None,
     ) -> None:
         """Initialize the implication engine.
 
@@ -63,10 +66,12 @@ class ImplicationEngine:
             causal_engine: Causal chain traversal engine
             db_client: Supabase client for goal queries and insight persistence
             llm_client: LLM client for explanation and recommendation generation
+            time_horizon_analyzer: Optional time horizon analyzer for temporal categorization
         """
         self._causal_engine = causal_engine
         self._db = db_client
         self._llm = llm_client
+        self._time_horizon_analyzer = time_horizon_analyzer or TimeHorizonAnalyzer(llm_client)
 
     async def analyze_event(
         self,
@@ -145,6 +150,10 @@ class ImplicationEngine:
             filtered_implications,
             key=lambda i: -i.combined_score,
         )
+
+        # Step 5: Enrich with time horizon categorization
+        if sorted_implications and self._time_horizon_analyzer:
+            sorted_implications = await self._enrich_with_time_horizons(sorted_implications)
 
         elapsed_ms = (time.monotonic() - start_time) * 1000
         logger.info(
@@ -228,6 +237,8 @@ class ImplicationEngine:
                 "causal_chain": implication.causal_chain,
                 "affected_goals": implication.affected_goals,
                 "recommended_actions": implication.recommended_actions,
+                "time_horizon": implication.time_horizon,
+                "time_to_impact": implication.time_to_impact,
                 "status": "new",
             }
 
@@ -361,6 +372,8 @@ class ImplicationEngine:
             causal_chain=causal_chain_data,
             affected_goals=[str(g["id"]) for g in affected_goals],
             recommended_actions=recommendations,
+            time_horizon=None,
+            time_to_impact=chain.time_to_impact,
             created_at=None,
         )
 
@@ -779,3 +792,67 @@ Generate 1-3 specific recommendations:""",
         except Exception as e:
             logger.warning(f"Recommendation generation failed: {e}")
             return []
+
+    async def _enrich_with_time_horizons(
+        self,
+        implications: list[Implication],
+    ) -> list[Implication]:
+        """Enrich implications with time horizon categorization.
+
+        Uses the TimeHorizonAnalyzer to categorize each implication
+        by when it will materialize.
+
+        Args:
+            implications: Implications to enrich
+
+        Returns:
+            Implications with time_horizon and time_to_impact fields populated
+        """
+        if not self._time_horizon_analyzer:
+            return implications
+
+        # Convert to dicts for analyzer
+        impl_dicts = [
+            {
+                "content": impl.content,
+                "trigger_event": impl.trigger_event,
+                "causal_chain": impl.causal_chain,
+            }
+            for impl in implications
+        ]
+
+        try:
+            # Categorize all implications
+            categorized = await self._time_horizon_analyzer.categorize(impl_dicts)
+
+            # Build a lookup by content (simple matching)
+            horizon_lookup: dict[str, tuple[str | None, str | None]] = {}
+            for horizon, impls in categorized.items():
+                for impl_dict in impls:
+                    content = impl_dict.get("content", "")
+                    time_to_impact = impl_dict.get("time_to_impact")
+                    horizon_lookup[content] = (horizon.value, time_to_impact)
+
+            # Enrich original implications
+            enriched: list[Implication] = []
+            for impl in implications:
+                content = impl.content
+                horizon_data = horizon_lookup.get(content)
+                if horizon_data:
+                    enriched.append(
+                        Implication(
+                            **{
+                                **impl.model_dump(),
+                                "time_horizon": horizon_data[0],
+                                "time_to_impact": horizon_data[1],
+                            }
+                        )
+                    )
+                else:
+                    enriched.append(impl)
+
+            return enriched
+
+        except Exception as e:
+            logger.warning(f"Time horizon enrichment failed: {e}")
+            return implications
