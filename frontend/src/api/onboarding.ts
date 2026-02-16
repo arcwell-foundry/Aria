@@ -695,3 +695,23 @@ export async function saveEmailPrivacyConfig(
   return response.data;
 }
 
+// First Conversation (US-914)
+
+export interface FirstConversationMessage {
+  content: string;
+  memory_delta: Record<string, unknown>;
+  suggested_next_action: string;
+  facts_referenced: number;
+  confidence_level: string;
+  rich_content: Array<{ type: string; data: Record<string, unknown> }>;
+  ui_commands: Array<Record<string, unknown>>;
+  suggestions: string[];
+}
+
+export async function getFirstConversation(): Promise<FirstConversationMessage> {
+  const response = await apiClient.get<FirstConversationMessage>(
+    "/onboarding/first-conversation"
+  );
+  return response.data;
+}
+

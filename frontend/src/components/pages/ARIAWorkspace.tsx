@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
+import { listConversations, getConversation } from '@/api/chat';
 
 export function ARIAWorkspace() {
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -29,6 +30,7 @@ export function ARIAWorkspace() {
   useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
+  const conversationLoadedRef = useRef(false);
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -40,6 +42,41 @@ export function ARIAWorkspace() {
       wsManager.disconnect();
     };
   }, [user?.id, session?.id]);
+
+  // Load most recent conversation on mount (hydrates first conversation after onboarding)
+  useEffect(() => {
+    if (conversationLoadedRef.current) return;
+    const messages = useConversationStore.getState().messages;
+    if (messages.length > 0) return;
+
+    conversationLoadedRef.current = true;
+
+    listConversations()
+      .then((conversations) => {
+        if (!conversations.length) return;
+        // Load the most recent conversation
+        const latest = conversations[0];
+        return getConversation(latest.id).then((chatMessages) => {
+          if (!chatMessages.length) return;
+          const store = useConversationStore.getState();
+          // Only load if store is still empty (avoid race with WebSocket)
+          if (store.messages.length > 0) return;
+          store.setActiveConversation(latest.id);
+          for (const msg of chatMessages) {
+            store.addMessage({
+              role: msg.role === 'assistant' ? 'aria' : 'user',
+              content: msg.content,
+              rich_content: [],
+              ui_commands: [],
+              suggestions: [],
+            });
+          }
+        });
+      })
+      .catch(() => {
+        // Silently fail — workspace will just be empty
+      });
+  }, []);
 
   // Wire up event listeners
   useEffect(() => {
