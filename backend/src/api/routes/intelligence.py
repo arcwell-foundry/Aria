@@ -52,6 +52,16 @@ from src.intelligence.predictive import (
     PredictionErrorDetectionResponse,
     PredictiveEngine,
 )
+from src.intelligence.simulation import (
+    MentalSimulationEngine,
+    OutcomeClassification,
+    QuickSimulationResponse,
+    ScenarioType,
+    SimulationOutcome,
+    SimulationRequest,
+    SimulationResponse,
+    SimulationResult,
+)
 from src.intelligence.temporal import (
     ImplicationWithTiming,
     TimeHorizon,
@@ -1477,4 +1487,332 @@ async def detect_prediction_errors(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to detect prediction errors: {str(e)}",
+        ) from e
+
+
+# ==============================================================================
+# MENTAL SIMULATION ENDPOINTS (US-708)
+# ==============================================================================
+
+
+class SimulationListResponse(BaseModel):
+    """Response model for listing simulations."""
+
+    simulations: list[SimulationResult]
+    total: int
+
+
+@router.post("/simulations", response_model=SimulationResponse)
+async def run_simulation(
+    current_user: CurrentUser,
+    request: SimulationRequest,
+    save_results: bool = Query(True, description="Whether to save simulation to database"),
+) -> SimulationResponse:
+    """Run a mental simulation for a "what if" scenario.
+
+    Analyzes a scenario to generate multiple possible outcomes,
+    traverses causal chains to identify downstream effects,
+    and provides a recommendation based on expected value.
+
+    Args:
+        current_user: Authenticated user
+        request: Simulation request with scenario and parameters
+        save_results: Whether to persist the simulation result
+
+    Returns:
+        SimulationResponse with outcomes and recommendation
+
+    Raises:
+        HTTPException: If simulation fails
+    """
+    try:
+        db = get_supabase_client()
+        llm = LLMClient()
+
+        # Create causal engine for chain traversal
+        causal_engine = CausalChainEngine(
+            graphiti_client=None,
+            llm_client=llm,
+            db_client=db,
+        )
+
+        # Create simulation engine
+        simulation_engine = MentalSimulationEngine(
+            causal_engine=causal_engine,
+            llm_client=llm,
+            db_client=db,
+        )
+
+        # Run simulation
+        result = await simulation_engine.simulate(
+            user_id=current_user.id,
+            request=request,
+        )
+
+        # Optionally save
+        simulation_id = None
+        saved = False
+        if save_results:
+            try:
+                simulation_id = await simulation_engine.save_simulation(
+                    user_id=current_user.id,
+                    result=result,
+                )
+                saved = True
+            except Exception as e:
+                logger.warning(f"Failed to save simulation: {e}")
+
+        logger.info(
+            "Simulation completed",
+            extra={
+                "user_id": current_user.id,
+                "outcomes_generated": len(result.outcomes),
+                "confidence": result.confidence,
+                "saved": saved,
+                "processing_time_ms": result.processing_time_ms,
+            },
+        )
+
+        return SimulationResponse(
+            result=result,
+            simulation_id=simulation_id,
+            saved=saved,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Simulation failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Simulation failed: {str(e)}",
+        ) from e
+
+
+@router.get("/simulations", response_model=SimulationListResponse)
+async def list_simulations(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Maximum simulations to return"),
+) -> SimulationListResponse:
+    """List past simulation results.
+
+    Returns simulations stored in jarvis_insights where
+    insight_type='simulation_result', ordered by most recent.
+
+    Args:
+        current_user: Authenticated user
+        limit: Maximum number of simulations to return
+
+    Returns:
+        SimulationListResponse with simulation results
+
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        db = get_supabase_client()
+
+        result = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("user_id", current_user.id)
+            .eq("insight_type", "simulation_result")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        insights = result.data or []
+
+        simulations: list[SimulationResult] = []
+        for insight in insights:
+            # Reconstruct SimulationResult from stored data
+            outcomes_data = insight.get("causal_chain") or []
+
+            outcomes = [
+                SimulationOutcome(
+                    scenario=o.get("scenario", ""),
+                    probability=o.get("probability", 0.5),
+                    classification=OutcomeClassification(o.get("classification", "mixed")),
+                    positive_outcomes=o.get("positive_outcomes", []),
+                    negative_outcomes=o.get("negative_outcomes", []),
+                    key_uncertainties=o.get("key_uncertainties", []),
+                    recommended=o.get("recommended", False),
+                    reasoning=o.get("reasoning", ""),
+                    causal_chain=o.get("causal_chain", []),
+                    time_to_impact=o.get("time_to_impact"),
+                    affected_goals=o.get("affected_goals", []),
+                )
+                for o in outcomes_data
+                if isinstance(o, dict)
+            ]
+
+            simulations.append(
+                SimulationResult(
+                    scenario=insight.get("trigger_event", ""),
+                    scenario_type=ScenarioType.HYPOTHETICAL,
+                    outcomes=outcomes,
+                    recommended_path=(insight.get("recommended_actions") or [""])[0],
+                    reasoning=insight.get("content", ""),
+                    sensitivity={},
+                    confidence=insight.get("confidence", 0.5),
+                    key_insights=[],
+                    processing_time_ms=0,
+                )
+            )
+
+        return SimulationListResponse(
+            simulations=simulations,
+            total=len(simulations),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to list simulations",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve simulations: {str(e)}",
+        ) from e
+
+
+@router.get("/simulations/{simulation_id}", response_model=SimulationResponse)
+async def get_simulation(
+    current_user: CurrentUser,
+    simulation_id: UUID,
+) -> SimulationResponse:
+    """Get a specific simulation result by ID.
+
+    Args:
+        current_user: Authenticated user
+        simulation_id: UUID of the simulation to retrieve
+
+    Returns:
+        SimulationResponse with the simulation result
+
+    Raises:
+        HTTPException: If simulation not found
+    """
+    try:
+        db = get_supabase_client()
+
+        result = (
+            db.table("jarvis_insights")
+            .select("*")
+            .eq("id", str(simulation_id))
+            .eq("user_id", current_user.id)
+            .eq("insight_type", "simulation_result")
+            .single()
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Simulation {simulation_id} not found",
+            )
+
+        insight = result.data
+
+        # Reconstruct SimulationResult
+        outcomes_data = insight.get("causal_chain") or []
+
+        outcomes = [
+            SimulationOutcome(
+                scenario=o.get("scenario", ""),
+                probability=o.get("probability", 0.5),
+                classification=OutcomeClassification(o.get("classification", "mixed")),
+                positive_outcomes=o.get("positive_outcomes", []),
+                negative_outcomes=o.get("negative_outcomes", []),
+                key_uncertainties=o.get("key_uncertainties", []),
+                recommended=o.get("recommended", False),
+                reasoning=o.get("reasoning", ""),
+                causal_chain=o.get("causal_chain", []),
+                time_to_impact=o.get("time_to_impact"),
+                affected_goals=o.get("affected_goals", []),
+            )
+            for o in outcomes_data
+            if isinstance(o, dict)
+        ]
+
+        simulation_result = SimulationResult(
+            scenario=insight.get("trigger_event", ""),
+            scenario_type=ScenarioType.HYPOTHETICAL,
+            outcomes=outcomes,
+            recommended_path=(insight.get("recommended_actions") or [""])[0],
+            reasoning=insight.get("content", ""),
+            sensitivity={},
+            confidence=insight.get("confidence", 0.5),
+            key_insights=[],
+            processing_time_ms=0,
+        )
+
+        return SimulationResponse(
+            result=simulation_result,
+            simulation_id=simulation_id,
+            saved=True,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Failed to get simulation",
+            extra={"user_id": current_user.id, "simulation_id": str(simulation_id)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve simulation: {str(e)}",
+        ) from e
+
+
+@router.post("/simulations/quick", response_model=QuickSimulationResponse)
+async def quick_simulation(
+    current_user: CurrentUser,
+    question: str = Query(..., min_length=10, max_length=1000, description="The what-if question"),
+) -> QuickSimulationResponse:
+    """Run a quick simulation for chat integration.
+
+    Lightweight simulation without full causal chain traversal,
+    suitable for real-time chat responses to "what if" questions.
+
+    Args:
+        current_user: Authenticated user
+        question: The "what if" question to answer
+
+    Returns:
+        QuickSimulationResponse with natural language answer
+
+    Raises:
+        HTTPException: If simulation fails
+    """
+    try:
+        engine = MentalSimulationEngine()
+
+        response = await engine.quick_simulate(
+            user_id=current_user.id,
+            question=question,
+        )
+
+        logger.info(
+            "Quick simulation completed",
+            extra={
+                "user_id": current_user.id,
+                "confidence": response.confidence,
+                "processing_time_ms": response.processing_time_ms,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        logger.exception(
+            "Quick simulation failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Quick simulation failed: {str(e)}",
         ) from e

@@ -10,6 +10,17 @@ from src.intelligence.causal import (
 )
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
+from src.intelligence.simulation import (
+    MentalSimulationEngine,
+    OutcomeClassification,
+    QuickSimulationResponse,
+    ScenarioType,
+    SimulationOutcome,
+    SimulationRequest,
+    SimulationResponse,
+    SimulationResult,
+    SimulationScenario,
+)
 
 __all__ = [
     "CognitiveLoadMonitor",
@@ -21,4 +32,14 @@ __all__ = [
     "CausalHop",
     "CausalTraversalRequest",
     "CausalTraversalResponse",
+    # Phase 7: Mental Simulation (US-708)
+    "MentalSimulationEngine",
+    "OutcomeClassification",
+    "ScenarioType",
+    "SimulationOutcome",
+    "SimulationRequest",
+    "SimulationResponse",
+    "SimulationResult",
+    "SimulationScenario",
+    "QuickSimulationResponse",
 ]
