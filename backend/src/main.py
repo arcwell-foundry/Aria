@@ -56,6 +56,7 @@ from src.api.routes import (
     websets,  # Phase 3: Websets integration
     workflows,
 )
+from src.api.routes import companion  # Phase 8: Companion personality routes
 from src.api.routes import (
     websocket as ws_route,
 )
@@ -184,6 +185,7 @@ app.include_router(briefings.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")
 app.include_router(communication.router, prefix="/api/v1")
+app.include_router(companion.router, prefix="/api/v1")  # Phase 8: Companion personality
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")
