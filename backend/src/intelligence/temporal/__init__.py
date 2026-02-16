@@ -22,9 +22,9 @@ from src.intelligence.temporal.models import (
     TemporalConflict,
     TimeHorizon,
     TimeHorizonCategorization,
-    TimeScale,
     TimelineRequest,
     TimelineView,
+    TimeScale,
 )
 from src.intelligence.temporal.multi_scale import MultiScaleTemporalReasoner
 from src.intelligence.temporal.time_horizon import TimeHorizonAnalyzer

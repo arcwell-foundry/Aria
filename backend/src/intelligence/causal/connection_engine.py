@@ -188,9 +188,7 @@ class CrossDomainConnectionEngine:
             data = {
                 "user_id": user_id,
                 "insight_type": "cross_domain_connection",
-                "trigger_event": (
-                    connection.source_events[0] if connection.source_events else ""
-                ),
+                "trigger_event": (connection.source_events[0] if connection.source_events else ""),
                 "content": connection.explanation,
                 "classification": connection.connection_type.value,
                 "impact_score": connection.novelty_score,
@@ -205,9 +203,7 @@ class CrossDomainConnectionEngine:
                 "causal_chain": [{"event": e} for e in connection.source_events],
                 "affected_goals": [],
                 "recommended_actions": (
-                    [connection.recommended_action]
-                    if connection.recommended_action
-                    else []
+                    [connection.recommended_action] if connection.recommended_action else []
                 ),
                 "status": "new",
             }
@@ -299,12 +295,8 @@ Return only the JSON array, no markdown."""
             # Parse JSON, handle markdown code blocks
             cleaned = response.strip()
             if cleaned.startswith("```"):
-                cleaned = (
-                    cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-                )
-                cleaned = (
-                    cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
-                )
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+                cleaned = cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
             entities_data = json.loads(cleaned)
             return [EntityExtraction(**e) for e in entities_data]
         except Exception as e:
@@ -325,11 +317,7 @@ Return only the JSON array, no markdown."""
         entity_names_b = {e.name.lower() for e in entities_b}
         overlap = entity_names_a & entity_names_b
 
-        connection_type = (
-            ConnectionType.ENTITY_OVERLAP
-            if overlap
-            else ConnectionType.LLM_INFERRED
-        )
+        connection_type = ConnectionType.ENTITY_OVERLAP if overlap else ConnectionType.LLM_INFERRED
 
         # If Graphiti available, check for paths
         graphiti_path = None
@@ -382,9 +370,7 @@ Return only the JSON array, no markdown."""
             recommended_action=scores.get("recommended_action"),
         )
 
-    async def _query_graphiti_path(
-        self, entity_a: str, entity_b: str
-    ) -> list | None:
+    async def _query_graphiti_path(self, entity_a: str, entity_b: str) -> list | None:
         """Query Graphiti for path between entities."""
         if not self._graphiti:
             return None
@@ -416,9 +402,7 @@ Return only the JSON array, no markdown."""
         overlap_text = (
             f"Shared entities: {list(overlap)}" if overlap else "No direct entity overlap"
         )
-        path_text = (
-            f"Graph path found: {graphiti_path}" if graphiti_path else "No graph path"
-        )
+        path_text = f"Graph path found: {graphiti_path}" if graphiti_path else "No graph path"
 
         prompt = f"""Assess this connection between two events. Return JSON.
 
@@ -447,12 +431,8 @@ Return only JSON, no markdown."""
             response = await self._llm.generate_response(prompt)
             cleaned = response.strip()
             if cleaned.startswith("```"):
-                cleaned = (
-                    cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-                )
-                cleaned = (
-                    cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
-                )
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+                cleaned = cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
             scores = json.loads(cleaned)
             if scores.get("skip"):
                 return None
@@ -478,8 +458,8 @@ Event B: {event_b}
 
 Connection type: {connection_type.value}
 Shared entities: { {e.name for e in entities_a} & {e.name for e in entities_b} }
-Novelty: {scores['novelty']:.0%}
-Recommended action: {scores.get('recommended_action', 'None')}
+Novelty: {scores["novelty"]:.0%}
+Recommended action: {scores.get("recommended_action", "None")}
 
 Write a clear, professional explanation suitable for a business context."""
 

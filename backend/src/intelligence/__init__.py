@@ -9,8 +9,8 @@ from src.intelligence.causal import (
     CausalTraversalResponse,
 )
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
-from src.intelligence.proactive_memory import ProactiveMemoryService
 from src.intelligence.orchestrator import JarvisOrchestrator, create_orchestrator
+from src.intelligence.proactive_memory import ProactiveMemoryService
 from src.intelligence.simulation import (
     MentalSimulationEngine,
     OutcomeClassification,

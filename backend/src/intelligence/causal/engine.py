@@ -129,9 +129,7 @@ class CausalChainEngine:
 
         # Step 3: Filter by minimum confidence and deduplicate
         filtered_chains = [
-            chain
-            for chain in all_chains
-            if chain.final_confidence >= min_confidence and chain.hops
+            chain for chain in all_chains if chain.final_confidence >= min_confidence and chain.hops
         ]
 
         # Deduplicate by final target entity
@@ -311,29 +309,35 @@ Return ONLY a valid JSON array, no other text:
                 # Parse the fact to extract relationship info
                 # Graphiti stores facts as natural language
                 if "causes" in fact.lower() or "leads to" in fact.lower():
-                    relationships.append({
-                        "target_entity": self._extract_target_from_fact(fact, entity_name),
-                        "relationship_type": "causes",
-                        "confidence": min(score, 1.0),
-                        "explanation": fact,
-                        "source": "graphiti",
-                    })
+                    relationships.append(
+                        {
+                            "target_entity": self._extract_target_from_fact(fact, entity_name),
+                            "relationship_type": "causes",
+                            "confidence": min(score, 1.0),
+                            "explanation": fact,
+                            "source": "graphiti",
+                        }
+                    )
                 elif "enables" in fact.lower() or "supports" in fact.lower():
-                    relationships.append({
-                        "target_entity": self._extract_target_from_fact(fact, entity_name),
-                        "relationship_type": "enables",
-                        "confidence": min(score, 1.0),
-                        "explanation": fact,
-                        "source": "graphiti",
-                    })
+                    relationships.append(
+                        {
+                            "target_entity": self._extract_target_from_fact(fact, entity_name),
+                            "relationship_type": "enables",
+                            "confidence": min(score, 1.0),
+                            "explanation": fact,
+                            "source": "graphiti",
+                        }
+                    )
                 elif "threatens" in fact.lower() or "risks" in fact.lower():
-                    relationships.append({
-                        "target_entity": self._extract_target_from_fact(fact, entity_name),
-                        "relationship_type": "threatens",
-                        "confidence": min(score, 1.0),
-                        "explanation": fact,
-                        "source": "graphiti",
-                    })
+                    relationships.append(
+                        {
+                            "target_entity": self._extract_target_from_fact(fact, entity_name),
+                            "relationship_type": "threatens",
+                            "confidence": min(score, 1.0),
+                            "explanation": fact,
+                            "source": "graphiti",
+                        }
+                    )
 
             return relationships
 
@@ -422,7 +426,12 @@ Return ONLY a valid JSON array (max 5 items), no other text:
 
         try:
             response = await self._llm.generate_response(
-                messages=[{"role": "user", "content": f"What are the downstream effects of {entity.name}?"}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"What are the downstream effects of {entity.name}?",
+                    }
+                ],
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=1000,
@@ -583,9 +592,7 @@ Return ONLY a valid JSON array (max 5 items), no other text:
 
         # If no Graphiti relationships, use LLM inference
         if not graphiti_rels:
-            inferred_rels = await self._infer_causal_relationships(
-                user_id, entity, trigger_event
-            )
+            inferred_rels = await self._infer_causal_relationships(user_id, entity, trigger_event)
             graphiti_rels = [
                 {
                     "target_entity": r.target_entity,
