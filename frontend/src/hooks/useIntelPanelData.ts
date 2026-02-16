@@ -35,7 +35,7 @@ export function useRouteContext() {
     isDraftDetail: !!draftMatch,
   };
 }
-import { listSignals, type SignalFilters } from "@/api/signals";
+import { listSignals, markSignalRead, markAllRead, dismissSignal, getUnreadCount, type SignalFilters } from "@/api/signals";
 import {
   listInsights,
   updateInsightFeedback,
@@ -73,6 +73,47 @@ export function useSignals(filters?: SignalFilters) {
     queryKey: intelKeys.signals(filters),
     queryFn: () => listSignals(filters),
     staleTime: 1000 * 60 * 2, // 2 minutes
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Signal mutation hooks (MarketSignalsFeed)
+// ---------------------------------------------------------------------------
+export function useUnreadSignalCount() {
+  return useQuery({
+    queryKey: [...intelKeys.all, "signalUnread"] as const,
+    queryFn: () => getUnreadCount(),
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useMarkSignalRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (signalId: string) => markSignalRead(signalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: intelKeys.all });
+    },
+  });
+}
+
+export function useMarkAllSignalsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => markAllRead(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: intelKeys.all });
+    },
+  });
+}
+
+export function useDismissSignal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (signalId: string) => dismissSignal(signalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: intelKeys.all });
+    },
   });
 }
 

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft } from '@/hooks/useDrafts';
+import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
 import type { EmailDraftTone } from '@/api/drafts';
 
 // Status badge styles
@@ -158,6 +159,12 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
           <ChevronLeft className="w-4 h-4" />
           Drafts
         </button>
+
+        {/* Intelligence Context */}
+        <DraftIntelligenceContext
+          leadId={draft.lead_memory_id}
+          companyName={draft.recipient_name?.split(' ').pop()}
+        />
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-6">

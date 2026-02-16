@@ -4,6 +4,7 @@ import { ExecutionPlanCard, type ExecutionPlanData } from './ExecutionPlanCard';
 import { MeetingCard, type MeetingCardData } from './MeetingCard';
 import { SignalCard, type SignalCardData } from './SignalCard';
 import { AlertCard, type AlertCardData } from './AlertCard';
+import { BriefingCard, type BriefingCardData } from './BriefingCard';
 
 interface RichContentRendererProps {
   items: RichContent[];
@@ -33,6 +34,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <SignalCard data={item.data as unknown as SignalCardData} />;
     case 'alert_card':
       return <AlertCard data={item.data as unknown as AlertCardData} />;
+    case 'briefing':
+      return <BriefingCard data={item.data as unknown as BriefingCardData} />;
     default:
       return (
         <div

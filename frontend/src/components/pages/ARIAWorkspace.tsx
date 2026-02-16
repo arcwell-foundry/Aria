@@ -14,6 +14,7 @@ import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
+import { useTodayBriefing, useGenerateBriefing } from '@/hooks/useBriefing';
 
 export function ARIAWorkspace() {
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -31,6 +32,9 @@ export function ARIAWorkspace() {
 
   const streamingIdRef = useRef<string | null>(null);
   const conversationLoadedRef = useRef(false);
+  const briefingInjectedRef = useRef(false);
+  const { data: briefing, isLoading: briefingLoading } = useTodayBriefing();
+  const generateBriefing = useGenerateBriefing();
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -77,6 +81,38 @@ export function ARIAWorkspace() {
         // Silently fail — workspace will just be empty
       });
   }, []);
+
+  // Inject daily briefing as ARIA's first message when available
+  useEffect(() => {
+    if (briefingInjectedRef.current) return;
+    if (briefingLoading) return;
+
+    // If no briefing exists yet, generate one
+    if (!briefing && !generateBriefing.isPending) {
+      generateBriefing.mutate(undefined);
+      return;
+    }
+
+    if (!briefing) return;
+
+    briefingInjectedRef.current = true;
+
+    const store = useConversationStore.getState();
+    store.addMessage({
+      role: 'aria',
+      content: `Good morning. Here's your intelligence briefing for today.`,
+      rich_content: [
+        {
+          type: 'briefing',
+          data: briefing as unknown as Record<string, unknown>,
+        },
+      ],
+      ui_commands: [],
+      suggestions: ['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health'],
+    });
+
+    store.setCurrentSuggestions(['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health']);
+  }, [briefing, briefingLoading, generateBriefing]);
 
   // Wire up event listeners
   useEffect(() => {

@@ -19,6 +19,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { UpcomingMeetings } from '@/components/actions/UpcomingMeetings';
 import { useGoalDashboard } from '@/hooks/useGoals';
 import { useActions, useApproveAction, useRejectAction } from '@/hooks/useActionQueue';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -399,6 +400,9 @@ export function ActionsPage() {
             Monitor goals, agent activity, and approve pending actions.
           </p>
         </div>
+
+        {/* Upcoming Meetings Section */}
+        <UpcomingMeetings />
 
         {/* Active Goals Section */}
         <section className="mb-8">

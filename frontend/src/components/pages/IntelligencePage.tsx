@@ -17,10 +17,10 @@
 
 import { useParams } from 'react-router-dom';
 import { Newspaper, TrendingUp } from 'lucide-react';
-import { cn } from '@/utils/cn';
 import { useBattleCards } from '@/hooks/useBattleCards';
-import { BattleCardPreview, BattleCardPreviewSkeleton } from '@/components/intelligence';
+import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
+import { useUnreadSignalCount } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
 import type { BattleCard } from '@/api/battleCards';
 
@@ -57,6 +57,7 @@ function IntelligenceSkeleton() {
 // Intelligence Overview Component
 function IntelligenceOverview() {
   const { data: battleCards, isLoading, error } = useBattleCards();
+  const { data: unreadCount } = useUnreadSignalCount();
 
   // Extract analysis data from each battle card
   const getCardData = (card: BattleCard) => ({
@@ -152,20 +153,16 @@ function IntelligenceOverview() {
             >
               <TrendingUp className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
               Market Signals
-            </h2>
-
-            <div
-              className={cn(
-                'rounded-xl p-6 border border-[var(--border)]',
-                'bg-[var(--bg-elevated)]'
+              {(unreadCount?.count ?? 0) > 0 && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: 'var(--accent)', color: 'white' }}
+                >
+                  {unreadCount?.count} new
+                </span>
               )}
-            >
-              <EmptyState
-                title="Market signal detection coming soon"
-                description="ARIA will automatically detect competitor pricing changes, product launches, and strategic moves."
-                icon={<TrendingUp className="w-8 h-8" />}
-              />
-            </div>
+            </h2>
+            <MarketSignalsFeed />
           </section>
         </div>
       )}
