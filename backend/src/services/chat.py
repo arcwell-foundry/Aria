@@ -729,6 +729,9 @@ class ChatService:
         # Email check — lazily initialized on first use
         self._email_check: EmailCheckService | None = None
 
+        # Companion orchestrator — lazily initialized on first use
+        self._companion_orchestrator: Any = None
+
     async def _get_skill_registry(self) -> Any:
         """Lazily initialize and return the SkillRegistry.
 
@@ -1338,11 +1341,29 @@ class ChatService:
         )
         proactive_ms = (time.perf_counter() - proactive_start) * 1000
 
-        # Load Digital Twin personality calibration for style matching
-        personality = await self._get_personality_calibration(user_id)
+        # Build companion context (replaces personality calibration + style guidelines)
+        companion_ctx = None
+        try:
+            if self._companion_orchestrator is None:
+                from src.companion.factory import create_companion_orchestrator
 
-        # Fetch Digital Twin writing style fingerprint for content generation
-        style_guidelines = await self._get_style_guidelines(user_id)
+                self._companion_orchestrator = create_companion_orchestrator()
+            companion_ctx = await self._companion_orchestrator.build_full_context(
+                user_id=user_id,
+                message=message,
+                conversation_history=conversation_messages,
+                session_id=conversation_id,
+            )
+        except Exception as e:
+            logger.warning("Companion orchestrator failed, falling back: %s", e)
+
+        # Fall back to individual calls if orchestrator failed
+        if companion_ctx is not None:
+            personality = None
+            style_guidelines = None
+        else:
+            personality = await self._get_personality_calibration(user_id)
+            style_guidelines = await self._get_style_guidelines(user_id)
 
         # Prime conversation with recent episodes, open threads, and salient facts
         priming_context = await self._get_priming_context(user_id, message)
@@ -1356,6 +1377,7 @@ class ChatService:
             style_guidelines,
             priming_context,
             web_context,
+            companion_context=companion_ctx,
         )
 
         logger.info(
@@ -1373,6 +1395,8 @@ class ChatService:
                 "web_context_type": web_context.get("type") if web_context else None,
                 "cognitive_load_level": load_state.level.value,
                 "has_style_guidelines": style_guidelines is not None,
+                "has_companion_context": companion_ctx is not None,
+                "companion_failed_subsystems": companion_ctx.failed_subsystems if companion_ctx else [],
                 "has_priming_context": priming_context is not None,
             },
         )
@@ -1573,6 +1597,17 @@ class ChatService:
             conversation_context=conversation_messages[-2:],
         )
 
+        # Companion post-response hooks (narrative increment + theory of mind store)
+        if companion_ctx is not None and self._companion_orchestrator is not None:
+            try:
+                await self._companion_orchestrator.post_response_hooks(
+                    user_id=user_id,
+                    mental_state_dict=companion_ctx.mental_state,
+                    session_id=conversation_id,
+                )
+            except Exception as e:
+                logger.warning("Companion post-response hooks failed: %s", e)
+
         # Store conversation turn as episodic memory (unique to non-streaming path)
         try:
             episode = Episode(
@@ -1654,6 +1689,7 @@ class ChatService:
                 "skill_detection_ms": round(skill_ms, 2),
                 "whatif_simulation_ms": round(whatif_ms, 2),
                 "temporal_analysis_ms": round(temporal_ms, 2),
+                "companion_context_ms": round(companion_ctx.build_time_ms, 2) if companion_ctx else 0.0,
                 "llm_response_ms": round(llm_ms, 2),
                 "total_ms": round(total_ms, 2),
             },
@@ -1795,6 +1831,7 @@ class ChatService:
         style_guidelines: str | None = None,
         priming_context: ConversationContext | None = None,
         web_context: dict[str, Any] | None = None,
+        companion_context: Any = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -1806,6 +1843,8 @@ class ChatService:
             style_guidelines: Optional writing style fingerprint from Digital Twin.
             priming_context: Optional conversation priming context.
             web_context: Optional web-grounded context from Exa.
+            companion_context: Optional CompanionContext from orchestrator
+                (replaces personality + style_guidelines when present).
 
         Returns:
             Formatted system prompt string.
@@ -1859,25 +1898,31 @@ class ChatService:
             lead_lines = [f"- {mem['content']}" for mem in lead_memories]
             base_prompt += "\n\n" + LEAD_CONTEXT_TEMPLATE.format(leads="\n".join(lead_lines))
 
-        # Add personality calibration from Digital Twin
-        if personality and personality.tone_guidance:
-            examples_text = ""
-            if personality.example_adjustments:
-                examples_text = "Examples:\n" + "\n".join(
-                    f"- {ex}" for ex in personality.example_adjustments
+        # Add companion context OR fall back to individual personality/style sections
+        if companion_context is not None:
+            companion_sections = companion_context.to_system_prompt_sections()
+            if companion_sections:
+                base_prompt = base_prompt + "\n\n" + companion_sections
+        else:
+            # Fallback: Add personality calibration from Digital Twin
+            if personality and personality.tone_guidance:
+                examples_text = ""
+                if personality.example_adjustments:
+                    examples_text = "Examples:\n" + "\n".join(
+                        f"- {ex}" for ex in personality.example_adjustments
+                    )
+                personality_context = PERSONALITY_CONTEXT_TEMPLATE.format(
+                    tone_guidance=personality.tone_guidance,
+                    examples=examples_text,
                 )
-            personality_context = PERSONALITY_CONTEXT_TEMPLATE.format(
-                tone_guidance=personality.tone_guidance,
-                examples=examples_text,
-            )
-            base_prompt = base_prompt + "\n\n" + personality_context
+                base_prompt = base_prompt + "\n\n" + personality_context
 
-        # Add Digital Twin writing style fingerprint
-        if style_guidelines:
-            style_context = WRITING_STYLE_TEMPLATE.format(
-                style_guidelines=style_guidelines,
-            )
-            base_prompt = base_prompt + "\n\n" + style_context
+            # Fallback: Add Digital Twin writing style fingerprint
+            if style_guidelines:
+                style_context = WRITING_STYLE_TEMPLATE.format(
+                    style_guidelines=style_guidelines,
+                )
+                base_prompt = base_prompt + "\n\n" + style_context
 
         # Add conversation priming context (recent episodes, open threads, salient facts)
         if priming_context and priming_context.formatted_context:

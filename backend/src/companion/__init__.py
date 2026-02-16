@@ -6,11 +6,13 @@ This module provides:
 - Metacognition service for knowledge self-assessment and uncertainty acknowledgment
 """
 
+from src.companion.factory import create_companion_orchestrator
 from src.companion.metacognition import (
     KnowledgeAssessment,
     KnowledgeSource,
     MetacognitionService,
 )
+from src.companion.orchestrator import CompanionContext, CompanionOrchestrator
 from src.companion.personality import (
     OpinionResult,
     PersonalityProfile,
@@ -30,6 +32,10 @@ from src.companion.theory_of_mind import (
 )
 
 __all__ = [
+    # Orchestrator
+    "CompanionContext",
+    "CompanionOrchestrator",
+    "create_companion_orchestrator",
     # Metacognition
     "KnowledgeAssessment",
     "KnowledgeSource",
