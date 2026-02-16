@@ -17,6 +17,8 @@ export type SidebarItem =
   | 'intelligence'
   | 'communications'
   | 'actions'
+  | 'activity'
+  | 'analytics'
   | 'settings';
 
 export type IntelPanelMode =
