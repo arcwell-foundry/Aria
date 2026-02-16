@@ -1674,6 +1674,16 @@ class ChatService:
                 }
             )
 
+        # Generate companion-driven ui_commands from response + context
+        if companion_ctx is not None and self._companion_orchestrator is not None:
+            try:
+                companion_commands = self._companion_orchestrator.generate_ui_commands(
+                    response_text, companion_ctx
+                )
+                ui_commands.extend(companion_commands)
+            except Exception as e:
+                logger.warning("Companion ui_commands generation failed: %s", e)
+
         result: dict[str, Any] = {
             "message": response_text,
             "citations": citations,

@@ -58,12 +58,24 @@ class CognitiveLoadInfo(BaseModel):
 
 
 class UICommand(BaseModel):
-    """A UI command ARIA can issue to control the frontend."""
+    """A UI command ARIA can issue to control the frontend.
+
+    Matches the frontend UICommand interface in api/chat.ts.
+    """
 
     action: str
     route: str | None = None
     element: str | None = None
     content: dict | None = None
+    effect: str | None = None  # 'glow' | 'pulse' | 'outline'
+    duration: int | None = None  # highlight duration in ms
+    mode: str | None = None  # 'workspace' | 'dialogue' | 'compact_avatar'
+    badge_count: int | None = None
+    sidebar_item: str | None = None
+    notification_type: str | None = None  # 'signal' | 'alert' | 'success' | 'info'
+    notification_message: str | None = None
+    modal_id: str | None = None
+    modal_data: dict | None = None
 
 
 class RichContent(BaseModel):
@@ -319,13 +331,23 @@ async def chat_stream(
             },
         )
 
+        # Build rich_content from proactive insights
+        rich_content: list[dict] = []
+        for insight in proactive_insights:
+            insight_dict = insight.to_dict() if hasattr(insight, "to_dict") else {}
+            insight_type = insight_dict.get("type", "")
+            if insight_type == "signal":
+                rich_content.append({"type": "signal_card", "data": insight_dict})
+            elif insight_type in ("goal_update", "goal"):
+                rich_content.append({"type": "goal_plan", "data": insight_dict})
+
         # Emit completion metadata with envelope fields
         ui_commands = _analyze_ui_commands(full_content)
         suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
 
         complete_event = {
             "type": "complete",
-            "rich_content": [],
+            "rich_content": rich_content,
             "ui_commands": ui_commands,
             "suggestions": suggestions,
         }
@@ -536,13 +558,34 @@ _ROUTE_KEYWORDS: dict[str, str] = {
     "settings": "/settings",
 }
 
+# Keywords that indicate an entity should be highlighted in the Intel Panel
+_HIGHLIGHT_KEYWORDS: list[tuple[str, str]] = [
+    ("deal", "deal-card"),
+    ("lead", "lead-card"),
+    ("opportunity", "deal-card"),
+    ("contact", "contact-card"),
+    ("account", "account-card"),
+]
+
+# Keywords indicating Intel Panel should update with contextual modules
+_INTEL_PANEL_TRIGGERS: dict[str, dict] = {
+    "battle card": {"module": "battle_card", "title": "Competitive Intelligence"},
+    "competitor": {"module": "competitive_landscape", "title": "Competitive Landscape"},
+    "forecast": {"module": "forecast", "title": "Pipeline Forecast"},
+    "risk": {"module": "risk_assessment", "title": "Risk Assessment"},
+    "goal": {"module": "goal_tracker", "title": "Goal Progress"},
+    "meeting": {"module": "meeting_prep", "title": "Meeting Preparation"},
+    "signal": {"module": "signals", "title": "Intelligence Signals"},
+}
+
 
 def _analyze_ui_commands(response: str) -> list[dict]:
-    """Analyze ARIA's response for UI navigation or highlight intents.
+    """Analyze ARIA's response for UI navigation, highlight, and panel intents.
 
-    Scans for route-related keywords and generates navigate commands.
-    This is a heuristic approach; the LLM can also produce explicit
-    ui_commands in structured responses.
+    Scans for route-related keywords and generates navigate, highlight,
+    update_intel_panel, and show_notification commands. This is a heuristic
+    approach; the LLM can also produce explicit ui_commands in structured
+    responses.
 
     Args:
         response: The assistant's text response.
@@ -553,10 +596,43 @@ def _analyze_ui_commands(response: str) -> list[dict]:
     commands: list[dict] = []
     response_lower = response.lower()
 
+    # Navigation: at most one per response
     for keyword, route in _ROUTE_KEYWORDS.items():
         if keyword in response_lower:
             commands.append({"action": "navigate", "route": route})
-            break  # Only one navigation per response
+            break
+
+    # Intel Panel update: surface contextual modules
+    for keyword, panel_info in _INTEL_PANEL_TRIGGERS.items():
+        if keyword in response_lower:
+            commands.append({
+                "action": "update_intel_panel",
+                "content": {
+                    "module": panel_info["module"],
+                    "title": panel_info["title"],
+                    "source": "conversation",
+                },
+            })
+            break  # One panel update per response
+
+    # Highlight: pulse entities mentioned in the response
+    for keyword, element_id in _HIGHLIGHT_KEYWORDS:
+        if keyword in response_lower:
+            commands.append({
+                "action": "highlight",
+                "element": element_id,
+                "effect": "pulse",
+                "duration": 3000,
+            })
+            break  # One highlight per response
+
+    # Notification for urgent/critical items
+    if "urgent" in response_lower or "critical" in response_lower:
+        commands.append({
+            "action": "show_notification",
+            "notification_type": "alert",
+            "notification_message": "ARIA flagged items requiring attention",
+        })
 
     return commands
 

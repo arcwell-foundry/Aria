@@ -575,6 +575,109 @@ class CompanionOrchestrator:
         return triggers
 
     # ------------------------------------------------------------------
+    # UI command generation
+    # ------------------------------------------------------------------
+
+    def generate_ui_commands(
+        self,
+        response_text: str,
+        context: CompanionContext,
+    ) -> list[dict[str, Any]]:
+        """Generate contextual ui_commands based on companion context.
+
+        Analyzes the response text alongside companion subsystem data to
+        produce UI commands that help ARIA drive the frontend experience.
+
+        Args:
+            response_text: The assistant's generated response.
+            context: The companion context gathered for this turn.
+
+        Returns:
+            List of UICommand dicts ready for the response envelope.
+        """
+        commands: list[dict[str, Any]] = []
+        response_lower = response_text.lower()
+
+        # Strategic concerns → highlight pipeline items, notify
+        if context.strategic_concerns:
+            high_severity = [
+                c for c in context.strategic_concerns
+                if (c.severity if hasattr(c, "severity") else c.get("severity", "")) in ("high", "critical")
+            ]
+            if high_severity:
+                concern = high_severity[0]
+                desc = (
+                    concern.description
+                    if hasattr(concern, "description")
+                    else concern.get("description", "Strategic concern flagged")
+                )
+                commands.append({
+                    "action": "update_intel_panel",
+                    "content": {
+                        "module": "strategic_alerts",
+                        "title": "Strategic Alerts",
+                        "alerts": [
+                            {
+                                "severity": (
+                                    concern.severity
+                                    if hasattr(concern, "severity")
+                                    else concern.get("severity", "high")
+                                ),
+                                "description": desc,
+                            }
+                        ],
+                    },
+                })
+
+        # Emotional state → gentle notification for elevated stress
+        if context.mental_state is not None:
+            try:
+                stress = (
+                    context.mental_state.stress_level.value
+                    if hasattr(context.mental_state.stress_level, "value")
+                    else str(context.mental_state.stress_level)
+                )
+                if stress in ("high", "elevated", "critical"):
+                    commands.append({
+                        "action": "show_notification",
+                        "notification_type": "info",
+                        "notification_message": "ARIA is adapting her communication style to your current state",
+                    })
+            except Exception:
+                pass  # Mental state unavailable
+
+        # Narrative anniversary → navigate to acknowledge milestones
+        if context.anniversaries:
+            commands.append({
+                "action": "show_notification",
+                "notification_type": "success",
+                "notification_message": "You have a milestone to celebrate!",
+            })
+
+        # Goal/plan mentions in response → highlight goal tracker
+        if any(kw in response_lower for kw in ("goal", "plan", "objective", "target")):
+            if not any(c.get("action") == "update_intel_panel" for c in commands):
+                commands.append({
+                    "action": "update_intel_panel",
+                    "content": {
+                        "module": "goal_tracker",
+                        "title": "Goal Progress",
+                        "source": "companion",
+                    },
+                })
+
+        # Onboarding completion → navigate to pipeline
+        if "onboarding" in response_lower and any(
+            kw in response_lower for kw in ("complete", "finished", "done", "all set")
+        ):
+            commands.append({
+                "action": "navigate",
+                "route": "/pipeline",
+            })
+
+        return commands
+
+    # ------------------------------------------------------------------
     # Post-response hooks
     # ------------------------------------------------------------------
 

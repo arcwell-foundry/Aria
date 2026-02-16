@@ -297,13 +297,29 @@ async def _handle_user_message(
             conversation_context=conversation_messages[-2:],
         )
 
+        # Build rich_content from proactive insights (mirrors chat service logic)
+        rich_content: list[dict] = []
+        for insight in proactive_insights:
+            insight_dict = insight.to_dict() if hasattr(insight, "to_dict") else {}
+            insight_type = insight_dict.get("type", "")
+            if insight_type == "signal":
+                rich_content.append({
+                    "type": "signal_card",
+                    "data": insight_dict,
+                })
+            elif insight_type in ("goal_update", "goal"):
+                rich_content.append({
+                    "type": "goal_plan",
+                    "data": insight_dict,
+                })
+
         # Send complete response
         ui_commands = _analyze_ui_commands(full_content)
         suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
 
         response_event = AriaMessageEvent(
             message=full_content,
-            rich_content=[],
+            rich_content=rich_content,
             ui_commands=ui_commands,
             suggestions=suggestions,
         )
