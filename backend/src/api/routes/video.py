@@ -192,6 +192,7 @@ async def create_video_session(
             memory_stores=[{"memory_store_id": f"aria-user-{current_user.id}"}],
             document_tags=_document_tags_for_session(request.session_type.value),
             retrieval_strategy="balanced",
+            audio_only=request.audio_only,
         )
     except httpx.HTTPStatusError:
         logger.exception(
@@ -229,6 +230,7 @@ async def create_video_session(
         "duration_seconds": None,
         "created_at": now,
         "lead_id": request.lead_id,
+        "is_audio_only": request.audio_only,
     }
 
     db = get_supabase_client()
@@ -267,6 +269,7 @@ async def create_video_session(
         duration_seconds=saved.get("duration_seconds"),
         created_at=saved["created_at"],
         lead_id=saved.get("lead_id"),
+        is_audio_only=saved.get("is_audio_only", False),
         perception_analysis=saved.get("perception_analysis"),
     )
 
@@ -322,6 +325,7 @@ async def list_video_sessions(
             duration_seconds=session.get("duration_seconds"),
             created_at=session["created_at"],
             lead_id=session.get("lead_id"),
+            is_audio_only=session.get("is_audio_only", False),
             perception_analysis=session.get("perception_analysis"),
         )
         for session in sessions
@@ -408,6 +412,7 @@ async def get_video_session(
         duration_seconds=session.get("duration_seconds"),
         created_at=session["created_at"],
         lead_id=session.get("lead_id"),
+        is_audio_only=session.get("is_audio_only", False),
         perception_analysis=session.get("perception_analysis"),
         transcripts=transcripts,
     )
@@ -519,6 +524,7 @@ async def end_video_session(
         duration_seconds=updated.get("duration_seconds"),
         created_at=updated["created_at"],
         lead_id=updated.get("lead_id"),
+        is_audio_only=updated.get("is_audio_only", False),
         perception_analysis=updated.get("perception_analysis"),
     )
 

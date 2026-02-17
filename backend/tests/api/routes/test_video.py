@@ -290,6 +290,54 @@ class TestCreateVideoSession:
                         assert response.status_code == 200
                         assert response.json()["session_type"] == "consultation"
 
+    def test_create_audio_only_session(
+        self, test_client: TestClient, mock_tavus: MagicMock, mock_db: MagicMock
+    ) -> None:
+        """Verify audio_only=True is passed to Tavus and stored in DB."""
+        mock_insert_result = MagicMock()
+        mock_insert_result.data = [{
+            "id": "session-123",
+            "user_id": "test-user-123",
+            "tavus_conversation_id": "tavus-conv-123",
+            "room_url": "https://daily.co/room/test-room",
+            "status": VideoSessionStatus.ACTIVE.value,
+            "session_type": SessionType.CHAT.value,
+            "started_at": datetime.now(UTC).isoformat(),
+            "ended_at": None,
+            "duration_seconds": None,
+            "created_at": datetime.now(UTC).isoformat(),
+            "lead_id": None,
+            "perception_analysis": {},
+            "is_audio_only": True,
+        }]
+
+        with patch.object(_video_mod, "get_tavus_client", return_value=mock_tavus):
+            with patch.object(_video_mod, "get_supabase_client", return_value=mock_db):
+                with patch.object(_video_mod, "build_aria_context", return_value="Test context"):
+                    with patch.object(_video_mod, "ws_manager") as mock_ws:
+                        mock_ws.send_to_user = AsyncMock()
+                        mock_db.table.return_value.insert.return_value.execute.return_value = (
+                            mock_insert_result
+                        )
+
+                        response = test_client.post(
+                            "/api/v1/video/sessions",
+                            json={"audio_only": True},
+                        )
+
+                        assert response.status_code == 200
+                        data = response.json()
+                        assert data["is_audio_only"] is True
+
+                        # Verify Tavus was called with audio_only=True
+                        mock_tavus.create_conversation.assert_called_once()
+                        call_kwargs = mock_tavus.create_conversation.call_args[1]
+                        assert call_kwargs["audio_only"] is True
+
+                        # Verify DB insert includes is_audio_only
+                        insert_call = mock_db.table.return_value.insert.call_args[0][0]
+                        assert insert_call["is_audio_only"] is True
+
 
 class TestGetVideoSession:
     """Tests for GET /video/sessions/{id} endpoint."""
