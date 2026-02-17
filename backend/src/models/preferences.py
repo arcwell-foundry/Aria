@@ -38,6 +38,9 @@ class PreferenceCreate(BaseModel):
         default_factory=list, description="List of tracked competitor names"
     )
     timezone: str = Field("UTC", description="User timezone")
+    video_briefing_enabled: bool = Field(
+        False, description="Enable video briefing delivery via Tavus avatar"
+    )
 
 
 class PreferenceUpdate(BaseModel):
@@ -56,6 +59,9 @@ class PreferenceUpdate(BaseModel):
         None, description="List of tracked competitor names"
     )
     timezone: str | None = Field(None, description="User timezone")
+    video_briefing_enabled: bool | None = Field(
+        None, description="Enable video briefing delivery via Tavus avatar"
+    )
     linkedin_posting_enabled: bool | None = Field(
         None, description="Enable ARIA LinkedIn posting features"
     )
@@ -94,6 +100,7 @@ class PreferenceResponse(BaseModel):
     default_tone: str = Field(..., description="Default communication tone")
     tracked_competitors: list[str] = Field(..., description="List of tracked competitor names")
     timezone: str = Field(..., description="User timezone")
+    video_briefing_enabled: bool = Field(..., description="Video briefing delivery enabled")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Last update timestamp")
 

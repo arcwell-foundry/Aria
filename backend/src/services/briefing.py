@@ -248,8 +248,8 @@ class BriefingService:
             extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
         )
 
-        # Notify user that briefing is ready
-        await notification_integration.notify_briefing_ready(
+        # Notify user that briefing is ready (with video CTA if enabled)
+        await notification_integration.notify_briefing_ready_with_video(
             user_id=user_id,
             briefing_date=briefing_date.isoformat(),
         )
@@ -1104,3 +1104,263 @@ Be concise and actionable. Start with "Good morning!"
             subject = subject[3:].strip()
 
         return subject[:100] if subject else "Email reply draft"
+
+    async def generate_video_briefing_context(self, user_id: str) -> str:
+        """Generate a conversational script for video briefing delivery.
+
+        Formats the daily briefing as natural speech optimized for Tavus
+        avatar delivery. The output is designed to be spoken naturally,
+        without markdown or formatting that would sound awkward when spoken.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            Conversational script string optimized for spoken delivery.
+            Kept under 5,000 tokens for optimal Tavus LLM performance.
+        """
+        # Get or generate the briefing
+        briefing = await self.get_or_generate_briefing(user_id)
+
+        # Get user name for personalization
+        user_name = "there"
+        try:
+            profile_result = (
+                self._db.table("profiles")
+                .select("full_name")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile_result and profile_result.data:
+                full_name = profile_result.data.get("full_name", "")
+                if full_name:
+                    user_name = full_name.split()[0]  # First name only
+        except Exception:
+            pass
+
+        # Build conversational script
+        script_parts = []
+
+        # Opening greeting
+        script_parts.append(f"Good morning, {user_name}.")
+
+        # Summary (the LLM-generated executive summary)
+        summary = briefing.get("summary", "")
+        if summary:
+            # Remove "Good morning!" prefix if present (we add our own)
+            summary = summary.replace("Good morning!", "").strip()
+            if summary.startswith("Good morning"):
+                summary = summary[13:].strip()  # Remove "Good morning" + space/punctuation
+            script_parts.append(summary)
+
+        # Calendar highlights
+        calendar = briefing.get("calendar", {})
+        meeting_count = calendar.get("meeting_count", 0)
+        key_meetings = calendar.get("key_meetings", [])
+
+        if meeting_count > 0:
+            script_parts.append(f"You have {meeting_count} meeting{'s' if meeting_count > 1 else ''} today.")
+            for i, meeting in enumerate(key_meetings[:3]):
+                time = meeting.get("time", "")
+                title = meeting.get("title", "Meeting")
+                company = meeting.get("company")
+
+                if i == 0:
+                    script_parts.append("Your key meetings are:")
+                if company:
+                    script_parts.append(f"At {time}, {title} with {company}.")
+                else:
+                    script_parts.append(f"At {time}, {title}.")
+        else:
+            script_parts.append("Your calendar is clear today, which gives you time for focused work.")
+
+        # Lead updates
+        leads = briefing.get("leads", {})
+        hot_leads = leads.get("hot_leads", [])
+        needs_attention = leads.get("needs_attention", [])
+
+        if hot_leads:
+            script_parts.append(f"You have {len(hot_leads)} hot lead{'s' if len(hot_leads) > 1 else ''} showing strong buying signals.")
+            for lead in hot_leads[:3]:
+                company = lead.get("company_name", "a company")
+                score = lead.get("health_score", 0)
+                script_parts.append(f"{company} has a health score of {score}.")
+
+        if needs_attention:
+            script_parts.append(f"{len(needs_attention)} lead{'s' if len(needs_attention) > 1 else ''} {'need' if len(needs_attention) == 1 else 'needs'} your attention.")
+            for lead in needs_attention[:2]:
+                company = lead.get("company_name", "a company")
+                script_parts.append(f"{company} is showing declining engagement.")
+
+        # Market signals
+        signals = briefing.get("signals", {})
+        company_news = signals.get("company_news", [])
+        competitive_intel = signals.get("competitive_intel", [])
+
+        if company_news or competitive_intel:
+            total_signals = len(company_news) + len(competitive_intel)
+            script_parts.append(f"I've detected {total_signals} market signal{'s' if total_signals > 1 else ''} for you.")
+
+            for news in company_news[:2]:
+                company = news.get("company_name", "a company")
+                headline = news.get("headline", "")
+                if headline:
+                    script_parts.append(f"{company}: {headline}.")
+
+            for intel in competitive_intel[:2]:
+                company = intel.get("company_name", "a competitor")
+                headline = intel.get("headline", "")
+                if headline:
+                    script_parts.append(f"Competitive intel on {company}: {headline}.")
+
+        # Tasks due
+        tasks = briefing.get("tasks", {})
+        overdue = tasks.get("overdue", [])
+        due_today = tasks.get("due_today", [])
+
+        if overdue:
+            script_parts.append(f"You have {len(overdue)} overdue task{'s' if len(overdue) > 1 else ''}.")
+            for task in overdue[:2]:
+                task_desc = task.get("task", "a task")
+                script_parts.append(f"{task_desc}.")
+
+        if due_today:
+            script_parts.append(f"{len(due_today)} task{'s' if len(due_today) > 1 else ''} {'are' if len(due_today) > 1 else 'is'} due today.")
+
+        # Email summary
+        email_summary = briefing.get("email_summary", {})
+        drafts_waiting = email_summary.get("drafts_waiting", 0)
+        drafts_high_confidence = email_summary.get("drafts_high_confidence", 0)
+        needs_attention_emails = email_summary.get("needs_attention", [])
+
+        if drafts_waiting > 0:
+            conf_msg = ""
+            if drafts_high_confidence > 0:
+                conf_msg = f", including {drafts_high_confidence} high confidence draft{'s' if drafts_high_confidence > 1 else ''}"
+            script_parts.append(f"I've prepared {drafts_waiting} email draft{'s' if drafts_waiting > 1 else ''} for you{conf_msg}.")
+
+        if needs_attention_emails:
+            script_parts.append(f"{len(needs_attention_emails)} email{'s' if len(needs_attention_emails) > 1 else ''} {'need' if len(needs_attention_emails) == 1 else 'needs'} your attention.")
+
+        # Closing
+        script_parts.append("Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with.")
+
+        # Join with natural pauses (double spaces for brief pauses)
+        script = "  ".join(script_parts)
+
+        # Ensure we stay under ~5,000 tokens (~20,000 characters as rough estimate)
+        # Truncate if necessary while preserving the closing
+        max_chars = 18000  # Conservative estimate for 4,500 tokens
+        closing = " Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with."
+        if len(script) > max_chars:
+            script = script[:max_chars - len(closing)] + closing
+
+        return script
+
+    async def create_video_briefing_session(self, user_id: str) -> dict[str, Any]:
+        """Create a Tavus video session for briefing delivery.
+
+        Creates a Tavus conversation optimized for briefing delivery with:
+        - session_type='briefing'
+        - Conversational context as the briefing script
+        - Cross-conversation memory so ARIA remembers past briefings
+        - High turn_taking_patience for Sparrow-1 flow
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            Dictionary with:
+            - session_id: The video session UUID
+            - room_url: The Tavus room URL for the video call
+            - briefing_date: The date of the briefing
+
+        Raises:
+            ExternalServiceError: If Tavus API fails.
+            DatabaseError: If database persistence fails.
+        """
+        from src.integrations.tavus import TavusAPIError, TavusConnectionError
+        from src.integrations.tavus_persona import SessionType
+        from src.services.video_service import VideoSessionService
+
+        # Check if video briefing is enabled for user
+        try:
+            prefs_result = (
+                self._db.table("user_preferences")
+                .select("video_briefing_enabled")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if prefs_result and prefs_result.data and not prefs_result.data.get(
+                "video_briefing_enabled", False
+            ):
+                logger.info(
+                    "Video briefing not enabled for user",
+                    extra={"user_id": user_id},
+                )
+                return {
+                    "session_id": None,
+                    "room_url": None,
+                    "briefing_date": date.today().isoformat(),
+                    "error": "video_briefing_not_enabled",
+                }
+        except Exception as e:
+            logger.warning(
+                "Failed to check video briefing preference",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # Generate the conversational briefing script
+        briefing_script = await self.generate_video_briefing_context(user_id)
+
+        # Build custom greeting for briefing
+        custom_greeting = "Good morning! I have your daily briefing ready. Let me walk you through what's important today."
+
+        try:
+            # Create video session via VideoSessionService
+            session_response = await VideoSessionService.create_session(
+                user_id=user_id,
+                session_type=SessionType.BRIEFING,  # type: ignore
+                context=briefing_script,
+                custom_greeting=custom_greeting,
+            )
+
+            logger.info(
+                "Video briefing session created",
+                extra={
+                    "user_id": user_id,
+                    "session_id": session_response.id,
+                    "briefing_date": date.today().isoformat(),
+                },
+            )
+
+            return {
+                "session_id": session_response.id,
+                "room_url": session_response.room_url,
+                "briefing_date": date.today().isoformat(),
+            }
+
+        except (TavusAPIError, TavusConnectionError) as e:
+            logger.error(
+                "Failed to create video briefing session",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            return {
+                "session_id": None,
+                "room_url": None,
+                "briefing_date": date.today().isoformat(),
+                "error": str(e),
+            }
+        except Exception as e:
+            logger.exception(
+                "Unexpected error creating video briefing session",
+                extra={"user_id": user_id},
+            )
+            return {
+                "session_id": None,
+                "room_url": None,
+                "briefing_date": date.today().isoformat(),
+                "error": str(e),
+            }

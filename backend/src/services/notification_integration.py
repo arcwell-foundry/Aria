@@ -5,6 +5,7 @@ This module provides a convenient interface for other services to create notific
 
 import logging
 
+from src.db.supabase import SupabaseClient
 from src.models.notification import NotificationType
 from src.services.notification_service import NotificationService
 
@@ -32,6 +33,82 @@ async def notify_briefing_ready(user_id: str, briefing_date: str) -> None:
         logger.error(
             "Failed to create briefing notification", extra={"user_id": user_id, "error": str(e)}
         )
+
+
+async def notify_briefing_ready_with_video(user_id: str, briefing_date: str) -> dict | None:
+    """Notify user that their daily briefing is ready, with video briefing CTA if enabled.
+
+    Checks if the user has video_briefing_enabled preference. If so, creates
+    a video briefing session and includes the room URL in the notification.
+
+    Args:
+        user_id: The user's UUID.
+        briefing_date: The briefing date (YYYY-MM-DD).
+
+    Returns:
+        Dict with video session info if video briefing was created, None otherwise.
+        Contains: session_id, room_url, briefing_date
+    """
+    video_session_info: dict | None = None
+
+    try:
+        # Check if video briefing is enabled
+        db = SupabaseClient.get_client()
+        prefs_result = (
+            db.table("user_preferences")
+            .select("video_briefing_enabled")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+
+        video_enabled = False
+        if prefs_result and prefs_result.data:
+            video_enabled = prefs_result.data.get("video_briefing_enabled", False)
+
+        if video_enabled:
+            # Create video briefing session
+            from src.services.briefing import BriefingService
+
+            briefing_service = BriefingService()
+            video_session_info = await briefing_service.create_video_briefing_session(user_id)
+
+            if video_session_info.get("room_url"):
+                # Create notification with video CTA
+                await NotificationService.create_notification(
+                    user_id=user_id,
+                    type=NotificationType.BRIEFING_READY,
+                    title="Daily Briefing Ready",
+                    message=f"Your briefing for {briefing_date} is ready. Watch it with ARIA or view the summary.",
+                    link="/briefing",
+                    metadata={
+                        "briefing_date": briefing_date,
+                        "video_briefing_url": video_session_info.get("room_url"),
+                        "video_session_id": video_session_info.get("session_id"),
+                        "has_video_cta": True,
+                    },
+                )
+                logger.info(
+                    "Briefing notification with video CTA created",
+                    extra={
+                        "user_id": user_id,
+                        "video_session_id": video_session_info.get("session_id"),
+                    },
+                )
+                return video_session_info
+
+        # Fall back to standard notification
+        await notify_briefing_ready(user_id, briefing_date)
+        return None
+
+    except Exception as e:
+        logger.error(
+            "Failed to create briefing notification with video check",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        # Fall back to standard notification
+        await notify_briefing_ready(user_id, briefing_date)
+        return None
 
 
 async def notify_signal_detected(
