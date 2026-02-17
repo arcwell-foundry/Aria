@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
+import * as Sentry from '@sentry/react';
 import { reportErrorToBackend } from '@/api/errorHandler';
 
 interface Props {
@@ -46,6 +47,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     this.setState({ error, errorInfo });
+
+    // Report to Sentry if initialized
+    Sentry.captureException(error, {
+      contexts: { react: { componentStack: errorInfo.componentStack ?? 'unknown' } },
+    });
 
     // Report to backend feedback endpoint
     const context = `ErrorBoundary catch — component stack: ${errorInfo.componentStack?.slice(0, 500) ?? "unknown"}`;
