@@ -13,8 +13,11 @@ Supported event types:
 - conversation.tool_call: Tool invocation during conversation
 """
 
+import asyncio
 import logging
+import time
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,6 +30,12 @@ from src.db.supabase import get_supabase_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+# Tool execution timeout in seconds
+TOOL_EXECUTION_TIMEOUT = 15
+
+# Per-conversation locks for sequential tool execution
+_conversation_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,6 +125,7 @@ class ToolCallPayload(TavusWebhookPayload):
 
     event_type: str = "conversation.tool_call"
     tool_name: str = Field(..., description="Name of the invoked tool")
+    tool_call_id: str | None = Field(None, description="Unique ID for this tool call")
     args: dict[str, Any] = Field(default_factory=dict, description="Tool arguments")
     result: dict[str, Any] | None = Field(None, description="Tool result if available")
 
@@ -576,25 +586,94 @@ async def handle_utterance(
         )
 
 
+async def _execute_tool_with_timeout(
+    tool_name: str,
+    arguments: dict[str, Any],
+    user_id: str,
+) -> str:
+    """Execute a video tool with timeout and retry.
+
+    First attempt has a 15-second timeout. On timeout, retries once.
+    If both attempts time out, returns a graceful failure message.
+
+    Args:
+        tool_name: Name of the tool to execute.
+        arguments: Tool arguments.
+        user_id: The user's UUID.
+
+    Returns:
+        Natural-language result string.
+    """
+    from src.integrations.tavus_tool_executor import VideoToolExecutor
+
+    executor = VideoToolExecutor(user_id=user_id)
+
+    for attempt in range(2):
+        try:
+            result = await asyncio.wait_for(
+                executor.execute(tool_name=tool_name, arguments=arguments),
+                timeout=TOOL_EXECUTION_TIMEOUT,
+            )
+            return result
+        except TimeoutError:
+            if attempt == 0:
+                logger.warning(
+                    "Tool execution timed out, retrying",
+                    extra={
+                        "tool_name": tool_name,
+                        "user_id": user_id,
+                        "attempt": attempt + 1,
+                    },
+                )
+                continue
+            # Second timeout — give up gracefully
+            logger.warning(
+                "Tool execution timed out after retry",
+                extra={"tool_name": tool_name, "user_id": user_id},
+            )
+            return (
+                f"I'm having trouble completing the {tool_name.replace('_', ' ')} "
+                "request right now. Let me try a different approach or come back "
+                "to this in a moment."
+            )
+
+    # Should not be reached, but satisfy type checker
+    return "I wasn't able to complete that request."
+
+
 async def handle_tool_call(
     conversation_id: str,
     payload: dict[str, Any],
     db: Any,
-) -> None:
+) -> dict[str, Any] | None:
     """Handle conversation.tool_call event.
 
-    Logs tool invocation to aria_activity.
+    Executes the requested tool via VideoToolExecutor with sequential
+    execution guard (one tool at a time per conversation) and timeout
+    handling. Logs execution details to aria_activity.
 
     Args:
         conversation_id: The Tavus conversation ID.
         payload: The full webhook payload containing tool call info.
         db: Supabase client.
+
+    Returns:
+        Dict with tool_call_id, tool_name, and result for the webhook
+        response, or None if execution failed.
     """
     tool_name = payload.get("tool_name", "unknown")
-    args = payload.get("args", {})
-    result = payload.get("result")
+    tool_call_id = payload.get("tool_call_id")
+    arguments = payload.get("args", {})
+    # Tavus may also send arguments as a JSON string under "arguments"
+    if not arguments and isinstance(payload.get("arguments"), str):
+        import json as _json
 
-    # Get the video session for user context
+        try:
+            arguments = _json.loads(payload["arguments"])
+        except (ValueError, TypeError):
+            arguments = {}
+
+    # Look up user_id from video_sessions
     session_result = (
         db.table("video_sessions")
         .select("user_id")
@@ -606,33 +685,65 @@ async def handle_tool_call(
     if session_result.data and len(session_result.data) > 0:
         user_id = session_result.data[0].get("user_id")
 
+    if not user_id:
+        logger.warning(
+            "No user_id found for tool call — cannot execute",
+            extra={"conversation_id": conversation_id, "tool_name": tool_name},
+        )
+        return None
+
+    # Sequential execution guard: one tool at a time per conversation
+    lock = _conversation_locks[conversation_id]
+
+    start_time = time.monotonic()
+    async with lock:
+        result = await _execute_tool_with_timeout(tool_name, arguments, user_id)
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+
+    success = not result.startswith("I ran into an issue") and not result.startswith(
+        "I'm having trouble"
+    )
+
+    # Truncate result for logging metadata
+    result_summary = result[:200] + "..." if len(result) > 200 else result
+
     # Log to aria_activity
     try:
         db.table("aria_activity").insert({
             "user_id": user_id,
-            "activity_type": f"webhook.tool_call.{tool_name}",
-            "description": f"Tool '{tool_name}' invoked during video session",
+            "activity_type": "video_tool_call",
+            "description": f"Tool '{tool_name}' executed during video session",
             "metadata": {
-                "conversation_id": conversation_id,
                 "tool_name": tool_name,
-                "args": args,
-                "result": result,
+                "tool_call_id": tool_call_id,
+                "arguments": arguments,
+                "result_summary": result_summary,
+                "duration_ms": duration_ms,
+                "conversation_id": conversation_id,
+                "success": success,
             },
         }).execute()
-
-        logger.info(
-            "Tool call logged",
-            extra={
-                "conversation_id": conversation_id,
-                "tool_name": tool_name,
-            },
-        )
-
     except Exception as e:
         logger.warning(
-            "Failed to log tool call",
+            "Failed to log tool call activity",
             extra={"conversation_id": conversation_id, "error": str(e)},
         )
+
+    logger.info(
+        "Video tool call executed",
+        extra={
+            "conversation_id": conversation_id,
+            "tool_name": tool_name,
+            "duration_ms": duration_ms,
+            "success": success,
+        },
+    )
+
+    return {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "result": result,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -658,23 +769,26 @@ EVENT_HANDLERS: dict[str, Any] = {
 async def handle_tavus_webhook(
     request: Request,
     x_webhook_secret: str | None = Header(None, alias="X-Webhook-Secret"),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Handle incoming Tavus webhook callbacks.
 
     This endpoint receives callbacks from Tavus for various video session
-    events including session lifecycle, transcription, and perception analysis.
+    events including session lifecycle, transcription, perception analysis,
+    and tool call execution.
+
+    For ``conversation.tool_call`` events the response includes the tool
+    execution result so Tavus can incorporate it into the LLM's reply.
 
     Args:
         request: The incoming FastAPI request.
         x_webhook_secret: Optional webhook secret header for verification.
 
     Returns:
-        Success acknowledgment.
+        Success acknowledgment, optionally with tool result.
 
     Raises:
         HTTPException: 401 if webhook secret is invalid.
         HTTPException: 400 if payload is invalid.
-        HTTPException: 404 if conversation ID not found.
     """
     # 1. Verify webhook secret
     if not verify_webhook_secret(x_webhook_secret):
@@ -752,29 +866,31 @@ async def handle_tavus_webhook(
             )
             # Still process the webhook for logging purposes
 
-    # 7. Log to aria_activity
-    try:
-        db.table("aria_activity").insert({
-            "user_id": None,  # System-generated event
-            "activity_type": f"webhook.{event_type}",
-            "description": f"Tavus webhook: {event_type}",
-            "metadata": {
-                "event_type": event_type,
-                "conversation_id": conversation_id,
-                "timestamp": payload.get("timestamp"),
-            },
-        }).execute()
-    except Exception as e:
-        logger.warning(
-            "Failed to log webhook to activity",
-            extra={"error": str(e)},
-        )
+    # 7. Log to aria_activity (skip for tool_call — handled inside handler)
+    if event_type != "conversation.tool_call":
+        try:
+            db.table("aria_activity").insert({
+                "user_id": None,  # System-generated event
+                "activity_type": f"webhook.{event_type}",
+                "description": f"Tavus webhook: {event_type}",
+                "metadata": {
+                    "event_type": event_type,
+                    "conversation_id": conversation_id,
+                    "timestamp": payload.get("timestamp"),
+                },
+            }).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to log webhook to activity",
+                extra={"error": str(e)},
+            )
 
     # 8. Dispatch to event handler
+    handler_result: dict[str, Any] | None = None
     handler = EVENT_HANDLERS.get(event_type)
     if handler:
         try:
-            await handler(conversation_id, payload, db)
+            handler_result = await handler(conversation_id, payload, db)
         except Exception as e:
             logger.exception(
                 "Error handling webhook event",
@@ -791,5 +907,11 @@ async def handle_tavus_webhook(
             extra={"event_type": event_type},
         )
 
-    # 9. Return success
+    # 9. Return response — include tool result for tool_call events
+    if event_type == "conversation.tool_call" and handler_result:
+        return {
+            "status": "ok",
+            "tool_result": handler_result,
+        }
+
     return {"status": "ok"}
