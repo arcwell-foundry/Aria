@@ -5,3 +5,4 @@ export { AriaPersonaSection } from './AriaPersonaSection';
 export { AutonomySection } from './AutonomySection';
 export { PerceptionSection } from './PerceptionSection';
 export { BillingSection } from './BillingSection';
+export { PrivacySection } from './PrivacySection';

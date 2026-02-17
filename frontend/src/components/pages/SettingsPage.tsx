@@ -17,9 +17,10 @@ import {
   AutonomySection,
   PerceptionSection,
   BillingSection,
+  PrivacySection,
 } from '@/components/settings';
 
-type SettingsSection = 'profile' | 'integrations' | 'aria' | 'autonomy' | 'perception' | 'billing';
+type SettingsSection = 'profile' | 'integrations' | 'aria' | 'autonomy' | 'perception' | 'privacy' | 'billing';
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'profile', label: 'Profile' },
@@ -27,6 +28,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'aria', label: 'ARIA Persona' },
   { id: 'autonomy', label: 'Autonomy' },
   { id: 'perception', label: 'Perception' },
+  { id: 'privacy', label: 'Privacy' },
   { id: 'billing', label: 'Billing' },
 ];
 
@@ -42,6 +44,8 @@ function SectionContent({ section }: { section: SettingsSection }) {
       return <AutonomySection />;
     case 'perception':
       return <PerceptionSection />;
+    case 'privacy':
+      return <PrivacySection />;
     case 'billing':
       return <BillingSection />;
     default:

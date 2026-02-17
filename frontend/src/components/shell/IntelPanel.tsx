@@ -35,6 +35,9 @@ import {
   ChatInputModule,
   SuggestedRefinementsModule,
   JarvisInsightsModule,
+  TerritoryForecastModule,
+  StakeholderMapModule,
+  DocumentIntelModule,
 } from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
@@ -55,6 +58,7 @@ function getPanelConfig(pathname: string): PanelConfig {
       title: 'Lead Intelligence',
       modules: [
         <StrategicAdviceModule key="advice" />,
+        <StakeholderMapModule key="stakeholders" />,
         <ObjectionsModule key="objections" />,
         <NextStepsModule key="steps" />,
         <CRMSnapshotModule key="crm" />,
@@ -82,8 +86,10 @@ function getPanelConfig(pathname: string): PanelConfig {
     return {
       title: 'Pipeline Alerts',
       modules: [
+        <TerritoryForecastModule key="forecast" />,
         <AlertsModule key="alerts" />,
         <BuyingSignalsModule key="signals" />,
+        <StakeholderMapModule key="stakeholders" />,
         <CRMSnapshotModule key="crm" />,
       ],
       chatContext: 'pipeline',
@@ -97,6 +103,7 @@ function getPanelConfig(pathname: string): PanelConfig {
         <JarvisInsightsModule key="jarvis" />,
         <CompetitiveIntelModule key="competitive" />,
         <NewsAlertsModule key="news" />,
+        <DocumentIntelModule key="documents" />,
         <NextBestActionModule key="action" />,
       ],
       chatContext: 'intelligence',
@@ -154,6 +161,7 @@ function getPanelConfig(pathname: string): PanelConfig {
     modules: [
       <JarvisInsightsModule key="jarvis" />,
       <AlertsModule key="alerts" />,
+      <DocumentIntelModule key="documents" />,
       <NextBestActionModule key="action" />,
     ],
     chatContext: 'general',

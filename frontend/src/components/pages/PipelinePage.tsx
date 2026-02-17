@@ -18,7 +18,9 @@ import { useParams } from 'react-router-dom';
 import { Search, Filter } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useLeads } from '@/hooks/useLeads';
+import { useTerritory } from '@/hooks/useAccounts';
 import { LeadTable } from '@/components/pipeline';
+import { TerritoryOverviewBar } from '@/components/pipeline/TerritoryOverviewBar';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LeadDetailPage } from './LeadDetailPage';
 import type { LeadStatus, LifecycleStage } from '@/api/leads';
@@ -98,6 +100,7 @@ function PipelineOverview() {
   const [statusFilter, setStatusFilter] = useState<LeadStatus | 'all'>('all');
   const [stageFilter, setStageFilter] = useState<LifecycleStage | 'all'>('all');
   const [healthFilter, setHealthFilter] = useState<'all' | 'critical' | 'at-risk' | 'healthy'>('all');
+  const { data: territory, isLoading: territoryLoading } = useTerritory();
 
   // Build filter object for API
   const leadFilters: Parameters<typeof useLeads>[0] = {
@@ -148,6 +151,9 @@ function PipelineOverview() {
           Command Mode: Active monitoring of high-velocity leads.
         </p>
       </div>
+
+      {/* Territory Overview Bar */}
+      <TerritoryOverviewBar territory={territory} isLoading={territoryLoading} />
 
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">

@@ -14,3 +14,6 @@ export { CRMSnapshotModule } from './CRMSnapshotModule';
 export { ChatInputModule } from './ChatInputModule';
 export { SuggestedRefinementsModule } from './SuggestedRefinementsModule';
 export { JarvisInsightsModule } from './JarvisInsightsModule';
+export { TerritoryForecastModule } from './TerritoryForecastModule';
+export { StakeholderMapModule } from './StakeholderMapModule';
+export { DocumentIntelModule } from './DocumentIntelModule';
