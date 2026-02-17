@@ -83,11 +83,48 @@ from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
 from src.middleware.performance import RequestIDMiddleware, RequestTimingMiddleware
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# Configure logging — JSON for production (Render captures stdout), text for dev
+def _configure_logging() -> None:
+    """Set up logging based on LOG_FORMAT env var.
+
+    json: Structured JSON via python-json-logger (for Render/production).
+    text: Human-readable format (for local development).
+    """
+    import os
+
+    log_format = os.environ.get("LOG_FORMAT", "text").lower()
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level, logging.INFO))
+
+    # Remove existing handlers to avoid duplicate output
+    root_logger.handlers.clear()
+
+    handler = logging.StreamHandler()
+
+    if log_format == "json":
+        from pythonjsonlogger.json import JsonFormatter
+
+        formatter = JsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+            rename_fields={
+                "asctime": "timestamp",
+                "levelname": "level",
+                "name": "service",
+            },
+            static_fields={"app": "aria-api"},
+        )
+        handler.setFormatter(formatter)
+    else:
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+
+    root_logger.addHandler(handler)
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -249,11 +286,11 @@ app.include_router(ws_route.router)
 
 
 @app.get("/health", tags=["system"])
-async def health_check() -> dict[str, str]:
-    """Health check endpoint.
+async def root_health_check() -> dict[str, str]:
+    """Root health check endpoint (used by Render healthCheckPath).
 
-    Returns:
-        Health status of the API.
+    Lightweight check — returns 200 if the process is running.
+    For dependency-aware checks, use /api/v1/health.
     """
     return {"status": "healthy"}
 

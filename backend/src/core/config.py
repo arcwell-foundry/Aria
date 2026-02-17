@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True  # Global rate limiting toggle
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 100  # Default limit for all endpoints
 
+    # Logging
+    LOG_FORMAT: Literal["text", "json"] = "text"
+    LOG_LEVEL: str = "INFO"
+
     # CORS Configuration
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
