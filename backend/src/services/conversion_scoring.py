@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from src.core.cache import cached
 from src.db.supabase import SupabaseClient
 from src.models.lead_memory import LeadStatus
 from src.services.activity_service import ActivityService
@@ -41,6 +42,18 @@ STAGE_EXPECTED_DAYS: dict[str, int] = {
 
 # Staleness threshold in hours
 STALENESS_THRESHOLD_HOURS = 24
+
+
+def _conversion_score_cache_key(*args: Any, **kwargs: Any) -> str:
+    """Generate cache key for conversion scoring.
+
+    Args[0] is self, args[1] is lead_memory_id.
+    """
+    lead_id = args[1] if len(args) > 1 else kwargs.get("lead_memory_id", "")
+    force_refresh = args[2] if len(args) > 2 else kwargs.get("force_refresh", False)
+
+    # Include force_refresh in key so forced refreshes bypass cache
+    return f"conversion_score:{lead_id}:{force_refresh}"
 
 
 class ConversionScore(BaseModel):
@@ -106,6 +119,7 @@ class ConversionScoringService:
         self._db = SupabaseClient.get_client()
         self._activity_service = ActivityService()
 
+    @cached(ttl=600, key_func=_conversion_score_cache_key)  # 10 minute TTL
     async def calculate_conversion_score(
         self, lead_memory_id: UUID | str, force_refresh: bool = False
     ) -> ConversionScore:

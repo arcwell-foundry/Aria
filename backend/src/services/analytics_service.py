@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.core.cache import cached
 from src.core.exceptions import DatabaseError
 from src.db.supabase import SupabaseClient
 
@@ -16,6 +17,22 @@ logger = logging.getLogger(__name__)
 
 # Lifecycle stages in funnel order
 LIFECYCLE_STAGES = ["lead", "opportunity", "account"]
+
+
+def _analytics_cache_key(*args: Any, **kwargs: Any) -> str:
+    """Generate cache key for analytics methods based on user_id and date range.
+
+    Args[0] is self for instance methods.
+    """
+    user_id = args[1] if len(args) > 1 else kwargs.get("user_id", "")
+    period_start = args[2] if len(args) > 2 else kwargs.get("period_start")
+    period_end = args[3] if len(args) > 3 else kwargs.get("period_end")
+
+    start_str = period_start.isoformat() if period_start else ""
+    end_str = period_end.isoformat() if period_end else ""
+
+    # Include calling function context for uniqueness
+    return f"analytics:{user_id}:{start_str}:{end_str}"
 
 
 class AnalyticsService:
@@ -36,6 +53,7 @@ class AnalyticsService:
             self._client = SupabaseClient.get_client()
         return self._client
 
+    @cached(ttl=300, key_func=_analytics_cache_key)  # 5 minute TTL
     async def get_overview_metrics(
         self,
         user_id: str,
@@ -172,6 +190,7 @@ class AnalyticsService:
             )
             raise DatabaseError(f"Failed to calculate overview metrics: {e}") from e
 
+    @cached(ttl=300, key_func=_analytics_cache_key)  # 5 minute TTL
     async def get_conversion_funnel(
         self,
         user_id: str,
@@ -208,7 +227,7 @@ class AnalyticsService:
             leads = response.data or []
 
             # Count leads per stage
-            stage_counts: dict[str, int] = {stage: 0 for stage in LIFECYCLE_STAGES}
+            stage_counts: dict[str, int] = dict.fromkeys(LIFECYCLE_STAGES, 0)
             stage_durations: dict[str, list[float]] = {
                 stage: [] for stage in LIFECYCLE_STAGES
             }
@@ -279,6 +298,19 @@ class AnalyticsService:
             )
             raise DatabaseError(f"Failed to calculate conversion funnel: {e}") from e
 
+    def _activity_trends_cache_key(*args: Any, **kwargs: Any) -> str:
+        """Cache key for activity trends includes granularity."""
+        user_id = args[1] if len(args) > 1 else kwargs.get("user_id", "")
+        period_start = args[2] if len(args) > 2 else kwargs.get("period_start")
+        period_end = args[3] if len(args) > 3 else kwargs.get("period_end")
+        granularity = args[4] if len(args) > 4 else kwargs.get("granularity", "day")
+
+        start_str = period_start.isoformat() if period_start else ""
+        end_str = period_end.isoformat() if period_end else ""
+
+        return f"activity_trends:{user_id}:{start_str}:{end_str}:{granularity}"
+
+    @cached(ttl=300, key_func=_activity_trends_cache_key)  # 5 minute TTL
     async def get_activity_trends(
         self,
         user_id: str,
@@ -384,6 +416,7 @@ class AnalyticsService:
             )
             raise DatabaseError(f"Failed to calculate activity trends: {e}") from e
 
+    @cached(ttl=300, key_func=_analytics_cache_key)  # 5 minute TTL
     async def get_response_time_metrics(
         self,
         user_id: str,
@@ -487,6 +520,7 @@ class AnalyticsService:
                 f"Failed to calculate response time metrics: {e}"
             ) from e
 
+    @cached(ttl=300, key_func=_analytics_cache_key)  # 5 minute TTL
     async def get_aria_impact_summary(
         self,
         user_id: str,

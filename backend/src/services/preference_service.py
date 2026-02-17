@@ -11,6 +11,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from src.core.cache import cached, invalidate_cache
 from src.db.supabase import SupabaseClient
 from src.models.preferences import PreferenceUpdate
 
@@ -24,6 +25,13 @@ class PreferenceService:
         """Initialize preference service with Supabase client."""
         self._db = SupabaseClient.get_client()
 
+    @staticmethod
+    def _preference_cache_key(*args: Any, **kwargs: Any) -> str:
+        """Generate cache key for preferences."""
+        user_id = args[1] if len(args) > 1 else kwargs.get("user_id", "")
+        return f"preferences:{user_id}"
+
+    @cached(ttl=300, key_func=_preference_cache_key)  # 5 minute TTL
     async def get_preferences(self, user_id: str) -> dict[str, Any]:
         """Get user preferences, creating defaults if not found.
 
@@ -100,6 +108,9 @@ class PreferenceService:
         result = (
             self._db.table("user_preferences").update(update_data).eq("user_id", user_id).execute()
         )
+
+        # Invalidate the cache for this user's preferences
+        invalidate_cache("get_preferences", key=user_id)
 
         logger.info(
             "Preferences updated",

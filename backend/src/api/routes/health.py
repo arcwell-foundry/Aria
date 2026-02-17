@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, status
 
 from src.api.deps import AdminUser
+from src.core.cache import cached
 from src.core.error_tracker import ErrorTracker
 from src.core.resilience import CircuitState, get_all_circuit_breakers
 
@@ -46,12 +47,11 @@ def _overall_status(services: dict[str, str]) -> str:
     return "degraded"
 
 
-@router.get("", status_code=status.HTTP_200_OK)
-async def health_check() -> dict[str, Any]:
-    """Overall health check.
+@cached(ttl=30, key_func=lambda: "health_check")  # 30 second TTL
+async def _get_cached_health_check() -> dict[str, Any]:
+    """Cached health check computation.
 
-    Returns status, per-service health, uptime, and version.
-    No authentication required.
+    Separated from endpoint to allow caching without affecting route signature.
     """
     breakers = get_all_circuit_breakers()
     services = {name: _service_status(cb.state) for name, cb in breakers.items()}
@@ -62,6 +62,16 @@ async def health_check() -> dict[str, Any]:
         "uptime_seconds": round(time.monotonic() - _start_time, 1),
         "version": _VERSION,
     }
+
+
+@router.get("", status_code=status.HTTP_200_OK)
+async def health_check() -> dict[str, Any]:
+    """Overall health check.
+
+    Returns status, per-service health, uptime, and version.
+    No authentication required.
+    """
+    return await _get_cached_health_check()
 
 
 @router.get("/detailed", status_code=status.HTTP_200_OK)

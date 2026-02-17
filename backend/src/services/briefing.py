@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.core.cache import cached
 from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -337,6 +338,19 @@ class BriefingService:
             return None
         return result.data if isinstance(result.data, dict) else None
 
+    @staticmethod
+    def _briefing_cache_key(*args: Any, **kwargs: Any) -> str:
+        """Generate cache key for briefing based on user_id and date.
+
+        Note: For instance methods, args[0] is self, so we skip it.
+        """
+        # args[0] is self, args[1] is user_id, args[2] is briefing_date
+        user_id = args[1] if len(args) > 1 else kwargs.get("user_id", "")
+        briefing_date = args[2] if len(args) > 2 else kwargs.get("briefing_date")
+        date_str = briefing_date.isoformat() if briefing_date else date.today().isoformat()
+        return f"briefing:{user_id}:{date_str}"
+
+    @cached(ttl=3600, key_func=_briefing_cache_key)  # 1 hour TTL
     async def get_or_generate_briefing(
         self, user_id: str, briefing_date: date | None = None
     ) -> dict[str, Any]:
