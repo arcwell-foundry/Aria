@@ -32,6 +32,8 @@ import { cn } from '@/utils/cn';
 import { Avatar } from '@/components/primitives/Avatar';
 import { HealthBar } from '@/components/pipeline/HealthBar';
 import { EmptyState } from '@/components/common/EmptyState';
+import { ConversionScoreBadge } from '@/components/leads/ConversionScoreBadge';
+import { ConversionScoreDetail } from '@/components/leads/ConversionScoreDetail';
 import {
   useLead,
   useLeadStakeholders,
@@ -671,6 +673,24 @@ export function LeadDetailPage({ leadId }: LeadDetailPageProps) {
               <HealthBar score={lead!.health_score} size="sm" />
             </div>
 
+            {/* Conversion Score */}
+            {lead!.conversion_score && (
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Conv. Score
+                </span>
+                <ConversionScoreBadge
+                  probability={lead!.conversion_score.probability}
+                  confidence={lead!.conversion_score.confidence}
+                  size="sm"
+                  showConfidence
+                />
+              </div>
+            )}
+
             {/* Lifecycle Stage */}
             <div className="flex items-center gap-2">
               <span
@@ -775,6 +795,9 @@ export function LeadDetailPage({ leadId }: LeadDetailPageProps) {
             </div>
           )}
         </div>
+
+        {/* Conversion Score Detail */}
+        <ConversionScoreDetail leadId={leadId} className="mb-6" />
 
         {/* Two-Column Layout: Stakeholders + Timeline */}
         <div className="flex gap-6">

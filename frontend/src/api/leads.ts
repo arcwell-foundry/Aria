@@ -11,6 +11,13 @@ export type EventType =
   | "note"
   | "signal";
 
+// Conversion Score types
+export interface ConversionScoreSummary {
+  probability: number;
+  confidence: number;
+  calculated_at: string | null;
+}
+
 // Response types
 export interface Lead {
   id: string;
@@ -27,8 +34,28 @@ export interface Lead {
   expected_close_date: string | null;
   expected_value: number | null;
   tags: string[];
+  conversion_score: ConversionScoreSummary | null;
   created_at: string;
   updated_at: string;
+}
+
+// Feature driver for score explanation
+export interface FeatureDriver {
+  name: string;
+  value: number;
+  contribution: number;
+  description: string;
+}
+
+// Full score explanation response
+export interface ScoreExplanation {
+  lead_memory_id: string;
+  conversion_probability: number;
+  confidence: number;
+  summary: string;
+  key_drivers: FeatureDriver[];
+  key_risks: FeatureDriver[];
+  recommendation: string;
 }
 
 export interface LeadEvent {
@@ -237,5 +264,19 @@ export async function transitionLeadStage(
   transition: StageTransition
 ): Promise<Lead> {
   const response = await apiClient.post<Lead>(`/leads/${leadId}/transition`, transition);
+  return response.data;
+}
+
+// Get conversion score with explanation
+export async function getConversionScore(
+  leadId: string,
+  forceRefresh = false
+): Promise<ScoreExplanation> {
+  const params = new URLSearchParams();
+  if (forceRefresh) params.append("force_refresh", "true");
+  const url = params.toString()
+    ? `/leads/${leadId}/conversion-score?${params}`
+    : `/leads/${leadId}/conversion-score`;
+  const response = await apiClient.get<ScoreExplanation>(url);
   return response.data;
 }

@@ -22,6 +22,7 @@ import { cn } from '@/utils/cn';
 import { SortableHeader } from '@/components/common/SortableHeader';
 import { HealthBar } from './HealthBar';
 import { Avatar } from '@/components/primitives/Avatar';
+import { ConversionScoreBadge } from '@/components/leads/ConversionScoreBadge';
 import type { Lead, Stakeholder } from '@/api/leads';
 
 // Constants
@@ -37,7 +38,7 @@ export interface LeadTableProps {
   className?: string;
 }
 
-type SortKey = 'company' | 'health' | 'last_activity' | 'value' | 'stakeholders';
+type SortKey = 'company' | 'health' | 'conversion' | 'last_activity' | 'value' | 'stakeholders';
 
 // Helper to check if a lead is stale (>14 days since last activity)
 function isStale(lastActivityAt: string | null): boolean {
@@ -125,6 +126,21 @@ function LeadRow({ lead, stakeholders = [], onClick }: LeadRowProps) {
         <HealthBar score={lead.health_score} size="sm" />
       </td>
 
+      {/* Conversion Score */}
+      <td className="py-3.5 px-4">
+        {lead.conversion_score ? (
+          <ConversionScoreBadge
+            probability={lead.conversion_score.probability}
+            confidence={lead.conversion_score.confidence}
+            size="sm"
+          />
+        ) : (
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            -
+          </span>
+        )}
+      </td>
+
       {/* Last Activity */}
       <td className="py-3.5 px-4">
         <span
@@ -193,6 +209,9 @@ function LeadRowSkeleton() {
         <div className="h-2 w-20 bg-[var(--border)] rounded-full animate-pulse" />
       </td>
       <td className="py-3.5 px-4">
+        <div className="h-5 w-14 bg-[var(--border)] rounded-full animate-pulse" />
+      </td>
+      <td className="py-3.5 px-4">
         <div className="h-4 w-20 bg-[var(--border)] rounded animate-pulse" />
       </td>
       <td className="py-3.5 px-4">
@@ -233,6 +252,9 @@ export function LeadTable({
           break;
         case 'health':
           comparison = a.health_score - b.health_score;
+          break;
+        case 'conversion':
+          comparison = (a.conversion_score?.probability ?? 0) - (b.conversion_score?.probability ?? 0);
           break;
         case 'last_activity': {
           const aDate = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0;
@@ -311,6 +333,15 @@ export function LeadTable({
               </th>
               <th className="py-3 px-4 text-left">
                 <SortableHeader
+                  label="Conv. Score"
+                  sortKey="conversion"
+                  currentSort={sortKey}
+                  currentDirection={sortDirection}
+                  onSort={handleSort}
+                />
+              </th>
+              <th className="py-3 px-4 text-left">
+                <SortableHeader
                   label="Last Activity"
                   sortKey="last_activity"
                   currentSort={sortKey}
@@ -342,7 +373,7 @@ export function LeadTable({
             {leads.length === 0 ? (
               // Empty state within table
               <tr>
-                <td colSpan={5} className="py-8 text-center">
+                <td colSpan={6} className="py-8 text-center">
                   <span style={{ color: 'var(--text-secondary)' }}>
                     No leads in pipeline
                   </span>
