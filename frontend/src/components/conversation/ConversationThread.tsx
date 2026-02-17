@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import { useConversationStore } from '@/stores/conversationStore';
 import { MessageBubble } from './MessageBubble';
 import { TimeDivider } from './TimeDivider';
@@ -24,47 +25,85 @@ function isFirstInGroup(messages: Message[], index: number): boolean {
   return gap >= THIRTY_MINUTES_MS;
 }
 
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full opacity-60">
+      <div className="w-12 h-12 rounded-full bg-[var(--accent-muted)] flex items-center justify-center mb-4">
+        <div className="w-3 h-3 rounded-full bg-accent aria-pulse-dot" />
+      </div>
+      <p className="font-display italic text-lg text-[var(--text-primary)]">ARIA</p>
+      <p className="text-xs text-[var(--text-secondary)] mt-1">Your AI colleague is ready</p>
+    </div>
+  );
+}
+
 export function ConversationThread() {
   const messages = useConversationStore((s) => s.messages);
   const isStreaming = useConversationStore((s) => s.isStreaming);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, isStreaming]);
+  // Memoize time divider and grouping computations
+  const messageMeta = useMemo(() => {
+    return messages.map((message, index) => ({
+      showTimeDivider: shouldShowTimeDivider(messages[index - 1], message),
+      isFirstInGroup: isFirstInGroup(messages, index),
+    }));
+  }, [messages]);
 
-  return (
-    <div
-      className={`flex-1 overflow-y-auto px-6 py-4 space-y-4 relative ${isStreaming ? 'aria-arrival-sweep' : ''}`}
-      data-aria-id="conversation-thread"
-    >
-      <UnreadIndicator />
-
-      {messages.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-full opacity-60">
-          <div className="w-12 h-12 rounded-full bg-[var(--accent-muted)] flex items-center justify-center mb-4">
-            <div className="w-3 h-3 rounded-full bg-accent aria-pulse-dot" />
-          </div>
-          <p className="font-display italic text-lg text-[var(--text-primary)]">ARIA</p>
-          <p className="text-xs text-[var(--text-secondary)] mt-1">Your AI colleague is ready</p>
-        </div>
-      )}
-
-      {messages.map((message, index) => (
-        <div key={message.id}>
-          {shouldShowTimeDivider(messages[index - 1], message) && (
+  const itemContent = useCallback(
+    (index: number) => {
+      const message = messages[index];
+      const meta = messageMeta[index];
+      return (
+        <div className="pb-4">
+          {meta.showTimeDivider && (
             <TimeDivider timestamp={message.timestamp} />
           )}
           <MessageBubble
             message={message}
-            isFirstInGroup={isFirstInGroup(messages, index)}
+            isFirstInGroup={meta.isFirstInGroup}
           />
         </div>
-      ))}
+      );
+    },
+    [messages, messageMeta],
+  );
 
-      {isStreaming && <TypingIndicator />}
+  const footer = useCallback(() => {
+    if (!isStreaming) return null;
+    return (
+      <div className="pb-4">
+        <TypingIndicator />
+      </div>
+    );
+  }, [isStreaming]);
 
-      <div ref={bottomRef} />
+  if (messages.length === 0) {
+    return (
+      <div
+        className={`flex-1 overflow-y-auto px-6 py-4 relative ${isStreaming ? 'aria-arrival-sweep' : ''}`}
+        data-aria-id="conversation-thread"
+      >
+        <UnreadIndicator />
+        <EmptyState />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex-1 relative ${isStreaming ? 'aria-arrival-sweep' : ''}`}
+      data-aria-id="conversation-thread"
+    >
+      <UnreadIndicator />
+      <Virtuoso
+        style={{ height: '100%' }}
+        className="px-6 py-4"
+        totalCount={messages.length}
+        itemContent={itemContent}
+        followOutput="smooth"
+        initialTopMostItemIndex={messages.length - 1}
+        components={{ Footer: footer }}
+      />
     </div>
   );
 }

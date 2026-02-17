@@ -9,8 +9,9 @@
  * arrive — clicking it prepends the items and resets the poll cursor.
  */
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { memo, useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Virtuoso } from 'react-virtuoso';
 import {
   Search,
   Users,
@@ -162,7 +163,7 @@ function EntityBadge({
 // ActivityItemCard
 // ---------------------------------------------------------------------------
 
-function ActivityItemCard({
+const ActivityItemCard = memo(function ActivityItemCard({
   item,
   compact,
   onNavigate,
@@ -272,7 +273,7 @@ function ActivityItemCard({
       </div>
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // FilterChip
@@ -361,9 +362,6 @@ export function ActivityFeed({
   const [dateEnd, setDateEnd] = useState('');
   const [pendingItems, setPendingItems] = useState<ActivityItem[]>([]);
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
   // Build filters (excluding page/page_size — handled by infinite query)
   const filters = useMemo<Omit<ActivityFilters, 'page' | 'page_size'>>(() => {
     const f: Omit<ActivityFilters, 'page' | 'page_size'> = {};
@@ -418,26 +416,14 @@ export function ActivityFeed({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Infinite scroll via IntersectionObserver
-  useEffect(() => {
-    if (compact) return; // No infinite scroll in compact mode
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+  const handleNavigate = useCallback((route: string) => navigate(route), [navigate]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
-          fetchNextPage();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [compact, hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const handleNavigate = (route: string) => navigate(route);
+  // Virtuoso endReached callback for infinite scroll (full mode only)
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // In compact mode, only show compactLimit items
   const displayItems = compact ? allItems.slice(0, compactLimit) : allItems;
@@ -495,7 +481,6 @@ export function ActivityFeed({
 
   return (
     <div
-      ref={scrollContainerRef}
       className="max-w-4xl mx-auto space-y-6"
       data-aria-id="activity-feed"
     >
@@ -658,33 +643,39 @@ export function ActivityFeed({
       )}
 
       {!isLoading && !error && displayItems.length > 0 && (
-        <div className="space-y-3">
-          {displayItems.map((item) => (
-            <ActivityItemCard
-              key={item.id}
-              item={item}
-              onNavigate={handleNavigate}
-            />
-          ))}
-
-          {/* Infinite scroll sentinel */}
-          <div ref={sentinelRef} className="h-1" />
-
-          {isFetchingNextPage && (
-            <div className="flex justify-center py-4">
-              <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+        <Virtuoso
+          useWindowScroll
+          totalCount={displayItems.length}
+          endReached={handleEndReached}
+          overscan={200}
+          itemContent={(index) => (
+            <div className="pb-3">
+              <ActivityItemCard
+                item={displayItems[index]}
+                onNavigate={handleNavigate}
+              />
             </div>
           )}
-
-          {!hasNextPage && displayItems.length > 0 && (
-            <p
-              className="text-xs text-center py-4"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              All activity loaded.
-            </p>
-          )}
-        </div>
+          components={{
+            Footer: () => (
+              <>
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-4">
+                    <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+                {!hasNextPage && displayItems.length > 0 && (
+                  <p
+                    className="text-xs text-center py-4"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    All activity loaded.
+                  </p>
+                )}
+              </>
+            ),
+          }}
+        />
       )}
     </div>
   );

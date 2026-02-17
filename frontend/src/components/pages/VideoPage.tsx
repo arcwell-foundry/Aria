@@ -38,10 +38,10 @@ const SESSION_TYPES: { value: SessionType; label: string; description: string }[
  */
 function SessionContextPanel() {
   const { data: goalsData } = useGoals("active");
-  const { data: activityData } = useActivityFeed({ limit: 5 });
+  const { data: activityData } = useActivityFeed();
 
   const activeGoals = goalsData?.slice(0, 3) ?? [];
-  const recentActivity = activityData?.activities?.slice(0, 5) ?? [];
+  const recentActivity = activityData?.pages?.flatMap((p) => p.items).slice(0, 5) ?? [];
 
   return (
     <div className="flex flex-col h-full bg-[#0F1117] text-white">
