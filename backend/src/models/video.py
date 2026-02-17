@@ -6,6 +6,7 @@ Tavus integration and transcript entries.
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -25,6 +26,7 @@ class SessionType(str, Enum):
     CHAT = "chat"
     BRIEFING = "briefing"
     DEBRIEF = "debrief"
+    CONSULTATION = "consultation"
 
 
 class VideoSessionCreate(BaseModel):
@@ -33,6 +35,7 @@ class VideoSessionCreate(BaseModel):
     session_type: SessionType = SessionType.CHAT
     context: str | None = None
     custom_greeting: str | None = None
+    lead_id: str | None = None
 
 
 class VideoSessionResponse(BaseModel):
@@ -48,6 +51,9 @@ class VideoSessionResponse(BaseModel):
     ended_at: datetime | None
     duration_seconds: int | None
     created_at: datetime
+    lead_id: str | None = None
+    perception_analysis: dict[str, Any] | None = None
+    transcripts: list["TranscriptEntryResponse"] | None = None
 
 
 class TranscriptEntryResponse(BaseModel):
@@ -59,3 +65,16 @@ class TranscriptEntryResponse(BaseModel):
     content: str
     timestamp_ms: int
     created_at: datetime
+
+
+class VideoSessionListResponse(BaseModel):
+    """Response model for paginated list of video sessions."""
+
+    items: list[VideoSessionResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+# Rebuild model to resolve forward reference
+VideoSessionResponse.model_rebuild()
