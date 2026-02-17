@@ -1254,3 +1254,610 @@ class TestReviewContribution:
             json={},
         )
         assert response.status_code == 422
+
+
+class TestBatchScoreLeads:
+    """Tests for POST /api/v1/leads/batch-score endpoint."""
+
+    def test_batch_score_requires_auth(self) -> None:
+        """Test that batch scoring requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.post("/api/v1/leads/batch-score")
+        assert response.status_code == 401
+
+    def test_batch_score_success(self, test_client: TestClient) -> None:
+        """Test successfully batch scoring leads."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.conversion_scoring import BatchScoreResult
+
+        mock_result = BatchScoreResult(
+            scored=10,
+            errors=[],
+            duration_seconds=2.5,
+        )
+
+        with patch(
+            "src.services.conversion_scoring.ConversionScoringService"
+        ) as mock_scoring_service:
+            mock_instance = mock_scoring_service.return_value
+            mock_instance.batch_score_all_leads = AsyncMock(return_value=mock_result)
+
+            response = test_client.post("/api/v1/leads/batch-score")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["scored"] == 10
+            assert data["errors"] == []
+            assert data["duration_seconds"] == 2.5
+
+    def test_batch_score_with_errors(self, test_client: TestClient) -> None:
+        """Test batch scoring with some errors."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.conversion_scoring import BatchScoreResult
+
+        mock_result = BatchScoreResult(
+            scored=8,
+            errors=[
+                {"lead_id": "lead-1", "error": "Scoring failed"},
+                {"lead_id": "lead-2", "error": "Missing data"},
+            ],
+            duration_seconds=3.0,
+        )
+
+        with patch(
+            "src.services.conversion_scoring.ConversionScoringService"
+        ) as mock_scoring_service:
+            mock_instance = mock_scoring_service.return_value
+            mock_instance.batch_score_all_leads = AsyncMock(return_value=mock_result)
+
+            response = test_client.post("/api/v1/leads/batch-score")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["scored"] == 8
+            assert len(data["errors"]) == 2
+
+
+class TestConversionRankings:
+    """Tests for GET /api/v1/leads/conversion-rankings endpoint."""
+
+    def test_rankings_requires_auth(self) -> None:
+        """Test that getting rankings requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.get("/api/v1/leads/conversion-rankings")
+        assert response.status_code == 401
+
+    def test_rankings_success(self, test_client: TestClient) -> None:
+        """Test successfully getting conversion rankings."""
+        from unittest.mock import MagicMock, patch
+
+        mock_result = MagicMock()
+        mock_result.data = [
+            {
+                "id": "lead-1",
+                "company_name": "Acme Corp",
+                "lifecycle_stage": "opportunity",
+                "metadata": {
+                    "conversion_score": {
+                        "conversion_probability": 75.0,
+                        "confidence": 0.85,
+                    }
+                },
+                "health_score": 80,
+                "expected_value": 100000,
+            },
+            {
+                "id": "lead-2",
+                "company_name": "Beta Inc",
+                "lifecycle_stage": "lead",
+                "metadata": {
+                    "conversion_score": {
+                        "conversion_probability": 45.0,
+                        "confidence": 0.65,
+                    }
+                },
+                "health_score": 60,
+                "expected_value": 50000,
+            },
+        ]
+
+        with patch("src.db.supabase.SupabaseClient") as mock_sb_client:
+            mock_db = MagicMock()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.not_.is_.return_value.execute.return_value = mock_result
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.get("/api/v1/leads/conversion-rankings")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 2
+            assert len(data["rankings"]) == 2
+            # Should be sorted by probability descending
+            assert data["rankings"][0]["conversion_probability"] == 75.0
+            assert data["rankings"][1]["conversion_probability"] == 45.0
+
+    def test_rankings_with_min_probability_filter(self, test_client: TestClient) -> None:
+        """Test rankings with minimum probability filter."""
+        from unittest.mock import MagicMock, patch
+
+        mock_result = MagicMock()
+        mock_result.data = [
+            {
+                "id": "lead-1",
+                "company_name": "Acme Corp",
+                "lifecycle_stage": "opportunity",
+                "metadata": {
+                    "conversion_score": {
+                        "conversion_probability": 75.0,
+                        "confidence": 0.85,
+                    }
+                },
+                "health_score": 80,
+                "expected_value": 100000,
+            },
+            {
+                "id": "lead-2",
+                "company_name": "Low Score Inc",
+                "lifecycle_stage": "lead",
+                "metadata": {
+                    "conversion_score": {
+                        "conversion_probability": 25.0,
+                        "confidence": 0.65,
+                    }
+                },
+                "health_score": 40,
+                "expected_value": 10000,
+            },
+        ]
+
+        with patch("src.db.supabase.SupabaseClient") as mock_sb_client:
+            mock_db = MagicMock()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.not_.is_.return_value.execute.return_value = mock_result
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.get("/api/v1/leads/conversion-rankings?min_probability=50")
+
+            assert response.status_code == 200
+            data = response.json()
+            # Only lead with 75% should be included
+            assert data["total_count"] == 1
+            assert data["rankings"][0]["conversion_probability"] == 75.0
+
+    def test_rankings_with_limit(self, test_client: TestClient) -> None:
+        """Test rankings with limit parameter."""
+        from unittest.mock import MagicMock, patch
+
+        mock_result = MagicMock()
+        mock_result.data = [
+            {
+                "id": f"lead-{i}",
+                "company_name": f"Company {i}",
+                "lifecycle_stage": "opportunity",
+                "metadata": {
+                    "conversion_score": {
+                        "conversion_probability": 80.0 - i * 10,
+                        "confidence": 0.8,
+                    }
+                },
+                "health_score": 70,
+                "expected_value": 50000,
+            }
+            for i in range(5)
+        ]
+
+        with patch("src.db.supabase.SupabaseClient") as mock_sb_client:
+            mock_db = MagicMock()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.not_.is_.return_value.execute.return_value = mock_result
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.get("/api/v1/leads/conversion-rankings?limit=3")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["rankings"]) == 3
+
+
+class TestGetConversionScore:
+    """Tests for GET /api/v1/leads/{lead_id}/conversion-score endpoint."""
+
+    def test_conversion_score_requires_auth(self) -> None:
+        """Test that getting conversion score requires authentication."""
+        app = create_test_app()
+        client = TestClient(app)
+        response = client.get("/api/v1/leads/some-lead-id/conversion-score")
+        assert response.status_code == 401
+
+    def test_conversion_score_success(self, test_client: TestClient) -> None:
+        """Test successfully getting conversion score."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.conversion_scoring import ConversionScore, ScoreExplanation, FeatureDriver
+
+        lead_id = str(uuid4())
+        mock_score = ConversionScore(
+            lead_memory_id=uuid4(),
+            conversion_probability=72.5,
+            confidence=0.85,
+            feature_values={"engagement_frequency": 0.8, "stakeholder_depth": 0.6},
+            feature_importance={"engagement_frequency": 0.144, "stakeholder_depth": 0.072},
+            calculated_at=datetime.now(UTC),
+        )
+
+        mock_explanation = ScoreExplanation(
+            lead_memory_id=uuid4(),
+            conversion_probability=72.5,
+            summary="Acme Corp has a 73% conversion probability. Key strengths: strong engagement.",
+            key_drivers=[
+                FeatureDriver(
+                    name="engagement_frequency",
+                    value=0.8,
+                    contribution=0.144,
+                    description="16 interactions this month",
+                )
+            ],
+            key_risks=[
+                FeatureDriver(
+                    name="stakeholder_depth",
+                    value=0.4,
+                    contribution=0.048,
+                    description="limited stakeholder mapping",
+                )
+            ],
+            recommendation="Map additional stakeholders and expand relationships.",
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch(
+                "src.services.conversion_scoring.ConversionScoringService"
+            ) as mock_scoring_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_scoring_instance = mock_scoring_service.return_value
+            mock_scoring_instance.calculate_conversion_score = AsyncMock(return_value=mock_score)
+            mock_scoring_instance.explain_score = AsyncMock(return_value=mock_explanation)
+
+            response = test_client.get(f"/api/v1/leads/{lead_id}/conversion-score")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["conversion_probability"] == 72.5
+            assert data["confidence"] == 0.85
+            assert "summary" in data
+            assert len(data["key_drivers"]) == 1
+            assert len(data["key_risks"]) == 1
+            assert "recommendation" in data
+
+    def test_conversion_score_lead_not_found(self, test_client: TestClient) -> None:
+        """Test getting conversion score for non-existent lead returns 404."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.exceptions import LeadNotFoundError
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=LeadNotFoundError("lead-999"))
+
+            response = test_client.get("/api/v1/leads/lead-999/conversion-score")
+
+            assert response.status_code == 404
+
+    def test_conversion_score_with_force_refresh(self, test_client: TestClient) -> None:
+        """Test force refresh parameter is passed to scoring service."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+        from unittest.mock import AsyncMock, patch, call
+
+        from src.services.conversion_scoring import ConversionScore, ScoreExplanation
+
+        mock_score = ConversionScore(
+            lead_memory_id=uuid4(),
+            conversion_probability=65.0,
+            confidence=0.75,
+            feature_values={},
+            feature_importance={},
+            calculated_at=datetime.now(UTC),
+        )
+
+        mock_explanation = ScoreExplanation(
+            lead_memory_id=uuid4(),
+            conversion_probability=65.0,
+            summary="Test summary",
+            key_drivers=[],
+            key_risks=[],
+            recommendation="Test recommendation",
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_lead_service,
+            patch(
+                "src.services.conversion_scoring.ConversionScoringService"
+            ) as mock_scoring_service,
+        ):
+            mock_lead_instance = mock_lead_service.return_value
+            mock_lead_instance.get_by_id = AsyncMock()
+
+            mock_scoring_instance = mock_scoring_service.return_value
+            mock_scoring_instance.calculate_conversion_score = AsyncMock(return_value=mock_score)
+            mock_scoring_instance.explain_score = AsyncMock(return_value=mock_explanation)
+
+            response = test_client.get("/api/v1/leads/lead-123/conversion-score?force_refresh=true")
+
+            assert response.status_code == 200
+            # Verify force_refresh was passed
+            mock_scoring_instance.calculate_conversion_score.assert_called_once_with(
+                "lead-123", force_refresh=True
+            )
+
+
+class TestUpdateLeadPredictionValidation:
+    """Tests for prediction validation when lead status changes to won/lost."""
+
+    def test_update_to_won_validates_prediction(self, test_client: TestClient) -> None:
+        """Test that updating status to won triggers prediction validation."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        existing_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Test Company",
+            lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            status=LeadStatus.ACTIVE,  # Previous status
+            health_score=75,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        updated_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Test Company",
+            lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            status=LeadStatus.WON,  # New status
+            health_score=75,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_prediction_result = MagicMock()
+        mock_prediction_result.data = [
+            {
+                "id": "prediction-123",
+                "predicted_outcome": "won",
+                "confidence": 0.85,
+            }
+        ]
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+        ):
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=[existing_lead, updated_lead])
+            mock_instance.update = AsyncMock()
+
+            mock_db = MagicMock()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_prediction_result
+            mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock()
+            mock_db.rpc.return_value.execute.return_value = MagicMock()
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-123",
+                json={"status": "won"},
+            )
+
+            assert response.status_code == 200
+            # Verify prediction validation was called
+            mock_db.table.assert_called()
+
+    def test_update_to_lost_validates_prediction(self, test_client: TestClient) -> None:
+        """Test that updating status to lost triggers prediction validation."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        existing_lead = LeadMemory(
+            id="test-lead-456",
+            user_id="test-user-123",
+            company_name="Lost Company",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=30,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        updated_lead = LeadMemory(
+            id="test-lead-456",
+            user_id="test-user-123",
+            company_name="Lost Company",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.LOST,
+            health_score=30,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_prediction_result = MagicMock()
+        mock_prediction_result.data = []  # No prediction found
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+        ):
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=[existing_lead, updated_lead])
+            mock_instance.update = AsyncMock()
+
+            mock_db = MagicMock()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_prediction_result
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-456",
+                json={"status": "lost"},
+            )
+
+            assert response.status_code == 200
+
+    def test_update_active_to_active_no_validation(self, test_client: TestClient) -> None:
+        """Test that updating active to active doesn't trigger validation."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        existing_lead = LeadMemory(
+            id="test-lead-789",
+            user_id="test-user-123",
+            company_name="Active Company",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        updated_lead = LeadMemory(
+            id="test-lead-789",
+            user_id="test-user-123",
+            company_name="Active Company Updated",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=60,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        with (
+            patch("src.api.routes.leads.LeadMemoryService") as mock_service,
+            patch("src.db.supabase.SupabaseClient") as mock_sb_client,
+        ):
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(side_effect=[existing_lead, updated_lead])
+            mock_instance.update = AsyncMock()
+
+            mock_db = MagicMock()
+            mock_sb_client.get_client = MagicMock(return_value=mock_db)
+
+            response = test_client.patch(
+                "/api/v1/leads/test-lead-789",
+                json={"health_score": 60, "company_name": "Active Company Updated"},
+            )
+
+            assert response.status_code == 200
+            # Supabase should not be called for prediction validation
+            # since status didn't change to won/lost
+            mock_db.table.assert_not_called()
+
+
+class TestLeadMemoryResponseWithConversionScore:
+    """Tests for LeadMemoryResponse with conversion_score field."""
+
+    def test_response_includes_conversion_score(self, test_client: TestClient) -> None:
+        """Test that lead response includes conversion score when available."""
+        from datetime import UTC, datetime
+        from decimal import Decimal
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        mock_lead = LeadMemory(
+            id="test-lead-123",
+            user_id="test-user-123",
+            company_name="Scored Company",
+            lifecycle_stage=LifecycleStage.OPPORTUNITY,
+            status=LeadStatus.ACTIVE,
+            health_score=75,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            expected_value=Decimal("100000"),
+            tags=["enterprise"],
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        # Add metadata with conversion score
+        mock_lead.metadata = {
+            "conversion_score": {
+                "conversion_probability": 72.5,
+                "confidence": 0.85,
+                "calculated_at": datetime.now(UTC).isoformat(),
+            }
+        }
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(return_value=mock_lead)
+
+            response = test_client.get("/api/v1/leads/test-lead-123")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "conversion_score" in data
+            assert data["conversion_score"]["probability"] == 72.5
+            assert data["conversion_score"]["confidence"] == 0.85
+
+    def test_response_without_conversion_score(self, test_client: TestClient) -> None:
+        """Test that lead response handles missing conversion score."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.memory.lead_memory import LeadMemory, LeadStatus, LifecycleStage, TriggerType
+
+        mock_lead = LeadMemory(
+            id="test-lead-456",
+            user_id="test-user-123",
+            company_name="Unscored Company",
+            lifecycle_stage=LifecycleStage.LEAD,
+            status=LeadStatus.ACTIVE,
+            health_score=50,
+            trigger=TriggerType.MANUAL,
+            first_touch_at=datetime.now(UTC),
+            last_activity_at=datetime.now(UTC),
+            tags=[],
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_lead.metadata = {}  # No conversion score
+
+        with patch("src.api.routes.leads.LeadMemoryService") as mock_service:
+            mock_instance = mock_service.return_value
+            mock_instance.get_by_id = AsyncMock(return_value=mock_lead)
+
+            response = test_client.get("/api/v1/leads/test-lead-456")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["conversion_score"] is None

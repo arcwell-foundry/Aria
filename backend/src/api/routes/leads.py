@@ -43,11 +43,16 @@ from src.models.lead_generation import (
     ReviewStatus,
 )
 from src.models.lead_memory import (
+    BatchScoreResponse,
     ContributionCreate,
     ContributionResponse,
     ContributionReviewRequest,
     ContributorCreate,
     ContributorResponse,
+    ConversionRankingItem,
+    ConversionRankingsResponse,
+    ConversionScoreSummary,
+    FeatureDriverResponse,
     InsightResponse,
     InsightType,
     LeadEventCreate,
@@ -55,6 +60,7 @@ from src.models.lead_memory import (
     LeadMemoryCreate,
     LeadMemoryResponse,
     LeadMemoryUpdate,
+    ScoreExplanationResponse,
     StageTransitionRequest,
     StakeholderCreate,
     StakeholderResponse,
@@ -75,8 +81,27 @@ def _lead_to_response(lead: LeadMemory) -> LeadMemoryResponse:
     Returns:
         LeadMemoryResponse Pydantic model.
     """
+    from datetime import datetime
+
     from src.models.lead_memory import LeadStatus as ResponseLeadStatus
     from src.models.lead_memory import LifecycleStage as ResponseLifecycleStage
+
+    # Extract conversion score from metadata if available
+    conversion_score = None
+    metadata = getattr(lead, "metadata", None) or {}
+    cached_score = metadata.get("conversion_score")
+    if cached_score:
+        try:
+            calculated_at = cached_score.get("calculated_at")
+            if isinstance(calculated_at, str):
+                calculated_at = datetime.fromisoformat(calculated_at.replace("Z", "+00:00"))
+            conversion_score = ConversionScoreSummary(
+                probability=cached_score.get("conversion_probability", 0),
+                confidence=cached_score.get("confidence", 0),
+                calculated_at=calculated_at,
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
 
     return LeadMemoryResponse(
         id=lead.id,
@@ -93,6 +118,7 @@ def _lead_to_response(lead: LeadMemory) -> LeadMemoryResponse:
         expected_close_date=lead.expected_close_date,
         expected_value=float(lead.expected_value) if lead.expected_value else None,
         tags=lead.tags,
+        conversion_score=conversion_score,
         created_at=lead.created_at,
         updated_at=lead.updated_at,
     )
@@ -328,6 +354,129 @@ async def get_pipeline(current_user: CurrentUser) -> PipelineSummary:
         ) from e
 
 
+# --- Conversion Scoring Endpoints ---
+
+
+@router.post("/batch-score", response_model=BatchScoreResponse)
+async def batch_score_leads(current_user: CurrentUser) -> BatchScoreResponse:
+    """Trigger conversion scoring for all active leads.
+
+    Recalculates conversion probability for all leads in the user's pipeline
+    that have status 'active'. Results are cached in lead metadata.
+
+    Args:
+        current_user: Current authenticated user.
+
+    Returns:
+        BatchScoreResponse with count of scored leads and any errors.
+    """
+    from src.services.conversion_scoring import ConversionScoringService
+
+    try:
+        service = ConversionScoringService()
+        result = await service.batch_score_all_leads(current_user.id)
+
+        return BatchScoreResponse(
+            scored=result.scored,
+            errors=[
+                {"lead_id": e.get("lead_id", ""), "error": e.get("error", "")}
+                for e in result.errors
+            ],
+            duration_seconds=result.duration_seconds,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to batch score leads")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to batch score leads: {e}",
+        ) from e
+
+
+@router.get("/conversion-rankings", response_model=ConversionRankingsResponse)
+async def get_conversion_rankings(
+    current_user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    min_probability: float = Query(0, ge=0, le=100, description="Minimum conversion probability"),
+) -> ConversionRankingsResponse:
+    """Get leads ranked by conversion probability.
+
+    Returns all active leads sorted by their conversion probability score.
+    Useful for prioritizing outreach and identifying hot opportunities.
+
+    Args:
+        current_user: Current authenticated user.
+        limit: Maximum number of results to return.
+        min_probability: Filter by minimum conversion probability.
+
+    Returns:
+        ConversionRankingsResponse with ranked leads.
+    """
+    from datetime import UTC, datetime
+
+    from src.db.supabase import SupabaseClient
+    from src.memory.lead_memory import LeadStatus
+    from src.models.lead_memory import LifecycleStage as ModelLifecycleStage
+
+    try:
+        db = SupabaseClient.get_client()
+
+        # Fetch active leads with conversion score in metadata
+        result = (
+            db.table("lead_memories")
+            .select("id, company_name, lifecycle_stage, metadata, health_score, expected_value")
+            .eq("user_id", str(current_user.id))
+            .eq("status", LeadStatus.ACTIVE.value)
+            .not_.is_("metadata->conversion_score", "null")
+            .execute()
+        )
+
+        leads = result.data or []
+
+        # Build rankings list
+        rankings: list[ConversionRankingItem] = []
+        for lead in leads:
+            metadata = lead.get("metadata") or {}
+            score_data = metadata.get("conversion_score")
+            if not score_data:
+                continue
+
+            probability = score_data.get("conversion_probability", 0)
+            if probability < min_probability:
+                continue
+
+            rankings.append(
+                ConversionRankingItem(
+                    id=lead["id"],
+                    company_name=lead.get("company_name", "Unknown"),
+                    lifecycle_stage=ModelLifecycleStage(lead.get("lifecycle_stage", "lead")),
+                    conversion_probability=probability,
+                    confidence=score_data.get("confidence", 0),
+                    health_score=lead.get("health_score", 0),
+                    expected_value=lead.get("expected_value"),
+                )
+            )
+
+        # Sort by conversion probability descending
+        rankings.sort(key=lambda x: x.conversion_probability, reverse=True)
+
+        # Apply limit
+        rankings = rankings[:limit]
+
+        return ConversionRankingsResponse(
+            rankings=rankings,
+            total_count=len(rankings),
+            scored_at=datetime.now(UTC),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to get conversion rankings")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get conversion rankings: {e}",
+        ) from e
+
+
 @router.get("/{lead_id}/timeline", response_model=list[LeadEventResponse])
 async def get_lead_timeline(
     lead_id: str,
@@ -495,6 +644,98 @@ async def get_lead(
         ) from e
 
 
+@router.get("/{lead_id}/conversion-score", response_model=ScoreExplanationResponse)
+async def get_conversion_score(
+    lead_id: str,
+    current_user: CurrentUser,
+    force_refresh: bool = Query(False, description="Force recalculation of score"),
+) -> ScoreExplanationResponse:
+    """Get conversion probability score with explanation for a lead.
+
+    Returns the conversion probability (0-100%) along with key drivers,
+    risks, and an actionable recommendation.
+
+    Args:
+        lead_id: The lead ID to get conversion score for.
+        current_user: Current authenticated user.
+        force_refresh: If True, bypass cache and recalculate score.
+
+    Returns:
+        ScoreExplanationResponse with probability, drivers, risks, and recommendation.
+
+    Raises:
+        HTTPException: 404 if lead not found, 500 if scoring fails.
+    """
+    from src.services.conversion_scoring import (
+        ConversionScoringService,
+        ScoringError,
+    )
+    from src.services.conversion_scoring import (
+        LeadNotFoundError as ScoringLeadNotFoundError,
+    )
+
+    try:
+        # Verify lead exists
+        service = LeadMemoryService()
+        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+
+        # Get score with explanation
+        scoring_service = ConversionScoringService()
+        score = await scoring_service.calculate_conversion_score(
+            lead_id, force_refresh=force_refresh
+        )
+        explanation = await scoring_service.explain_score(lead_id)
+
+        return ScoreExplanationResponse(
+            lead_memory_id=str(explanation.lead_memory_id),
+            conversion_probability=explanation.conversion_probability,
+            confidence=score.confidence,
+            summary=explanation.summary,
+            key_drivers=[
+                FeatureDriverResponse(
+                    name=d.name,
+                    value=d.value,
+                    contribution=d.contribution,
+                    description=d.description,
+                )
+                for d in explanation.key_drivers
+            ],
+            key_risks=[
+                FeatureDriverResponse(
+                    name=r.name,
+                    value=r.value,
+                    contribution=r.contribution,
+                    description=r.description,
+                )
+                for r in explanation.key_risks
+            ],
+            recommendation=explanation.recommendation,
+        )
+
+    except LeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead {lead_id} not found",
+        ) from e
+    except ScoringLeadNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lead not found for scoring: {e}",
+        ) from e
+    except ScoringError as e:
+        logger.exception("Scoring error")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to get conversion score")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate conversion score: {e}",
+        ) from e
+
+
 @router.post("", response_model=LeadMemoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_lead(
     lead_data: LeadMemoryCreate,
@@ -571,8 +812,9 @@ async def update_lead(
     try:
         service = LeadMemoryService()
 
-        # Verify lead exists
-        await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+        # Get existing lead to check status change
+        existing_lead = await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
+        previous_status = existing_lead.status
 
         # Convert expected_value to Decimal if provided
         expected_value = (
@@ -598,6 +840,14 @@ async def update_lead(
             tags=lead_data.tags,
         )
 
+        # Track prediction accuracy when lead status changes to won/lost
+        if (
+            lead_status
+            and lead_status in [LeadStatus.WON, LeadStatus.LOST]
+            and previous_status not in [LeadStatus.WON, LeadStatus.LOST]
+        ):
+            await _validate_conversion_prediction(lead_id, lead_status, current_user.id)
+
         # Fetch and return updated lead
         updated_lead = await service.get_by_id(user_id=current_user.id, lead_id=lead_id)
         return _lead_to_response(updated_lead)
@@ -613,6 +863,99 @@ async def update_lead(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=sanitize_error(e),
         ) from e
+
+
+async def _validate_conversion_prediction(
+    lead_id: str, final_status: LeadStatus, user_id: str
+) -> None:
+    """Validate conversion prediction when a lead is won or lost.
+
+    Updates the prediction record and calibration table.
+
+    Args:
+        lead_id: The lead ID that was won or lost.
+        final_status: The final status (WON or LOST).
+        user_id: The user ID.
+    """
+    from datetime import UTC, datetime
+
+    from src.db.supabase import SupabaseClient
+
+    try:
+        db = SupabaseClient.get_client()
+
+        # Find pending prediction for this lead
+        result = (
+            db.table("predictions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("prediction_type", "deal_outcome")
+            .eq("status", "pending")
+            .eq("context->>lead_memory_id", lead_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        predictions = result.data or []
+        if not predictions:
+            logger.debug(
+                "No pending prediction found for lead",
+                extra={"lead_id": lead_id},
+            )
+            return
+
+        prediction = predictions[0]
+        prediction_id = prediction["id"]
+        predicted_outcome = prediction.get("predicted_outcome", "won")
+        confidence = prediction.get("confidence", 0.5)
+
+        # Determine if prediction was correct
+        actual_outcome = final_status.value  # "won" or "lost"
+        is_correct = predicted_outcome == actual_outcome
+
+        # Update prediction status
+        now = datetime.now(UTC)
+        db.table("predictions").update(
+            {
+                "status": "validated_correct" if is_correct else "validated_incorrect",
+                "validated_at": now.isoformat(),
+                "validation_notes": f"Lead was marked as {actual_outcome}",
+            }
+        ).eq("id", prediction_id).execute()
+
+        # Update calibration table using the database function
+        bucket = round(confidence * 10) / 10
+        bucket = max(0.1, min(1.0, bucket))
+
+        db.rpc(
+            "upsert_calibration",
+            {
+                "p_user_id": user_id,
+                "p_prediction_type": "deal_outcome",
+                "p_confidence_bucket": bucket,
+                "p_is_correct": is_correct,
+            },
+        ).execute()
+
+        logger.info(
+            "Validated conversion prediction",
+            extra={
+                "lead_id": lead_id,
+                "prediction_id": prediction_id,
+                "predicted": predicted_outcome,
+                "actual": actual_outcome,
+                "is_correct": is_correct,
+                "confidence": confidence,
+            },
+        )
+
+    except Exception as e:
+        # Don't fail the lead update if prediction validation fails
+        logger.warning(
+            "Failed to validate conversion prediction",
+            extra={"lead_id": lead_id, "error": str(e)},
+        )
 
 
 @router.post("/{lead_id}/notes", response_model=LeadEventResponse)

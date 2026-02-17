@@ -88,6 +88,14 @@ class LeadMemoryUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class ConversionScoreSummary(BaseModel):
+    """Summary of conversion score for lead response."""
+
+    probability: float = Field(..., ge=0, le=100, description="Conversion probability 0-100%")
+    confidence: float = Field(..., ge=0, le=1, description="Data completeness score 0-1")
+    calculated_at: datetime | None = Field(None, description="When score was calculated")
+
+
 class LeadMemoryResponse(BaseModel):
     id: str
     user_id: str
@@ -103,6 +111,9 @@ class LeadMemoryResponse(BaseModel):
     expected_close_date: date | None
     expected_value: float | None
     tags: list[str]
+    conversion_score: ConversionScoreSummary | None = Field(
+        None, description="Conversion probability score from ML model"
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -231,3 +242,53 @@ class ContributionResponse(BaseModel):
 
 class ContributionReviewRequest(BaseModel):
     action: Literal["merge", "reject"] = Field(..., description="Action: 'merge' or 'reject'")
+
+
+# Conversion Scoring Models
+class FeatureDriverResponse(BaseModel):
+    """A feature that influences the conversion score."""
+
+    name: str
+    value: float
+    contribution: float
+    description: str
+
+
+class ScoreExplanationResponse(BaseModel):
+    """Full explanation of conversion score."""
+
+    lead_memory_id: str
+    conversion_probability: float
+    confidence: float
+    summary: str
+    key_drivers: list[FeatureDriverResponse]
+    key_risks: list[FeatureDriverResponse]
+    recommendation: str
+
+
+class BatchScoreResponse(BaseModel):
+    """Result of batch scoring all leads."""
+
+    scored: int
+    errors: list[dict[str, str]]
+    duration_seconds: float
+
+
+class ConversionRankingItem(BaseModel):
+    """A lead in the conversion rankings list."""
+
+    id: str
+    company_name: str
+    lifecycle_stage: LifecycleStage
+    conversion_probability: float
+    confidence: float
+    health_score: int
+    expected_value: float | None
+
+
+class ConversionRankingsResponse(BaseModel):
+    """Ranked list of leads by conversion probability."""
+
+    rankings: list[ConversionRankingItem]
+    total_count: int
+    scored_at: datetime
