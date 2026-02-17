@@ -20,6 +20,7 @@ class NotificationType(str, Enum):
     DRAFT_READY = "draft_ready"
     LEAD_SILENT = "lead_silent"
     LEAD_HEALTH_DROP = "lead_health_drop"
+    VIDEO_SESSION_READY = "video_session_ready"
 
 
 class NotificationCreate(BaseModel):
