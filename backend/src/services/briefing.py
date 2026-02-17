@@ -48,6 +48,7 @@ class EmailSummary(BaseModel):
     drafts_high_confidence: int = 0
     drafts_need_review: int = 0
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -110,7 +111,11 @@ class BriefingService:
             "market_trends": [],
             "competitive_intel": [],
         }
-        empty_tasks: dict[str, Any] = {"overdue": [], "due_today": []}
+        empty_tasks: dict[str, Any] = {
+            "overdue": [],
+            "due_today": [],
+            "meetings_without_debriefs": 0,
+        }
         empty_email: dict[str, Any] = {
             "total_received": 0,
             "needs_attention": [],
@@ -151,12 +156,25 @@ class BriefingService:
             logger.warning("Failed to gather task data", extra={"user_id": user_id}, exc_info=True)
             task_data = empty_tasks
 
+        # Get debrief count for meetings without debriefs
+        try:
+            from src.services.debrief_scheduler import DebriefScheduler
+
+            debrief_scheduler = DebriefScheduler()
+            debrief_count = await debrief_scheduler.get_debrief_prompt_count(user_id)
+            task_data["meetings_without_debriefs"] = debrief_count
+        except Exception:
+            logger.warning(
+                "Failed to get debrief prompt count",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            task_data["meetings_without_debriefs"] = 0
+
         try:
             email_data = await self._get_email_data(user_id)
         except Exception:
-            logger.warning(
-                "Failed to gather email data", extra={"user_id": user_id}, exc_info=True
-            )
+            logger.warning("Failed to gather email data", extra={"user_id": user_id}, exc_info=True)
             email_data = empty_email
 
         # Get personality calibration for tone-matched briefing
@@ -199,7 +217,11 @@ class BriefingService:
 
         # Generate summary using LLM
         summary = await self._generate_summary(
-            calendar_data, lead_data, signal_data, task_data, email_data,
+            calendar_data,
+            lead_data,
+            signal_data,
+            task_data,
+            email_data,
             tone_guidance=tone_guidance,
         )
 
@@ -257,9 +279,9 @@ class BriefingService:
         # Log briefing generation to activity feed (non-blocking)
         drafts_count = email_data.get("drafts_waiting", 0)
         signals_count = (
-            len(signal_data.get("company_news", [])) +
-            len(signal_data.get("market_trends", [])) +
-            len(signal_data.get("competitive_intel", []))
+            len(signal_data.get("company_news", []))
+            + len(signal_data.get("market_trends", []))
+            + len(signal_data.get("competitive_intel", []))
         )
 
         try:
@@ -536,11 +558,13 @@ class BriefingService:
             suggestions.append(f"Review {drafts_waiting} email drafts")
 
         # Add default suggestions
-        suggestions.extend([
-            "Focus on the critical meeting",
-            "Show me the buying signals",
-            "Update me on competitor activity",
-        ])
+        suggestions.extend(
+            [
+                "Focus on the critical meeting",
+                "Show me the buying signals",
+                "Update me on competitor activity",
+            ]
+        )
 
         return suggestions[:5]  # Limit to 5 suggestions
 
@@ -756,38 +780,49 @@ class BriefingService:
                             if any(h.get("headline") == headline for h in company_news):
                                 continue
 
-                            company_news.append({
-                                "id": f"exa-{hash(item.url) % 10000}",
-                                "company_name": company_name,
-                                "headline": headline,
-                                "summary": item.text[:300] if item.text else "",
-                                "relevance_score": 0.75,
-                                "detected_at": item.published_date or datetime.now(UTC).isoformat(),
-                                "source": "exa_realtime",
-                                "url": item.url,
-                            })
+                            company_news.append(
+                                {
+                                    "id": f"exa-{hash(item.url) % 10000}",
+                                    "company_name": company_name,
+                                    "headline": headline,
+                                    "summary": item.text[:300] if item.text else "",
+                                    "relevance_score": 0.75,
+                                    "detected_at": item.published_date
+                                    or datetime.now(UTC).isoformat(),
+                                    "source": "exa_realtime",
+                                    "url": item.url,
+                                }
+                            )
 
                         # Get similar companies for competitive intel
                         if website and len(competitive_intel) < 10:
                             similar_results = await exa.find_similar(
                                 url=website,
                                 num_results=3,
-                                exclude_domains=[website.split("//")[1].split("/")[0]] if "://" in website else None,
+                                exclude_domains=[website.split("//")[1].split("/")[0]]
+                                if "://" in website
+                                else None,
                             )
 
                             for item in similar_results:
                                 # Extract competitor name from URL
-                                competitor_name = item.title.split(" - ")[0] if " - " in item.title else item.title[:50]
-                                competitive_intel.append({
-                                    "id": f"exa-similar-{hash(item.url) % 10000}",
-                                    "company_name": competitor_name,
-                                    "headline": f"Similar to {company_name}: {item.title}",
-                                    "summary": item.text[:200] if item.text else "",
-                                    "relevance_score": 0.6,
-                                    "detected_at": datetime.now(UTC).isoformat(),
-                                    "source": "exa_similar",
-                                    "url": item.url,
-                                })
+                                competitor_name = (
+                                    item.title.split(" - ")[0]
+                                    if " - " in item.title
+                                    else item.title[:50]
+                                )
+                                competitive_intel.append(
+                                    {
+                                        "id": f"exa-similar-{hash(item.url) % 10000}",
+                                        "company_name": competitor_name,
+                                        "headline": f"Similar to {company_name}: {item.title}",
+                                        "summary": item.text[:200] if item.text else "",
+                                        "relevance_score": 0.6,
+                                        "detected_at": datetime.now(UTC).isoformat(),
+                                        "source": "exa_similar",
+                                        "url": item.url,
+                                    }
+                                )
 
                     except Exception as e:
                         logger.warning(
@@ -904,7 +939,10 @@ class BriefingService:
         overdue_count = len(tasks.get("overdue", []))
         email_count = email_data.get("total_received", 0)
         drafts_waiting = email_data.get("drafts_waiting", 0)
-        total_activity = meeting_count + attention_count + signal_count + overdue_count + email_count
+        meetings_without_debriefs = tasks.get("meetings_without_debriefs", 0)
+        total_activity = (
+            meeting_count + attention_count + signal_count + overdue_count + email_count
+        )
 
         if total_activity == 0:
             prompt = (
@@ -915,6 +953,11 @@ class BriefingService:
                 'Start with "Good morning!"'
             )
         else:
+            debrief_note = (
+                f"\nMeetings without debriefs: {meetings_without_debriefs}"
+                if meetings_without_debriefs > 0
+                else ""
+            )
             prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
 
 Calendar: {meeting_count} meetings today
@@ -922,7 +965,7 @@ Leads needing attention: {attention_count}
 New signals: {signal_count}
 Overdue tasks: {overdue_count}
 Emails received: {email_count}
-Drafts waiting for review: {drafts_waiting}
+Drafts waiting for review: {drafts_waiting}{debrief_note}
 
 Be concise and actionable. Start with "Good morning!"
 """
@@ -1013,17 +1056,19 @@ Be concise and actionable. Start with "Good morning!"
                 # Look up company from relationship or sender domain
                 company = await self._get_company_for_sender(user_id, draft.recipient_email)
 
-                needs_attention.append({
-                    "sender": draft.recipient_name or draft.recipient_email,
-                    "company": company,
-                    "subject": draft.subject,
-                    "summary": await self._summarize_draft_context(draft),
-                    "urgency": "NORMAL",
-                    "draft_status": "saved_to_drafts",
-                    "draft_confidence": confidence_label,
-                    "aria_notes": draft.aria_notes,
-                    "draft_id": draft.draft_id,
-                })
+                needs_attention.append(
+                    {
+                        "sender": draft.recipient_name or draft.recipient_email,
+                        "company": company,
+                        "subject": draft.subject,
+                        "summary": await self._summarize_draft_context(draft),
+                        "urgency": "NORMAL",
+                        "draft_status": "saved_to_drafts",
+                        "draft_confidence": confidence_label,
+                        "aria_notes": draft.aria_notes,
+                        "draft_id": draft.draft_id,
+                    }
+                )
 
             # Build FYI highlights from scan result
             fyi_highlights: list[str] = []
@@ -1076,12 +1121,11 @@ Be concise and actionable. Start with "Good morning!"
 
             if result and result.data:
                 import json
+
                 metadata_raw = result.data[0].get("metadata")
                 if metadata_raw:
                     metadata = (
-                        json.loads(metadata_raw)
-                        if isinstance(metadata_raw, str)
-                        else metadata_raw
+                        json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
                     )
                     if metadata.get("company"):
                         return metadata["company"]
@@ -1160,7 +1204,9 @@ Be concise and actionable. Start with "Good morning!"
         key_meetings = calendar.get("key_meetings", [])
 
         if meeting_count > 0:
-            script_parts.append(f"You have {meeting_count} meeting{'s' if meeting_count > 1 else ''} today.")
+            script_parts.append(
+                f"You have {meeting_count} meeting{'s' if meeting_count > 1 else ''} today."
+            )
             for i, meeting in enumerate(key_meetings[:3]):
                 time = meeting.get("time", "")
                 title = meeting.get("title", "Meeting")
@@ -1173,7 +1219,9 @@ Be concise and actionable. Start with "Good morning!"
                 else:
                     script_parts.append(f"At {time}, {title}.")
         else:
-            script_parts.append("Your calendar is clear today, which gives you time for focused work.")
+            script_parts.append(
+                "Your calendar is clear today, which gives you time for focused work."
+            )
 
         # Lead updates
         leads = briefing.get("leads", {})
@@ -1181,14 +1229,18 @@ Be concise and actionable. Start with "Good morning!"
         needs_attention = leads.get("needs_attention", [])
 
         if hot_leads:
-            script_parts.append(f"You have {len(hot_leads)} hot lead{'s' if len(hot_leads) > 1 else ''} showing strong buying signals.")
+            script_parts.append(
+                f"You have {len(hot_leads)} hot lead{'s' if len(hot_leads) > 1 else ''} showing strong buying signals."
+            )
             for lead in hot_leads[:3]:
                 company = lead.get("company_name", "a company")
                 score = lead.get("health_score", 0)
                 script_parts.append(f"{company} has a health score of {score}.")
 
         if needs_attention:
-            script_parts.append(f"{len(needs_attention)} lead{'s' if len(needs_attention) > 1 else ''} {'need' if len(needs_attention) == 1 else 'needs'} your attention.")
+            script_parts.append(
+                f"{len(needs_attention)} lead{'s' if len(needs_attention) > 1 else ''} {'need' if len(needs_attention) == 1 else 'needs'} your attention."
+            )
             for lead in needs_attention[:2]:
                 company = lead.get("company_name", "a company")
                 script_parts.append(f"{company} is showing declining engagement.")
@@ -1200,7 +1252,9 @@ Be concise and actionable. Start with "Good morning!"
 
         if company_news or competitive_intel:
             total_signals = len(company_news) + len(competitive_intel)
-            script_parts.append(f"I've detected {total_signals} market signal{'s' if total_signals > 1 else ''} for you.")
+            script_parts.append(
+                f"I've detected {total_signals} market signal{'s' if total_signals > 1 else ''} for you."
+            )
 
             for news in company_news[:2]:
                 company = news.get("company_name", "a company")
@@ -1220,13 +1274,17 @@ Be concise and actionable. Start with "Good morning!"
         due_today = tasks.get("due_today", [])
 
         if overdue:
-            script_parts.append(f"You have {len(overdue)} overdue task{'s' if len(overdue) > 1 else ''}.")
+            script_parts.append(
+                f"You have {len(overdue)} overdue task{'s' if len(overdue) > 1 else ''}."
+            )
             for task in overdue[:2]:
                 task_desc = task.get("task", "a task")
                 script_parts.append(f"{task_desc}.")
 
         if due_today:
-            script_parts.append(f"{len(due_today)} task{'s' if len(due_today) > 1 else ''} {'are' if len(due_today) > 1 else 'is'} due today.")
+            script_parts.append(
+                f"{len(due_today)} task{'s' if len(due_today) > 1 else ''} {'are' if len(due_today) > 1 else 'is'} due today."
+            )
 
         # Email summary
         email_summary = briefing.get("email_summary", {})
@@ -1238,13 +1296,19 @@ Be concise and actionable. Start with "Good morning!"
             conf_msg = ""
             if drafts_high_confidence > 0:
                 conf_msg = f", including {drafts_high_confidence} high confidence draft{'s' if drafts_high_confidence > 1 else ''}"
-            script_parts.append(f"I've prepared {drafts_waiting} email draft{'s' if drafts_waiting > 1 else ''} for you{conf_msg}.")
+            script_parts.append(
+                f"I've prepared {drafts_waiting} email draft{'s' if drafts_waiting > 1 else ''} for you{conf_msg}."
+            )
 
         if needs_attention_emails:
-            script_parts.append(f"{len(needs_attention_emails)} email{'s' if len(needs_attention_emails) > 1 else ''} {'need' if len(needs_attention_emails) == 1 else 'needs'} your attention.")
+            script_parts.append(
+                f"{len(needs_attention_emails)} email{'s' if len(needs_attention_emails) > 1 else ''} {'need' if len(needs_attention_emails) == 1 else 'needs'} your attention."
+            )
 
         # Closing
-        script_parts.append("Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with.")
+        script_parts.append(
+            "Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with."
+        )
 
         # Join with natural pauses (double spaces for brief pauses)
         script = "  ".join(script_parts)
@@ -1254,7 +1318,7 @@ Be concise and actionable. Start with "Good morning!"
         max_chars = 18000  # Conservative estimate for 4,500 tokens
         closing = " Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with."
         if len(script) > max_chars:
-            script = script[:max_chars - len(closing)] + closing
+            script = script[: max_chars - len(closing)] + closing
 
         return script
 
@@ -1293,8 +1357,10 @@ Be concise and actionable. Start with "Good morning!"
                 .maybe_single()
                 .execute()
             )
-            if prefs_result and prefs_result.data and not prefs_result.data.get(
-                "video_briefing_enabled", False
+            if (
+                prefs_result
+                and prefs_result.data
+                and not prefs_result.data.get("video_briefing_enabled", False)
             ):
                 logger.info(
                     "Video briefing not enabled for user",

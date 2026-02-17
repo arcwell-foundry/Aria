@@ -583,6 +583,25 @@ async def _run_weekly_improvement_report() -> None:
         logger.exception("Weekly improvement report scheduler run failed")
 
 
+async def _run_debrief_prompt_checks() -> None:
+    """Check for meetings that ended recently and prompt for debriefs."""
+    try:
+        from src.services.debrief_scheduler import run_debrief_prompt_scheduler
+
+        result = await run_debrief_prompt_scheduler()
+
+        if result["users_processed"] > 0:
+            logger.info(
+                "Debrief prompt scheduler complete: %d users processed, "
+                "%d notifications sent, %d errors",
+                result["users_processed"],
+                result["total_notifications"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Debrief prompt scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -690,6 +709,13 @@ async def start_scheduler() -> None:
             name="Weekly self-improvement report generation",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_debrief_prompt_checks,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="debrief_prompt_checks",
+            name="Meeting debrief prompt scheduler",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -713,6 +739,7 @@ async def start_scheduler() -> None:
             "periodic email check every 30 min, "
             "draft feedback poll every 30 min, "
             "deferred draft retry every 15 min, "
+            "debrief prompt checks every 15 min, "
             "style recalibration weekly on Sunday at 2 AM, "
             "daily improvement cycle at 23:30, "
             "weekly improvement report on Sunday at 3 AM"
