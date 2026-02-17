@@ -529,6 +529,218 @@ async def _update_lead_sentiment_from_perception(
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Perception Tool Call Handling
+# ─────────────────────────────────────────────────────────────────────────────
+
+PERCEPTION_TOOLS: frozenset[str] = frozenset({
+    "adapt_to_confusion",
+    "note_engagement_drop",
+})
+
+
+async def handle_perception_tool_call(
+    conversation_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    db: Any,
+) -> dict[str, Any] | None:
+    """Handle a perception tool call (adapt_to_confusion / note_engagement_drop).
+
+    Records the perception event on the video session, updates per-topic
+    statistics, and logs to aria_activity.  Returns a silent spoken_text
+    so ARIA adapts organically without an explicit verbal acknowledgement.
+
+    Args:
+        conversation_id: The Tavus conversation ID.
+        tool_name: The perception tool name.
+        arguments: Tool arguments (indicator, topic, metadata, etc.).
+        db: Supabase client.
+
+    Returns:
+        Dict with ``spoken_text: ""`` on success, or ``None`` on failure.
+    """
+    # 1. Look up the video session
+    session_result = (
+        db.table("video_sessions")
+        .select("id, user_id, perception_events, started_at")
+        .eq("tavus_conversation_id", conversation_id)
+        .execute()
+    )
+
+    if not session_result.data or len(session_result.data) == 0:
+        logger.warning(
+            "No video session found for perception tool call",
+            extra={"conversation_id": conversation_id, "tool_name": tool_name},
+        )
+        return None
+
+    session = session_result.data[0]
+    session_id: str = session["id"]
+    user_id: str = session["user_id"]
+    perception_events: list[dict[str, Any]] = session.get("perception_events") or []
+    started_at_str: str | None = session.get("started_at")
+
+    # 2. Compute session_time_seconds
+    session_time_seconds: float = 0.0
+    now = datetime.now(UTC)
+    if started_at_str:
+        try:
+            started_at = datetime.fromisoformat(
+                started_at_str.replace("Z", "+00:00")
+            )
+            session_time_seconds = (now - started_at).total_seconds()
+        except (ValueError, TypeError):
+            pass
+
+    # 3. Build the perception event
+    topic = arguments.get("topic", "unknown")
+    indicator = arguments.get("indicator", "")
+
+    event: dict[str, Any] = {
+        "tool_name": tool_name,
+        "timestamp": now.isoformat(),
+        "session_time_seconds": round(session_time_seconds, 2),
+        "indicator": indicator,
+        "topic": topic,
+        "metadata": {k: v for k, v in arguments.items() if k not in ("indicator", "topic")},
+    }
+
+    # 4. Deduplication: skip if same tool + topic within 2 seconds of last event
+    for prev in reversed(perception_events):
+        if prev.get("tool_name") == tool_name and prev.get("topic") == topic:
+            try:
+                prev_ts = datetime.fromisoformat(prev["timestamp"])
+                if abs((now - prev_ts).total_seconds()) < 2.0:
+                    logger.debug(
+                        "Skipping duplicate perception event",
+                        extra={"tool_name": tool_name, "topic": topic},
+                    )
+                    return {"spoken_text": ""}
+            except (ValueError, TypeError, KeyError):
+                pass
+            break  # Only compare with the most recent matching event
+
+    # 5. Append event to perception_events JSONB array
+    perception_events.append(event)
+    try:
+        db.table("video_sessions").update({
+            "perception_events": perception_events,
+        }).eq("id", session_id).execute()
+    except Exception as e:
+        logger.warning(
+            "Failed to update perception_events on video_sessions",
+            extra={"session_id": session_id, "error": str(e)},
+        )
+
+    # 6. Upsert topic stats
+    try:
+        await _upsert_topic_stats(
+            user_id=user_id,
+            tool_name=tool_name,
+            topic=topic,
+            db=db,
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to upsert perception topic stats",
+            extra={"user_id": user_id, "topic": topic, "error": str(e)},
+        )
+
+    # 7. Log to aria_activity
+    try:
+        db.table("aria_activity").insert({
+            "user_id": user_id,
+            "activity_type": f"perception.{tool_name}",
+            "description": (
+                f"Perception event: {tool_name} on topic '{topic}' "
+                f"(indicator: {indicator})"
+            ),
+            "metadata": {
+                "conversation_id": conversation_id,
+                "session_id": session_id,
+                "event": event,
+            },
+        }).execute()
+    except Exception as e:
+        logger.warning(
+            "Failed to log perception activity",
+            extra={"conversation_id": conversation_id, "error": str(e)},
+        )
+
+    logger.info(
+        "Perception tool call handled",
+        extra={
+            "conversation_id": conversation_id,
+            "tool_name": tool_name,
+            "topic": topic,
+            "session_time_seconds": round(session_time_seconds, 2),
+        },
+    )
+
+    # Silent response — ARIA adapts organically
+    return {"spoken_text": ""}
+
+
+async def _upsert_topic_stats(
+    user_id: str,
+    tool_name: str,
+    topic: str,
+    db: Any,
+) -> None:
+    """Create or update a row in perception_topic_stats.
+
+    Increments the relevant counter (confusion_count or
+    disengagement_count) and total_mentions for the user + topic pair.
+
+    Args:
+        user_id: The user ID.
+        tool_name: The perception tool name.
+        topic: The topic string from the tool arguments.
+        db: Supabase client.
+    """
+    now_iso = datetime.now(UTC).isoformat()
+
+    # Check for existing row
+    existing = (
+        db.table("perception_topic_stats")
+        .select("id, confusion_count, disengagement_count, total_mentions")
+        .eq("user_id", user_id)
+        .eq("topic", topic)
+        .execute()
+    )
+
+    if existing.data and len(existing.data) > 0:
+        row = existing.data[0]
+        update_data: dict[str, Any] = {
+            "total_mentions": (row.get("total_mentions", 0) or 0) + 1,
+        }
+        if tool_name == "adapt_to_confusion":
+            update_data["confusion_count"] = (row.get("confusion_count", 0) or 0) + 1
+            update_data["last_confused_at"] = now_iso
+        elif tool_name == "note_engagement_drop":
+            update_data["disengagement_count"] = (row.get("disengagement_count", 0) or 0) + 1
+            update_data["last_disengaged_at"] = now_iso
+
+        db.table("perception_topic_stats").update(update_data).eq(
+            "id", row["id"]
+        ).execute()
+    else:
+        insert_data: dict[str, Any] = {
+            "user_id": user_id,
+            "topic": topic,
+            "confusion_count": 1 if tool_name == "adapt_to_confusion" else 0,
+            "disengagement_count": 1 if tool_name == "note_engagement_drop" else 0,
+            "total_mentions": 1,
+        }
+        if tool_name == "adapt_to_confusion":
+            insert_data["last_confused_at"] = now_iso
+        elif tool_name == "note_engagement_drop":
+            insert_data["last_disengaged_at"] = now_iso
+
+        db.table("perception_topic_stats").insert(insert_data).execute()
+
+
 async def handle_utterance(
     conversation_id: str,
     payload: dict[str, Any],
@@ -697,6 +909,22 @@ async def handle_tool_call(
             "No user_id found for tool call — cannot execute",
             extra={"conversation_id": conversation_id, "tool_name": tool_name},
         )
+        return None
+
+    # Perception tools are handled separately — silent, no business execution
+    if tool_name in PERCEPTION_TOOLS:
+        handler_result = await handle_perception_tool_call(
+            conversation_id=conversation_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            db=db,
+        )
+        if handler_result:
+            return {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "result": handler_result["spoken_text"],
+            }
         return None
 
     # Sequential execution guard: one tool at a time per conversation
