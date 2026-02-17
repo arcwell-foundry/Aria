@@ -36,6 +36,7 @@ from src.api.routes import (
     email_preferences,
     feedback,
     goals,
+    health,
     insights,
     integrations,
     intelligence,  # Phase 7: Causal intelligence routes
@@ -77,6 +78,7 @@ from src.api.routes.companion import (
     narrative_router as companion_narrative_router,  # US-807: Narrative Identity
 )
 from src.api.routes.companion import user_router as companion_user_router  # US-802: Theory of Mind
+from src.core.error_tracker import ErrorTracker
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
 
@@ -216,6 +218,7 @@ app.include_router(email.router, prefix="/api/v1")
 app.include_router(email_preferences.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(goals.router, prefix="/api/v1")
+app.include_router(health.router, prefix="/api/v1")
 app.include_router(insights.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(intelligence.router, prefix="/api/v1")  # Phase 7: Causal intelligence
@@ -317,6 +320,11 @@ async def aria_exception_handler(request: Request, exc: ARIAException) -> JSONRe
             "request_id": request_id,
             "path": request.url.path,
         },
+    )
+    ErrorTracker.get_instance().record_error(
+        service="api",
+        error_type=exc.code,
+        message=f"{request.method} {request.url.path}: {exc.message}",
     )
     return JSONResponse(
         status_code=exc.status_code,
@@ -439,6 +447,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "request_id": request_id,
             "path": request.url.path,
         },
+    )
+    ErrorTracker.get_instance().record_error(
+        service="api",
+        error_type=type(exc).__name__,
+        message=f"{request.method} {request.url.path}: {exc}",
     )
 
     # Build response with explicit CORS headers so the browser
