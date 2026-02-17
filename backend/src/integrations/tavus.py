@@ -561,6 +561,8 @@ class TavusClient:
         file_url_or_path: str,
         tags: list[str] | None = None,
         crawl: bool = False,
+        max_depth: int | None = None,
+        max_pages: int | None = None,
     ) -> dict[str, Any]:
         """Create a document in the knowledge base.
 
@@ -569,6 +571,8 @@ class TavusClient:
             file_url_or_path: URL or path to the document
             tags: Optional list of tags for the document
             crawl: Whether to crawl linked documents (for URLs)
+            max_depth: Maximum crawl depth (requires crawl=True)
+            max_pages: Maximum number of pages to crawl (requires crawl=True)
 
         Returns:
             Dictionary with document_id
@@ -587,6 +591,10 @@ class TavusClient:
 
         if crawl:
             payload["crawl"] = crawl
+            if max_depth is not None:
+                payload["max_depth"] = max_depth
+            if max_pages is not None:
+                payload["max_pages"] = max_pages
 
         self._check_circuit()
         try:

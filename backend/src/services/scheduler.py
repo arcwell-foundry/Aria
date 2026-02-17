@@ -602,6 +602,26 @@ async def _run_debrief_prompt_checks() -> None:
         logger.exception("Debrief prompt scheduler run failed")
 
 
+async def _run_competitive_docs_refresh() -> None:
+    """Monthly refresh of competitive intelligence docs in Tavus Knowledge Base.
+
+    Re-generates battle card summary documents from the battle_cards table
+    and re-uploads them to Tavus for RAG retrieval during video conversations.
+    """
+    try:
+        from scripts.setup_tavus_knowledge_base import refresh_competitive_docs
+
+        result = await refresh_competitive_docs()
+        logger.info(
+            "Competitive docs refresh complete: uploaded=%d, deleted=%d, skipped=%d",
+            result.get("uploaded", 0),
+            result.get("deleted", 0),
+            result.get("skipped", 0),
+        )
+    except Exception:
+        logger.exception("Competitive docs refresh scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -716,6 +736,13 @@ async def start_scheduler() -> None:
             name="Meeting debrief prompt scheduler",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_competitive_docs_refresh,
+            trigger=CronTrigger(day=1, hour=3, minute=0),  # 1st of month, 3 AM
+            id="competitive_docs_refresh",
+            name="Monthly Tavus KB competitive docs refresh",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -742,7 +769,8 @@ async def start_scheduler() -> None:
             "debrief prompt checks every 15 min, "
             "style recalibration weekly on Sunday at 2 AM, "
             "daily improvement cycle at 23:30, "
-            "weekly improvement report on Sunday at 3 AM"
+            "weekly improvement report on Sunday at 3 AM, "
+            "competitive docs refresh monthly on 1st at 3 AM"
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")

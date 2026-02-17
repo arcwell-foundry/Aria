@@ -28,6 +28,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/video", tags=["video"])
 
+# Default Knowledge Base tags for all video conversations
+_DEFAULT_KB_TAGS = ["aria-context", "life-sciences", "competitive"]
+
+
+def _document_tags_for_session(session_type: str) -> list[str]:
+    """Return Knowledge Base document tags for a given session type.
+
+    Briefing sessions include "signals" for market intelligence retrieval.
+
+    Args:
+        session_type: The video session type string.
+
+    Returns:
+        List of document tag strings.
+    """
+    tags = list(_DEFAULT_KB_TAGS)
+    if session_type in ("briefing", "consultation"):
+        tags.append("signals")
+    return tags
+
 
 async def build_aria_context(user_id: str, session_type: str, lead_id: str | None = None) -> str:
     """Build conversational context for Tavus session based on ARIA intelligence.
@@ -170,7 +190,7 @@ async def create_video_session(
             context=full_context or None,
             custom_greeting=request.custom_greeting,
             memory_stores=[{"memory_store_id": f"aria-user-{current_user.id}"}],
-            document_tags=["aria-context"],
+            document_tags=_document_tags_for_session(request.session_type.value),
             retrieval_strategy="balanced",
         )
     except httpx.HTTPStatusError:

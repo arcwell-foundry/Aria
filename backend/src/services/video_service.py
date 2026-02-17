@@ -34,6 +34,20 @@ from src.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
+# Default Knowledge Base tags for all video conversations
+_DEFAULT_KB_TAGS = ["aria-context", "life-sciences", "competitive"]
+
+
+def _document_tags_for_session(session_type: SessionType) -> list[str]:
+    """Return Knowledge Base document tags for a given session type.
+
+    Briefing and consultation sessions include "signals" for market intelligence.
+    """
+    tags = list(_DEFAULT_KB_TAGS)
+    if session_type in (SessionType.BRIEFING, SessionType.CONSULTATION):
+        tags.append("signals")
+    return tags
+
 
 class VideoSessionService:
     """Service for managing video session lifecycle with Tavus integration.
@@ -88,7 +102,7 @@ class VideoSessionService:
                 context=full_context or None,
                 custom_greeting=custom_greeting,
                 memory_stores=[{"memory_store_id": f"aria-user-{user_id}"}],
-                document_tags=["aria-context"],
+                document_tags=_document_tags_for_session(session_type),
                 retrieval_strategy="balanced",
             )
         except Exception as e:
