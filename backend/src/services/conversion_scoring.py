@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from src.db.supabase import SupabaseClient
 from src.models.lead_memory import LeadStatus
+from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class ConversionScoringService:
     def __init__(self) -> None:
         """Initialize conversion scoring service with Supabase client."""
         self._db = SupabaseClient.get_client()
+        self._activity_service = ActivityService()
 
     async def calculate_conversion_score(
         self, lead_memory_id: UUID | str, force_refresh: bool = False
@@ -320,6 +322,24 @@ class ConversionScoringService:
                 "duration_seconds": duration,
             },
         )
+
+        # Log to activity feed
+        try:
+            await self._activity_service.record(
+                user_id=str(user_id),
+                agent="analyst",
+                activity_type="score_calculated",
+                title=f"Scored {scored} leads",
+                description=f"Batch scoring completed: {scored} scored, {len(errors)} errors in {duration:.1f}s",
+                confidence=0.9,
+                metadata={
+                    "scored": scored,
+                    "errors": len(errors),
+                    "duration_seconds": duration,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to log batch scoring activity")
 
         return BatchScoreResult(scored=scored, errors=errors, duration_seconds=duration)
 

@@ -21,6 +21,7 @@ from src.models.prediction import (
     PredictionUpdate,
     PredictionValidate,
 )
+from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class PredictionService:
     def __init__(self) -> None:
         """Initialize prediction service with Supabase client."""
         self._db = SupabaseClient.get_client()
+        self._activity_service = ActivityService()
 
     async def register(self, user_id: str, data: PredictionCreate) -> dict[str, Any]:
         """Register a new prediction.
@@ -73,6 +75,27 @@ class PredictionService:
 
         prediction = cast(dict[str, Any], result.data[0])
         logger.info("Prediction registered", extra={"prediction_id": prediction["id"]})
+
+        # Log to activity feed
+        try:
+            await self._activity_service.record(
+                user_id=user_id,
+                agent="analyst",
+                activity_type="score_calculated",
+                title=f"Prediction: {data.prediction_text[:80]}",
+                description=data.prediction_text,
+                confidence=data.confidence,
+                metadata={
+                    "prediction_id": prediction["id"],
+                    "prediction_type": data.prediction_type.value,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Failed to log prediction activity",
+                extra={"prediction_id": prediction["id"]},
+            )
+
         return prediction
 
     async def get_prediction(self, user_id: str, prediction_id: str) -> dict[str, Any] | None:

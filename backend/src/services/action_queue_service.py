@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from src.db.supabase import SupabaseClient
 from src.models.action_queue import ActionCreate, ActionStatus, RiskLevel
+from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class ActionQueueService:
     def __init__(self) -> None:
         """Initialize with Supabase client."""
         self._db = SupabaseClient.get_client()
+        self._activity_service = ActivityService()
 
     async def submit_action(
         self,
@@ -80,6 +82,29 @@ class ActionQueueService:
                 "status": initial_status,
             },
         )
+
+        # Log to activity feed
+        try:
+            await self._activity_service.record(
+                user_id=user_id,
+                agent=data.agent.value,
+                activity_type="goal_updated",
+                title=data.title,
+                description=data.description or "",
+                reasoning=data.reasoning or "",
+                confidence=0.8,
+                metadata={
+                    "action_id": action["id"],
+                    "action_type": data.action_type.value,
+                    "risk_level": data.risk_level.value,
+                    "status": initial_status,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Failed to log action activity",
+                extra={"action_id": action["id"]},
+            )
 
         # Broadcast action.pending WebSocket event for pending actions
         if initial_status == ActionStatus.PENDING.value:

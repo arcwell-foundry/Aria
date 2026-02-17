@@ -17,6 +17,7 @@ from src.models.signal import (
     SignalType,
 )
 from src.services import notification_integration
+from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class SignalService:
     def __init__(self) -> None:
         """Initialize signal service with Supabase client."""
         self._db = SupabaseClient.get_client()
+        self._activity_service = ActivityService()
 
     async def create_signal(self, user_id: str, data: SignalCreate) -> dict[str, Any]:
         """Create a new market signal.
@@ -68,6 +70,26 @@ class SignalService:
 
         signal = cast(dict[str, Any], result.data[0])
         logger.info("Market signal created", extra={"signal_id": signal["id"]})
+
+        # Log to activity feed
+        try:
+            await self._activity_service.record(
+                user_id=user_id,
+                agent="scout",
+                activity_type="signal_detected",
+                title=f"Signal detected: {data.headline}",
+                description=data.summary or "",
+                confidence=data.relevance_score or 0.5,
+                related_entity_type="lead" if data.linked_lead_id else None,
+                related_entity_id=data.linked_lead_id,
+                metadata={
+                    "signal_id": signal["id"],
+                    "signal_type": data.signal_type.value,
+                    "company_name": data.company_name,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to log signal activity", extra={"signal_id": signal["id"]})
 
         # Notify user about the detected signal
         await notification_integration.notify_signal_detected(
