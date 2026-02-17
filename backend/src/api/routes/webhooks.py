@@ -13,13 +13,18 @@ Supported event types:
 - conversation.tool_call: Tool invocation during conversation
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.integrations.tavus_tool_executor import ToolResult
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -590,7 +595,7 @@ async def _execute_tool_with_timeout(
     tool_name: str,
     arguments: dict[str, Any],
     user_id: str,
-) -> str:
+) -> ToolResult:
     """Execute a video tool with timeout and retry.
 
     First attempt has a 15-second timeout. On timeout, retries once.
@@ -602,9 +607,9 @@ async def _execute_tool_with_timeout(
         user_id: The user's UUID.
 
     Returns:
-        Natural-language result string.
+        ToolResult with spoken_text and optional rich_content.
     """
-    from src.integrations.tavus_tool_executor import VideoToolExecutor
+    from src.integrations.tavus_tool_executor import ToolResult, VideoToolExecutor
 
     executor = VideoToolExecutor(user_id=user_id)
 
@@ -631,14 +636,16 @@ async def _execute_tool_with_timeout(
                 "Tool execution timed out after retry",
                 extra={"tool_name": tool_name, "user_id": user_id},
             )
-            return (
-                f"I'm having trouble completing the {tool_name.replace('_', ' ')} "
-                "request right now. Let me try a different approach or come back "
-                "to this in a moment."
+            return ToolResult(
+                spoken_text=(
+                    f"I'm having trouble completing the {tool_name.replace('_', ' ')} "
+                    "request right now. Let me try a different approach or come back "
+                    "to this in a moment."
+                )
             )
 
     # Should not be reached, but satisfy type checker
-    return "I wasn't able to complete that request."
+    return ToolResult(spoken_text="I wasn't able to complete that request.")
 
 
 async def handle_tool_call(
@@ -697,15 +704,19 @@ async def handle_tool_call(
 
     start_time = time.monotonic()
     async with lock:
-        result = await _execute_tool_with_timeout(tool_name, arguments, user_id)
+        tool_result = await _execute_tool_with_timeout(tool_name, arguments, user_id)
     duration_ms = int((time.monotonic() - start_time) * 1000)
 
-    success = not result.startswith("I ran into an issue") and not result.startswith(
-        "I'm having trouble"
-    )
+    spoken_text = tool_result.spoken_text
+
+    success = not spoken_text.startswith(
+        "I ran into an issue"
+    ) and not spoken_text.startswith("I'm having trouble")
 
     # Truncate result for logging metadata
-    result_summary = result[:200] + "..." if len(result) > 200 else result
+    result_summary = (
+        spoken_text[:200] + "..." if len(spoken_text) > 200 else spoken_text
+    )
 
     # Log to aria_activity
     try:
@@ -729,6 +740,22 @@ async def handle_tool_call(
             extra={"conversation_id": conversation_id, "error": str(e)},
         )
 
+    # Emit rich_content to frontend via WebSocket
+    if tool_result.rich_content is not None:
+        try:
+            from src.core.ws import ws_manager
+
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message="",
+                rich_content=[tool_result.rich_content],
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to send rich content via WebSocket",
+                extra={"conversation_id": conversation_id, "error": str(e)},
+            )
+
     logger.info(
         "Video tool call executed",
         extra={
@@ -742,7 +769,7 @@ async def handle_tool_call(
     return {
         "tool_call_id": tool_call_id,
         "tool_name": tool_name,
-        "result": result,
+        "result": spoken_text,
     }
 
 
