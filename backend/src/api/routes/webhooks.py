@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from src.core.config import settings
 from src.db.supabase import get_supabase_client
+from src.services.perception_intelligence import PerceptionIntelligenceService
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +319,25 @@ async def handle_shutdown(
                         "error": str(e),
                     },
                 )
+
+        # Process perception intelligence for lead health + conversion scoring
+        if perception_analysis:
+            try:
+                video_session_id = result.data[0].get("id") if result.data else None
+                if video_session_id:
+                    perception_service = PerceptionIntelligenceService()
+                    await perception_service.process_perception_analysis(
+                        session_id=video_session_id,
+                        analysis_data=perception_analysis,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to process perception intelligence on shutdown",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error": str(e),
+                    },
+                )
     else:
         logger.warning(
             "No video session found for shutdown",
@@ -531,13 +551,30 @@ async def handle_perception_analysis(
         },
     )
 
-    # If linked to a lead, update stakeholder sentiment
+    # If linked to a lead, update stakeholder sentiment and run perception intelligence
     if lead_id:
         await _update_lead_sentiment_from_perception(
             lead_id=lead_id,
             perception=perception,
             db=db,
         )
+
+        # Orchestrate full perception → lead intelligence flow
+        try:
+            perception_service = PerceptionIntelligenceService()
+            await perception_service.process_perception_analysis(
+                session_id=video_session_id,
+                analysis_data=perception,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to run perception intelligence from analysis event",
+                extra={
+                    "conversation_id": conversation_id,
+                    "video_session_id": video_session_id,
+                    "error": str(e),
+                },
+            )
 
 
 async def _update_lead_sentiment_from_perception(

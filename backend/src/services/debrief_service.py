@@ -21,6 +21,7 @@ from src.db.supabase import SupabaseClient
 from src.models.notification import NotificationType
 from src.services.activity_service import ActivityService
 from src.services.notification_service import NotificationService
+from src.services.perception_intelligence import PerceptionIntelligenceService
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,16 @@ class DebriefService:
 
             # 3. Recalculate health score
             await self._recalculate_health_score(linked_lead_id, debrief["outcome"])
+
+            # 3b. Feed perception intelligence into conversion scoring
+            try:
+                perception_service = PerceptionIntelligenceService()
+                await perception_service.feed_to_conversion_scoring(linked_lead_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to feed perception to conversion scoring during debrief",
+                    extra={"lead_id": linked_lead_id, "error": str(e)},
+                )
 
         # 4. Store in episodic memory
         await self._store_episodic_memory(user_id, debrief)
