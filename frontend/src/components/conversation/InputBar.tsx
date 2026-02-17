@@ -1,9 +1,10 @@
 import { useCallback, useRef, useEffect } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Phone } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { VoiceIndicator } from './VoiceIndicator';
+import { modalityController } from '@/core/ModalityController';
 
 interface InputBarProps {
   onSend: (message: string) => void;
@@ -48,6 +49,10 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
     [handleSubmit],
   );
 
+  const handleAudioCall = useCallback(() => {
+    modalityController.switchToAudioCall('chat');
+  }, []);
+
   const { isListening, isSupported, toggleListening } = useVoiceInput({
     onTranscript: (text) => {
       onSend(text);
@@ -78,6 +83,17 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
           isSupported={isSupported}
           onToggle={toggleListening}
         />
+
+        <button
+          type="button"
+          onClick={handleAudioCall}
+          className="flex-shrink-0 p-2 rounded-lg text-[var(--text-secondary)] transition-colors hover:text-[#2E66FF] hover:bg-[rgba(46,102,255,0.1)]"
+          aria-label="Call ARIA (audio only)"
+          data-aria-id="audio-call-button"
+          title="Call ARIA"
+        >
+          <Phone size={16} />
+        </button>
 
         <textarea
           ref={textareaRef}
