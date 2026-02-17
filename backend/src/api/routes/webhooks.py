@@ -239,6 +239,33 @@ async def handle_shutdown(
                     extra={"conversation_id": conversation_id, "error": str(e)},
                 )
 
+    # Query perception_events and lead_id for aggregation
+    perception_events: list[dict[str, Any]] = []
+    lead_id: str | None = None
+    try:
+        perception_result = (
+            db.table("video_sessions")
+            .select("perception_events, lead_id")
+            .eq("tavus_conversation_id", conversation_id)
+            .execute()
+        )
+        if perception_result.data and len(perception_result.data) > 0:
+            perception_events = perception_result.data[0].get("perception_events") or []
+            lead_id = perception_result.data[0].get("lead_id")
+    except Exception as e:
+        logger.warning(
+            "Failed to query perception_events for shutdown aggregation",
+            extra={"conversation_id": conversation_id, "error": str(e)},
+        )
+
+    # Aggregate perception events if any exist
+    perception_analysis: dict[str, Any] | None = None
+    if perception_events:
+        perception_analysis = _aggregate_perception_events(
+            perception_events,
+            session_duration_seconds=duration_seconds,
+        )
+
     update_data = {
         "status": "ended",
         "ended_at": now.isoformat(),
@@ -246,6 +273,8 @@ async def handle_shutdown(
     }
     if duration_seconds is not None:
         update_data["duration_seconds"] = duration_seconds
+    if perception_analysis is not None:
+        update_data["perception_analysis"] = perception_analysis
 
     result = (
         db.table("video_sessions")
@@ -263,6 +292,32 @@ async def handle_shutdown(
                 "duration_seconds": duration_seconds,
             },
         )
+
+        # Create lead memory event if lead exists and perception data available
+        if lead_id and perception_analysis:
+            try:
+                db.table("lead_memory_events").insert({
+                    "lead_id": lead_id,
+                    "event_type": "video_session",
+                    "source": "tavus_video",
+                    "metadata": perception_analysis,
+                }).execute()
+                logger.info(
+                    "Lead memory event created for session shutdown",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "lead_id": lead_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to create lead memory event",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "lead_id": lead_id,
+                        "error": str(e),
+                    },
+                )
     else:
         logger.warning(
             "No video session found for shutdown",
@@ -739,6 +794,86 @@ async def _upsert_topic_stats(
             insert_data["last_disengaged_at"] = now_iso
 
         db.table("perception_topic_stats").insert(insert_data).execute()
+
+
+def _aggregate_perception_events(
+    events: list[dict[str, Any]],
+    session_duration_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Aggregate perception events into a session-level summary.
+
+    Computes engagement score, event counts, trend analysis, and
+    confused topic list from the raw perception events collected
+    during a video session.
+
+    Args:
+        events: List of perception event dicts from the
+            ``perception_events`` JSONB column.
+        session_duration_seconds: Total session duration in seconds.
+            Used for trend calculation when provided.
+
+    Returns:
+        Aggregation dict with engagement_score, confusion_events,
+        disengagement_events, engagement_trend, confused_topics,
+        and total_perception_events.
+    """
+    if not events:
+        return {
+            "engagement_score": 1.0,
+            "confusion_events": 0,
+            "disengagement_events": 0,
+            "engagement_trend": "stable",
+            "confused_topics": [],
+            "total_perception_events": 0,
+        }
+
+    confusion_count = 0
+    disengagement_count = 0
+    confused_topics: list[str] = []
+    seen_topics: set[str] = set()
+
+    for evt in events:
+        tool_name = evt.get("tool_name", "")
+        if tool_name == "adapt_to_confusion":
+            confusion_count += 1
+            topic = evt.get("topic", "")
+            if topic and topic not in seen_topics:
+                confused_topics.append(topic)
+                seen_topics.add(topic)
+        elif tool_name == "note_engagement_drop":
+            disengagement_count += 1
+
+    # Engagement score: start at 1.0, penalise for negative events
+    score = 1.0 - (confusion_count * 0.08) - (disengagement_count * 0.10)
+    engagement_score = max(score, 0.0)
+
+    # Trend analysis: compare first-half vs second-half event density
+    engagement_trend = "stable"
+    total = len(events)
+    if session_duration_seconds is not None and total >= 2:
+        midpoint = session_duration_seconds / 2.0
+        first_half = 0
+        second_half = 0
+        for evt in events:
+            session_time = evt.get("session_time_seconds", 0.0)
+            if session_time <= midpoint:
+                first_half += 1
+            else:
+                second_half += 1
+
+        if second_half > first_half + 1:
+            engagement_trend = "declining"
+        elif first_half > second_half + 1:
+            engagement_trend = "improving"
+
+    return {
+        "engagement_score": round(engagement_score, 2),
+        "confusion_events": confusion_count,
+        "disengagement_events": disengagement_count,
+        "engagement_trend": engagement_trend,
+        "confused_topics": confused_topics,
+        "total_perception_events": total,
+    }
 
 
 async def handle_utterance(
