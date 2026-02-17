@@ -101,6 +101,51 @@ class ModalityControllerImpl {
     }
   }
 
+  /**
+   * Switch to audio-only call mode.
+   * Creates a Tavus session with audio_only=true, navigates to /dialogue.
+   */
+  async switchToAudioCall(sessionType?: TavusSessionType): Promise<void> {
+    const store = useModalityStore.getState();
+    const type = sessionType || 'chat';
+    const route = type === 'briefing' ? '/briefing' : '/dialogue';
+
+    // If there's already an active audio session, just navigate
+    if (store.tavusSession.status === 'active' && store.tavusSession.id && store.tavusSession.isAudioOnly) {
+      store.setActiveModality('avatar');
+      store.setTavusSession({ sessionType: type });
+      store.setIsPipVisible(false);
+      this.navigateFn?.(route);
+      return;
+    }
+
+    // Start connecting
+    store.setActiveModality('avatar');
+    store.setTavusSession({ status: 'connecting', sessionType: type, isAudioOnly: true });
+    store.setIsPipVisible(false);
+
+    try {
+      const response = await apiClient.post<TavusCreateResponse>('/video/sessions', {
+        session_type: type,
+        audio_only: true,
+      });
+
+      const { session_id, room_url } = response.data;
+
+      store.setTavusSession({
+        id: session_id,
+        roomUrl: room_url,
+        status: 'active',
+        isAudioOnly: true,
+      });
+    } catch (err) {
+      console.warn('[ModalityController] Failed to create audio session:', err);
+      store.setTavusSession({ status: 'idle', isAudioOnly: false });
+    }
+
+    this.navigateFn?.(route);
+  }
+
   private async switchToAvatar(sessionType: TavusSessionType): Promise<void> {
     const store = useModalityStore.getState();
     const route = sessionType === 'briefing' ? '/briefing' : '/dialogue';
