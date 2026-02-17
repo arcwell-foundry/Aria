@@ -24,8 +24,9 @@ def test_analyze_ui_commands_battle_card():
     """Detect battle card navigation intent."""
     response = "Here's the battle card for Catalent with their latest positioning."
     commands = _analyze_ui_commands(response)
-    assert len(commands) == 1
+    assert len(commands) == 2
     assert commands[0]["route"] == "/intelligence/battle-cards"
+    assert commands[1]["action"] == "update_intel_panel"
 
 
 def test_generate_suggestions_returns_list():
