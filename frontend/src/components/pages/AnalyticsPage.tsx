@@ -1,23 +1,33 @@
 /**
- * AnalyticsPage - ROI Dashboard
+ * AnalyticsPage - Full Analytics Dashboard
+ *
+ * Comprehensive analytics dashboard with:
+ * - KPI cards with delta percentages
+ * - Conversion funnel visualization
+ * - Activity trends line chart
+ * - ARIA Impact and Response Time cards
  *
  * Follows ARIA Design System v1.0:
  * - LIGHT THEME (content pages use light background)
- * - Header: "Analytics // ROI Dashboard" with status dot
- * - Period selector chips (This Week / Month / Quarter)
- * - Metric cards grid, Recharts trend chart, breakdown sections
- * - Export CSV button
+ * - Header with status dot
+ * - Period selector with comparison toggle
+ * - Recharts for all visualizations
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from "react";
 import {
+  Users,
+  Calendar,
+  Mail,
   Clock,
-  Brain,
-  Zap,
   TrendingUp,
+  TrendingDown,
   Download,
   Loader2,
-} from 'lucide-react';
+  Zap,
+  Timer,
+  ArrowRight,
+} from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -26,21 +36,34 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-} from 'recharts';
-import { cn } from '@/utils/cn';
-import { useROIMetrics, useROITrend, useExportROIReport } from '@/hooks/useROI';
-import { EmptyState } from '@/components/common/EmptyState';
-import type { ROIPeriod, ROIMetricsResponse } from '@/api/roi';
+} from "recharts";
+import { cn } from "@/utils/cn";
+import {
+  useOverviewMetrics,
+  useConversionFunnel,
+  useActivityTrends,
+  useAriaImpactSummary,
+  useResponseTimeMetrics,
+  useExportAnalytics,
+} from "@/hooks/useAnalytics";
+import { EmptyState } from "@/components/common/EmptyState";
+import type { AnalyticsPeriod } from "@/api/analytics";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PERIOD_OPTIONS: { label: string; value: ROIPeriod }[] = [
-  { label: 'This Week', value: '7d' },
-  { label: 'This Month', value: '30d' },
-  { label: 'This Quarter', value: '90d' },
+const PERIOD_OPTIONS: { label: string; value: AnalyticsPeriod }[] = [
+  { label: "7 Days", value: "7d" },
+  { label: "30 Days", value: "30d" },
+  { label: "90 Days", value: "90d" },
 ];
+
+const STAGE_COLORS: Record<string, string> = {
+  lead: "#94A3B8",
+  opportunity: "#3B82F6",
+  account: "#22C55E",
+};
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -49,13 +72,13 @@ const PERIOD_OPTIONS: { label: string; value: ROIPeriod }[] = [
 function AnalyticsSkeleton() {
   return (
     <div className="space-y-6 animate-pulse">
-      {/* Metric cards */}
+      {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
             className="border border-[var(--border)] rounded-lg p-5"
-            style={{ backgroundColor: 'var(--bg-elevated)' }}
+            style={{ backgroundColor: "var(--bg-elevated)" }}
           >
             <div className="h-4 w-20 bg-[var(--border)] rounded mb-3" />
             <div className="h-8 w-16 bg-[var(--border)] rounded mb-2" />
@@ -64,26 +87,35 @@ function AnalyticsSkeleton() {
         ))}
       </div>
 
-      {/* Chart */}
-      <div
-        className="border border-[var(--border)] rounded-lg p-5"
-        style={{ backgroundColor: 'var(--bg-elevated)' }}
-      >
-        <div className="h-4 w-32 bg-[var(--border)] rounded mb-4" />
-        <div className="h-64 bg-[var(--border)] rounded" />
+      {/* Middle section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div
+          className="border border-[var(--border)] rounded-lg p-5"
+          style={{ backgroundColor: "var(--bg-elevated)" }}
+        >
+          <div className="h-4 w-32 bg-[var(--border)] rounded mb-4" />
+          <div className="h-48 bg-[var(--border)] rounded" />
+        </div>
+        <div
+          className="border border-[var(--border)] rounded-lg p-5"
+          style={{ backgroundColor: "var(--bg-elevated)" }}
+        >
+          <div className="h-4 w-32 bg-[var(--border)] rounded mb-4" />
+          <div className="h-48 bg-[var(--border)] rounded" />
+        </div>
       </div>
 
-      {/* Breakdowns */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      {/* Bottom section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {Array.from({ length: 2 }).map((_, i) => (
           <div
             key={i}
             className="border border-[var(--border)] rounded-lg p-5"
-            style={{ backgroundColor: 'var(--bg-elevated)' }}
+            style={{ backgroundColor: "var(--bg-elevated)" }}
           >
             <div className="h-4 w-28 bg-[var(--border)] rounded mb-4" />
             <div className="space-y-3">
-              {Array.from({ length: 3 }).map((__, j) => (
+              {Array.from({ length: 4 }).map((__, j) => (
                 <div key={j} className="flex justify-between">
                   <div className="h-3 w-24 bg-[var(--border)] rounded" />
                   <div className="h-3 w-12 bg-[var(--border)] rounded" />
@@ -98,34 +130,39 @@ function AnalyticsSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// MetricCard
+// KPICard
 // ---------------------------------------------------------------------------
 
-function MetricCard({
+function KPICard({
   icon: Icon,
   title,
   value,
   unit,
-  subtitle,
+  delta,
+  comparisonEnabled,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   value: string | number;
   unit?: string;
-  subtitle?: string;
+  delta?: number | null;
+  comparisonEnabled: boolean;
 }) {
+  const showDelta = comparisonEnabled && delta !== null && delta !== undefined;
+  const isPositive = (delta ?? 0) >= 0;
+
   return (
     <div
       className="border border-[var(--border)] rounded-lg p-5"
-      style={{ backgroundColor: 'var(--bg-elevated)' }}
+      style={{ backgroundColor: "var(--bg-elevated)" }}
     >
       <div className="flex items-center gap-2 mb-3">
-        <span style={{ color: 'var(--accent)' }}>
+        <span style={{ color: "var(--accent)" }}>
           <Icon className="w-4 h-4" />
         </span>
         <span
           className="text-xs font-medium uppercase tracking-wider"
-          style={{ color: 'var(--text-secondary)' }}
+          style={{ color: "var(--text-secondary)" }}
         >
           {title}
         </span>
@@ -133,135 +170,153 @@ function MetricCard({
       <div className="flex items-baseline gap-1.5">
         <span
           className="font-display text-3xl italic"
-          style={{ color: 'var(--text-primary)' }}
+          style={{ color: "var(--text-primary)" }}
         >
           {value}
         </span>
         {unit && (
           <span
             className="font-mono text-xs"
-            style={{ color: 'var(--text-secondary)' }}
+            style={{ color: "var(--text-secondary)" }}
           >
             {unit}
           </span>
         )}
       </div>
-      {subtitle && (
-        <p
-          className="text-xs mt-1"
-          style={{ color: 'var(--text-secondary)' }}
+      {showDelta && (
+        <div
+          className={cn(
+            "flex items-center gap-1 mt-2 text-xs font-medium",
+            isPositive ? "text-[var(--success)]" : "text-[var(--critical)]"
+          )}
         >
-          {subtitle}
-        </p>
+          {isPositive ? (
+            <TrendingUp className="w-3.5 h-3.5" />
+          ) : (
+            <TrendingDown className="w-3.5 h-3.5" />
+          )}
+          <span>{isPositive ? "+" : ""}{delta.toFixed(1)}%</span>
+        </div>
       )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// TrendChart
+// ConversionFunnelChart
 // ---------------------------------------------------------------------------
 
-function TrendChart({ data }: { data: { week_start: string; hours_saved: number }[] }) {
-  const chartData = data.map((d) => ({
-    ...d,
-    label: new Date(d.week_start).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    }),
+function ConversionFunnelChart({
+  data,
+}: {
+  data: { stages: Record<string, number>; conversion_rates: Record<string, number | null> };
+}) {
+  const { stages, conversion_rates } = data;
+  const stageOrder = ["lead", "opportunity", "account"];
+  const stageLabels: Record<string, string> = {
+    lead: "Leads",
+    opportunity: "Opportunities",
+    account: "Accounts",
+  };
+
+  const chartData = stageOrder.map((stage) => ({
+    name: stageLabels[stage] || stage,
+    value: stages[stage] || 0,
+    stage,
   }));
 
+  const maxValue = Math.max(...chartData.map((d) => d.value), 1);
+
   return (
     <div
       className="border border-[var(--border)] rounded-lg p-5"
-      style={{ backgroundColor: 'var(--bg-elevated)' }}
+      style={{ backgroundColor: "var(--bg-elevated)" }}
     >
       <h3
         className="text-sm font-medium mb-4"
-        style={{ color: 'var(--text-primary)' }}
+        style={{ color: "var(--text-primary)" }}
       >
-        Hours Saved Over Time
+        Conversion Funnel
       </h3>
-      <ResponsiveContainer width="100%" height={256}>
-        <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-          <defs>
-            <linearGradient id="hoursGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#2E66FF" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#2E66FF" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis
-            dataKey="label"
-            tick={{ fontFamily: 'JetBrains Mono', fontSize: 11, fill: 'var(--text-secondary)' }}
-            axisLine={{ stroke: 'var(--border)' }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fontFamily: 'JetBrains Mono', fontSize: 11, fill: 'var(--text-secondary)' }}
-            axisLine={{ stroke: 'var(--border)' }}
-            tickLine={false}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              fontFamily: 'JetBrains Mono',
-              fontSize: 12,
-              color: 'var(--text-primary)',
-            }}
-            formatter={(value: number) => [`${value} hrs`, 'Saved']}
-          />
-          <Area
-            type="monotone"
-            dataKey="hours_saved"
-            stroke="#2E66FF"
-            strokeWidth={2}
-            fill="url(#hoursGradient)"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
 
-// ---------------------------------------------------------------------------
-// BreakdownSection
-// ---------------------------------------------------------------------------
+      {/* Horizontal bar chart */}
+      <div className="space-y-4">
+        {chartData.map((item, index) => {
+          const widthPercent = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
+          const prevStage = stageOrder[index - 1];
+          const convKey = prevStage ? `${prevStage}_to_${item.stage}` : null;
+          const convRate = convKey ? conversion_rates[convKey] : null;
 
-function BreakdownSection({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { label: string; value: string | number }[];
-}) {
-  return (
-    <div
-      className="border border-[var(--border)] rounded-lg p-5"
-      style={{ backgroundColor: 'var(--bg-elevated)' }}
-    >
-      <h3
-        className="text-sm font-medium mb-4"
-        style={{ color: 'var(--text-primary)' }}
-      >
-        {title}
-      </h3>
-      <div className="space-y-3">
-        {rows.map((row) => (
-          <div key={row.label} className="flex items-center justify-between">
+          return (
+            <div key={item.stage}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {item.name}
+                </span>
+                <div className="flex items-center gap-3">
+                  {convRate !== null && convRate !== undefined && (
+                    <span
+                      className="text-xs"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {index === 0 ? "" : `${(convRate * 100).toFixed(0)}% conv`}
+                    </span>
+                  )}
+                  <span
+                    className="font-mono text-xs font-medium"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {item.value}
+                  </span>
+                </div>
+              </div>
+              <div
+                className="h-8 rounded"
+                style={{ backgroundColor: "var(--bg-subtle)" }}
+              >
+                <div
+                  className="h-full rounded flex items-center justify-end pr-2 transition-all duration-300"
+                  style={{
+                    width: `${Math.max(widthPercent, item.value > 0 ? 8 : 0)}%`,
+                    backgroundColor: STAGE_COLORS[item.stage] || "#94A3B8",
+                  }}
+                >
+                  {item.value > 0 && widthPercent > 15 && (
+                    <span className="text-xs text-white font-medium">
+                      {item.value}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {index < chartData.length - 1 && (
+                <div className="flex justify-center py-1">
+                  <ArrowRight
+                    className="w-4 h-4 rotate-90"
+                    style={{ color: "var(--text-secondary)" }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 mt-4 pt-4 border-t border-[var(--border)]">
+        {stageOrder.map((stage) => (
+          <div key={stage} className="flex items-center gap-1.5">
+            <div
+              className="w-3 h-3 rounded-sm"
+              style={{ backgroundColor: STAGE_COLORS[stage] }}
+            />
             <span
               className="text-xs"
-              style={{ color: 'var(--text-secondary)' }}
+              style={{ color: "var(--text-secondary)" }}
             >
-              {row.label}
-            </span>
-            <span
-              className="font-mono text-xs font-medium"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              {row.value}
+              {stageLabels[stage]}
             </span>
           </div>
         ))}
@@ -271,35 +326,310 @@ function BreakdownSection({
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// ActivityTrendsChart
 // ---------------------------------------------------------------------------
 
-function buildBreakdowns(data: ROIMetricsResponse) {
-  const ts = data.time_saved.breakdown;
-  return {
-    timeSaved: [
-      { label: 'Email Drafts', value: `${ts.email_drafts.estimated_hours.toFixed(1)} hrs` },
-      { label: 'Meeting Prep', value: `${ts.meeting_prep.estimated_hours.toFixed(1)} hrs` },
-      { label: 'Research Reports', value: `${ts.research_reports.estimated_hours.toFixed(1)} hrs` },
-      { label: 'CRM Updates', value: `${ts.crm_updates.estimated_hours.toFixed(1)} hrs` },
-    ],
-    intelligence: [
-      { label: 'Facts Discovered', value: data.intelligence_delivered.facts_discovered },
-      { label: 'Signals Detected', value: data.intelligence_delivered.signals_detected },
-      { label: 'Gaps Filled', value: data.intelligence_delivered.gaps_filled },
-      { label: 'Briefings Generated', value: data.intelligence_delivered.briefings_generated },
-    ],
-    actions: [
-      { label: 'Auto-Approved', value: data.actions_taken.auto_approved },
-      { label: 'User-Approved', value: data.actions_taken.user_approved },
-      { label: 'Rejected', value: data.actions_taken.rejected },
-    ],
-    pipeline: [
-      { label: 'Leads Discovered', value: data.pipeline_impact.leads_discovered },
-      { label: 'Meetings Prepped', value: data.pipeline_impact.meetings_prepped },
-      { label: 'Follow-Ups Sent', value: data.pipeline_impact.follow_ups_sent },
-    ],
+function ActivityTrendsChart({
+  data,
+}: {
+  data: { series: Record<string, Record<string, number>> };
+}) {
+  const { series } = data;
+
+  // Merge all series into unified data points
+  const allDates = new Set<string>();
+  Object.values(series).forEach((s) => {
+    Object.keys(s).forEach((date) => allDates.add(date));
+  });
+
+  const sortedDates = Array.from(allDates).sort();
+  const chartData = sortedDates.map((date) => ({
+    date,
+    label: new Date(date).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    }),
+    emails: series.emails_sent[date] || 0,
+    meetings: series.meetings[date] || 0,
+    actions: series.aria_actions[date] || 0,
+    leads: series.leads_created[date] || 0,
+  }));
+
+  // Take last 14 data points for readability
+  const displayData = chartData.slice(-14);
+
+  return (
+    <div
+      className="border border-[var(--border)] rounded-lg p-5"
+      style={{ backgroundColor: "var(--bg-elevated)" }}
+    >
+      <h3
+        className="text-sm font-medium mb-4"
+        style={{ color: "var(--text-primary)" }}
+      >
+        Activity Trends
+      </h3>
+      <ResponsiveContainer width="100%" height={200}>
+        <AreaChart data={displayData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+          <defs>
+            <linearGradient id="emailsGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="meetingsGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#22C55E" stopOpacity={0.2} />
+              <stop offset="95%" stopColor="#22C55E" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontFamily: "JetBrains Mono", fontSize: 10, fill: "var(--text-secondary)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fontFamily: "JetBrains Mono", fontSize: 10, fill: "var(--text-secondary)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={false}
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "var(--bg-elevated)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              fontFamily: "JetBrains Mono",
+              fontSize: 11,
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="emails"
+            name="Emails"
+            stroke="#3B82F6"
+            strokeWidth={2}
+            fill="url(#emailsGradient)"
+          />
+          <Area
+            type="monotone"
+            dataKey="meetings"
+            name="Meetings"
+            stroke="#22C55E"
+            strokeWidth={2}
+            fill="url(#meetingsGradient)"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 mt-4">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#3B82F6" }} />
+          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Emails Sent
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#22C55E" }} />
+          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Meetings
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AriaImpactCard
+// ---------------------------------------------------------------------------
+
+function AriaImpactCard({
+  data,
+}: {
+  data: { total_actions: number; by_action_type: Record<string, number>; estimated_time_saved_minutes: number; pipeline_impact: Record<string, { count: number; estimated_value: number }> };
+}) {
+  const { total_actions, by_action_type, estimated_time_saved_minutes, pipeline_impact } = data;
+
+  const hoursSaved = (estimated_time_saved_minutes / 60).toFixed(1);
+  const actionTypes = Object.entries(by_action_type).slice(0, 5);
+  const totalPipelineValue = Object.values(pipeline_impact).reduce(
+    (sum, item) => sum + (item.estimated_value || 0),
+    0
+  );
+
+  return (
+    <div
+      className="border border-[var(--border)] rounded-lg p-5"
+      style={{ backgroundColor: "var(--bg-elevated)" }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <span style={{ color: "var(--accent)" }}>
+          <Zap className="w-4 h-4" />
+        </span>
+        <h3
+          className="text-sm font-medium"
+          style={{ color: "var(--text-primary)" }}
+        >
+          ARIA Impact
+        </h3>
+      </div>
+
+      {/* Summary metrics */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Total Actions
+          </p>
+          <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
+            {total_actions}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Time Saved
+          </p>
+          <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
+            {hoursSaved} hrs
+          </p>
+        </div>
+      </div>
+
+      {/* Actions breakdown */}
+      {actionTypes.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+            Actions by Type
+          </p>
+          {actionTypes.map(([type, count]) => (
+            <div key={type} className="flex items-center justify-between">
+              <span className="text-xs capitalize" style={{ color: "var(--text-secondary)" }}>
+                {type.replace(/_/g, " ")}
+              </span>
+              <span
+                className="font-mono text-xs font-medium"
+                style={{ color: "var(--text-primary)" }}
+              >
+                {count}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pipeline value */}
+      {totalPipelineValue > 0 && (
+        <div className="mt-4 pt-4 border-t border-[var(--border)]">
+          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Pipeline Value Influenced
+          </p>
+          <p className="text-lg font-semibold" style={{ color: "var(--success)" }}>
+            ${totalPipelineValue.toLocaleString()}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ResponseTimeCard
+// ---------------------------------------------------------------------------
+
+function ResponseTimeCard({
+  data,
+}: {
+  data: { avg_response_minutes: number | null; trend: Array<{ date: string; avg_response_minutes: number }> };
+}) {
+  const { avg_response_minutes, trend } = data;
+
+  // Calculate trend direction
+  let trendDirection: "up" | "down" | "stable" = "stable";
+  if (trend.length >= 2) {
+    const recent = trend.slice(-3);
+    const older = trend.slice(-6, -3);
+    if (recent.length > 0 && older.length > 0) {
+      const recentAvg = recent.reduce((s, r) => s + r.avg_response_minutes, 0) / recent.length;
+      const olderAvg = older.reduce((s, r) => s + r.avg_response_minutes, 0) / older.length;
+      if (recentAvg < olderAvg * 0.9) trendDirection = "down";
+      else if (recentAvg > olderAvg * 1.1) trendDirection = "up";
+    }
+  }
+
+  const formatTime = (minutes: number | null) => {
+    if (minutes === null) return "--";
+    if (minutes < 60) return `${Math.round(minutes)}m`;
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
   };
+
+  return (
+    <div
+      className="border border-[var(--border)] rounded-lg p-5"
+      style={{ backgroundColor: "var(--bg-elevated)" }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <span style={{ color: "var(--accent)" }}>
+          <Timer className="w-4 h-4" />
+        </span>
+        <h3
+          className="text-sm font-medium"
+          style={{ color: "var(--text-primary)" }}
+        >
+          Response Time
+        </h3>
+      </div>
+
+      {/* Main metric */}
+      <div className="mb-4">
+        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          Average Response Time
+        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
+            {formatTime(avg_response_minutes)}
+          </p>
+          {avg_response_minutes !== null && (
+            <span
+              className={cn(
+                "text-xs px-2 py-0.5 rounded-full",
+                trendDirection === "down"
+                  ? "bg-[var(--success)]/10 text-[var(--success)]"
+                  : trendDirection === "up"
+                    ? "bg-[var(--critical)]/10 text-[var(--critical)]"
+                    : "bg-[var(--text-secondary)]/10 text-[var(--text-secondary)]"
+              )}
+            >
+              {trendDirection === "down" ? "Improving" : trendDirection === "up" ? "Slower" : "Stable"}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Mini trend chart */}
+      {trend.length > 1 && (
+        <ResponsiveContainer width="100%" height={60}>
+          <AreaChart data={trend.slice(-14)} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="responseGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#64748B" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#64748B" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <Area
+              type="monotone"
+              dataKey="avg_response_minutes"
+              stroke="#64748B"
+              strokeWidth={1.5}
+              fill="url(#responseGradient)"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -307,90 +637,71 @@ function buildBreakdowns(data: ROIMetricsResponse) {
 // ---------------------------------------------------------------------------
 
 function AnalyticsDashboard() {
-  const [period, setPeriod] = useState<ROIPeriod>('30d');
-  const { data, isLoading, error } = useROIMetrics(period);
-  const { data: trendData } = useROITrend(period);
-  const exportReport = useExportROIReport();
+  const [period, setPeriod] = useState<AnalyticsPeriod>("30d");
+  const [comparisonEnabled, setComparisonEnabled] = useState(true);
+
+  const { data: overview, isLoading: overviewLoading } = useOverviewMetrics(period);
+  const { data: funnel } = useConversionFunnel(period);
+  const { data: trends } = useActivityTrends(period, "day");
+  const { data: impact } = useAriaImpactSummary(period);
+  const { data: responseTimes } = useResponseTimeMetrics(period);
+  const exportMutation = useExportAnalytics();
+
+  const isLoading = overviewLoading;
 
   const handleExport = () => {
-    exportReport.mutate(period);
+    exportMutation.mutate({ period, format: "csv" });
   };
 
-  const intelTotal = data
-    ? data.intelligence_delivered.facts_discovered +
-      data.intelligence_delivered.signals_detected +
-      data.intelligence_delivered.gaps_filled +
-      data.intelligence_delivered.briefings_generated
-    : 0;
-
-  const approvalRate = data?.action_approval_rate;
-
-  const breakdowns = data ? buildBreakdowns(data) : null;
+  // Calculate deltas for KPIs (using previous period comparison)
+  const deltas = useMemo(() => {
+    if (!overview) return {};
+    // These would come from a period comparison endpoint
+    // For now, we'll show placeholders
+    return {
+      leads_created: null,
+      meetings_booked: null,
+      emails_sent: null,
+      time_saved_minutes: null,
+    };
+  }, [overview]);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <span
-          className="w-3 h-3 rounded-full shrink-0"
-          style={{ backgroundColor: 'var(--success)' }}
-        />
-        <div>
-          <p
-            className="font-mono text-xs uppercase tracking-wider"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            Analytics
-          </p>
-          <h1
-            className="font-display text-2xl italic"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            ROI Dashboard
-          </h1>
-        </div>
-      </div>
-
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Measuring ARIA's impact on your productivity.
-      </p>
-
-      {/* Controls row */}
       <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          {PERIOD_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setPeriod(opt.value)}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-150',
-                period === opt.value
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-              )}
-              style={
-                period === opt.value
-                  ? undefined
-                  : { backgroundColor: 'var(--bg-subtle)' }
-              }
+        <div className="flex items-center gap-3">
+          <span
+            className="w-3 h-3 rounded-full shrink-0"
+            style={{ backgroundColor: "var(--success)" }}
+          />
+          <div>
+            <p
+              className="font-mono text-xs uppercase tracking-wider"
+              style={{ color: "var(--text-secondary)" }}
             >
-              {opt.label}
-            </button>
-          ))}
+              Dashboard
+            </p>
+            <h1
+              className="font-display text-2xl italic"
+              style={{ color: "var(--text-primary)" }}
+            >
+              Analytics
+            </h1>
+          </div>
         </div>
 
         <button
           type="button"
           onClick={handleExport}
-          disabled={exportReport.isPending || !data}
+          disabled={exportMutation.isPending || !overview}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 disabled:opacity-50"
           style={{
-            backgroundColor: 'var(--bg-subtle)',
-            color: 'var(--text-secondary)',
+            backgroundColor: "var(--bg-subtle)",
+            color: "var(--text-secondary)",
           }}
         >
-          {exportReport.isPending ? (
+          {exportMutation.isPending ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <Download className="w-3.5 h-3.5" />
@@ -399,76 +710,111 @@ function AnalyticsDashboard() {
         </button>
       </div>
 
+      <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+        Track your team&apos;s performance and ARIA&apos;s impact on your workflow.
+      </p>
+
+      {/* Controls row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          {/* Period selector */}
+          <div className="flex gap-2">
+            {PERIOD_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setPeriod(opt.value)}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-150",
+                  period === opt.value
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+                style={
+                  period === opt.value
+                    ? undefined
+                    : { backgroundColor: "var(--bg-subtle)" }
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Comparison toggle */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={comparisonEnabled}
+              onChange={(e) => setComparisonEnabled(e.target.checked)}
+              className="w-4 h-4 rounded border-[var(--border)] accent-[var(--accent)]"
+            />
+            <span
+              className="text-xs"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Show comparison
+            </span>
+          </label>
+        </div>
+      </div>
+
       {/* Content */}
       {isLoading && <AnalyticsSkeleton />}
 
-      {error && (
-        <p className="text-sm" style={{ color: 'var(--critical)' }}>
-          Failed to load analytics data. Please try again.
-        </p>
-      )}
-
-      {!isLoading && !error && !data && (
+      {!isLoading && !overview && (
         <EmptyState
           title="No analytics data available yet."
-          description="As ARIA works alongside you, productivity metrics and ROI data will appear here."
+          description="As you use ARIA, performance metrics and activity data will appear here."
         />
       )}
 
-      {!isLoading && !error && data && (
+      {!isLoading && overview && (
         <>
-          {/* Metric cards */}
+          {/* KPI cards row */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard
+            <KPICard
+              icon={Users}
+              title="Leads Created"
+              value={overview.leads_created}
+              delta={deltas.leads_created}
+              comparisonEnabled={comparisonEnabled}
+            />
+            <KPICard
+              icon={Calendar}
+              title="Meetings Booked"
+              value={overview.meetings_booked}
+              delta={deltas.meetings_booked}
+              comparisonEnabled={comparisonEnabled}
+            />
+            <KPICard
+              icon={Mail}
+              title="Emails Sent"
+              value={overview.emails_sent}
+              delta={deltas.emails_sent}
+              comparisonEnabled={comparisonEnabled}
+            />
+            <KPICard
               icon={Clock}
-              title="Time Saved"
-              value={data.time_saved.hours.toFixed(1)}
+              title="Time Saved by ARIA"
+              value={(overview.time_saved_minutes / 60).toFixed(1)}
               unit="hrs"
-              subtitle={
-                data.time_saved_per_week != null
-                  ? `${data.time_saved_per_week.toFixed(1)} hrs/week`
-                  : undefined
-              }
-            />
-            <MetricCard
-              icon={Brain}
-              title="Intelligence"
-              value={intelTotal}
-              subtitle="facts, signals, gaps, briefings"
-            />
-            <MetricCard
-              icon={Zap}
-              title="Actions Taken"
-              value={data.actions_taken.total}
-              subtitle={
-                approvalRate != null
-                  ? `${(approvalRate * 100).toFixed(0)}% approval rate`
-                  : undefined
-              }
-            />
-            <MetricCard
-              icon={TrendingUp}
-              title="Pipeline Impact"
-              value={data.pipeline_impact.leads_discovered}
-              unit="leads"
-              subtitle={`${data.pipeline_impact.meetings_prepped} meetings prepped`}
+              delta={deltas.time_saved_minutes}
+              comparisonEnabled={comparisonEnabled}
             />
           </div>
 
-          {/* Trend chart */}
-          {trendData && trendData.length > 0 && (
-            <TrendChart data={trendData} />
-          )}
+          {/* Middle section: Funnel + Trends */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {funnel && <ConversionFunnelChart data={funnel} />}
+            {trends && <ActivityTrendsChart data={trends} />}
+          </div>
 
-          {/* Breakdowns */}
-          {breakdowns && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <BreakdownSection title="Time Saved Breakdown" rows={breakdowns.timeSaved} />
-              <BreakdownSection title="Intelligence Breakdown" rows={breakdowns.intelligence} />
-              <BreakdownSection title="Actions Breakdown" rows={breakdowns.actions} />
-              <BreakdownSection title="Pipeline Breakdown" rows={breakdowns.pipeline} />
-            </div>
-          )}
+          {/* Bottom section: Impact + Response Time */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {impact && <AriaImpactCard data={impact} />}
+            {responseTimes && <ResponseTimeCard data={responseTimes} />}
+          </div>
         </>
       )}
     </div>
@@ -483,7 +829,7 @@ export function AnalyticsPage() {
   return (
     <div
       className="flex-1 flex flex-col h-full"
-      style={{ backgroundColor: 'var(--bg-primary)' }}
+      style={{ backgroundColor: "var(--bg-primary)" }}
       data-aria-id="analytics-page"
     >
       <div className="flex-1 overflow-y-auto p-8">
