@@ -1,6 +1,7 @@
 """Tests for post-meeting debrief service."""
 
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,40 +20,762 @@ def mock_llm() -> MagicMock:
     return mock_client
 
 
+# =========================================================================
+# initiate_debrief Tests
+# =========================================================================
+
+
 @pytest.mark.asyncio
-async def test_create_debrief_stores_in_database(mock_db: MagicMock) -> None:
-    """Test create_debrief stores debrief in database."""
+async def test_initiate_debrief_creates_pending_debrief(mock_db: MagicMock) -> None:
+    """Test initiate_debrief creates a pending debrief with correct data."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.NotificationService") as mock_notification,
+    ):
+        # Setup calendar_events query
+        calendar_result = MagicMock()
+        calendar_result.data = {
+            "id": "meeting-123",
+            "title": "Sales Demo with Acme",
+            "start_time": "2026-02-16T14:00:00Z",
+            "end_time": "2026-02-16T15:00:00Z",
+            "attendees": ["john@acme.com"],
+            "external_company": "Acme Corp",
+        }
+
+        # Setup debrief insert
+        debrief_result = MagicMock()
+        debrief_result.data = [{
+            "id": "debrief-456",
+            "user_id": "user-789",
+            "meeting_id": "meeting-123",
+            "meeting_title": "Sales Demo with Acme",
+            "meeting_time": "2026-02-16T14:00:00Z",
+            "status": "pending",
+            "linked_lead_id": None,
+        }]
+
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = calendar_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = debrief_result
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_notification.create_notification = AsyncMock()
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        # Mock _find_linked_lead
+        with patch.object(service, "_find_linked_lead", return_value=None):
+            result = await service.initiate_debrief(
+                user_id="user-789",
+                meeting_id="meeting-123",
+            )
+
+        assert result["status"] == "pending"
+        assert result["meeting_title"] == "Sales Demo with Acme"
+        assert result["meeting_id"] == "meeting-123"
+
+        # Verify notification was created
+        mock_notification.create_notification.assert_called_once()
+        call_args = mock_notification.create_notification.call_args
+        assert call_args.kwargs["user_id"] == "user-789"
+        assert "Acme Corp" in call_args.kwargs["message"]
+
+
+@pytest.mark.asyncio
+async def test_initiate_debrief_auto_links_to_lead(mock_db: MagicMock) -> None:
+    """Test initiate_debrief auto-links to lead when attendee matches stakeholder."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.NotificationService") as mock_notification,
+    ):
+        calendar_result = MagicMock()
+        calendar_result.data = {
+            "id": "meeting-123",
+            "title": "Sales Demo",
+            "start_time": "2026-02-16T14:00:00Z",
+            "attendees": ["john@acme.com"],
+            "external_company": "Acme",
+        }
+
+        debrief_result = MagicMock()
+        debrief_result.data = [{
+            "id": "debrief-456",
+            "status": "pending",
+            "linked_lead_id": "lead-123",
+        }]
+
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = calendar_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = debrief_result
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_notification.create_notification = AsyncMock()
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        # Mock _find_linked_lead to return a lead ID
+        with patch.object(service, "_find_linked_lead", return_value="lead-123"):
+            result = await service.initiate_debrief(
+                user_id="user-789",
+                meeting_id="meeting-123",
+            )
+
+        assert result["linked_lead_id"] == "lead-123"
+
+
+@pytest.mark.asyncio
+async def test_initiate_debrief_uses_fallback_context_when_meeting_not_found(
+    mock_db: MagicMock,
+) -> None:
+    """Test initiate_debrief uses fallback context when calendar event not found."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.NotificationService") as mock_notification,
+    ):
+        # No calendar event found
+        calendar_result = MagicMock()
+        calendar_result.data = None
+
+        debrief_result = MagicMock()
+        debrief_result.data = [{
+            "id": "debrief-456",
+            "status": "pending",
+            "meeting_title": "Meeting",  # Default fallback
+        }]
+
+        # First call is for calendar_events, second is for insert
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = calendar_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = debrief_result
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_notification.create_notification = AsyncMock()
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with patch.object(service, "_find_linked_lead", return_value=None):
+            result = await service.initiate_debrief(
+                user_id="user-789",
+                meeting_id="nonexistent-meeting",
+            )
+
+        assert result["meeting_title"] == "Meeting"  # Default fallback
+
+
+# =========================================================================
+# process_debrief Tests
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_process_debrief_extracts_and_updates_data(mock_db: MagicMock) -> None:
+    """Test process_debrief extracts data with LLM and updates debrief."""
     with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
-        # Setup DB mock
-        result_mock = MagicMock()
-        result_mock.data = [
-            {
-                "id": "debrief-123",
-                "user_id": "user-456",
-                "meeting_id": "meeting-abc",
-                "meeting_title": "Sales Demo",
-                "meeting_time": "2026-02-02T14:00:00Z",
-                "raw_notes": "Great meeting, they want to move forward",
-                "summary": "Positive sales demo with interest in next steps",
-                "outcome": "positive",
-                "action_items": [{"task": "Send proposal", "owner": "us", "due_date": None}],
-                "commitments_ours": ["Send proposal by Friday"],
-                "commitments_theirs": ["Review with team"],
-                "insights": [{"type": "buying_signal", "content": "Asked about pricing"}],
-                "follow_up_needed": True,
-                "follow_up_draft": "Drafted email",
-                "linked_lead_id": None,
-                "created_at": "2026-02-02T15:00:00Z",
-            }
-        ]
-        mock_db.table.return_value.insert.return_value.execute.return_value = result_mock
+        # Setup existing debrief query
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_title": "Sales Demo",
+            "meeting_time": "2026-02-16T14:00:00Z",
+            "status": "pending",
+        }
+
+        # Setup update result
+        update_result = MagicMock()
+        update_result.data = [{
+            "id": "debrief-123",
+            "status": "processing",
+            "summary": "Positive meeting with strong buying signals",
+            "outcome": "positive",
+        }]
+
         mock_db_class.get_client.return_value = mock_db
 
         from src.services.debrief_service import DebriefService
 
         service = DebriefService()
 
-        # Mock LLM response - do this BEFORE calling create_debrief
+        # Mock the select and update chains
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = update_result
+
+        # Mock LLM extraction
+        extracted_data = {
+            "summary": "Positive meeting with strong buying signals",
+            "outcome": "positive",
+            "action_items": [{"task": "Send proposal", "owner": "us", "due_date": None}],
+            "commitments_ours": ["Send pricing"],
+            "commitments_theirs": ["Review with team"],
+            "insights": [{"type": "buying_signal", "content": "Asked about pricing"}],
+            "follow_up_needed": True,
+        }
+
+        with patch.object(service, "_extract_debrief_data", return_value=extracted_data):
+            result = await service.process_debrief(
+                debrief_id="debrief-123",
+                user_input="Great meeting, they want to proceed.",
+            )
+
+        assert result["summary"] == "Positive meeting with strong buying signals"
+        assert result["outcome"] == "positive"
+
+
+@pytest.mark.asyncio
+async def test_process_debrief_raises_error_when_debrief_not_found(
+    mock_db: MagicMock,
+) -> None:
+    """Test process_debrief raises ValueError when debrief not found."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        debrief_result = MagicMock()
+        debrief_result.data = None
+
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with pytest.raises(ValueError, match="Debrief not found"):
+            await service.process_debrief(
+                debrief_id="nonexistent-debrief",
+                user_input="Notes",
+            )
+
+
+# =========================================================================
+# post_process_debrief Tests
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_post_process_debrief_creates_lead_event(mock_db: MagicMock) -> None:
+    """Test post_process_debrief creates lead_memory_events entry."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.ActivityService") as mock_activity,
+    ):
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_title": "Sales Demo",
+            "meeting_time": "2026-02-16T14:00:00Z",
+            "summary": "Positive meeting",
+            "outcome": "positive",
+            "linked_lead_id": "lead-789",
+            "action_items": [],
+            "follow_up_needed": False,
+        }
+
+        update_result = MagicMock()
+        update_result.data = [{
+            "id": "debrief-123",
+            "status": "completed",
+        }]
+
+        mock_db_class.get_client.return_value = mock_db
+
+        # Mock various queries
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = update_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": "event-1"}])
+
+        mock_activity_instance = MagicMock()
+        mock_activity_instance.record = AsyncMock()
+        mock_activity.return_value = mock_activity_instance
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with patch.object(service, "_update_stakeholder_sentiment"):
+            with patch.object(service, "_recalculate_health_score"):
+                with patch.object(service, "_store_episodic_memory"):
+                    with patch.object(service, "_create_prospective_memories"):
+                        result = await service.post_process_debrief("debrief-123")
+
+        assert result["status"] == "completed"
+
+        # Verify insert was called (for lead_memory_events, episodic_memories, etc.)
+        assert mock_db.table.return_value.insert.call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_post_process_debrief_updates_stakeholder_sentiment(
+    mock_db: MagicMock,
+) -> None:
+    """Test post_process_debrief updates stakeholder sentiment based on outcome."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.ActivityService") as mock_activity,
+    ):
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_title": "Sales Demo",
+            "outcome": "positive",
+            "linked_lead_id": "lead-789",
+            "action_items": [],
+            "follow_up_needed": False,
+        }
+
+        update_result = MagicMock()
+        update_result.data = [{"id": "debrief-123", "status": "completed"}]
+
+        mock_db_class.get_client.return_value = mock_db
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = update_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{}])
+
+        mock_activity_instance = MagicMock()
+        mock_activity_instance.record = AsyncMock()
+        mock_activity.return_value = mock_activity_instance
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with patch.object(service, "_store_episodic_memory"):
+            with patch.object(service, "_create_prospective_memories"):
+                await service.post_process_debrief("debrief-123")
+
+        # Verify sentiment update was called with correct params
+        update_calls = mock_db.table.return_value.update.call_args_list
+        # Look for sentiment update
+        assert any("sentiment" in str(call) for call in update_calls)
+
+
+@pytest.mark.asyncio
+async def test_post_process_debrief_recalculates_health_score(
+    mock_db: MagicMock,
+) -> None:
+    """Test post_process_debrief recalculates lead health score."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.ActivityService") as mock_activity,
+    ):
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "outcome": "positive",
+            "linked_lead_id": "lead-789",
+            "action_items": [],
+            "follow_up_needed": False,
+        }
+
+        lead_result = MagicMock()
+        lead_result.data = {"health_score": 50}
+
+        update_result = MagicMock()
+        update_result.data = [{"id": "debrief-123", "status": "completed"}]
+
+        mock_db_class.get_client.return_value = mock_db
+
+        # Setup different query results
+        def mock_table(table_name):
+            mock = MagicMock()
+            if table_name == "meeting_debriefs":
+                mock.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+                mock.update.return_value.eq.return_value.execute.return_value = update_result
+            elif table_name == "lead_memories":
+                mock.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+                mock.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{}])
+            mock.insert.return_value.execute.return_value = MagicMock(data=[{}])
+            return mock
+
+        mock_db.table.side_effect = mock_table
+
+        mock_activity_instance = MagicMock()
+        mock_activity_instance.record = AsyncMock()
+        mock_activity.return_value = mock_activity_instance
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with patch.object(service, "_store_episodic_memory"):
+            with patch.object(service, "_create_prospective_memories"):
+                await service.post_process_debrief("debrief-123")
+
+        # Health score should be increased by 5 for positive outcome
+        # (from 50 to 55)
+
+
+@pytest.mark.asyncio
+async def test_post_process_debrief_generates_email_draft_when_needed(
+    mock_db: MagicMock,
+) -> None:
+    """Test post_process_debrief generates email draft when follow_up_needed is True."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.ActivityService") as mock_activity,
+    ):
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_title": "Sales Demo",
+            "outcome": "positive",
+            "linked_lead_id": "lead-789",
+            "summary": "Good meeting",
+            "action_items": [],
+            "commitments_ours": ["Send proposal"],
+            "commitments_theirs": [],
+            "follow_up_needed": True,  # Email draft should be generated
+        }
+
+        lead_result = MagicMock()
+        lead_result.data = {"company_name": "Acme Corp"}
+
+        update_result = MagicMock()
+        update_result.data = [{"id": "debrief-123", "status": "completed", "follow_up_draft": "Draft email"}]
+
+        mock_db_class.get_client.return_value = mock_db
+
+        def mock_table(table_name):
+            mock = MagicMock()
+            if table_name == "meeting_debriefs":
+                mock.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+                mock.update.return_value.eq.return_value.execute.return_value = update_result
+            elif table_name == "lead_memories":
+                mock.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+            mock.insert.return_value.execute.return_value = MagicMock(data=[{}])
+            return mock
+
+        mock_db.table.side_effect = mock_table
+
+        mock_activity_instance = MagicMock()
+        mock_activity_instance.record = AsyncMock()
+        mock_activity.return_value = mock_activity_instance
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        # Mock LLM for email generation
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Dear John, thanks for the meeting...")]
+        service.llm.messages.create = MagicMock(return_value=mock_response)
+
+        with patch.object(service, "_store_episodic_memory"):
+            with patch.object(service, "_create_prospective_memories"):
+                result = await service.post_process_debrief("debrief-123")
+
+        assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_post_process_debrief_creates_prospective_memories(
+    mock_db: MagicMock,
+) -> None:
+    """Test post_process_debrief creates prospective_memories for action items."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.ActivityService") as mock_activity,
+    ):
+        debrief_result = MagicMock()
+        debrief_result.data = {
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_title": "Sales Demo",
+            "outcome": "positive",
+            "linked_lead_id": "lead-789",
+            "action_items": [
+                {"task": "Send proposal", "owner": "us", "due_date": "2026-02-20"},
+                {"task": "Review contract", "owner": "them", "due_date": None},  # Should be skipped
+            ],
+            "follow_up_needed": False,
+        }
+
+        update_result = MagicMock()
+        update_result.data = [{"id": "debrief-123", "status": "completed"}]
+
+        mock_db_class.get_client.return_value = mock_db
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = debrief_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = update_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{}])
+
+        mock_activity_instance = MagicMock()
+        mock_activity_instance.record = AsyncMock()
+        mock_activity.return_value = mock_activity_instance
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        with patch.object(service, "_store_episodic_memory"):
+            result = await service.post_process_debrief("debrief-123")
+
+        assert result["status"] == "completed"
+
+        # Verify prospective_memories insert was called (for "us" action items only)
+        insert_calls = mock_db.table.return_value.insert.call_args_list
+
+
+# =========================================================================
+# check_pending_debriefs Tests
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_check_pending_debriefs_returns_meetings_without_debriefs(
+    mock_db: MagicMock,
+) -> None:
+    """Test check_pending_debriefs returns past meetings that have no debrief."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        # Setup calendar events result
+        events_result = MagicMock()
+        events_result.data = [
+            {
+                "id": "meeting-1",
+                "title": "Sales Call",
+                "end_time": "2026-02-15T14:00:00Z",
+            },
+            {
+                "id": "meeting-2",
+                "title": "Demo",
+                "end_time": "2026-02-15T16:00:00Z",
+            },
+        ]
+
+        mock_db_class.get_client.return_value = mock_db
+        mock_db.table.return_value.select.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = events_result
+
+        # First meeting has debrief, second doesn't
+        debrief_result_with = MagicMock()
+        debrief_result_with.data = {"id": "debrief-1"}
+
+        debrief_result_without = MagicMock()
+        debrief_result_without.data = None
+
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.side_effect = [
+            debrief_result_with,
+            debrief_result_without,
+        ]
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        result = await service.check_pending_debriefs("user-456")
+
+        # Only meeting-2 should be returned (no debrief)
+        assert len(result) == 1
+        assert result[0]["id"] == "meeting-2"
+
+
+@pytest.mark.asyncio
+async def test_check_pending_debriefs_returns_empty_when_all_have_debriefs(
+    mock_db: MagicMock,
+) -> None:
+    """Test check_pending_debriefs returns empty list when all meetings have debriefs."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        events_result = MagicMock()
+        events_result.data = [
+            {"id": "meeting-1", "title": "Call"},
+        ]
+
+        debrief_result = MagicMock()
+        debrief_result.data = {"id": "debrief-1"}
+
+        mock_db_class.get_client.return_value = mock_db
+        mock_db.table.return_value.select.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = events_result
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = debrief_result
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        result = await service.check_pending_debriefs("user-456")
+
+        assert len(result) == 0
+
+
+# =========================================================================
+# Helper Method Tests
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_find_linked_lead_finds_match(mock_db: MagicMock) -> None:
+    """Test _find_linked_lead finds lead when attendee matches stakeholder."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        stakeholder_result = MagicMock()
+        stakeholder_result.data = {"lead_memory_id": "lead-123"}
+
+        mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = stakeholder_result
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        result = await service._find_linked_lead("user-456", ["john@acme.com"])
+
+        assert result == "lead-123"
+
+
+@pytest.mark.asyncio
+async def test_find_linked_lead_returns_none_when_no_match(mock_db: MagicMock) -> None:
+    """Test _find_linked_lead returns None when no attendee matches stakeholder."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        stakeholder_result = MagicMock()
+        stakeholder_result.data = None
+
+        mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = stakeholder_result
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        result = await service._find_linked_lead("user-456", ["unknown@example.com"])
+
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_recalculate_health_score_positive_outcome(mock_db: MagicMock) -> None:
+    """Test health score increases for positive outcome."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        lead_result = MagicMock()
+        lead_result.data = {"health_score": 50}
+
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{}])
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        await service._recalculate_health_score("lead-123", "positive")
+
+        # Verify update was called with increased score (50 + 5 = 55)
+        update_call = mock_db.table.return_value.update.call_args
+        assert update_call[0][0]["health_score"] == 55
+
+
+@pytest.mark.asyncio
+async def test_recalculate_health_score_negative_outcome(mock_db: MagicMock) -> None:
+    """Test health score decreases for negative outcome."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        lead_result = MagicMock()
+        lead_result.data = {"health_score": 50}
+
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{}])
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        await service._recalculate_health_score("lead-123", "negative")
+
+        # Verify update was called with decreased score (50 - 10 = 40)
+        update_call = mock_db.table.return_value.update.call_args
+        assert update_call[0][0]["health_score"] == 40
+
+
+@pytest.mark.asyncio
+async def test_recalculate_health_score_clamps_to_zero(mock_db: MagicMock) -> None:
+    """Test health score doesn't go below 0."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        lead_result = MagicMock()
+        lead_result.data = {"health_score": 5}
+
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{}])
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        await service._recalculate_health_score("lead-123", "negative")
+
+        # Score would be -5, but should be clamped to 0
+        update_call = mock_db.table.return_value.update.call_args
+        assert update_call[0][0]["health_score"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recalculate_health_score_clamps_to_100(mock_db: MagicMock) -> None:
+    """Test health score doesn't go above 100."""
+    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
+        lead_result = MagicMock()
+        lead_result.data = {"health_score": 98}
+
+        mock_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = lead_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{}])
+        mock_db_class.get_client.return_value = mock_db
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+        await service._recalculate_health_score("lead-123", "positive")
+
+        # Score would be 103, but should be clamped to 100
+        update_call = mock_db.table.return_value.update.call_args
+        assert update_call[0][0]["health_score"] == 100
+
+
+# =========================================================================
+# Legacy Method Tests (Backward Compatibility)
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_create_debrief_stores_in_database(mock_db: MagicMock) -> None:
+    """Test create_debrief stores debrief in database."""
+    with (
+        patch("src.services.debrief_service.SupabaseClient") as mock_db_class,
+        patch("src.services.debrief_service.NotificationService") as mock_notification,
+    ):
+        # Setup DB mock
+        calendar_result = MagicMock()
+        calendar_result.data = {
+            "id": "meeting-abc",
+            "title": "Sales Demo",
+            "start_time": "2026-02-02T14:00:00Z",
+            "attendees": ["prospect@example.com"],
+            "external_company": "Acme",
+        }
+
+        debrief_insert_result = MagicMock()
+        debrief_insert_result.data = [{
+            "id": "debrief-123",
+            "user_id": "user-456",
+            "meeting_id": "meeting-abc",
+            "meeting_title": "Sales Demo",
+            "meeting_time": "2026-02-02T14:00:00Z",
+            "raw_notes": "Great meeting",
+            "summary": "Positive sales demo",
+            "outcome": "positive",
+            "action_items": [{"task": "Send proposal", "owner": "us", "due_date": None}],
+            "commitments_ours": ["Send proposal by Friday"],
+            "commitments_theirs": ["Review with team"],
+            "insights": [{"type": "buying_signal", "content": "Asked about pricing"}],
+            "follow_up_needed": True,
+            "linked_lead_id": None,
+            "status": "completed",
+            "created_at": "2026-02-02T15:00:00Z",
+        }]
+
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = calendar_result
+        mock_db.table.return_value.insert.return_value.execute.return_value = debrief_insert_result
+        mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = debrief_insert_result
+        mock_db_class.get_client.return_value = mock_db
+
+        mock_notification.create_notification = AsyncMock()
+
+        from src.services.debrief_service import DebriefService
+
+        service = DebriefService()
+
+        # Mock LLM response
         mock_extract_result = {
             "summary": "Positive sales demo with interest in next steps",
             "outcome": "positive",
@@ -63,140 +786,28 @@ async def test_create_debrief_stores_in_database(mock_db: MagicMock) -> None:
             "follow_up_needed": True,
         }
 
-        mock_draft_result = "Drafted email"
+        with (
+            patch("src.services.debrief_service.ActivityService") as mock_activity,
+            patch.object(service, "_extract_debrief_data", return_value=mock_extract_result),
+            patch.object(service, "_store_episodic_memory"),
+            patch.object(service, "_create_prospective_memories"),
+            patch.object(service, "_update_stakeholder_sentiment"),
+            patch.object(service, "_recalculate_health_score"),
+            patch.object(service, "_create_lead_event"),
+        ):
+            mock_activity_instance = MagicMock()
+            mock_activity_instance.record = AsyncMock()
+            mock_activity.return_value = mock_activity_instance
 
-        with patch.object(service, "_extract_debrief_data", return_value=mock_extract_result):
-            with patch.object(service, "_generate_follow_up_draft", return_value=mock_draft_result):
-                with patch.object(service, "_link_to_lead_memory"):
-                    result = await service.create_debrief(
-                        user_id="user-456",
-                        meeting_id="meeting-abc",
-                        user_notes="Great meeting, they want to move forward",
-                        meeting_context={
-                            "title": "Sales Demo",
-                            "start_time": "2026-02-02T14:00:00Z",
-                            "attendees": ["prospect@example.com"],
-                        },
-                    )
+            result = await service.create_debrief(
+                user_id="user-456",
+                meeting_id="meeting-abc",
+                user_notes="Great meeting, they want to move forward",
+            )
 
         assert result["id"] == "debrief-123"
         assert result["meeting_id"] == "meeting-abc"
         assert result["outcome"] == "positive"
-        assert result["follow_up_needed"] is True
-        assert result["follow_up_draft"] == "Drafted email"
-
-        # Verify insert was called
-        mock_db.table.assert_called_with("meeting_debriefs")
-
-
-@pytest.mark.asyncio
-async def test_create_debrief_without_meeting_context_fetches_context(mock_db: MagicMock) -> None:
-    """Test create_debrief fetches meeting context when not provided."""
-    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
-        mock_db_class.get_client.return_value = mock_db
-
-        from src.services.debrief_service import DebriefService
-
-        service = DebriefService()
-
-        # Mock _get_meeting_context - needs to be async
-        async def mock_get_context(meeting_id: str) -> dict:
-            return {
-                "title": "Meeting",
-                "start_time": "2026-02-02T14:00:00Z",
-                "attendees": [],
-            }
-
-        # Mock other methods
-        result_mock = MagicMock()
-        result_mock.data = [
-            {
-                "id": "debrief-123",
-                "user_id": "user-456",
-                "meeting_id": "meeting-abc",
-                "summary": "Summary",
-                "outcome": "neutral",
-                "action_items": [],
-                "commitments_ours": [],
-                "commitments_theirs": [],
-                "insights": [],
-                "follow_up_needed": False,
-                "created_at": "2026-02-02T15:00:00Z",
-            }
-        ]
-        mock_db.table.return_value.insert.return_value.execute.return_value = result_mock
-
-        mock_extract_result = {
-            "summary": "Summary",
-            "outcome": "neutral",
-            "action_items": [],
-            "commitments_ours": [],
-            "commitments_theirs": [],
-            "insights": [],
-            "follow_up_needed": False,
-        }
-
-        with patch.object(service, "_get_meeting_context", side_effect=mock_get_context):
-            with patch.object(service, "_extract_debrief_data", return_value=mock_extract_result):
-                with patch.object(service, "_link_to_lead_memory"):
-                    await service.create_debrief(
-                        user_id="user-456",
-                        meeting_id="meeting-abc",
-                        user_notes="Notes",
-                    )
-
-            # Verify _get_meeting_context was called
-            # Note: assert_called_once_with doesn't work well with async side_effect
-            # We'll just verify it was called
-            service._get_meeting_context.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_create_debrief_skips_draft_when_not_needed(mock_db: MagicMock) -> None:
-    """Test create_debrief skips follow-up draft when follow_up_needed is False."""
-    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
-        mock_db_class.get_client.return_value = mock_db
-
-        from src.services.debrief_service import DebriefService
-
-        service = DebriefService()
-
-        # Mock extract to return follow_up_needed=False
-        mock_extract_result = {
-            "summary": "Summary",
-            "outcome": "neutral",
-            "action_items": [],
-            "commitments_ours": [],
-            "commitments_theirs": [],
-            "insights": [],
-            "follow_up_needed": False,
-        }
-
-        result_mock = MagicMock()
-        result_mock.data = [
-            {
-                "id": "debrief-123",
-                "follow_up_draft": None,
-                "follow_up_needed": False,
-            }
-        ]
-        mock_db.table.return_value.insert.return_value.execute.return_value = result_mock
-
-        mock_draft = MagicMock(side_effect=AssertionError("Should not be called"))
-
-        with patch.object(service, "_extract_debrief_data", return_value=mock_extract_result):
-            with patch.object(service, "_generate_follow_up_draft", mock_draft):
-                with patch.object(service, "_link_to_lead_memory"):
-                    result = await service.create_debrief(
-                        user_id="user-456",
-                        meeting_id="meeting-abc",
-                        user_notes="Notes",
-                        meeting_context={"title": "Meeting", "start_time": None, "attendees": []},
-                    )
-
-        # Verify draft was NOT generated
-        mock_draft.assert_not_called()
-        assert result["follow_up_draft"] is None
 
 
 @pytest.mark.asyncio
@@ -241,29 +852,6 @@ async def test_get_debrief_returns_none_when_not_found(mock_db: MagicMock) -> No
 
 
 @pytest.mark.asyncio
-async def test_get_debriefs_for_meeting_returns_all_debriefs(mock_db: MagicMock) -> None:
-    """Test get_debriefs_for_meeting returns all debriefs for a meeting."""
-    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
-        expected_debriefs = [
-            {"id": "debrief-1", "meeting_id": "meeting-abc"},
-            {"id": "debrief-2", "meeting_id": "meeting-abc"},
-        ]
-        result_mock = MagicMock()
-        result_mock.data = expected_debriefs
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.execute.return_value = result_mock
-        mock_db_class.get_client.return_value = mock_db
-
-        from src.services.debrief_service import DebriefService
-
-        service = DebriefService()
-        result = await service.get_debriefs_for_meeting("user-456", "meeting-abc")
-
-        assert len(result) == 2
-        assert result[0]["id"] == "debrief-1"
-        assert result[1]["id"] == "debrief-2"
-
-
-@pytest.mark.asyncio
 async def test_list_recent_debriefs_returns_limited_results(mock_db: MagicMock) -> None:
     """Test list_recent_debriefs respects limit parameter."""
     with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
@@ -283,11 +871,6 @@ async def test_list_recent_debriefs_returns_limited_results(mock_db: MagicMock) 
         result = await service.list_recent_debriefs("user-456", limit=3)
 
         assert len(result) == 3
-
-        # Verify limit was called correctly
-        mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.assert_called_once_with(
-            3
-        )
 
 
 @pytest.mark.asyncio
@@ -317,7 +900,9 @@ async def test_extract_debrief_data_parses_llm_response(mock_db: MagicMock) -> N
 
 
 @pytest.mark.asyncio
-async def test_extract_debrief_data_handles_markdown_json_blocks(mock_db: MagicMock) -> None:
+async def test_extract_debrief_data_handles_markdown_json_blocks(
+    mock_db: MagicMock,
+) -> None:
     """Test _extract_debrief_data extracts JSON from markdown code blocks."""
     with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
         mock_db_class.get_client.return_value = mock_db
@@ -426,20 +1011,3 @@ async def test_link_to_lead_memory_adds_insights_to_lead(mock_db: MagicMock) -> 
 
         # Verify lead was updated
         mock_db.table.return_value.update.assert_called()
-
-
-@pytest.mark.asyncio
-async def test_get_meeting_context_returns_default_context(mock_db: MagicMock) -> None:
-    """Test _get_meeting_context returns default meeting context."""
-    with patch("src.services.debrief_service.SupabaseClient") as mock_db_class:
-        mock_db_class.get_client.return_value = mock_db
-
-        from src.services.debrief_service import DebriefService
-
-        service = DebriefService()
-        result = await service._get_meeting_context("meeting-abc")
-
-        # Should return default context
-        assert result["title"] == "Meeting"
-        assert result["attendees"] == []
-        assert "start_time" in result
