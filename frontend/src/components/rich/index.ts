@@ -4,3 +4,8 @@ export { MeetingCard, type MeetingCardData } from './MeetingCard';
 export { SignalCard, type SignalCardData } from './SignalCard';
 export { AlertCard, type AlertCardData } from './AlertCard';
 export { RichContentRenderer } from './RichContentRenderer';
+export { LeadCard, type LeadCardData } from './LeadCard';
+export { BattleCard, type BattleCardData } from './BattleCard';
+export { PipelineChart, type PipelineChartData } from './PipelineChart';
+export { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
+export { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';

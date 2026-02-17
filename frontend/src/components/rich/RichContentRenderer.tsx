@@ -8,6 +8,11 @@ import { AlertCard, type AlertCardData } from './AlertCard';
 import { ActionApprovalCard, type ActionApprovalData } from './ActionApprovalCard';
 import { BriefingCard, type BriefingCardData } from './BriefingCard';
 import { BriefingSummaryCard } from '@/components/briefing';
+import { LeadCard, type LeadCardData } from './LeadCard';
+import { BattleCard, type BattleCardData } from './BattleCard';
+import { PipelineChart, type PipelineChartData } from './PipelineChart';
+import { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
+import { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -99,6 +104,16 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <BriefingCard data={item.data as unknown as BriefingCardData} />;
     case 'briefing_summary':
       return <BriefingSummaryWrapper data={item.data as unknown as BriefingSummaryData} />;
+    case 'lead_card':
+      return <LeadCard data={item.data as unknown as LeadCardData} />;
+    case 'battle_card':
+      return <BattleCard data={item.data as unknown as BattleCardData} />;
+    case 'pipeline_chart':
+      return <PipelineChart data={item.data as unknown as PipelineChartData} />;
+    case 'research_results':
+      return <ResearchResultsCard data={item.data as unknown as ResearchResultsData} />;
+    case 'email_draft':
+      return <EmailDraftCard data={item.data as unknown as EmailDraftData} />;
     default:
       return (
         <div
