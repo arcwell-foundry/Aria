@@ -20,6 +20,7 @@ export interface TavusSession {
   roomUrl: string | null;
   status: TavusSessionStatus;
   sessionType: TavusSessionType;
+  isAudioOnly: boolean;
 }
 
 const INITIAL_TAVUS_SESSION: TavusSession = {
@@ -27,6 +28,7 @@ const INITIAL_TAVUS_SESSION: TavusSession = {
   roomUrl: null,
   status: 'idle',
   sessionType: 'chat',
+  isAudioOnly: false,
 };
 
 export interface ModalityState {

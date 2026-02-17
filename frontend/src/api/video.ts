@@ -14,6 +14,7 @@ export interface VideoSessionCreate {
   context?: string;
   custom_greeting?: string;
   lead_id?: string;
+  audio_only?: boolean;
 }
 
 export interface VideoTranscriptEntry {
@@ -40,6 +41,7 @@ export interface VideoSession {
   duration_seconds: number | null;
   created_at: string;
   lead_id?: string;
+  is_audio_only?: boolean;
   perception_analysis?: Record<string, unknown>;
   transcripts?: VideoTranscriptEntry[];
 }
