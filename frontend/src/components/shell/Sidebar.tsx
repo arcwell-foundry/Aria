@@ -32,6 +32,7 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '@/components/primitives/Avatar';
 import { wsManager } from '@/core/WebSocketManager';
+import { useAutonomyStore } from '@/stores/autonomyStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,10 +159,29 @@ function NavItem({
 // Sidebar
 // ---------------------------------------------------------------------------
 
+const TIER_COLORS: Record<string, string> = {
+  guided: '#3B82F6',
+  assisted: '#F59E0B',
+  autonomous: '#22C55E',
+};
+
+const TIER_LABELS: Record<string, string> = {
+  guided: 'Guided',
+  assisted: 'Assisted',
+  autonomous: 'Autonomous',
+};
+
 export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const currentTier = useAutonomyStore((s) => s.currentTier);
+  const fetchAutonomyStatus = useAutonomyStore((s) => s.fetchStatus);
+
+  // Fetch autonomy status on mount
+  useEffect(() => {
+    fetchAutonomyStatus();
+  }, [fetchAutonomyStatus]);
 
   // ---------------------------------------------------------------------------
   // Task 2: Derive isARIAActive from WebSocket connection state
@@ -279,6 +299,28 @@ export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
           <span className="aria-pulse-dot w-2 h-2 rounded-full bg-[#2E66FF]" />
         )}
       </div>
+
+      {/* Trust level badge */}
+      {currentTier && (
+        <button
+          type="button"
+          onClick={() => handleNav({ key: 'settings', label: 'Settings', icon: Shield, route: '/settings/autonomy' })}
+          className="flex items-center gap-2 mx-5 mb-4 px-2.5 py-1.5 rounded-md transition-colors hover:bg-[rgba(46,102,255,0.08)]"
+          data-aria-id="trust-badge"
+        >
+          <Shield className="w-3.5 h-3.5 text-[#8B92A5]" />
+          <span className="text-xs text-[#8B92A5]">Trust:</span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: TIER_COLORS[currentTier] || '#3B82F6' }}
+            />
+            <span className="text-xs font-medium text-[#C4C9D9]">
+              {TIER_LABELS[currentTier] || currentTier}
+            </span>
+          </div>
+        </button>
+      )}
 
       {/* ----------------------------------------------------------------- */}
       {/* Primary navigation */}

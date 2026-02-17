@@ -12,13 +12,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from src.db.supabase import SupabaseClient
-from src.models.action_queue import ActionCreate, ActionStatus, RiskLevel
+from src.models.action_queue import ActionCreate, ActionStatus
 from src.services.activity_service import ActivityService
+from src.services.autonomy_calibration import get_autonomy_calibration_service
 
 logger = logging.getLogger(__name__)
-
-# Risk levels that auto-approve when trust is established
-AUTO_APPROVE_RISK_LEVELS = {RiskLevel.LOW}
 
 
 class ActionQueueService:
@@ -28,6 +26,7 @@ class ActionQueueService:
         """Initialize with Supabase client."""
         self._db = SupabaseClient.get_client()
         self._activity_service = ActivityService()
+        self._autonomy = get_autonomy_calibration_service()
 
     async def submit_action(
         self,
@@ -48,8 +47,13 @@ class ActionQueueService:
         Returns:
             Created action dict.
         """
-        # Determine initial status based on risk level
-        if data.risk_level in AUTO_APPROVE_RISK_LEVELS:
+        # Check autonomy calibration to determine if action should auto-execute
+        auto_execute = await self._autonomy.should_auto_execute(
+            user_id=user_id,
+            action_type=data.action_type.value,
+            context={"risk_level": data.risk_level.value, "agent": data.agent.value},
+        )
+        if auto_execute:
             initial_status = ActionStatus.AUTO_APPROVED.value
             approved_at = datetime.now(UTC).isoformat()
         else:

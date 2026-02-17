@@ -3,6 +3,7 @@ export { ProfileSection } from './ProfileSection';
 export { IntegrationsSection } from './IntegrationsSection';
 export { AriaPersonaSection } from './AriaPersonaSection';
 export { AutonomySection } from './AutonomySection';
+export { AutonomySettings } from './AutonomySettings';
 export { PerceptionSection } from './PerceptionSection';
 export { BillingSection } from './BillingSection';
 export { PrivacySection } from './PrivacySection';

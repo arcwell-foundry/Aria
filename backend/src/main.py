@@ -21,6 +21,7 @@ from src.api.routes import (
     analytics,
     aria_config,
     auth,
+    autonomy,
     battle_cards,
     billing,
     briefings,
@@ -230,6 +231,7 @@ app.include_router(account.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")
 app.include_router(action_queue.router, prefix="/api/v1")
 app.include_router(activity.router, prefix="/api/v1")
+app.include_router(autonomy.router, prefix="/api/v1")
 app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")

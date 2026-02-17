@@ -14,7 +14,7 @@ import {
   ProfileSection,
   IntegrationsSection,
   AriaPersonaSection,
-  AutonomySection,
+  AutonomySettings,
   PerceptionSection,
   BillingSection,
   PrivacySection,
@@ -41,7 +41,7 @@ function SectionContent({ section }: { section: SettingsSection }) {
     case 'aria':
       return <AriaPersonaSection />;
     case 'autonomy':
-      return <AutonomySection />;
+      return <AutonomySettings />;
     case 'perception':
       return <PerceptionSection />;
     case 'privacy':
