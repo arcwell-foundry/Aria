@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Video } from 'lucide-react';
 import { ConversationThread } from '@/components/conversation/ConversationThread';
 import { InputBar } from '@/components/conversation/InputBar';
@@ -12,11 +13,14 @@ import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
+import { useBriefingStatus } from '@/hooks/useBriefingStatus';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
 import { useTodayBriefing, useGenerateBriefing } from '@/hooks/useBriefing';
+import { VideoBriefingCard } from '@/components/briefing';
 
 export function ARIAWorkspace() {
+  const navigate = useNavigate();
   const addMessage = useConversationStore((s) => s.addMessage);
   const appendToMessage = useConversationStore((s) => s.appendToMessage);
   const updateMessageMetadata = useConversationStore((s) => s.updateMessageMetadata);
@@ -35,6 +39,20 @@ export function ARIAWorkspace() {
   const briefingInjectedRef = useRef(false);
   const { data: briefing, isLoading: briefingLoading } = useTodayBriefing();
   const generateBriefing = useGenerateBriefing();
+
+  // Video briefing status
+  const {
+    ready: briefingReady,
+    viewed: briefingViewed,
+    briefingId,
+    duration,
+    topics,
+    dismissed: briefingDismissed,
+    dismiss: dismissBriefing,
+    fetchTextBriefing,
+    summaryData,
+    clearSummaryData,
+  } = useBriefingStatus();
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -262,6 +280,71 @@ export function ARIAWorkspace() {
     [addMessage, activeConversationId, setActiveConversation],
   );
 
+  // Video briefing handlers
+  const handlePlayBriefing = useCallback(() => {
+    navigate('/briefing');
+  }, [navigate]);
+
+  const handleDismissBriefing = useCallback(() => {
+    dismissBriefing();
+    // Add a message to conversation indicating briefing was dismissed
+    addMessage({
+      role: 'system',
+      content: 'Briefing saved for later. You can access it anytime from the Briefing section.',
+      rich_content: [],
+      ui_commands: [],
+      suggestions: ['Show briefing now', 'Open Briefing'],
+    });
+  }, [dismissBriefing, addMessage]);
+
+  const handleReadInstead = useCallback(async () => {
+    try {
+      const textBriefing = await fetchTextBriefing();
+      dismissBriefing();
+      addMessage({
+        role: 'aria',
+        content: textBriefing,
+        rich_content: [],
+        ui_commands: [],
+        suggestions: ['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health'],
+      });
+    } catch {
+      addMessage({
+        role: 'system',
+        content: 'Unable to load text briefing. Please try again.',
+        rich_content: [],
+        ui_commands: [],
+        suggestions: ['Try again'],
+      });
+    }
+  }, [fetchTextBriefing, dismissBriefing, addMessage]);
+
+  // Show summary card after briefing ends
+  useEffect(() => {
+    if (summaryData) {
+      addMessage({
+        role: 'aria',
+        content: 'Your briefing is complete. Here\'s a summary:',
+        rich_content: [
+          {
+            type: 'briefing_summary',
+            data: {
+              key_points: summaryData.key_points,
+              action_items: summaryData.action_items,
+              completed_at: summaryData.completed_at,
+            },
+          },
+        ],
+        ui_commands: [],
+        suggestions: ['Review action items', 'Schedule follow-ups'],
+      });
+      clearSummaryData();
+    }
+  }, [summaryData, addMessage, clearSummaryData]);
+
+  // Determine if video briefing card should be shown
+  const showVideoBriefingCard = briefingReady && !briefingViewed && !briefingDismissed && briefingId;
+
   return (
     <div
       className="flex-1 flex flex-col h-full"
@@ -280,6 +363,21 @@ export function ARIAWorkspace() {
           <span className="text-xs">Avatar</span>
         </button>
       </div>
+
+      {/* Video Briefing Card - shown when briefing is ready and not yet viewed */}
+      {showVideoBriefingCard && (
+        <div className="px-6 pb-4">
+          <VideoBriefingCard
+            briefingId={briefingId!}
+            duration={duration}
+            topics={topics}
+            onPlay={handlePlayBriefing}
+            onDismiss={handleDismissBriefing}
+            onReadInstead={handleReadInstead}
+          />
+        </div>
+      )}
+
       <ConversationThread />
       <SuggestionChips onSelect={handleSend} />
       <InputBar onSend={handleSend} />

@@ -1,10 +1,16 @@
 import type { RichContent } from '@/api/chat';
+import type { BriefingActionItem } from '@/api/briefings';
 import { GoalPlanCard, type GoalPlanData } from './GoalPlanCard';
 import { ExecutionPlanCard, type ExecutionPlanData } from './ExecutionPlanCard';
 import { MeetingCard, type MeetingCardData } from './MeetingCard';
 import { SignalCard, type SignalCardData } from './SignalCard';
 import { AlertCard, type AlertCardData } from './AlertCard';
 import { BriefingCard, type BriefingCardData } from './BriefingCard';
+import { BriefingSummaryCard } from '@/components/briefing';
+import { useNavigate } from 'react-router-dom';
+import { useConversationStore } from '@/stores/conversationStore';
+import { wsManager } from '@/core/WebSocketManager';
+import { WS_EVENTS } from '@/types/chat';
 
 interface RichContentRendererProps {
   items: RichContent[];
@@ -22,6 +28,58 @@ export function RichContentRenderer({ items }: RichContentRendererProps) {
   );
 }
 
+interface BriefingSummaryData {
+  key_points: string[];
+  action_items: BriefingActionItem[];
+  completed_at: string;
+}
+
+// Wrapper component for BriefingSummaryCard with handlers
+function BriefingSummaryWrapper({ data }: { data: BriefingSummaryData }) {
+  const navigate = useNavigate();
+  const addMessage = useConversationStore((s) => s.addMessage);
+  const activeConversationId = useConversationStore((s) => s.activeConversationId);
+  const setActiveConversation = useConversationStore((s) => s.setActiveConversation);
+
+  const handleReplay = () => {
+    navigate('/briefing?replay=true');
+  };
+
+  const handleActionItemClick = (item: BriefingActionItem) => {
+    // Ensure conversation exists
+    let conversationId = activeConversationId;
+    if (!conversationId) {
+      conversationId = crypto.randomUUID();
+      setActiveConversation(conversationId);
+    }
+
+    // Send contextual message
+    addMessage({
+      role: 'user',
+      content: `I'd like to work on: ${item.text}`,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message: `I'd like to work on: ${item.text}`,
+      conversation_id: conversationId,
+    });
+  };
+
+  return (
+    <BriefingSummaryCard
+      briefingId=""
+      completedAt={data.completed_at}
+      keyPoints={data.key_points}
+      actionItems={data.action_items}
+      onReplay={handleReplay}
+      onActionItemClick={handleActionItemClick}
+    />
+  );
+}
+
 function RichContentItem({ item }: { item: RichContent }) {
   switch (item.type) {
     case 'goal_plan':
@@ -36,6 +94,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <AlertCard data={item.data as unknown as AlertCardData} />;
     case 'briefing':
       return <BriefingCard data={item.data as unknown as BriefingCardData} />;
+    case 'briefing_summary':
+      return <BriefingSummaryWrapper data={item.data as unknown as BriefingSummaryData} />;
     default:
       return (
         <div

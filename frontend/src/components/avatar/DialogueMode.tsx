@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useModalityStore } from '@/stores/modalityStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -19,6 +20,7 @@ interface DialogueModeProps {
 }
 
 export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
+  const [searchParams] = useSearchParams();
   const addMessage = useConversationStore((s) => s.addMessage);
   const appendToMessage = useConversationStore((s) => s.appendToMessage);
   const updateMessageMetadata = useConversationStore((s) => s.updateMessageMetadata);
@@ -35,6 +37,9 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
+
+  // Check if this is a replay
+  const isReplay = searchParams.get('replay') === 'true';
 
   const isBriefing = sessionType === 'briefing' || tavusSession.sessionType === 'briefing';
 
@@ -58,7 +63,12 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
     const deliverBriefing = async () => {
       try {
-        await apiClient.post('/briefings/deliver');
+        // If replay, use the replay endpoint; otherwise, deliver new briefing
+        if (isReplay) {
+          await apiClient.post('/briefings/replay');
+        } else {
+          await apiClient.post('/briefings/deliver');
+        }
       } catch (err) {
         // Briefing delivery failure handled by WebSocket fallback
         console.warn('Briefing delivery request failed:', err);
@@ -66,7 +76,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
 
     deliverBriefing();
-  }, [sessionType]);
+  }, [sessionType, isReplay]);
 
   // Track briefing progress based on aria.speaking events
   useEffect(() => {

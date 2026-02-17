@@ -106,3 +106,40 @@ export async function generateBriefing(briefingDate?: string): Promise<BriefingC
   });
   return response.data;
 }
+
+// Video briefing status types
+export interface BriefingStatusResponse {
+  ready: boolean;
+  viewed: boolean;
+  briefing_id: string | null;
+  duration: number;
+  topics: string[];
+}
+
+export interface BriefingViewResponse {
+  key_points: string[];
+  action_items: BriefingActionItem[];
+  completed_at: string;
+}
+
+export interface BriefingActionItem {
+  id: string;
+  text: string;
+  status: 'pending' | 'done';
+}
+
+// Video briefing API functions
+export async function getBriefingStatus(): Promise<BriefingStatusResponse> {
+  const response = await apiClient.get<BriefingStatusResponse>("/briefings/status");
+  return response.data;
+}
+
+export async function markBriefingViewed(briefingId: string): Promise<BriefingViewResponse> {
+  const response = await apiClient.post<BriefingViewResponse>(`/briefings/${briefingId}/view`);
+  return response.data;
+}
+
+export async function getTextBriefing(briefingId: string): Promise<string> {
+  const response = await apiClient.get<string>(`/briefings/${briefingId}/text`);
+  return response.data;
+}
