@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     TAVUS_REPLICA_ID: str = ""
     TAVUS_CALLBACK_URL: str = ""
     TAVUS_GUARDRAILS_ID: str = ""
+    TAVUS_WEBHOOK_SECRET: str = ""  # Webhook signature verification secret
 
     # Daily.co (Phase 6)
     DAILY_API_KEY: SecretStr | None = None
