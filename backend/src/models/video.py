@@ -76,5 +76,21 @@ class VideoSessionListResponse(BaseModel):
     offset: int
 
 
+class VideoToolCallRequest(BaseModel):
+    """Request model for executing a video tool call from Tavus CVI."""
+
+    tool_name: str
+    arguments: dict[str, Any] = {}
+    conversation_id: str | None = None
+
+
+class VideoToolCallResponse(BaseModel):
+    """Response model for video tool call results."""
+
+    tool_name: str
+    result: str
+    success: bool
+
+
 # Rebuild model to resolve forward reference
 VideoSessionResponse.model_rebuild()

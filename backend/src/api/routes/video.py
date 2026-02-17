@@ -11,12 +11,16 @@ from src.api.deps import CurrentUser
 from src.core.ws import ws_manager
 from src.db.supabase import get_supabase_client
 from src.integrations.tavus import get_tavus_client
+from src.integrations.tavus_tool_executor import VideoToolExecutor
+from src.integrations.tavus_tools import VALID_TOOL_NAMES
 from src.models.video import (
     TranscriptEntryResponse,
     VideoSessionCreate,
     VideoSessionListResponse,
     VideoSessionResponse,
     VideoSessionStatus,
+    VideoToolCallRequest,
+    VideoToolCallResponse,
 )
 from src.models.ws_events import AriaSpeakingEvent
 
@@ -496,4 +500,50 @@ async def end_video_session(
         created_at=updated["created_at"],
         lead_id=updated.get("lead_id"),
         perception_analysis=updated.get("perception_analysis"),
+    )
+
+
+@router.post("/tools/execute", response_model=VideoToolCallResponse)
+async def execute_video_tool(
+    current_user: CurrentUser,
+    request: VideoToolCallRequest,
+) -> VideoToolCallResponse:
+    """Execute a tool call triggered by the Tavus CVI LLM during a video conversation.
+
+    The frontend receives a ``conversation.tool_call`` event via Daily's
+    WebRTC data channel, calls this endpoint, then echoes the result back
+    to the conversation via ``conversation.echo``.
+
+    Args:
+        current_user: The authenticated user.
+        request: Tool name and arguments from the tool call event.
+
+    Returns:
+        Spoken-ready result string for the avatar to speak.
+    """
+    if request.tool_name not in VALID_TOOL_NAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tool: {request.tool_name}",
+        )
+
+    logger.info(
+        "Executing video tool call",
+        extra={
+            "user_id": current_user.id,
+            "tool_name": request.tool_name,
+            "conversation_id": request.conversation_id,
+        },
+    )
+
+    executor = VideoToolExecutor(user_id=current_user.id)
+    result = await executor.execute(
+        tool_name=request.tool_name,
+        arguments=request.arguments,
+    )
+
+    return VideoToolCallResponse(
+        tool_name=request.tool_name,
+        result=result,
+        success=not result.startswith("I ran into an issue"),
     )

@@ -17,6 +17,7 @@ from typing import Any
 from src.core.config import settings
 from src.db.supabase import SupabaseClient
 from src.integrations.tavus import TavusClient
+from src.integrations.tavus_tools import ARIA_VIDEO_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +68,23 @@ ARIA_SYSTEM_PROMPT = """You are ARIA, an AI Department Director for Life Science
 - Always propose, never assume user agreement
 
 ## Your Tools
-You have access to six specialized agents:
-1. Hunter - Lead generation and prospecting
-2. Analyst - Scientific and market research
-3. Strategist - Planning and competitive positioning
-4. Scribe - Communication drafting
-5. Operator - Task execution and CRM operations
-6. Scout - Signal monitoring and intelligence
+You have live tools you can call during this conversation. When the user asks you to do something, USE the appropriate tool — don't just describe what you could do.
 
-Proactively suggest when these agents could help, but don't execute without user approval.
+Available tools:
+- search_companies: Find companies by industry, funding, location
+- search_leads: Discover leads matching ICP criteria
+- get_lead_details: Look up a specific lead in the pipeline
+- get_battle_card: Get competitive intelligence on a competitor
+- search_pubmed: Search scientific publications
+- search_clinical_trials: Search ClinicalTrials.gov
+- get_pipeline_summary: Get pipeline stats and health metrics
+- get_meeting_brief: Get prep material for upcoming meetings
+- draft_email: Draft a personalised email
+- schedule_meeting: Book a meeting on the calendar
+- get_market_signals: Get recent market intelligence and news
+- add_lead_to_pipeline: Add a company to the pipeline
+
+When you call a tool, briefly tell the user what you're doing: "Let me search for that..." Then share the results conversationally. Don't read raw data — summarise and highlight what matters.
 
 ## Tone Guidance
 - Warm but professional, never casual or overly formal
@@ -192,6 +201,7 @@ ARIA_PERSONA_LAYERS: dict[str, Any] = {
         "api_key": "<ANTHROPIC_API_KEY>",
         "speculative_inference": True,
         "extra_body": {"temperature": 0.7, "top_p": 0.9},
+        "tools": ARIA_VIDEO_TOOLS,
     },
     "tts": {
         "tts_engine": "cartesia",
