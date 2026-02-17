@@ -38,8 +38,11 @@ _ENTITY_TABLE_MAP: dict[str, tuple[str, str]] = {
 
 _PERIOD_DELTAS: dict[str, timedelta] = {
     "day": timedelta(days=1),
+    "1d": timedelta(days=1),
     "week": timedelta(weeks=1),
+    "7d": timedelta(weeks=1),
     "month": timedelta(days=30),
+    "30d": timedelta(days=30),
 }
 
 
@@ -79,6 +82,8 @@ class ActivityFeedService:
             query = query.eq("agent", filters["agent"])
         if filters.get("related_entity_type"):
             query = query.eq("related_entity_type", filters["related_entity_type"])
+        if filters.get("related_entity_id"):
+            query = query.eq("related_entity_id", filters["related_entity_id"])
         if filters.get("date_start"):
             query = query.gte("created_at", filters["date_start"])
         if filters.get("date_end"):
