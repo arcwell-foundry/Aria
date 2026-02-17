@@ -13,9 +13,13 @@ import { useModalityStore } from '@/stores/modalityStore';
 import { WaveformBars } from './WaveformBars';
 import ariaAvatarSrc from '@/assets/aria-avatar.png';
 
-export function AvatarContainer() {
+interface AvatarContainerProps {
+  audioOnly?: boolean;
+}
+
+export function AvatarContainer({ audioOnly = false }: AvatarContainerProps) {
   const tavusSession = useModalityStore((s) => s.tavusSession);
-  const hasActiveSession = tavusSession.status === 'active' && tavusSession.roomUrl;
+  const hasActiveSession = !audioOnly && tavusSession.status === 'active' && tavusSession.roomUrl;
 
   return (
     <div

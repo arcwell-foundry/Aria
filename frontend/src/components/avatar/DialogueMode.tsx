@@ -14,6 +14,7 @@ import { AvatarContainer } from './AvatarContainer';
 import { TranscriptPanel } from './TranscriptPanel';
 import { DialogueHeader } from './DialogueHeader';
 import { BriefingControls } from './BriefingControls';
+import { AudioCallControls } from './AudioCallControls';
 import { VideoToastStack } from '@/components/video/VideoToastStack';
 import type { ToastItem } from '@/components/video/VideoContentToast';
 
@@ -32,6 +33,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const setActiveConversation = useConversationStore((s) => s.setActiveConversation);
   const setIsSpeaking = useModalityStore((s) => s.setIsSpeaking);
   const tavusSession = useModalityStore((s) => s.tavusSession);
+  const isAudioOnly = tavusSession.isAudioOnly;
 
   const { session } = useSession();
   const { user } = useAuth();
@@ -347,34 +349,60 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     >
       <DialogueHeader />
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Avatar */}
-        <div className="flex-1 flex flex-col items-center justify-center relative">
-          <AvatarContainer />
+      {isAudioOnly ? (
+        /* Audio-only layout: single column */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Compact avatar + waveform header */}
+          <div className="flex flex-col items-center py-6 shrink-0">
+            <AvatarContainer audioOnly />
+          </div>
+
+          {/* Full-width transcript */}
+          <div className="flex-1 overflow-hidden">
+            <TranscriptPanel onSend={handleSend} />
+          </div>
+
+          {/* Call controls */}
+          <AudioCallControls />
+
+          {/* Toast stack for rich content */}
           <VideoToastStack
             toasts={toasts}
             onDismiss={handleToastDismiss}
             onToastClick={handleToastClick}
           />
-          {isBriefing && (
-            <div className="absolute bottom-8 z-10">
-              <BriefingControls
-                progress={briefingProgress}
-                isPlaying={isBriefingPlaying}
-                onPlayPause={handlePlayPause}
-                onRewind={handleRewind}
-                onForward={handleForward}
-              />
-            </div>
-          )}
         </div>
+      ) : (
+        /* Video layout: split screen */
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left: Avatar */}
+          <div className="flex-1 flex flex-col items-center justify-center relative">
+            <AvatarContainer />
+            <VideoToastStack
+              toasts={toasts}
+              onDismiss={handleToastDismiss}
+              onToastClick={handleToastClick}
+            />
+            {isBriefing && (
+              <div className="absolute bottom-8 z-10">
+                <BriefingControls
+                  progress={briefingProgress}
+                  isPlaying={isBriefingPlaying}
+                  onPlayPause={handlePlayPause}
+                  onRewind={handleRewind}
+                  onForward={handleForward}
+                />
+              </div>
+            )}
+          </div>
 
-        {/* Divider */}
-        <div className="w-px bg-[#1A1A2E]" />
+          {/* Divider */}
+          <div className="w-px bg-[#1A1A2E]" />
 
-        {/* Right: Transcript */}
-        <TranscriptPanel onSend={handleSend} />
-      </div>
+          {/* Right: Transcript */}
+          <TranscriptPanel onSend={handleSend} />
+        </div>
+      )}
     </div>
   );
 }
