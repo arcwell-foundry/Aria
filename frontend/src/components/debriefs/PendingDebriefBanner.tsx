@@ -96,7 +96,7 @@ function PendingDebriefItem({
         >
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            {formatRelativeTime(meeting.start_time)}
+            {formatRelativeTime(meeting.start_time || "")}
           </span>
           {meeting.lead_name && (
             <span className="flex items-center gap-1">
@@ -108,7 +108,7 @@ function PendingDebriefItem({
       </div>
 
       <button
-        onClick={() => onStartDebrief(meeting.meeting_id)}
+        onClick={() => meeting.meeting_id && onStartDebrief(meeting.meeting_id)}
         className={cn(
           "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium",
           "bg-amber-600 text-white hover:bg-amber-700 transition-colors",

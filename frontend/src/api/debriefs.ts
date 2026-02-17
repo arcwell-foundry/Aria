@@ -7,139 +7,234 @@
 
 import { apiClient } from "./client";
 
-// Types matching backend
+// Re-export types for backwards compatibility
+export type {
+  DebriefOutcome,
+  DebriefStatus,
+  ActionItem,
+  DebriefInsight,
+  DebriefAnalysis,
+  FollowUpEmail,
+  DebriefInitiateRequest,
+  DebriefSubmitRequest,
+  UpdateDebriefRequest,
+  DebriefInitiateResponse,
+  DebriefSubmitResponse,
+  Debrief,
+  DebriefResponse,
+  DebriefListItem,
+  DebriefListResponse,
+  PendingDebrief,
+} from "@/types/debrief";
 
-export type DebriefOutcome = "positive" | "neutral" | "concern";
+import type {
+  DebriefInitiateRequest,
+  DebriefInitiateResponse,
+  DebriefSubmitRequest,
+  DebriefSubmitResponse,
+  DebriefResponse,
+  DebriefListResponse,
+  PendingDebrief,
+  Debrief,
+  UpdateDebriefRequest,
+} from "@/types/debrief";
 
-// List item type for the debriefs list view
-export interface DebriefListItem {
-  id: string;
-  meeting_id: string;
-  meeting_title: string | null;
-  meeting_time: string | null;
-  outcome: DebriefOutcome | null;
-  action_items_count: number;
-  linked_lead_id: string | null;
-  linked_lead_name: string | null;
-  status: "draft" | "complete";
-  created_at: string;
-}
-
-// Paginated list response
-export interface DebriefListResponse {
-  items: DebriefListItem[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
-
-// Pending debrief (meeting without debrief)
-export interface PendingDebrief {
-  meeting_id: string;
-  title: string;
-  start_time: string;
-  lead_name: string | null;
-  attendees: string[];
-}
-
-export interface Debrief {
-  id: string;
-  meeting_id: string;
-  user_id: string;
-  title: string;
-  occurred_at: string;
-  attendees: string[];
-  lead_id?: string;
-  lead_name?: string;
-  outcome: DebriefOutcome | null;
-  notes: string | null;
-  ai_analysis?: DebriefAnalysis;
-  follow_up_email?: FollowUpEmail;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DebriefAnalysis {
-  summary: string;
-  action_items: ActionItem[];
-  commitments: {
-    ours: string[];
-    theirs: string[];
-  };
-  insights: string[];
-}
-
-export interface ActionItem {
-  task: string;
-  owner?: string;
-  due_date?: string;
-  completed?: boolean;
-}
-
-export interface FollowUpEmail {
-  draft_id: string;
-  subject: string;
-  body: string;
-}
-
-// Request types
-
-export interface UpdateDebriefRequest {
-  outcome?: DebriefOutcome;
-  notes?: string;
-  lead_id?: string | null; // null to unlink
-}
-
-// API functions
+// =============================================================================
+// API Functions
+// =============================================================================
 
 /**
- * Get a debrief by meeting ID.
+ * Initiate a debrief for a meeting.
+ * Creates a pending debrief linked to a calendar event.
  */
-export async function getDebrief(meetingId: string): Promise<Debrief> {
-  const response = await apiClient.get<Debrief>(`/debriefs/meeting/${meetingId}`);
+export async function initiateDebrief(
+  meetingId: string,
+  calendarEventId?: string
+): Promise<DebriefInitiateResponse> {
+  const payload: DebriefInitiateRequest = {
+    meeting_id: meetingId,
+    ...(calendarEventId && { calendar_event_id: calendarEventId }),
+  };
+  const response = await apiClient.post<DebriefInitiateResponse>(
+    "/debriefs",
+    payload
+  );
+  return response.data;
+}
+
+/**
+ * Submit debrief notes and trigger AI extraction pipeline.
+ * Processes notes to extract action items, commitments, and insights.
+ */
+export async function submitDebrief(
+  debriefId: string,
+  data: DebriefSubmitRequest
+): Promise<DebriefSubmitResponse> {
+  const response = await apiClient.put<DebriefSubmitResponse>(
+    `/debriefs/${debriefId}`,
+    data
+  );
   return response.data;
 }
 
 /**
  * Update a debrief with outcome and notes.
- * Triggers AI analysis on the backend.
+ * Legacy function that maps to submitDebrief for backwards compatibility.
  */
 export async function updateDebrief(
   debriefId: string,
   data: UpdateDebriefRequest
 ): Promise<Debrief> {
-  const response = await apiClient.put<Debrief>(`/debriefs/${debriefId}`, data);
+  // Map legacy UpdateDebriefRequest to DebriefSubmitRequest
+  const submitData: DebriefSubmitRequest = {
+    raw_notes: data.notes || "",
+    outcome: data.outcome,
+  };
+  const response = await apiClient.put<DebriefSubmitResponse>(
+    `/debriefs/${debriefId}`,
+    submitData
+  );
+
+  // Transform response to Debrief format
+  return {
+    id: response.data.id,
+    meeting_id: debriefId,
+    user_id: "",
+    title: "",
+    occurred_at: new Date().toISOString(),
+    attendees: [],
+    outcome: data.outcome ?? null,
+    notes: submitData.raw_notes,
+    ai_analysis: {
+      summary: response.data.summary,
+      action_items: response.data.action_items,
+      commitments: {
+        ours: response.data.commitments_ours,
+        theirs: response.data.commitments_theirs,
+      },
+      insights: response.data.insights.map((i) =>
+        typeof i === "string" ? i : i.insight
+      ),
+    },
+    follow_up_email: response.data.follow_up_draft
+      ? {
+          draft_id: response.data.id,
+          subject: "Follow-up",
+          body: response.data.follow_up_draft,
+        }
+      : undefined,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Get a debrief by meeting ID (returns debriefs for a meeting).
+ */
+export async function getDebrief(meetingId: string): Promise<Debrief> {
+  const response = await apiClient.get<DebriefResponse[]>(
+    `/debriefs/meeting/${meetingId}`
+  );
+
+  if (!response.data.length) {
+    throw new Error("Debrief not found");
+  }
+
+  const debriefResponse = response.data[0];
+
+  // Transform DebriefResponse to Debrief format
+  return {
+    id: debriefResponse.id,
+    meeting_id: debriefResponse.meeting_id,
+    user_id: debriefResponse.user_id,
+    title: debriefResponse.meeting_title || "Meeting",
+    occurred_at: debriefResponse.meeting_time || debriefResponse.created_at,
+    attendees: [],
+    lead_id: debriefResponse.linked_lead_id ?? undefined,
+    outcome: debriefResponse.outcome,
+    notes: debriefResponse.raw_notes,
+    ai_analysis: debriefResponse.summary
+      ? {
+          summary: debriefResponse.summary,
+          action_items: debriefResponse.action_items,
+          commitments: {
+            ours: debriefResponse.commitments_ours,
+            theirs: debriefResponse.commitments_theirs,
+          },
+          insights: debriefResponse.insights.map((i) =>
+            typeof i === "string" ? i : i.insight
+          ),
+        }
+      : undefined,
+    follow_up_email: debriefResponse.follow_up_draft
+      ? {
+          draft_id: debriefResponse.id,
+          subject: "Follow-up",
+          body: debriefResponse.follow_up_draft,
+        }
+      : undefined,
+    created_at: debriefResponse.created_at,
+    updated_at: debriefResponse.created_at,
+  };
+}
+
+/**
+ * Get a debrief by its ID.
+ */
+export async function getDebriefById(debriefId: string): Promise<DebriefResponse> {
+  const response = await apiClient.get<DebriefResponse>(`/debriefs/${debriefId}`);
+  return response.data;
+}
+
+/**
+ * Get debriefs for a specific meeting.
+ */
+export async function getDebriefsByMeeting(
+  meetingId: string
+): Promise<DebriefResponse[]> {
+  const response = await apiClient.get<DebriefResponse[]>(
+    `/debriefs/meeting/${meetingId}`
+  );
   return response.data;
 }
 
 /**
  * List all debriefs with optional filtering and pagination.
  */
-export async function listDebriefs(
-  page = 1,
-  pageSize = 20,
-  startDate?: string,
-  endDate?: string,
-  search?: string
-): Promise<DebriefListResponse> {
-  const params = new URLSearchParams();
-  params.append("page", page.toString());
-  params.append("page_size", pageSize.toString());
-  if (startDate) params.append("start_date", startDate);
-  if (endDate) params.append("end_date", endDate);
-  if (search) params.append("search", search);
+export async function listDebriefs(params?: {
+  page?: number;
+  page_size?: number;
+  start_date?: string;
+  end_date?: string;
+  linked_lead_id?: string;
+  search?: string;
+}): Promise<DebriefListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.append("page", params.page.toString());
+  if (params?.page_size) searchParams.append("page_size", params.page_size.toString());
+  if (params?.start_date) searchParams.append("start_date", params.start_date);
+  if (params?.end_date) searchParams.append("end_date", params.end_date);
+  if (params?.linked_lead_id) searchParams.append("linked_lead_id", params.linked_lead_id);
+  if (params?.search) searchParams.append("search", params.search);
 
-  const response = await apiClient.get<DebriefListResponse>(
-    `/debriefs?${params.toString()}`
-  );
-  return response.data;
+  const queryString = searchParams.toString();
+  const url = queryString ? `/debriefs?${queryString}` : "/debriefs";
+
+  const response = await apiClient.get<DebriefListResponse>(url);
+
+  // Add total_pages for backwards compatibility
+  const data = response.data;
+  return {
+    ...data,
+    total_pages: Math.ceil(data.total / (params?.page_size || 20)),
+  };
 }
 
 /**
  * Get meetings that need debriefs (pending).
  */
-export async function getPendingDebriefs(): Promise<PendingDebrief[]> {
-  const response = await apiClient.get<PendingDebrief[]>("/debriefs/pending");
+export async function getPendingDebriefs(limit?: number): Promise<PendingDebrief[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  const response = await apiClient.get<PendingDebrief[]>(`/debriefs/pending${params}`);
   return response.data;
 }
