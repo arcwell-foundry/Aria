@@ -167,14 +167,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS origins — hardcoded to avoid config resolution issues
-CORS_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-]
+# CORS origins — read from CORS_ORIGINS env var via config, with local fallbacks
+CORS_ORIGINS = get_cors_origins()
 logger.info("CORS allowed origins: %s", CORS_ORIGINS)
 
 # Performance middleware — timing wraps request-ID so ID is available when timing logs.

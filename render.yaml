@@ -1,0 +1,166 @@
+# Render Blueprint — ARIA Backend Infrastructure
+# https://render.com/docs/blueprint-spec
+#
+# Deploy: Connect this repo in the Render Dashboard, or use `render blueprint apply`.
+# All secrets (sync: false) must be set manually in the Render Dashboard.
+
+services:
+  # ── Primary API Server ───────────────────────────────────────────────
+  - type: web
+    name: aria-api
+    runtime: python
+    plan: starter  # $7/mo — 512 MB RAM, 0.5 CPU (upgrade to standard for production)
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      gunicorn src.main:app
+      -w 2
+      -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:$PORT
+      --timeout 120
+      --graceful-timeout 30
+      --access-logfile -
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Python version
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      # Application
+      - key: APP_ENV
+        value: production
+      - key: LOG_FORMAT
+        value: json
+      # CORS — comma-separated allowed origins
+      - key: CORS_ORIGINS
+        value: https://app.luminone.ai,https://aria.luminone.ai,http://localhost:5173
+      # Tavus webhook callback (update after first deploy with actual Render URL)
+      - key: TAVUS_CALLBACK_URL
+        value: https://aria-api.onrender.com/api/v1/webhooks/tavus
+      # Scheduler — disable in web process if running separate cron
+      # Set to "false" to let the cron service handle all scheduled work.
+      # Leave as "true" (default) for single-instance deployments.
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      # ── Secrets (set in Render Dashboard) ──
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USER
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: TAVUS_API_KEY
+        sync: false
+      - key: TAVUS_PERSONA_ID
+        sync: false
+      - key: TAVUS_REPLICA_ID
+        sync: false
+      - key: DAILY_API_KEY
+        sync: false
+      - key: EXA_API_KEY
+        sync: false
+      - key: EXA_WEBHOOK_SECRET
+        sync: false
+      - key: COMPOSIO_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+  # ── Scheduled Tasks (Cron) ───────────────────────────────────────────
+  - type: cron
+    name: aria-scheduled-tasks
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    schedule: "*/15 * * * *"  # Every 15 minutes
+    startCommand: python -m src.tasks.scheduled
+    envVars:
+      # Inherit all secrets from the web service
+      - key: APP_SECRET_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: APP_SECRET_KEY
+      - key: ANTHROPIC_API_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: ANTHROPIC_API_KEY
+      - key: SUPABASE_URL
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: OPENAI_API_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: OPENAI_API_KEY
+      - key: NEO4J_URI
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: NEO4J_URI
+      - key: NEO4J_USER
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: NEO4J_USER
+      - key: NEO4J_PASSWORD
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: NEO4J_PASSWORD
+      - key: EXA_API_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: EXA_API_KEY
+      - key: COMPOSIO_API_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: COMPOSIO_API_KEY
+      - key: RESEND_API_KEY
+        fromService:
+          name: aria-api
+          type: web
+          envVarKey: RESEND_API_KEY
+      - key: APP_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      - key: LOG_FORMAT
+        value: json
+      # Disable the in-process scheduler in the cron runner
+      - key: ENABLE_SCHEDULER
+        value: "false"
