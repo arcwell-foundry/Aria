@@ -18,18 +18,33 @@ export interface ActivityItem {
 }
 
 export interface ActivityFeedResponse {
-  activities: ActivityItem[];
-  count: number;
+  items: ActivityItem[];
+  total: number;
+  page: number;
 }
 
 export interface ActivityFilters {
+  type?: string;
   agent?: string;
-  activity_type?: string;
-  date_start?: string;
-  date_end?: string;
+  entity_type?: string;
+  entity_id?: string;
+  since?: string;
   search?: string;
-  limit?: number;
-  offset?: number;
+  page?: number;
+  page_size?: number;
+}
+
+export interface ActivityPollResponse {
+  items: ActivityItem[];
+  count: number;
+}
+
+export interface ActivityStatsResponse {
+  total: number;
+  by_type: Record<string, number>;
+  by_agent: Record<string, number>;
+  period: string;
+  since: string;
 }
 
 export interface AgentStatusItem {
@@ -49,17 +64,35 @@ export async function getActivityFeed(
   filters?: ActivityFilters
 ): Promise<ActivityFeedResponse> {
   const params = new URLSearchParams();
+  if (filters?.type) params.append("type", filters.type);
   if (filters?.agent) params.append("agent", filters.agent);
-  if (filters?.activity_type)
-    params.append("activity_type", filters.activity_type);
-  if (filters?.date_start) params.append("date_start", filters.date_start);
-  if (filters?.date_end) params.append("date_end", filters.date_end);
-  if (filters?.search) params.append("search", filters.search);
-  if (filters?.limit) params.append("limit", filters.limit.toString());
-  if (filters?.offset) params.append("offset", filters.offset.toString());
+  if (filters?.entity_type) params.append("entity_type", filters.entity_type);
+  if (filters?.entity_id) params.append("entity_id", filters.entity_id);
+  if (filters?.since) params.append("since", filters.since);
+  if (filters?.page) params.append("page", filters.page.toString());
+  if (filters?.page_size)
+    params.append("page_size", filters.page_size.toString());
 
   const url = params.toString() ? `/activity?${params}` : "/activity";
   const response = await apiClient.get<ActivityFeedResponse>(url);
+  return response.data;
+}
+
+export async function pollActivity(
+  since: string
+): Promise<ActivityPollResponse> {
+  const response = await apiClient.get<ActivityPollResponse>(
+    `/activity/poll?since=${encodeURIComponent(since)}`
+  );
+  return response.data;
+}
+
+export async function getActivityStats(
+  period = "7d"
+): Promise<ActivityStatsResponse> {
+  const response = await apiClient.get<ActivityStatsResponse>(
+    `/activity/stats?period=${encodeURIComponent(period)}`
+  );
   return response.data;
 }
 
