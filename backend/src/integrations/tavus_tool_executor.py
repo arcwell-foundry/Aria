@@ -15,12 +15,21 @@ Flow:
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from src.integrations.tavus_tools import TOOL_AGENT_MAP, VALID_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolResult:
+    """Result of a video tool execution."""
+
+    spoken_text: str
+    rich_content: dict[str, Any] | None = None
 
 
 class VideoToolExecutor:
@@ -64,7 +73,7 @@ class VideoToolExecutor:
         self,
         tool_name: str,
         arguments: dict[str, Any],
-    ) -> str:
+    ) -> ToolResult:
         """Execute a video tool call and return a spoken-ready result.
 
         Args:
@@ -72,14 +81,18 @@ class VideoToolExecutor:
             arguments: Parameters parsed from the tool call.
 
         Returns:
-            Natural-language result string for the avatar to speak.
+            ToolResult with spoken text and optional rich content for overlays.
         """
         if tool_name not in VALID_TOOL_NAMES:
-            return f"I don't have a tool called {tool_name}. Let me help you another way."
+            return ToolResult(
+                spoken_text=f"I don't have a tool called {tool_name}. Let me help you another way."
+            )
 
         handler = getattr(self, f"_handle_{tool_name}", None)
         if handler is None:
-            return "That capability isn't available right now."
+            return ToolResult(
+                spoken_text="That capability isn't available right now."
+            )
 
         try:
             result = await handler(arguments)
@@ -94,16 +107,18 @@ class VideoToolExecutor:
                 },
             )
             await self._log_activity(tool_name, arguments, success=False)
-            return (
-                f"I ran into an issue executing {tool_name.replace('_', ' ')}. "
-                "Let me try a different approach."
+            return ToolResult(
+                spoken_text=(
+                    f"I ran into an issue executing {tool_name.replace('_', ' ')}. "
+                    "Let me try a different approach."
+                )
             )
 
     # ------------------------------------------------------------------
     # Tool handlers
     # ------------------------------------------------------------------
 
-    async def _handle_search_companies(self, args: dict[str, Any]) -> str:
+    async def _handle_search_companies(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import HunterAgent
 
         agent = HunterAgent(llm_client=self.llm, user_id=self._user_id)
@@ -114,11 +129,15 @@ class VideoToolExecutor:
         )
 
         if not results:
-            return f"I searched for companies matching '{args['query']}' but didn't find any results. Want me to broaden the search?"
+            return ToolResult(
+                spoken_text=f"I searched for companies matching '{args['query']}' but didn't find any results. Want me to broaden the search?"
+            )
 
         companies = results if isinstance(results, list) else results.get("companies", [])
         if not companies:
-            return f"No companies found matching '{args['query']}'. Would you like me to try different criteria?"
+            return ToolResult(
+                spoken_text=f"No companies found matching '{args['query']}'. Would you like me to try different criteria?"
+            )
 
         lines = [f"I found {len(companies)} companies matching your search."]
         for i, company in enumerate(companies[:5], 1):
@@ -128,9 +147,23 @@ class VideoToolExecutor:
             lines.append(f"{i}. {name}" + (f" — {snippet}" if snippet else ""))
 
         lines.append("Would you like me to dig deeper into any of these, or add them to your pipeline?")
-        return " ".join(lines)
+        spoken_text = " ".join(lines)
 
-    async def _handle_search_leads(self, args: dict[str, Any]) -> str:
+        # Build rich_content from the first result
+        first = companies[0]
+        rich_content: dict[str, Any] = {
+            "type": "lead_card",
+            "data": {
+                "company_name": first.get("name") or first.get("company_name", "Unknown"),
+                "contacts": first.get("contacts", []),
+                "fit_score": first.get("fit_score"),
+                "signals": first.get("signals", []),
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_search_leads(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import HunterAgent
 
         agent = HunterAgent(llm_client=self.llm, user_id=self._user_id)
@@ -141,11 +174,15 @@ class VideoToolExecutor:
         )
 
         if not results:
-            return "I couldn't find leads matching that profile right now. Can you refine the criteria?"
+            return ToolResult(
+                spoken_text="I couldn't find leads matching that profile right now. Can you refine the criteria?"
+            )
 
         leads = results if isinstance(results, list) else results.get("companies", [])
         if not leads:
-            return "No leads matched your ICP criteria. Would you like to adjust the search?"
+            return ToolResult(
+                spoken_text="No leads matched your ICP criteria. Would you like to adjust the search?"
+            )
 
         lines = [f"I found {len(leads)} potential leads matching your ideal customer profile."]
         for i, lead in enumerate(leads[:5], 1):
@@ -155,9 +192,23 @@ class VideoToolExecutor:
             lines.append(f"{i}. {name}{fit_str}")
 
         lines.append("Want me to add any of these to your pipeline?")
-        return " ".join(lines)
+        spoken_text = " ".join(lines)
 
-    async def _handle_get_lead_details(self, args: dict[str, Any]) -> str:
+        # Build rich_content from the first result
+        first = leads[0]
+        rich_content: dict[str, Any] = {
+            "type": "lead_card",
+            "data": {
+                "company_name": first.get("name") or first.get("company_name", "Unknown"),
+                "contacts": first.get("contacts", []),
+                "fit_score": first.get("fit_score"),
+                "signals": first.get("signals", []),
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_get_lead_details(self, args: dict[str, Any]) -> ToolResult:
         company_name = args["company_name"]
 
         result = (
@@ -170,7 +221,9 @@ class VideoToolExecutor:
         )
 
         if not result.data:
-            return f"I don't have {company_name} in your pipeline. Would you like me to research them and add them?"
+            return ToolResult(
+                spoken_text=f"I don't have {company_name} in your pipeline. Would you like me to research them and add them?"
+            )
 
         lead = result.data[0]
         name = lead.get("company_name", company_name)
@@ -185,9 +238,20 @@ class VideoToolExecutor:
         if last_activity:
             parts.append(f"Last activity was on {last_activity[:10]}.")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_get_battle_card(self, args: dict[str, Any]) -> str:
+        rich_content: dict[str, Any] = {
+            "type": "lead_card",
+            "data": {
+                "company_name": name,
+                "fit_score": score,
+                "signals": [stage, status],
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_get_battle_card(self, args: dict[str, Any]) -> ToolResult:
         competitor_name = args["competitor_name"]
 
         result = (
@@ -200,7 +264,9 @@ class VideoToolExecutor:
         )
 
         if not result.data:
-            return f"I don't have a battle card for {competitor_name} yet. Would you like me to create one?"
+            return ToolResult(
+                spoken_text=f"I don't have a battle card for {competitor_name} yet. Would you like me to create one?"
+            )
 
         card = result.data[0]
         name = card.get("competitor_name", competitor_name)
@@ -225,9 +291,37 @@ class VideoToolExecutor:
         if win_strategy:
             parts.append(f"Recommended win strategy: {win_strategy[:150]}.")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_search_pubmed(self, args: dict[str, Any]) -> str:
+        # Build comparison rows from available data
+        rows: list[dict[str, str]] = []
+        if strengths:
+            s_list = [strengths] if isinstance(strengths, str) else strengths[:3]
+            for s_item in s_list:
+                rows.append({"dimension": "Strength", "competitor": s_item, "us": ""})
+        if weaknesses:
+            w_list = [weaknesses] if isinstance(weaknesses, str) else weaknesses[:3]
+            for w_item in w_list:
+                rows.append({"dimension": "Weakness", "competitor": w_item, "us": ""})
+        if differentiators:
+            d_list = [differentiators] if isinstance(differentiators, str) else differentiators[:3]
+            for d_item in d_list:
+                rows.append({"dimension": "Differentiator", "competitor": "", "us": d_item})
+        if win_strategy:
+            rows.append({"dimension": "Win Strategy", "competitor": "", "us": win_strategy[:150]})
+
+        rich_content: dict[str, Any] = {
+            "type": "battle_card",
+            "data": {
+                "competitor_name": name,
+                "our_company": "Your Team",
+                "rows": rows,
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_search_pubmed(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import AnalystAgent
 
         agent = AnalystAgent(llm_client=self.llm, user_id=self._user_id)
@@ -243,7 +337,9 @@ class VideoToolExecutor:
         pmids = results.get("pmids", []) if isinstance(results, dict) else []
 
         if count == 0:
-            return f"I didn't find any PubMed articles for '{args['query']}'. Try broadening your search terms."
+            return ToolResult(
+                spoken_text=f"I didn't find any PubMed articles for '{args['query']}'. Try broadening your search terms."
+            )
 
         # Fetch article details for the PMIDs
         try:
@@ -267,9 +363,34 @@ class VideoToolExecutor:
         else:
             parts.append(f"I found {len(pmids)} article IDs but couldn't fetch the details right now.")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_search_clinical_trials(self, args: dict[str, Any]) -> str:
+        # Build rich_content only if we fetched article details
+        rich_content: dict[str, Any] | None = None
+        if articles:
+            rich_results: list[dict[str, Any]] = []
+            for article in articles[:5]:
+                pmid = article.get("pmid", "")
+                rich_results.append({
+                    "title": article.get("title", "Untitled"),
+                    "authors": article.get("authors", ""),
+                    "date": article.get("year", ""),
+                    "excerpt": article.get("abstract", "")[:200] if article.get("abstract") else "",
+                    "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
+                    "source": "PubMed",
+                })
+            rich_content = {
+                "type": "research_results",
+                "data": {
+                    "query": args["query"],
+                    "total_count": count,
+                    "results": rich_results,
+                },
+            }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_search_clinical_trials(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import AnalystAgent
 
         agent = AnalystAgent(llm_client=self.llm, user_id=self._user_id)
@@ -294,7 +415,9 @@ class VideoToolExecutor:
         studies = results.get("studies", []) if isinstance(results, dict) else []
 
         if total == 0:
-            return f"No clinical trials found for {query}. Want me to try different search terms?"
+            return ToolResult(
+                spoken_text=f"No clinical trials found for {query}. Want me to try different search terms?"
+            )
 
         parts = [f"I found {total} clinical trials related to {query}."]
         for i, study in enumerate(studies[:3], 1):
@@ -311,9 +434,41 @@ class VideoToolExecutor:
                 desc += f", sponsored by {sponsor}"
             parts.append(f"{i}. {desc}")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_get_pipeline_summary(self, _args: dict[str, Any]) -> str:
+        # Build rich_content only if studies were found
+        rich_results: list[dict[str, Any]] = []
+        for study in studies[:5]:
+            nct_id = study.get("nct_id", "")
+            phase = study.get("phase", "")
+            status = study.get("status", study.get("overall_status", ""))
+            excerpt_parts = []
+            if phase:
+                excerpt_parts.append(f"Phase {phase}")
+            if status:
+                excerpt_parts.append(status)
+
+            rich_results.append({
+                "title": study.get("title", study.get("brief_title", "Untitled")),
+                "authors": study.get("sponsor", study.get("lead_sponsor", "")),
+                "date": study.get("start_date", ""),
+                "excerpt": " - ".join(excerpt_parts),
+                "url": f"https://clinicaltrials.gov/study/{nct_id}" if nct_id else "",
+                "source": "ClinicalTrials.gov",
+            })
+
+        rich_content: dict[str, Any] = {
+            "type": "research_results",
+            "data": {
+                "query": query,
+                "total_count": total,
+                "results": rich_results,
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_get_pipeline_summary(self, _args: dict[str, Any]) -> ToolResult:
         result = (
             self.db.table("lead_memories")
             .select("lifecycle_stage, health_score, status")
@@ -323,7 +478,9 @@ class VideoToolExecutor:
         )
 
         if not result.data:
-            return "Your pipeline is empty right now. Would you like me to find some leads to get started?"
+            return ToolResult(
+                spoken_text="Your pipeline is empty right now. Would you like me to find some leads to get started?"
+            )
 
         leads = result.data
         total = len(leads)
@@ -357,9 +514,30 @@ class VideoToolExecutor:
         if hot > 0:
             parts.append(f"{hot} leads are hot with a health score above 70.")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_get_meeting_brief(self, args: dict[str, Any]) -> str:
+        # Build stages array for the chart (include all stages with counts)
+        stages_list: list[dict[str, Any]] = []
+        for stage in stage_order:
+            count = stages.get(stage, 0)
+            if count > 0:
+                stages_list.append({"stage": stage, "count": count})
+        for stage, count in stages.items():
+            if stage not in stage_order and count > 0:
+                stages_list.append({"stage": stage, "count": count})
+
+        rich_content: dict[str, Any] = {
+            "type": "pipeline_chart",
+            "data": {
+                "stages": stages_list,
+                "total": total,
+                "avg_health": avg_health,
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_get_meeting_brief(self, args: dict[str, Any]) -> ToolResult:
         meeting_id = args.get("meeting_id")
 
         if meeting_id:
@@ -385,7 +563,9 @@ class VideoToolExecutor:
             )
 
         if not result.data:
-            return "I don't have a meeting brief ready. Would you like me to generate one for your next meeting?"
+            return ToolResult(
+                spoken_text="I don't have a meeting brief ready. Would you like me to generate one for your next meeting?"
+            )
 
         brief = result.data[0]
         title = brief.get("meeting_title", "your meeting")
@@ -413,9 +593,9 @@ class VideoToolExecutor:
                 points = talking_points if isinstance(talking_points, list) else [talking_points]
                 parts.append(f"Key talking points: {', '.join(str(p) for p in points[:3])}.")
 
-        return " ".join(parts)
+        return ToolResult(spoken_text=" ".join(parts))
 
-    async def _handle_draft_email(self, args: dict[str, Any]) -> str:
+    async def _handle_draft_email(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import ScribeAgent
 
         agent = ScribeAgent(llm_client=self.llm, user_id=self._user_id)
@@ -436,9 +616,13 @@ class VideoToolExecutor:
         )
 
         if not result:
-            return "I wasn't able to draft that email. Can you give me more context?"
+            return ToolResult(
+                spoken_text="I wasn't able to draft that email. Can you give me more context?"
+            )
 
         subject = result.get("subject", "")
+        body = result.get("body", "")
+        draft_id = result.get("draft_id", "")
         word_count = result.get("word_count", 0)
 
         parts = [f"I've drafted an email to {args['to']}."]
@@ -448,9 +632,22 @@ class VideoToolExecutor:
             parts.append(f"It's {word_count} words.")
         parts.append("The draft is saved and ready for your review. Would you like me to read it, adjust the tone, or send it?")
 
-        return " ".join(parts)
+        spoken_text = " ".join(parts)
 
-    async def _handle_schedule_meeting(self, args: dict[str, Any]) -> str:
+        rich_content: dict[str, Any] = {
+            "type": "email_draft",
+            "data": {
+                "to": args["to"],
+                "subject": subject,
+                "body": body,
+                "draft_id": draft_id,
+                "tone": tone,
+            },
+        }
+
+        return ToolResult(spoken_text=spoken_text, rich_content=rich_content)
+
+    async def _handle_schedule_meeting(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import OperatorAgent
 
         agent = OperatorAgent(llm_client=self.llm, user_id=self._user_id)
@@ -472,10 +669,12 @@ class VideoToolExecutor:
         )
 
         if isinstance(result, dict) and not result.get("connected", True):
-            return (
-                "Your calendar isn't connected yet. "
-                "You can connect Google Calendar or Outlook in Settings under Integrations. "
-                "Once connected, I'll be able to schedule meetings directly."
+            return ToolResult(
+                spoken_text=(
+                    "Your calendar isn't connected yet. "
+                    "You can connect Google Calendar or Outlook in Settings under Integrations. "
+                    "Once connected, I'll be able to schedule meetings directly."
+                )
             )
 
         parts = [f"I'm setting up a meeting for {args['purpose']} with {', '.join(attendees)}."]
@@ -486,9 +685,9 @@ class VideoToolExecutor:
         else:
             parts.append("I've submitted the request. Check your calendar for confirmation.")
 
-        return " ".join(parts)
+        return ToolResult(spoken_text=" ".join(parts))
 
-    async def _handle_get_market_signals(self, args: dict[str, Any]) -> str:
+    async def _handle_get_market_signals(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import ScoutAgent
 
         agent = ScoutAgent(llm_client=self.llm, user_id=self._user_id)
@@ -502,11 +701,15 @@ class VideoToolExecutor:
         )
 
         if not results:
-            return f"I didn't find any recent market signals for {topic}. Want me to expand the time window?"
+            return ToolResult(
+                spoken_text=f"I didn't find any recent market signals for {topic}. Want me to expand the time window?"
+            )
 
         articles = results if isinstance(results, list) else []
         if not articles:
-            return f"No recent signals found for {topic}."
+            return ToolResult(
+                spoken_text=f"No recent signals found for {topic}."
+            )
 
         parts = [f"Here are the latest market signals for {topic}."]
         for i, article in enumerate(articles[:4], 1):
@@ -519,9 +722,9 @@ class VideoToolExecutor:
                 parts.append(entry)
 
         parts.append("Would you like me to analyse any of these signals in more detail?")
-        return " ".join(parts)
+        return ToolResult(spoken_text=" ".join(parts))
 
-    async def _handle_add_lead_to_pipeline(self, args: dict[str, Any]) -> str:
+    async def _handle_add_lead_to_pipeline(self, args: dict[str, Any]) -> ToolResult:
         company_name = args["company_name"]
         contact_name = args.get("contact_name")
         notes = args.get("notes", "Added during video conversation")
@@ -538,10 +741,12 @@ class VideoToolExecutor:
 
         if existing.data:
             lead = existing.data[0]
-            return (
-                f"{lead['company_name']} is already in your pipeline "
-                f"at the {lead.get('lifecycle_stage', 'prospect')} stage. "
-                "Would you like me to update their information?"
+            return ToolResult(
+                spoken_text=(
+                    f"{lead['company_name']} is already in your pipeline "
+                    f"at the {lead.get('lifecycle_stage', 'prospect')} stage. "
+                    "Would you like me to update their information?"
+                )
             )
 
         # Insert new lead
@@ -572,7 +777,7 @@ class VideoToolExecutor:
             parts.append(f"Primary contact: {contact_name}.")
         parts.append("I'll start monitoring them for signals and enriching the profile.")
 
-        return " ".join(parts)
+        return ToolResult(spoken_text=" ".join(parts))
 
     # ------------------------------------------------------------------
     # Activity logging
