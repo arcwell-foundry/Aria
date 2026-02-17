@@ -13,6 +13,8 @@ import {
   AnalyticsPage,
   SettingsPage,
   OnboardingPage,
+  VideoPage,
+  DebriefPage,
 } from '@/components/pages';
 import { DialogueMode } from '@/components/avatar';
 
@@ -42,12 +44,14 @@ export function AppRoutes() {
         <Route index element={<ARIAWorkspace />} />
         <Route path="dialogue" element={<DialogueMode />} />
         <Route path="briefing" element={<DialogueMode sessionType="briefing" />} />
+        <Route path="aria/video" element={<VideoPage />} />
         <Route path="pipeline" element={<PipelinePage />} />
         <Route path="pipeline/leads/:leadId" element={<PipelinePage />} />
         <Route path="intelligence" element={<IntelligencePage />} />
         <Route path="intelligence/battle-cards/:competitorId" element={<IntelligencePage />} />
         <Route path="communications" element={<CommunicationsPage />} />
         <Route path="communications/drafts/:draftId" element={<CommunicationsPage />} />
+        <Route path="debriefs/new" element={<DebriefPage />} />
         <Route path="actions" element={<ActionsPage />} />
         <Route path="actions/goals/:goalId" element={<ActionsPage />} />
         <Route path="activity" element={<ActivityPage />} />
