@@ -184,46 +184,75 @@ class HealthScoreCalculator:
             )
             return float(1.0 - ratio)
 
-    def _score_sentiment(self, insights: list[Any]) -> float:
-        """Score overall sentiment from insights.
+    def _score_sentiment(
+        self,
+        insights: list[Any],
+        perception_data: dict[str, Any] | None = None,
+    ) -> float:
+        """Score overall sentiment from insights, optionally blended with video perception.
 
-        0.5 = neutral (no insights)
-        0.0 = all negative
-        1.0 = all positive
+        When ``perception_data`` is ``None`` the method behaves exactly as
+        before (backward compatible).  When perception data from a Tavus
+        video session is supplied, the final score is a weighted blend of
+        insight-based sentiment (70%) and perception-based engagement (30%).
+
+        0.5 = neutral (no insights, no perception)
+        0.0 = all negative / fully disengaged
+        1.0 = all positive / fully engaged
 
         Args:
             insights: List of insight objects with sentiment field.
+            perception_data: Optional dict with keys ``engagement_score``,
+                ``confusion_events``, and ``disengagement_events`` from the
+                Tavus Raven-0 perception pipeline.
 
         Returns:
             Score between 0.0 and 1.0.
         """
+        # --- Insight-based score (unchanged logic) ---
         if not insights:
-            return 0.5  # Neutral default
+            insight_score = 0.5  # Neutral default
+        else:
+            positive_count = sum(
+                1 for i in insights if getattr(i, "sentiment", None) == Sentiment.POSITIVE
+            )
+            negative_count = sum(
+                1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEGATIVE
+            )
+            neutral_count = sum(
+                1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEUTRAL
+            )
+            unknown_count = sum(
+                1 for i in insights if getattr(i, "sentiment", None) == Sentiment.UNKNOWN
+            )
 
-        # Count sentiments
-        positive_count = sum(
-            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.POSITIVE
-        )
-        negative_count = sum(
-            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEGATIVE
-        )
-        neutral_count = sum(
-            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.NEUTRAL
-        )
-        unknown_count = sum(
-            1 for i in insights if getattr(i, "sentiment", None) == Sentiment.UNKNOWN
-        )
+            total = len(insights)
+            if total == 0:
+                insight_score = 0.5
+            else:
+                sentiment_sum = (
+                    positive_count * 1.0
+                    + (neutral_count + unknown_count) * 0.5
+                    + negative_count * 0.0
+                )
+                insight_score = sentiment_sum / total
 
-        total = len(insights)
-        if total == 0:
-            return 0.5
+        # --- Backward compatible: no perception data ---
+        if perception_data is None:
+            return insight_score
 
-        # Calculate score: positive=1, neutral=0.5, negative=0, unknown=0.5
-        sentiment_sum = (
-            positive_count * 1.0 + (neutral_count + unknown_count) * 0.5 + negative_count * 0.0
-        )
+        # --- Perception-based score ---
+        engagement = float(perception_data.get("engagement_score", 0.5))
+        confusion = int(perception_data.get("confusion_events", 0))
+        disengagement = int(perception_data.get("disengagement_events", 0))
 
-        return sentiment_sum / total
+        perception_score = engagement
+        perception_score -= min(confusion * 0.03, 0.3)
+        perception_score -= min(disengagement * 0.04, 0.3)
+        perception_score = max(0.0, min(perception_score, 1.0))
+
+        # --- Blend: 70% insight, 30% perception ---
+        return insight_score * 0.7 + perception_score * 0.3
 
     def _score_breadth(self, stakeholders: list[Any]) -> float:
         """Score stakeholder breadth.
