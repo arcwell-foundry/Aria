@@ -466,6 +466,60 @@ class DebriefService:
         )
         return cast(list[dict[str, Any]], result.data)
 
+    async def list_debriefs_filtered(
+        self,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        linked_lead_id: str | None = None,
+    ) -> dict[str, Any]:
+        """List debriefs with pagination and filtering.
+
+        Args:
+            user_id: The user's UUID.
+            page: Page number (1-indexed).
+            page_size: Number of items per page.
+            start_date: Optional ISO date string to filter from.
+            end_date: Optional ISO date string to filter to.
+            linked_lead_id: Optional lead ID to filter by.
+
+        Returns:
+            Dict with items, total, and has_more.
+        """
+        offset = (page - 1) * page_size
+
+        # Build query
+        query = (
+            self.db.table("meeting_debriefs")
+            .select("*", count="exact")
+            .eq("user_id", user_id)
+        )
+
+        # Apply filters
+        if start_date:
+            query = query.gte("created_at", start_date)
+        if end_date:
+            query = query.lte("created_at", end_date)
+        if linked_lead_id:
+            query = query.eq("linked_lead_id", linked_lead_id)
+
+        # Apply pagination
+        query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
+
+        result = query.execute()
+
+        items = cast(list[dict[str, Any]], result.data or [])
+        total = result.count if result.count is not None else len(items)
+        has_more = (offset + page_size) < total
+
+        return {
+            "items": items,
+            "total": total,
+            "has_more": has_more,
+        }
+
     # =========================================================================
     # Private Helper Methods
     # =========================================================================
@@ -526,7 +580,7 @@ class DebriefService:
 
     async def _find_linked_lead(
         self,
-        user_id: str,
+        user_id: str,  # noqa: ARG002
         attendees: list[Any],  # noqa: ARG002
     ) -> str | None:
         """Find lead memory linked to meeting attendees.
