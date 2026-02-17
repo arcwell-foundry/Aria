@@ -14,6 +14,8 @@ import { AvatarContainer } from './AvatarContainer';
 import { TranscriptPanel } from './TranscriptPanel';
 import { DialogueHeader } from './DialogueHeader';
 import { BriefingControls } from './BriefingControls';
+import { VideoToastStack } from '@/components/video/VideoToastStack';
+import type { ToastItem } from '@/components/video/VideoContentToast';
 
 interface DialogueModeProps {
   sessionType?: 'chat' | 'briefing' | 'debrief';
@@ -47,6 +49,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const [isBriefingPlaying, setIsBriefingPlaying] = useState(true);
   const [briefingProgress, setBriefingProgress] = useState(0);
   const briefingProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -112,6 +115,23 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
   }, [isBriefing]);
 
+  const toastTitleForContent = useCallback((type: string, data: Record<string, unknown>): string => {
+    switch (type) {
+      case 'lead_card':
+        return `Lead: ${(data.company_name as string) || 'Company'}`;
+      case 'battle_card':
+        return `Battle Card: ${(data.competitor_name as string) || 'Competitor'}`;
+      case 'pipeline_chart':
+        return `Pipeline: ${(data.total as number) || 0} leads`;
+      case 'research_results':
+        return `Research: ${(data.query as string) || 'Results'}`;
+      case 'email_draft':
+        return `Draft: ${(data.subject as string) || 'Email'}`;
+      default:
+        return type.replace(/_/g, ' ');
+    }
+  }, []);
+
   // Wire up event listeners (same pattern as ARIAWorkspace + speaking events)
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
@@ -126,16 +146,28 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           suggestions: data.suggestions || [],
         });
         streamingIdRef.current = null;
-        return;
+      } else {
+        addMessage({
+          role: 'aria',
+          content: data.message,
+          rich_content: data.rich_content || [],
+          ui_commands: data.ui_commands || [],
+          suggestions: data.suggestions || [],
+        });
       }
 
-      addMessage({
-        role: 'aria',
-        content: data.message,
-        rich_content: data.rich_content || [],
-        ui_commands: data.ui_commands || [],
-        suggestions: data.suggestions || [],
-      });
+      // Create toast notifications for video content overlay
+      const richItems = data.rich_content || [];
+      const VIDEO_CONTENT_TYPES = ['lead_card', 'battle_card', 'pipeline_chart', 'research_results', 'email_draft'];
+      for (const item of richItems) {
+        if (VIDEO_CONTENT_TYPES.includes(item.type)) {
+          const toastId = `toast-${item.type}-${Date.now()}`;
+          setToasts((prev) => {
+            const next = [...prev, { id: toastId, contentType: item.type, title: toastTitleForContent(item.type, item.data) }];
+            return next.length > 3 ? next.slice(-3) : next;
+          });
+        }
+      }
 
       if (data.suggestions?.length) {
         setCurrentSuggestions(data.suggestions);
@@ -227,7 +259,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
     };
-  }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking]);
+  }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking, toastTitleForContent]);
 
   // Briefing control handlers
   // Ensure conversation_id exists before any send — prevents fragmentation
@@ -278,6 +310,18 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     });
   }, [ensureConversationId]);
 
+  const handleToastDismiss = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const handleToastClick = useCallback((id: string) => {
+    const transcriptEl = document.querySelector('[data-aria-id="transcript-panel"]');
+    if (transcriptEl) {
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   const handleSend = useCallback(
     (message: string) => {
       addMessage({
@@ -307,6 +351,11 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         {/* Left: Avatar */}
         <div className="flex-1 flex flex-col items-center justify-center relative">
           <AvatarContainer />
+          <VideoToastStack
+            toasts={toasts}
+            onDismiss={handleToastDismiss}
+            onToastClick={handleToastClick}
+          />
           {isBriefing && (
             <div className="absolute bottom-8 z-10">
               <BriefingControls
