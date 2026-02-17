@@ -7,7 +7,9 @@ import { SessionProvider } from "@/contexts/SessionContext";
 import { IntelPanelProvider } from "@/contexts/IntelPanelContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { ServiceHealthBanner } from "@/components/ServiceHealthBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
+import { useServiceHealth } from "@/hooks/useServiceHealth";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAuth } from "@/hooks/useAuth";
@@ -27,6 +29,7 @@ const queryClient = new QueryClient({
 function AppContent() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const serviceHealth = useServiceHealth(isAuthenticated);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
@@ -58,6 +61,7 @@ function AppContent() {
 
   return (
     <>
+      <ServiceHealthBanner health={serviceHealth} />
       <ThemeProvider>
         <SessionProvider isAuthenticated={isAuthenticated}>
           <IntelPanelProvider>

@@ -16,3 +16,4 @@ export { SortableHeader, type SortableHeaderProps, type SortDirection } from './
 export { AgentAvatar, type AgentAvatarProps } from './AgentAvatar';
 export { ProtectedRoute, type ProtectedRouteProps } from './ProtectedRoute';
 export { CommandPalette, type CommandPaletteProps } from './CommandPalette';
+export { ErrorBoundary, withErrorBoundary } from '../ErrorBoundary';
