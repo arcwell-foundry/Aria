@@ -7,6 +7,7 @@ from typing import Any
 from composio import Composio
 
 from src.core.config import settings
+from src.core.resilience import composio_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,7 @@ class ComposioOAuthClient:
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
         """
+        composio_circuit_breaker.check()
 
         def _execute() -> Any:
             return self._client.tools.execute(
@@ -219,7 +221,12 @@ class ComposioOAuthClient:
                 dangerously_skip_version_check=True,
             )
 
-        result = await asyncio.to_thread(_execute)
+        try:
+            result = await asyncio.to_thread(_execute)
+        except Exception:
+            composio_circuit_breaker.record_failure()
+            raise
+        composio_circuit_breaker.record_success()
         # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):
             return result

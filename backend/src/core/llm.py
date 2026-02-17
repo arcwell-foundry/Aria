@@ -6,8 +6,8 @@ from typing import Any
 
 import anthropic
 
-from src.core.circuit_breaker import CircuitBreaker
 from src.core.config import settings
+from src.core.resilience import claude_api_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_MAX_TOKENS = 4096
 
-_llm_circuit_breaker = CircuitBreaker("claude_api")
+# Use the enhanced circuit breaker from resilience module
+_llm_circuit_breaker = claude_api_circuit_breaker
 
 
 class LLMClient:
@@ -74,7 +75,7 @@ class LLMClient:
             },
         )
 
-        response = await _llm_circuit_breaker.call_async(self._client.messages.create, **kwargs)
+        response = await _llm_circuit_breaker.call(self._client.messages.create, **kwargs)
 
         # Extract text from response
         text_content: str = str(response.content[0].text)

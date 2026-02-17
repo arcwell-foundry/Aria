@@ -66,11 +66,11 @@ async def test_generate_response_includes_system_prompt() -> None:
 @pytest.mark.asyncio
 async def test_generate_response_opens_circuit_after_repeated_failures() -> None:
     """Test that repeated API failures open the circuit breaker."""
-    from src.core.circuit_breaker import CircuitBreakerOpen
+    from src.core.resilience import CircuitBreakerOpen
     from src.core.llm import LLMClient, _llm_circuit_breaker
 
     # Reset circuit breaker state from any previous tests
-    _llm_circuit_breaker.record_success()
+    _llm_circuit_breaker.reset()
 
     with patch("src.core.llm.anthropic.AsyncAnthropic") as mock_anthropic:
         mock_client = AsyncMock()
@@ -95,7 +95,7 @@ async def test_generate_response_opens_circuit_after_repeated_failures() -> None
             await client.generate_response(messages)
 
     # Reset for other tests
-    _llm_circuit_breaker.record_success()
+    _llm_circuit_breaker.reset()
 
 
 @pytest.mark.asyncio
@@ -104,7 +104,7 @@ async def test_generate_response_circuit_resets_on_success() -> None:
     from src.core.llm import LLMClient, _llm_circuit_breaker
 
     # Reset circuit breaker state from any previous tests
-    _llm_circuit_breaker.record_success()
+    _llm_circuit_breaker.reset()
 
     with patch("src.core.llm.anthropic.AsyncAnthropic") as mock_anthropic:
         mock_client = AsyncMock()
@@ -139,4 +139,4 @@ async def test_generate_response_circuit_resets_on_success() -> None:
         assert result == "recovered"
 
     # Reset for other tests
-    _llm_circuit_breaker.record_success()
+    _llm_circuit_breaker.reset()

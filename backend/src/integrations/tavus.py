@@ -6,6 +6,7 @@ from typing import Any, cast
 import httpx
 
 from src.core.config import settings
+from src.core.resilience import tavus_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,9 @@ class TavusClient:
             details = error.response.text
             message = f"Tavus API error: {status_code}"
 
+        # 5xx errors count as circuit breaker failures; 4xx are client errors
+        if status_code >= 500:
+            tavus_circuit_breaker.record_failure()
         logger.error(
             "Tavus API error: status=%s message=%s",
             status_code,
@@ -87,8 +91,26 @@ class TavusClient:
         Raises:
             TavusConnectionError: Always raised with connection details.
         """
+        tavus_circuit_breaker.record_failure()
         logger.error("Tavus connection error: %s", str(error))
         raise TavusConnectionError(f"Failed to connect to Tavus API: {error}") from error
+
+    def _record_success(self) -> None:
+        """Record a successful API call with the circuit breaker."""
+        tavus_circuit_breaker.record_success()
+
+    def _check_circuit(self) -> None:
+        """Check circuit breaker before making a call.
+
+        Raises:
+            TavusConnectionError: If the circuit breaker is open.
+        """
+        try:
+            tavus_circuit_breaker.check()
+        except Exception:
+            raise TavusConnectionError(
+                "Tavus API circuit breaker is open — service temporarily unavailable"
+            )
 
     # ====================
     # Conversation Methods
@@ -132,6 +154,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         payload: dict[str, Any] = {
             "persona_id": self.persona_id,
             "conversation_name": conversation_name,
@@ -175,6 +198,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -201,6 +225,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -210,6 +235,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -231,6 +257,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -239,6 +266,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -260,6 +288,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.delete(
@@ -268,6 +297,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -294,6 +324,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 params: dict[str, str | int] = {"limit": limit}
@@ -307,6 +338,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 data: dict[str, Any] = cast(dict[str, Any], response.json())
                 conversations = data.get("conversations")
                 return (
@@ -367,6 +399,7 @@ class TavusClient:
         if guardrails_id:
             payload["guardrails_id"] = guardrails_id
 
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -376,6 +409,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -401,6 +435,7 @@ class TavusClient:
         pid = persona_id or self.persona_id
         if not pid:
             raise ValueError("Persona ID is required")
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -409,6 +444,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -435,6 +471,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.patch(
@@ -444,6 +481,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -462,6 +500,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -470,6 +509,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 data: dict[str, Any] = cast(dict[str, Any], response.json())
                 personas = data.get("personas", data)
                 return cast(list[dict[str, Any]], personas) if isinstance(personas, list) else []
@@ -493,6 +533,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.delete(
@@ -501,6 +542,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -546,6 +588,7 @@ class TavusClient:
         if crawl:
             payload["crawl"] = crawl
 
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -555,6 +598,7 @@ class TavusClient:
                     timeout=60.0,  # Longer timeout for document uploads
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -576,6 +620,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -584,6 +629,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -602,6 +648,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -610,6 +657,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 data: dict[str, Any] = cast(dict[str, Any], response.json())
                 documents = data.get("documents", data)
                 return cast(list[dict[str, Any]], documents) if isinstance(documents, list) else []
@@ -633,6 +681,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.delete(
@@ -641,6 +690,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -669,6 +719,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -678,6 +729,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -699,6 +751,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -707,6 +760,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)
@@ -729,6 +783,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -737,6 +792,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 data: dict[str, Any] = cast(dict[str, Any], response.json())
                 replicas = data.get("replicas", data)
                 return cast(list[dict[str, Any]], replicas) if isinstance(replicas, list) else []
@@ -760,6 +816,7 @@ class TavusClient:
             TavusAPIError: If the API returns an error
             TavusConnectionError: If unable to connect to the API
         """
+        self._check_circuit()
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -768,6 +825,7 @@ class TavusClient:
                     timeout=30.0,
                 )
                 response.raise_for_status()
+                self._record_success()
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             self._handle_http_error(e)

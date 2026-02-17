@@ -41,6 +41,7 @@ from src.agents.capabilities.enrichment_providers.base import (
     PublicationResult,
 )
 from src.core.config import settings
+from src.core.resilience import exa_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +516,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             return []
 
         try:
+            exa_circuit_breaker.check()
+        except Exception:
+            logger.warning("Exa circuit breaker open — skipping instant search")
+            return []
+
+        try:
             async with httpx.AsyncClient(
                 timeout=5.0,
                 headers=self._get_headers(),
@@ -534,6 +541,8 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                         resp.status_code,
                         query[:100],
                     )
+                    if resp.status_code >= 500:
+                        exa_circuit_breaker.record_failure()
                     return []
 
                 data = resp.json()
@@ -547,10 +556,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                     )
                     for r in data.get("results", [])
                 ]
+                exa_circuit_breaker.record_success()
                 logger.info("Exa search_instant: returned %d results", len(results))
                 return results
 
         except Exception as e:
+            exa_circuit_breaker.record_failure()
             logger.error(
                 "Exa search_instant exception: query='%s' error='%s'",
                 query[:100],
@@ -585,6 +596,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             return []
 
         try:
+            exa_circuit_breaker.check()
+        except Exception:
+            logger.warning("Exa circuit breaker open — skipping fast search")
+            return []
+
+        try:
             payload: dict[str, Any] = {
                 "query": query,
                 "numResults": num_results,
@@ -607,6 +624,8 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                         resp.status_code,
                         query[:100],
                     )
+                    if resp.status_code >= 500:
+                        exa_circuit_breaker.record_failure()
                     return []
 
                 data = resp.json()
@@ -620,10 +639,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                     )
                     for r in data.get("results", [])
                 ]
+                exa_circuit_breaker.record_success()
                 logger.info("Exa search_fast: returned %d results", len(results))
                 return results
 
         except Exception as e:
+            exa_circuit_breaker.record_failure()
             logger.error(
                 "Exa search_fast exception: query='%s' error='%s'",
                 query[:100],
@@ -660,6 +681,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             return []
 
         try:
+            exa_circuit_breaker.check()
+        except Exception:
+            logger.warning("Exa circuit breaker open — skipping deep search")
+            return []
+
+        try:
             payload: dict[str, Any] = {
                 "query": query,
                 "numResults": num_results,
@@ -683,6 +710,8 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                         resp.status_code,
                         query[:100],
                     )
+                    if resp.status_code >= 500:
+                        exa_circuit_breaker.record_failure()
                     return []
 
                 data = resp.json()
@@ -697,10 +726,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                     )
                     for r in data.get("results", [])
                 ]
+                exa_circuit_breaker.record_success()
                 logger.info("Exa search_deep: returned %d results", len(results))
                 return results
 
         except Exception as e:
+            exa_circuit_breaker.record_failure()
             logger.error(
                 "Exa search_deep exception: query='%s' error='%s'",
                 query[:100],
@@ -1111,6 +1142,12 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             payload["excludeDomains"] = exclude_domains
 
         try:
+            exa_circuit_breaker.check()
+        except Exception:
+            logger.warning("Exa circuit breaker open — skipping search for '%s'", query[:100])
+            return []
+
+        try:
             resp = await client.post(
                 f"{self._base_url}/search",
                 json=payload,
@@ -1122,11 +1159,14 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                     query[:100],
                     resp.text[:200],
                 )
+                if resp.status_code >= 500:
+                    exa_circuit_breaker.record_failure()
                 return []
 
             data = resp.json()
             results = data.get("results", [])
 
+            exa_circuit_breaker.record_success()
             # Log AFTER success with result count
             logger.info(
                 "EXA: Got %d results for query='%s'",
@@ -1136,6 +1176,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             return results
 
         except Exception as exc:
+            exa_circuit_breaker.record_failure()
             # Log ERRORS with full context
             logger.error(
                 "EXA: Exception for query='%s' error='%s'",
