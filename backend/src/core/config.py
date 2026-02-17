@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Tavus (Phase 6)
     TAVUS_API_KEY: SecretStr | None = None
     TAVUS_PERSONA_ID: str = ""
+    TAVUS_REPLICA_ID: str = ""
+    TAVUS_CALLBACK_URL: str = ""
+    TAVUS_GUARDRAILS_ID: str = ""
 
     # Daily.co (Phase 6)
     DAILY_API_KEY: SecretStr | None = None
