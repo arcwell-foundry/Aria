@@ -186,6 +186,79 @@ ARIA_PERSONA_LAYERS: dict[str, Any] = {
             "Note any moments of strong positive engagement",
             "Detect signs of agreement or disagreement",
         ],
+        "perception_tool_prompt": (
+            "You have two perception tools available. "
+            "When you detect that the user appears confused, hesitant, or is struggling "
+            "to understand, call adapt_to_confusion with the observed indicator and the "
+            "current topic as a snake_case label (e.g. 'pipeline_review', 'battle_card'). "
+            "When you detect that the user is disengaged, distracted, or losing interest, "
+            "call note_engagement_drop with the type of disengagement and the current "
+            "topic as a snake_case label. Always classify the current topic before calling "
+            "either tool."
+        ),
+        "perception_tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "adapt_to_confusion",
+                    "description": (
+                        "Called when the user shows signs of confusion or hesitation. "
+                        "ARIA will adapt its explanation style, simplify language, or "
+                        "offer to re-explain the current topic."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confusion_indicator": {
+                                "type": "string",
+                                "description": (
+                                    "What indicates the user is confused, e.g. "
+                                    "'furrowed brow', 'repeated question', 'long pause'"
+                                ),
+                            },
+                            "topic": {
+                                "type": "string",
+                                "description": (
+                                    "The current topic as a snake_case label, e.g. "
+                                    "'pipeline_review', 'battle_card', 'goal_planning'"
+                                ),
+                            },
+                        },
+                        "required": ["confusion_indicator", "topic"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "note_engagement_drop",
+                    "description": (
+                        "Called when the user shows signs of disengagement or distraction. "
+                        "ARIA will adjust pacing, switch topics, or re-engage the user."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "disengagement_type": {
+                                "type": "string",
+                                "description": (
+                                    "The type of disengagement observed, e.g. "
+                                    "'looking_away', 'fidgeting', 'monotone_responses'"
+                                ),
+                            },
+                            "topic": {
+                                "type": "string",
+                                "description": (
+                                    "The current topic as a snake_case label, e.g. "
+                                    "'pipeline_review', 'battle_card', 'goal_planning'"
+                                ),
+                            },
+                        },
+                        "required": ["disengagement_type", "topic"],
+                    },
+                },
+            },
+        ],
     },
     "conversational_flow": {
         "turn_detection_model": "sparrow-1",
