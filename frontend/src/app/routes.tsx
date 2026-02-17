@@ -15,6 +15,7 @@ import {
   OnboardingPage,
   VideoPage,
   DebriefPage,
+  DebriefsListPage,
 } from '@/components/pages';
 import { DialogueMode } from '@/components/avatar';
 
@@ -51,6 +52,7 @@ export function AppRoutes() {
         <Route path="intelligence/battle-cards/:competitorId" element={<IntelligencePage />} />
         <Route path="communications" element={<CommunicationsPage />} />
         <Route path="communications/drafts/:draftId" element={<CommunicationsPage />} />
+        <Route path="debriefs" element={<DebriefsListPage />} />
         <Route path="debriefs/new" element={<DebriefPage />} />
         <Route path="actions" element={<ActionsPage />} />
         <Route path="actions/goals/:goalId" element={<ActionsPage />} />

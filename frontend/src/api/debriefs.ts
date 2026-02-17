@@ -11,6 +11,38 @@ import { apiClient } from "./client";
 
 export type DebriefOutcome = "positive" | "neutral" | "concern";
 
+// List item type for the debriefs list view
+export interface DebriefListItem {
+  id: string;
+  meeting_id: string;
+  meeting_title: string | null;
+  meeting_time: string | null;
+  outcome: DebriefOutcome | null;
+  action_items_count: number;
+  linked_lead_id: string | null;
+  linked_lead_name: string | null;
+  status: "draft" | "complete";
+  created_at: string;
+}
+
+// Paginated list response
+export interface DebriefListResponse {
+  items: DebriefListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+// Pending debrief (meeting without debrief)
+export interface PendingDebrief {
+  meeting_id: string;
+  title: string;
+  start_time: string;
+  lead_name: string | null;
+  attendees: string[];
+}
+
 export interface Debrief {
   id: string;
   meeting_id: string;
@@ -78,5 +110,36 @@ export async function updateDebrief(
   data: UpdateDebriefRequest
 ): Promise<Debrief> {
   const response = await apiClient.put<Debrief>(`/debriefs/${debriefId}`, data);
+  return response.data;
+}
+
+/**
+ * List all debriefs with optional filtering and pagination.
+ */
+export async function listDebriefs(
+  page = 1,
+  pageSize = 20,
+  startDate?: string,
+  endDate?: string,
+  search?: string
+): Promise<DebriefListResponse> {
+  const params = new URLSearchParams();
+  params.append("page", page.toString());
+  params.append("page_size", pageSize.toString());
+  if (startDate) params.append("start_date", startDate);
+  if (endDate) params.append("end_date", endDate);
+  if (search) params.append("search", search);
+
+  const response = await apiClient.get<DebriefListResponse>(
+    `/debriefs?${params.toString()}`
+  );
+  return response.data;
+}
+
+/**
+ * Get meetings that need debriefs (pending).
+ */
+export async function getPendingDebriefs(): Promise<PendingDebrief[]> {
+  const response = await apiClient.get<PendingDebrief[]>("/debriefs/pending");
   return response.data;
 }

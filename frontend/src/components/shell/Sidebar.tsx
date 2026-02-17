@@ -22,6 +22,7 @@ import {
   ListChecks,
   BarChart3,
   Settings,
+  FileText,
 } from 'lucide-react';
 import {
   useNavigationStore,
@@ -70,6 +71,7 @@ const PRIMARY_NAV: NavEntry[] = [
     icon: Mail,
     route: '/communications',
   },
+  { key: 'debriefs', label: 'Debriefs', icon: FileText, route: '/debriefs' },
   { key: 'actions', label: 'Actions', icon: Zap, route: '/actions' },
   { key: 'activity', label: 'Activity', icon: ListChecks, route: '/activity' },
   { key: 'analytics', label: 'Analytics', icon: BarChart3, route: '/analytics' },

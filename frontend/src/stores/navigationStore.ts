@@ -16,6 +16,7 @@ export type SidebarItem =
   | 'pipeline'
   | 'intelligence'
   | 'communications'
+  | 'debriefs'
   | 'actions'
   | 'activity'
   | 'analytics'
