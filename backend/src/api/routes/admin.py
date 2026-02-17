@@ -868,3 +868,27 @@ async def run_ambient_gaps(
     from src.services.scheduler import run_ambient_gaps_admin
 
     return await run_ambient_gaps_admin()
+
+
+# --- Performance Stats (observability) ---
+
+
+@router.get(
+    "/perf-stats",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+)
+async def get_perf_stats(
+    _current_user: AdminUser,
+) -> dict[str, Any]:
+    """Return p50/p95/p99 response times by endpoint for the last 1000 requests.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        Performance summary with global and per-endpoint percentiles.
+    """
+    from src.middleware.performance import perf_stats
+
+    return perf_stats.summarize()

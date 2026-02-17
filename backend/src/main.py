@@ -81,6 +81,7 @@ from src.api.routes.companion import user_router as companion_user_router  # US-
 from src.core.error_tracker import ErrorTracker
 from src.core.exceptions import ARIAException, RateLimitError
 from src.core.security import setup_security
+from src.middleware.performance import RequestIDMiddleware, RequestTimingMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -175,6 +176,11 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 logger.info("CORS allowed origins: %s", CORS_ORIGINS)
+
+# Performance middleware — timing wraps request-ID so ID is available when timing logs.
+# In Starlette, last-added = outermost, so add timing first, then ID.
+app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 
 # Security headers middleware (US-932) — added first so it's innermost
 setup_security(app)
