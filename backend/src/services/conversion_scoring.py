@@ -473,6 +473,9 @@ class ConversionScoringService:
     async def _calculate_sentiment_trend(self, lead_id: str, _now: datetime) -> float:
         """Calculate normalized sentiment trend over 30 days.
 
+        Blends stakeholder sentiment with video session perception data when
+        available. Video engagement scores are weighted at 30% when present.
+
         Note: Currently calculates current state only. Historical sentiment
         tracking would require a sentiment_history table for true trend analysis.
         _now parameter reserved for future historical comparison.
@@ -490,15 +493,42 @@ class ConversionScoringService:
         stakeholders = current_result.data or []
 
         if not stakeholders:
-            return 0.5
+            stakeholder_score = 0.5
+        else:
+            positive = sum(1 for s in stakeholders if s.get("sentiment") == "positive")
+            negative = sum(1 for s in stakeholders if s.get("sentiment") == "negative")
+            total = len(stakeholders)
 
-        positive = sum(1 for s in stakeholders if s.get("sentiment") == "positive")
-        negative = sum(1 for s in stakeholders if s.get("sentiment") == "negative")
-        total = len(stakeholders)
+            # Net sentiment score (-1 to +1), then normalize to 0-1
+            net_sentiment = (positive - negative) / total if total > 0 else 0
+            stakeholder_score = (net_sentiment + 1) / 2
 
-        # Net sentiment score (-1 to +1), then normalize to 0-1
-        net_sentiment = (positive - negative) / total if total > 0 else 0
-        return (net_sentiment + 1) / 2
+        # Fetch recent video session engagement for this lead
+        video_result = (
+            self._db.table("video_sessions")
+            .select("perception_analysis")
+            .eq("lead_id", lead_id)
+            .eq("status", "ended")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        video_sessions = video_result.data or []
+        engagement_scores = [
+            session["perception_analysis"]["engagement_score"]
+            for session in video_sessions
+            if isinstance(session.get("perception_analysis"), dict)
+            and isinstance(
+                session["perception_analysis"].get("engagement_score"), (int, float)
+            )
+        ]
+
+        if engagement_scores:
+            avg_video_engagement = sum(engagement_scores) / len(engagement_scores)
+            return stakeholder_score * 0.7 + avg_video_engagement * 0.3
+
+        return stakeholder_score
 
     def _calculate_stage_velocity(self, lead: dict[str, Any]) -> float:
         """Calculate normalized stage velocity (time in stage vs expected)."""
