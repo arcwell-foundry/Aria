@@ -12,6 +12,7 @@ Flow:
 5. Frontend echoes result back via ``conversation.echo``
 """
 
+import contextlib
 import json
 import logging
 import uuid
@@ -263,52 +264,117 @@ class VideoToolExecutor:
             .execute()
         )
 
-        if not result.data:
-            return ToolResult(
-                spoken_text=f"I don't have a battle card for {competitor_name} yet. Would you like me to create one?"
+        if result.data:
+            card = result.data[0]
+            return self._format_battle_card(card, competitor_name)
+
+        # No card in DB — generate one via Strategist
+        try:
+            from src.agents import StrategistAgent
+
+            agent = StrategistAgent(llm_client=self.llm, user_id=self._user_id)
+            analysis = await agent._call_tool(
+                "analyze_account",
+                goal={"title": f"Competitive analysis of {competitor_name}", "type": "research"},
+                context={"target_company": competitor_name},
             )
 
-        card = result.data[0]
+            if not analysis:
+                return ToolResult(
+                    spoken_text=(
+                        f"I don't have a battle card for {competitor_name} yet "
+                        "and couldn't generate one right now. Would you like me to try again?"
+                    )
+                )
+
+            # Extract competitive data
+            comp_analysis = analysis.get("competitive_analysis", {})
+            competitors = comp_analysis.get("competitors", [])
+            target: dict[str, Any] = next(
+                (c for c in competitors if competitor_name.lower() in c.get("name", "").lower()),
+                {},
+            )
+
+            strengths = target.get("strengths", analysis.get("challenges", []))
+            weaknesses = target.get("weaknesses", analysis.get("opportunities", []))
+            recommendation = analysis.get("recommendation", "")
+
+            # Cache the generated card in DB (best-effort)
+            try:
+                self.db.table("battle_cards").insert({
+                    "user_id": self._user_id,
+                    "competitor_name": competitor_name,
+                    "strengths": json.dumps(strengths),
+                    "weaknesses": json.dumps(weaknesses),
+                    "overview": recommendation,
+                    "update_source": "strategist_agent",
+                }).execute()
+            except Exception:
+                logger.debug("Failed to cache generated battle card", exc_info=True)
+
+            # Build response
+            card = {
+                "competitor_name": competitor_name,
+                "strengths": strengths,
+                "weaknesses": weaknesses,
+                "win_strategy": recommendation,
+                "our_differentiators": analysis.get("opportunities", []),
+            }
+            return self._format_battle_card(card, competitor_name)
+
+        except Exception:
+            logger.debug("Strategist battle card generation failed", exc_info=True)
+            return ToolResult(
+                spoken_text=(
+                    f"I don't have a battle card for {competitor_name} yet. "
+                    "Would you like me to create one?"
+                )
+            )
+
+    def _format_battle_card(self, card: dict[str, Any], competitor_name: str) -> ToolResult:
+        """Format a battle card dict into a ToolResult with spoken text and rich content."""
         name = card.get("competitor_name", competitor_name)
         parts = [f"Here's the battle card for {name}."]
 
         strengths = card.get("strengths")
         if strengths:
-            s = strengths if isinstance(strengths, str) else ", ".join(strengths[:3])
+            if isinstance(strengths, str):
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
+                    strengths = json.loads(strengths)
+            s = strengths if isinstance(strengths, str) else ", ".join(str(x) for x in strengths[:3])
             parts.append(f"Their key strengths are: {s}.")
 
         weaknesses = card.get("weaknesses")
         if weaknesses:
-            w = weaknesses if isinstance(weaknesses, str) else ", ".join(weaknesses[:3])
+            if isinstance(weaknesses, str):
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
+                    weaknesses = json.loads(weaknesses)
+            w = weaknesses if isinstance(weaknesses, str) else ", ".join(str(x) for x in weaknesses[:3])
             parts.append(f"Their weaknesses include: {w}.")
 
         differentiators = card.get("our_differentiators") or card.get("differentiators")
         if differentiators:
-            d = differentiators if isinstance(differentiators, str) else ", ".join(differentiators[:3])
+            d = differentiators if isinstance(differentiators, str) else ", ".join(str(x) for x in differentiators[:3])
             parts.append(f"Our key differentiators: {d}.")
 
-        win_strategy = card.get("win_strategy")
+        win_strategy = card.get("win_strategy") or card.get("overview")
         if win_strategy:
-            parts.append(f"Recommended win strategy: {win_strategy[:150]}.")
+            parts.append(f"Recommended win strategy: {str(win_strategy)[:150]}.")
 
         spoken_text = " ".join(parts)
 
-        # Build comparison rows from available data
         rows: list[dict[str, str]] = []
-        if strengths:
-            s_list = [strengths] if isinstance(strengths, str) else strengths[:3]
-            for s_item in s_list:
-                rows.append({"dimension": "Strength", "competitor": s_item, "us": ""})
-        if weaknesses:
-            w_list = [weaknesses] if isinstance(weaknesses, str) else weaknesses[:3]
-            for w_item in w_list:
-                rows.append({"dimension": "Weakness", "competitor": w_item, "us": ""})
-        if differentiators:
-            d_list = [differentiators] if isinstance(differentiators, str) else differentiators[:3]
-            for d_item in d_list:
-                rows.append({"dimension": "Differentiator", "competitor": "", "us": d_item})
+        if strengths and not isinstance(strengths, str):
+            for s_item in strengths[:3]:
+                rows.append({"dimension": "Strength", "competitor": str(s_item), "us": ""})
+        if weaknesses and not isinstance(weaknesses, str):
+            for w_item in weaknesses[:3]:
+                rows.append({"dimension": "Weakness", "competitor": str(w_item), "us": ""})
+        if differentiators and not isinstance(differentiators, str):
+            for d_item in differentiators[:3]:
+                rows.append({"dimension": "Differentiator", "competitor": "", "us": str(d_item)})
         if win_strategy:
-            rows.append({"dimension": "Win Strategy", "competitor": "", "us": win_strategy[:150]})
+            rows.append({"dimension": "Win Strategy", "competitor": "", "us": str(win_strategy)[:150]})
 
         rich_content: dict[str, Any] = {
             "type": "battle_card",

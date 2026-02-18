@@ -154,3 +154,43 @@ async def test_draft_email_graceful_fallback_on_digital_twin_failure():
             call_kwargs = mock_agent._call_tool.call_args
             style_arg = call_kwargs.kwargs.get("style", {})
             assert style_arg == {}
+
+
+@pytest.mark.asyncio
+async def test_get_battle_card_generates_via_strategist_when_not_in_db():
+    """When no battle card exists in DB, Strategist should generate one."""
+    from src.integrations.tavus_tool_executor import VideoToolExecutor
+
+    executor = VideoToolExecutor(user_id="user-123")
+    executor._llm = MagicMock()
+
+    # Mock DB — battle_cards returns empty, then insert succeeds
+    mock_db = MagicMock()
+    # First call: battle_cards select returns empty
+    mock_select = MagicMock()
+    mock_select.data = []
+    mock_db.table.return_value.select.return_value.eq.return_value.ilike.return_value.limit.return_value.execute.return_value = mock_select
+    # Insert call
+    mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": "card-1"}])
+    executor._db = mock_db
+
+    with patch("src.agents.StrategistAgent") as MockStrat:
+        mock_agent = AsyncMock()
+        mock_agent._call_tool.return_value = {
+            "target_company": "Catalent",
+            "opportunities": ["Strong mAb portfolio"],
+            "challenges": ["High pricing"],
+            "recommendation": "Lead with cost efficiency",
+            "competitive_analysis": {
+                "competitors": [{"name": "Catalent", "strengths": ["Scale"], "weaknesses": ["Slow"]}],
+            },
+        }
+        MockStrat.return_value = mock_agent
+
+        result = await executor._handle_get_battle_card({"competitor_name": "Catalent"})
+
+        # Strategist should have been invoked
+        mock_agent._call_tool.assert_called_once()
+        assert "Catalent" in result.spoken_text
+        assert result.rich_content is not None
+        assert result.rich_content["type"] == "battle_card"
