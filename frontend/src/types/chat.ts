@@ -78,3 +78,22 @@ export interface WSEnvelope {
   type: string;
   payload: unknown;
 }
+
+// === Video Session Summary ===
+
+export interface VideoSessionSummaryData {
+  session_id: string;
+  duration_seconds: number;
+  is_audio_only: boolean;
+  summary: string;
+  topics: string[];
+  action_items: Array<{
+    text: string;
+    is_tracked: boolean;
+  }>;
+  transcript_entries: Array<{
+    speaker: 'aria' | 'user';
+    text: string;
+    timestamp: string;
+  }>;
+}
