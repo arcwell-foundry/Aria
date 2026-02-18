@@ -14,8 +14,10 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, AgentStatus, BaseAgent
+from src.core.capability_tokens import DelegationCapabilityToken
 
 if TYPE_CHECKING:
+    from src.core.delegation_trace import DelegationTraceService
     from src.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,7 @@ class AgentOrchestrator:
         user_id: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         max_concurrent_agents: int = DEFAULT_MAX_CONCURRENT_AGENTS,
+        delegation_trace_service: "DelegationTraceService | None" = None,
     ) -> None:
         """Initialize the orchestrator.
 
@@ -95,6 +98,7 @@ class AgentOrchestrator:
             user_id: ID of the user this orchestrator is working for.
             max_tokens: Maximum total tokens across all agent executions.
             max_concurrent_agents: Maximum agents to run in parallel.
+            delegation_trace_service: Optional DelegationTraceService for audit trail.
         """
         self.llm = llm_client
         self.user_id = user_id
@@ -102,6 +106,7 @@ class AgentOrchestrator:
         self.max_concurrent_agents = max_concurrent_agents
         self.active_agents: dict[str, BaseAgent] = {}
         self._total_tokens_used = 0
+        self._trace_service = delegation_trace_service
 
     def spawn_agent(self, agent_class: type[BaseAgent]) -> str:
         """Spawn an agent and return its ID.
@@ -229,11 +234,66 @@ class AgentOrchestrator:
                 )
             )
 
+        # --- DCT validation (fail-open) ---
+        dct_dict = task.get("capability_token")
+        if dct_dict:
+            try:
+                dct = DelegationCapabilityToken.from_dict(dct_dict)
+                if not dct.is_valid():
+                    logger.warning("DCT expired for agent %s", agent.name)
+            except Exception as e:
+                logger.warning("DCT validation failed: %s", e)
+
+        # --- Start delegation trace ---
+        trace_id: str | None = None
+        if self._trace_service:
+            try:
+                trace_id = await self._trace_service.start_trace(
+                    user_id=self.user_id,
+                    goal_id=task.get("goal_id"),
+                    parent_trace_id=task.get("parent_trace_id"),
+                    delegator="orchestrator",
+                    delegatee=agent.name,
+                    task_description=task.get(
+                        "description",
+                        task.get("title", f"{agent.name} task"),
+                    ),
+                    task_characteristics=task.get("task_characteristics"),
+                    capability_token=dct_dict,
+                    inputs={
+                        k: v
+                        for k, v in task.items()
+                        if k not in ("capability_token", "task_characteristics")
+                    },
+                )
+            except Exception as e:
+                logger.warning("Failed to start delegation trace: %s", e)
+
         try:
             result = await agent.run(task)
 
             # Accumulate token usage
             self._total_tokens_used += result.tokens_used
+
+            # --- Complete delegation trace ---
+            if self._trace_service and trace_id:
+                try:
+                    await self._trace_service.complete_trace(
+                        trace_id=trace_id,
+                        outputs=(
+                            result.data
+                            if result.data
+                            else {"summary": str(result)[:500]}
+                        ),
+                        cost_usd=0.0,
+                        status="completed" if result.success else "failed",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to complete delegation trace %s: %s",
+                        trace_id,
+                        e,
+                    )
 
             # Report complete or failed
             if on_progress is not None:
@@ -257,6 +317,18 @@ class AgentOrchestrator:
             return result
 
         except Exception as e:
+            # --- Fail delegation trace ---
+            if self._trace_service and trace_id:
+                try:
+                    await self._trace_service.fail_trace(
+                        trace_id=trace_id,
+                        error_message=str(e)[:500],
+                    )
+                except Exception as trace_err:
+                    logger.warning(
+                        "Failed to record trace failure: %s", trace_err
+                    )
+
             # Report failure on exception
             if on_progress is not None:
                 on_progress(

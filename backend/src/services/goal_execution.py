@@ -29,6 +29,19 @@ from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
+_NOT_SET = object()  # Sentinel for lazy initialization
+
+_AGENT_TO_CATEGORY: dict[str, str] = {
+    "hunter": "lead_discovery",
+    "analyst": "research",
+    "strategist": "strategy",
+    "scribe": "email_draft",
+    "operator": "crm_action",
+    "scout": "market_monitoring",
+    "verifier": "verification",
+    "executor": "browser_automation",
+}
+
 
 class GoalExecutionService:
     """Executes agent goals by running LLM-powered analyses.
@@ -47,6 +60,32 @@ class GoalExecutionService:
         self._activity = ActivityService()
         self._dynamic_agents: dict[str, type] = {}
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
+        self._trust_service: Any = _NOT_SET
+        self._trace_service: Any = _NOT_SET
+
+    def _get_trust_service(self) -> Any:
+        """Lazily initialize TrustCalibrationService."""
+        if self._trust_service is _NOT_SET:
+            try:
+                from src.core.trust import get_trust_calibration_service
+
+                self._trust_service = get_trust_calibration_service()
+            except Exception as e:
+                logger.warning("Failed to initialize TrustCalibrationService: %s", e)
+                self._trust_service = None
+        return self._trust_service
+
+    def _get_trace_service(self) -> Any:
+        """Lazily initialize DelegationTraceService."""
+        if self._trace_service is _NOT_SET:
+            try:
+                from src.core.delegation_trace import DelegationTraceService
+
+                self._trace_service = DelegationTraceService()
+            except Exception as e:
+                logger.warning("Failed to initialize DelegationTraceService: %s", e)
+                self._trace_service = None
+        return self._trace_service
 
     def register_dynamic_agent(self, agent_type: str, agent_class: type) -> None:
         """Register a dynamically created agent class for task routing.
@@ -522,6 +561,28 @@ class GoalExecutionService:
             },
         )
 
+        # --- Start delegation trace ---
+        trace_id: str | None = None
+        trace_svc = self._get_trace_service()
+        if trace_svc:
+            try:
+                trace_id = await trace_svc.start_trace(
+                    user_id=user_id,
+                    goal_id=goal.get("id"),
+                    delegator="goal_execution",
+                    delegatee=agent_type,
+                    task_description=(
+                        f"{agent_type.title()} analysis for: "
+                        f"{goal.get('title', '')}"
+                    ),
+                    inputs={
+                        "goal_title": goal.get("title"),
+                        "agent_type": agent_type,
+                    },
+                )
+            except Exception as e:
+                logger.warning("Failed to start delegation trace: %s", e)
+
         # Step 1: Try skill-aware execution
         skill_result = await self._try_skill_execution(
             user_id=user_id,
@@ -567,6 +628,27 @@ class GoalExecutionService:
                 content=skill_result,
                 goal_id=goal["id"],
             )
+
+            # Trust update on success (skill-aware path)
+            trust_svc = self._get_trust_service()
+            if trust_svc:
+                try:
+                    category = _AGENT_TO_CATEGORY.get(agent_type, "general")
+                    await trust_svc.update_on_success(user_id, category)
+                except Exception as te:
+                    logger.warning("Trust update on success failed: %s", te)
+
+            # Complete delegation trace (skill-aware path)
+            if trace_svc and trace_id:
+                try:
+                    await trace_svc.complete_trace(
+                        trace_id=trace_id,
+                        outputs={"agent_type": agent_type, "success": True},
+                        cost_usd=0.0,
+                        status="completed",
+                    )
+                except Exception as te:
+                    logger.warning("Failed to complete delegation trace: %s", te)
 
             return {
                 "agent_type": agent_type,
@@ -684,6 +766,27 @@ class GoalExecutionService:
                 goal_id=goal["id"],
             )
 
+            # Trust update on success (prompt-based path)
+            trust_svc = self._get_trust_service()
+            if trust_svc:
+                try:
+                    category = _AGENT_TO_CATEGORY.get(agent_type, "general")
+                    await trust_svc.update_on_success(user_id, category)
+                except Exception as te:
+                    logger.warning("Trust update on success failed: %s", te)
+
+            # Complete delegation trace (prompt-based path)
+            if trace_svc and trace_id:
+                try:
+                    await trace_svc.complete_trace(
+                        trace_id=trace_id,
+                        outputs={"agent_type": agent_type, "success": True},
+                        cost_usd=0.0,
+                        status="completed",
+                    )
+                except Exception as te:
+                    logger.warning("Failed to complete delegation trace: %s", te)
+
             return {
                 "agent_type": agent_type,
                 "success": True,
@@ -700,6 +803,26 @@ class GoalExecutionService:
                     "error": str(e),
                 },
             )
+
+            # Trust update on failure
+            trust_svc = self._get_trust_service()
+            if trust_svc:
+                try:
+                    category = _AGENT_TO_CATEGORY.get(agent_type, "general")
+                    await trust_svc.update_on_failure(user_id, category)
+                except Exception as te:
+                    logger.warning("Trust update on failure failed: %s", te)
+
+            # Fail delegation trace
+            if trace_svc and trace_id:
+                try:
+                    await trace_svc.fail_trace(
+                        trace_id=trace_id,
+                        error_message=str(e)[:500],
+                    )
+                except Exception as te:
+                    logger.warning("Failed to record trace failure: %s", te)
+
             return {
                 "agent_type": agent_type,
                 "success": False,

@@ -33,7 +33,27 @@ from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
 from src.services.extraction import ExtractionService
 
+from src.core.cognitive_friction import (
+    FRICTION_CHALLENGE,
+    FRICTION_FLAG,
+    FRICTION_REFUSE,
+    FrictionDecision,
+    get_cognitive_friction_engine,
+)
+
 logger = logging.getLogger(__name__)
+
+# Agent-to-trust-category mapping for autonomy upgrade checks
+_AGENT_TO_CATEGORY: dict[str, str] = {
+    "hunter": "lead_discovery",
+    "analyst": "research",
+    "strategist": "strategy",
+    "scribe": "email_draft",
+    "operator": "crm_action",
+    "scout": "market_monitoring",
+    "verifier": "verification",
+    "executor": "browser_automation",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +759,32 @@ class ChatService:
         # Companion orchestrator — lazily initialized on first use
         self._companion_orchestrator: Any = None
 
+        # Cognitive Friction Engine — lazily initialized
+        self._friction_engine: Any = None
+
+        # Trust Calibration Service — lazily initialized
+        self._trust_service: Any = None
+
+    def _get_friction_engine(self) -> Any:
+        """Lazily initialize CognitiveFrictionEngine."""
+        if self._friction_engine is None:
+            try:
+                self._friction_engine = get_cognitive_friction_engine()
+            except Exception as e:
+                logger.warning("Failed to initialize CognitiveFrictionEngine: %s", e)
+        return self._friction_engine
+
+    def _get_trust_service(self) -> Any:
+        """Lazily initialize TrustCalibrationService."""
+        if self._trust_service is None:
+            try:
+                from src.core.trust import get_trust_calibration_service
+
+                self._trust_service = get_trust_calibration_service()
+            except Exception as e:
+                logger.warning("Failed to initialize TrustCalibrationService: %s", e)
+        return self._trust_service
+
     async def _get_skill_registry(self) -> Any:
         """Lazily initialize and return the SkillRegistry.
 
@@ -1348,6 +1394,80 @@ class ChatService:
         )
         proactive_ms = (time.perf_counter() - proactive_start) * 1000
 
+        # --- Cognitive Friction: evaluate before any action routing ---
+        friction_ms = 0.0
+        friction_decision: FrictionDecision | None = None
+        try:
+            friction_start = time.perf_counter()
+            friction_engine = self._get_friction_engine()
+            if friction_engine:
+                friction_decision = await friction_engine.evaluate(
+                    user_id=user_id,
+                    user_request=message,
+                    task_characteristics=None,
+                    user_context=None,
+                )
+            friction_ms = (time.perf_counter() - friction_start) * 1000
+        except Exception as e:
+            logger.warning("Cognitive friction evaluation failed (fail-open): %s", e)
+
+        # Early return on challenge or refuse
+        if friction_decision and friction_decision.level in (
+            FRICTION_CHALLENGE,
+            FRICTION_REFUSE,
+        ):
+            pushback_msg = (
+                friction_decision.user_message
+                or "I need to pause on that request."
+            )
+            working_memory.add_message("assistant", pushback_msg)
+            await self.persist_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message=message,
+                assistant_message=pushback_msg,
+                assistant_metadata={"friction_level": friction_decision.level},
+                conversation_context=conversation_messages[-2:],
+            )
+            return {
+                "message": pushback_msg,
+                "citations": [],
+                "conversation_id": conversation_id,
+                "rich_content": [
+                    {
+                        "type": "friction_decision",
+                        "data": {
+                            "level": friction_decision.level,
+                            "proceed_if_confirmed": friction_decision.proceed_if_confirmed,
+                        },
+                    }
+                ],
+                "ui_commands": [],
+                "suggestions": (
+                    ["Confirm and proceed", "Let me rethink"]
+                    if friction_decision.proceed_if_confirmed
+                    else ["Understood", "Tell me more"]
+                ),
+                "timing": {
+                    "memory_query_ms": round(memory_ms, 2),
+                    "proactive_query_ms": round(proactive_ms, 2),
+                    "web_grounding_ms": round(web_grounding_ms, 2),
+                    "email_check_ms": round(email_check_ms, 2),
+                    "friction_ms": round(friction_ms, 2),
+                    "skill_detection_ms": 0,
+                    "llm_response_ms": 0,
+                    "total_ms": round(
+                        (time.perf_counter() - total_start) * 1000, 2
+                    ),
+                },
+                "cognitive_load": {
+                    "level": load_state.level.value,
+                    "score": round(load_state.score, 3),
+                    "recommendation": load_state.recommendation,
+                },
+                "proactive_insights": [],
+            }
+
         # Build companion context (replaces personality calibration + style guidelines)
         companion_ctx = None
         try:
@@ -1396,6 +1516,18 @@ class ChatService:
                 priming_context,
                 web_context,
                 companion_context=companion_ctx,
+            )
+
+        # Inject friction flag note into system prompt if flagged
+        if (
+            friction_decision
+            and friction_decision.level == FRICTION_FLAG
+            and friction_decision.user_message
+        ):
+            system_prompt += (
+                f"\n\n## Cognitive Friction Note\n"
+                f"Surface this concern naturally alongside your response: "
+                f"{friction_decision.user_message}"
             )
 
         logger.info(
@@ -1714,6 +1846,7 @@ class ChatService:
                 "proactive_query_ms": round(proactive_ms, 2),
                 "web_grounding_ms": round(web_grounding_ms, 2),
                 "email_check_ms": round(email_check_ms, 2),
+                "friction_ms": round(friction_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
                 "whatif_simulation_ms": round(whatif_ms, 2),
                 "temporal_analysis_ms": round(temporal_ms, 2),
@@ -1737,6 +1870,24 @@ class ChatService:
                 "steps_completed": skill_result.get("steps_completed", 0),
                 "steps_failed": skill_result.get("steps_failed", 0),
             }
+
+        # Check if ARIA can request autonomy upgrade after successful skill execution
+        if skill_result and skill_result.get("status") == "completed":
+            try:
+                trust_svc = self._get_trust_service()
+                if trust_svc:
+                    skill_agent = skill_result.get("agent_type", "general")
+                    category = _AGENT_TO_CATEGORY.get(skill_agent, "general")
+                    can_upgrade = await trust_svc.can_request_autonomy_upgrade(
+                        user_id, category
+                    )
+                    if can_upgrade:
+                        autonomy_request = await trust_svc.format_autonomy_request(
+                            user_id, category
+                        )
+                        result["autonomy_request"] = autonomy_request
+            except Exception as e:
+                logger.warning("Autonomy upgrade check failed: %s", e)
 
         return result
 
