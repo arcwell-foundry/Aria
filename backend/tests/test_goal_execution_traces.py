@@ -1,7 +1,8 @@
 """Tests for DelegationTrace wiring in GoalExecutionService."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 def _make_goal_execution_service():
@@ -18,9 +19,16 @@ def _make_goal_execution_service():
     svc._active_tasks = {}
     svc._trust_service = None
     svc._trace_service = None
+    svc._adaptive_coordinator = None
     svc._store_execution = AsyncMock()
     svc._submit_actions_to_queue = AsyncMock()
     svc._try_skill_execution = AsyncMock(return_value=None)
+
+    # Skip verification (these tests focus on traces, not verification)
+    async def _passthrough_verify(**kwargs):
+        return (kwargs["content"], None, False)
+
+    svc._verify_and_adapt = _passthrough_verify
     # Mock prompt builders to avoid needing real context data
     svc._build_analyst_prompt = MagicMock(return_value="analyze this")
     svc._build_scout_prompt = MagicMock(return_value="scout this")

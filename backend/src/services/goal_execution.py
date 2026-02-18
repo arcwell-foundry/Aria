@@ -27,6 +27,17 @@ from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
 from src.services.activity_service import ActivityService
 
+try:
+    from src.agents.verifier import (
+        VERIFICATION_POLICIES,
+        VerificationResult,
+        VerifierAgent,
+    )
+except ImportError:
+    VerifierAgent = None  # type: ignore[assignment,misc]
+    VERIFICATION_POLICIES = {}  # type: ignore[assignment]
+    VerificationResult = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 _NOT_SET = object()  # Sentinel for lazy initialization
@@ -40,6 +51,15 @@ _AGENT_TO_CATEGORY: dict[str, str] = {
     "scout": "market_monitoring",
     "verifier": "verification",
     "executor": "browser_automation",
+}
+
+_AGENT_TO_VERIFICATION_POLICY: dict[str, str] = {
+    "analyst": "RESEARCH_BRIEF",
+    "scribe": "EMAIL_DRAFT",
+    "strategist": "STRATEGY",
+    "scout": "RESEARCH_BRIEF",
+    "hunter": "RESEARCH_BRIEF",
+    # operator, verifier, executor — no verification policy (action-based, not content-based)
 }
 
 
@@ -62,6 +82,7 @@ class GoalExecutionService:
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._trust_service: Any = _NOT_SET
         self._trace_service: Any = _NOT_SET
+        self._adaptive_coordinator: Any = _NOT_SET
 
     def _get_trust_service(self) -> Any:
         """Lazily initialize TrustCalibrationService."""
@@ -86,6 +107,18 @@ class GoalExecutionService:
                 logger.warning("Failed to initialize DelegationTraceService: %s", e)
                 self._trace_service = None
         return self._trace_service
+
+    def _get_adaptive_coordinator(self) -> Any:
+        """Lazily initialize AdaptiveCoordinator."""
+        if self._adaptive_coordinator is _NOT_SET:
+            try:
+                from src.core.adaptive_coordinator import get_adaptive_coordinator
+
+                self._adaptive_coordinator = get_adaptive_coordinator()
+            except Exception as e:
+                logger.warning("Failed to initialize AdaptiveCoordinator: %s", e)
+                self._adaptive_coordinator = None
+        return self._adaptive_coordinator
 
     def register_dynamic_agent(self, agent_type: str, agent_class: type) -> None:
         """Register a dynamically created agent class for task routing.
@@ -529,6 +562,202 @@ class GoalExecutionService:
             logger.debug(f"Skill execution attempt failed for {agent_type}: {e}")
             return None
 
+    async def _verify_and_adapt(
+        self,
+        *,
+        user_id: str,
+        goal: dict[str, Any],
+        agent_type: str,
+        content: dict[str, Any],
+        context: dict[str, Any],
+        execution_mode: str,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
+        """Verify agent output; retry or escalate on failure.
+
+        Returns:
+            (content, verification_result_dict, escalated)
+            - content: original or retry content
+            - verification_result_dict: VerificationResult.to_dict() or None
+            - escalated: True if verification failed and retries exhausted
+        """
+        # 1. Look up policy
+        policy_name = _AGENT_TO_VERIFICATION_POLICY.get(agent_type)
+        if policy_name is None:
+            return (content, None, False)
+
+        if not VERIFICATION_POLICIES:
+            return (content, None, False)
+
+        policy = VERIFICATION_POLICIES.get(policy_name)
+        if policy is None:
+            return (content, None, False)
+
+        # 2. Create verifier — fail-open on any error
+        try:
+            verifier = VerifierAgent(llm_client=self._llm, user_id=user_id)
+        except Exception as e:
+            logger.warning("Failed to create VerifierAgent, skipping verification: %s", e)
+            return (content, None, False)
+
+        # 3. Run verification — fail-open on error
+        try:
+            verification_result = await verifier.verify(content, policy)
+        except Exception as e:
+            logger.warning("Verification raised exception, skipping: %s", e)
+            return (content, None, False)
+
+        # 4. Check result
+        if verification_result.passed:
+            return (content, verification_result.to_dict(), False)
+
+        # 5. Verification failed — try adaptive coordination
+        coordinator = self._get_adaptive_coordinator()
+        if coordinator is None:
+            # No coordinator available, escalate with original content
+            vr_dict = verification_result.to_dict()
+            vr_dict["reason"] = "; ".join(verification_result.issues)
+            return (content, vr_dict, True)
+
+        # 6. Build evaluation and get decision
+        try:
+            from src.core.adaptive_coordinator import AgentOutputEvaluation
+
+            vr_dict = verification_result.to_dict()
+            vr_dict["reason"] = "; ".join(verification_result.issues)
+
+            evaluation = AgentOutputEvaluation(
+                agent_type=agent_type,
+                goal_id=goal.get("id", ""),
+                output=content,
+                confidence=verification_result.confidence,
+                execution_time_ms=0,
+                expected_duration_ms=30000,
+                verification_result=vr_dict,
+            )
+
+            decision = coordinator.evaluate_output(evaluation)
+        except Exception as e:
+            logger.warning("AdaptiveCoordinator evaluation failed: %s", e)
+            vr_dict = verification_result.to_dict()
+            vr_dict["reason"] = "; ".join(verification_result.issues)
+            return (content, vr_dict, True)
+
+        # 7. Handle decision
+        from src.core.adaptive_coordinator import AdaptiveDecisionType
+
+        if decision.decision_type == AdaptiveDecisionType.RETRY_SAME:
+            # Inject verification feedback into context and retry
+            retry_context = dict(context)
+            retry_context["verification_feedback"] = "; ".join(verification_result.issues)
+            retry_context["verification_suggestions"] = verification_result.suggestions
+
+            retry_content = await self._retry_agent_execution(
+                user_id=user_id,
+                goal=goal,
+                agent_type=agent_type,
+                context=retry_context,
+                execution_mode=execution_mode,
+            )
+
+            if retry_content is not None:
+                # Re-verify the retry output
+                try:
+                    retry_vr = await verifier.verify(retry_content, policy)
+                except Exception as e:
+                    logger.warning("Retry verification raised exception: %s", e)
+                    return (retry_content, None, False)
+
+                if retry_vr.passed:
+                    return (retry_content, retry_vr.to_dict(), False)
+
+                # Retry also failed → escalate
+                retry_vr_dict = retry_vr.to_dict()
+                retry_vr_dict["reason"] = "; ".join(retry_vr.issues)
+                return (retry_content, retry_vr_dict, True)
+
+            # Retry returned None → escalate with original
+            vr_dict = verification_result.to_dict()
+            vr_dict["reason"] = "; ".join(verification_result.issues)
+            return (content, vr_dict, True)
+
+        # RE_DELEGATE, ESCALATE, or anything else → escalate
+        vr_dict = verification_result.to_dict()
+        vr_dict["reason"] = "; ".join(verification_result.issues)
+        return (content, vr_dict, True)
+
+    async def _retry_agent_execution(
+        self,
+        *,
+        user_id: str,
+        goal: dict[str, Any],
+        agent_type: str,
+        context: dict[str, Any],
+        execution_mode: str,
+    ) -> dict[str, Any] | None:
+        """Re-run agent execution with verification feedback injected.
+
+        Returns content dict or None on failure.
+        """
+        try:
+            if execution_mode == "skill_aware":
+                result = await self._try_skill_execution(
+                    user_id=user_id,
+                    goal=goal,
+                    agent_type=agent_type,
+                    context=context,
+                )
+                return result  # may be None
+
+            # Prompt-based retry
+            prompt_builder = {
+                "scout": self._build_scout_prompt,
+                "analyst": self._build_analyst_prompt,
+                "hunter": self._build_hunter_prompt,
+                "strategist": self._build_strategist_prompt,
+                "scribe": self._build_scribe_prompt,
+                "operator": self._build_operator_prompt,
+            }
+
+            builder = prompt_builder.get(agent_type)
+            if not builder:
+                return None
+
+            prompt = builder(goal, context)
+
+            # Append verification feedback to prompt
+            feedback = context.get("verification_feedback", "")
+            suggestions = context.get("verification_suggestions", [])
+            if feedback:
+                prompt += (
+                    f"\n\n--- VERIFICATION FEEDBACK ---\n"
+                    f"The previous output was rejected for: {feedback}\n"
+                )
+                if suggestions:
+                    prompt += "Suggestions:\n" + "\n".join(
+                        f"- {s}" for s in suggestions
+                    )
+                prompt += "\nPlease address these issues in your response.\n"
+
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are ARIA, an AI Department Director for life sciences "
+                    "commercial teams. Revise your analysis addressing the "
+                    "verification feedback. Respond with a JSON object only."
+                ),
+                max_tokens=2048,
+                temperature=0.3,
+            )
+
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                return {"raw_analysis": response.strip()}
+
+        except Exception as e:
+            logger.warning("Retry agent execution failed: %s", e)
+            return None
+
     async def _execute_agent(
         self,
         user_id: str,
@@ -597,12 +826,22 @@ class GoalExecutionService:
                 extra={"agent_type": agent_type, "user_id": user_id},
             )
 
+            # --- Verification gate ---
+            content, vr_dict, escalated = await self._verify_and_adapt(
+                user_id=user_id,
+                goal=goal,
+                agent_type=agent_type,
+                content=skill_result,
+                context=context,
+                execution_mode="skill_aware",
+            )
+
             # Store execution result
             await self._store_execution(
                 user_id=user_id,
                 goal_id=goal["id"],
                 agent_type=agent_type,
-                content=skill_result,
+                content=content,
                 goal_agent_id=goal_agent_id,
             )
 
@@ -612,7 +851,7 @@ class GoalExecutionService:
                 agent=agent_type,
                 activity_type="analysis_complete",
                 title=f"{agent_type.title()} completed skill-augmented analysis",
-                description=skill_result.get(
+                description=content.get(
                     "summary", f"{agent_type.title()} skill execution for: {goal.get('title', '')}"
                 ),
                 confidence=0.85,
@@ -625,18 +864,21 @@ class GoalExecutionService:
             await self._submit_actions_to_queue(
                 user_id=user_id,
                 agent_type=agent_type,
-                content=skill_result,
+                content=content,
                 goal_id=goal["id"],
             )
 
-            # Trust update on success (skill-aware path)
+            # Trust: failure if escalated, success otherwise
             trust_svc = self._get_trust_service()
             if trust_svc:
                 try:
                     category = _AGENT_TO_CATEGORY.get(agent_type, "general")
-                    await trust_svc.update_on_success(user_id, category)
+                    if escalated:
+                        await trust_svc.update_on_failure(user_id, category)
+                    else:
+                        await trust_svc.update_on_success(user_id, category)
                 except Exception as te:
-                    logger.warning("Trust update on success failed: %s", te)
+                    logger.warning("Trust update failed: %s", te)
 
             # Complete delegation trace (skill-aware path)
             if trace_svc and trace_id:
@@ -644,18 +886,24 @@ class GoalExecutionService:
                     await trace_svc.complete_trace(
                         trace_id=trace_id,
                         outputs={"agent_type": agent_type, "success": True},
+                        verification_result=vr_dict,
                         cost_usd=0.0,
                         status="completed",
                     )
                 except Exception as te:
                     logger.warning("Failed to complete delegation trace: %s", te)
 
-            return {
+            result: dict[str, Any] = {
                 "agent_type": agent_type,
                 "success": True,
-                "content": skill_result,
+                "content": content,
                 "execution_mode": "skill_aware",
+                "verification_result": vr_dict,
             }
+            if escalated:
+                result["escalated"] = True
+                result["escalation_reason"] = "Verification failed after retries"
+            return result
 
         # Step 2: Fall back to prompt-based LLM analysis
         prompt_builder = {
@@ -734,6 +982,16 @@ class GoalExecutionService:
             except json.JSONDecodeError:
                 content = {"raw_analysis": response.strip()}
 
+            # --- Verification gate ---
+            content, vr_dict, escalated = await self._verify_and_adapt(
+                user_id=user_id,
+                goal=goal,
+                agent_type=agent_type,
+                content=content,
+                context=context,
+                execution_mode="prompt_based",
+            )
+
             # Store execution result
             await self._store_execution(
                 user_id=user_id,
@@ -766,14 +1024,17 @@ class GoalExecutionService:
                 goal_id=goal["id"],
             )
 
-            # Trust update on success (prompt-based path)
+            # Trust: failure if escalated, success otherwise
             trust_svc = self._get_trust_service()
             if trust_svc:
                 try:
                     category = _AGENT_TO_CATEGORY.get(agent_type, "general")
-                    await trust_svc.update_on_success(user_id, category)
+                    if escalated:
+                        await trust_svc.update_on_failure(user_id, category)
+                    else:
+                        await trust_svc.update_on_success(user_id, category)
                 except Exception as te:
-                    logger.warning("Trust update on success failed: %s", te)
+                    logger.warning("Trust update failed: %s", te)
 
             # Complete delegation trace (prompt-based path)
             if trace_svc and trace_id:
@@ -781,18 +1042,24 @@ class GoalExecutionService:
                     await trace_svc.complete_trace(
                         trace_id=trace_id,
                         outputs={"agent_type": agent_type, "success": True},
+                        verification_result=vr_dict,
                         cost_usd=0.0,
                         status="completed",
                     )
                 except Exception as te:
                     logger.warning("Failed to complete delegation trace: %s", te)
 
-            return {
+            result = {
                 "agent_type": agent_type,
                 "success": True,
                 "content": content,
                 "execution_mode": "prompt_based",
+                "verification_result": vr_dict,
             }
+            if escalated:
+                result["escalated"] = True
+                result["escalation_reason"] = "Verification failed after retries"
+            return result
 
         except Exception as e:
             logger.error(

@@ -278,6 +278,11 @@ class AgentOrchestrator:
             # --- Complete delegation trace ---
             if self._trace_service and trace_id:
                 try:
+                    verification_result_dict = None
+                    if isinstance(result.data, dict):
+                        verification_result_dict = result.data.get(
+                            "verification_result"
+                        )
                     await self._trace_service.complete_trace(
                         trace_id=trace_id,
                         outputs=(
@@ -285,6 +290,7 @@ class AgentOrchestrator:
                             if result.data
                             else {"summary": str(result)[:500]}
                         ),
+                        verification_result=verification_result_dict,
                         cost_usd=0.0,
                         status="completed" if result.success else "failed",
                     )
