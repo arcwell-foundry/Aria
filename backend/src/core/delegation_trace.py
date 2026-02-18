@@ -185,9 +185,7 @@ class DelegationTraceService:
             "completed_at": now.isoformat(),
         }
         try:
-            self._client.table(_TABLE).update(update_data).eq(
-                "trace_id", trace_id
-            ).execute()
+            self._client.table(_TABLE).update(update_data).eq("trace_id", trace_id).execute()
             logger.info(
                 "Trace completed: %s status=%s cost=$%.4f",
                 trace_id,
@@ -212,9 +210,7 @@ class DelegationTraceService:
             "completed_at": now.isoformat(),
         }
         try:
-            self._client.table(_TABLE).update(update_data).eq(
-                "trace_id", trace_id
-            ).execute()
+            self._client.table(_TABLE).update(update_data).eq("trace_id", trace_id).execute()
             logger.info("Trace failed: %s error=%s", trace_id, error_message)
         except Exception:
             logger.exception("Failed to mark delegation trace %s as failed", trace_id)

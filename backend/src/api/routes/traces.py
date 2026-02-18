@@ -41,7 +41,7 @@ async def get_recent_traces(
 @router.get("/{goal_id}/tree")
 async def get_trace_tree(
     goal_id: str,
-    current_user: CurrentUser,
+    current_user: CurrentUser,  # noqa: ARG001 — required for auth
 ) -> list[dict[str, Any]]:
     """Get the full delegation tree for a goal ("show your work")."""
     service = _get_service()
