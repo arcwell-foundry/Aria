@@ -126,6 +126,8 @@ class OODAState:
     total_tokens_used: int = 0
     thinking_traces: dict[str, str] = field(default_factory=dict)
     task_characteristics: dict[str, Any] | None = None
+    approval_level: str | None = None
+    capability_token: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize state to dictionary.
@@ -149,6 +151,8 @@ class OODAState:
             "total_tokens_used": self.total_tokens_used,
             "thinking_traces": self.thinking_traces,
             "task_characteristics": self.task_characteristics,
+            "approval_level": self.approval_level,
+            "capability_token": self.capability_token,
         }
 
     @classmethod
@@ -176,6 +180,8 @@ class OODAState:
             total_tokens_used=data.get("total_tokens_used", 0),
             thinking_traces=data.get("thinking_traces", {}),
             task_characteristics=data.get("task_characteristics"),
+            approval_level=data.get("approval_level"),
+            capability_token=data.get("capability_token"),
         )
 
         # Restore phase logs
@@ -216,6 +222,8 @@ class OODALoop:
         cold_memory_retriever: Any | None = None,
         cost_governor: Any | None = None,
         user_id: str | None = None,
+        trust_service: Any | None = None,
+        dct_minter: Any | None = None,
     ) -> None:
         """Initialize OODA loop.
 
@@ -232,6 +240,8 @@ class OODALoop:
             cold_memory_retriever: Optional ColdMemoryRetriever for on-demand retrieval.
             cost_governor: Optional CostGovernor for budget-aware thinking.
             user_id: Optional user ID — enables extended thinking in orient/decide.
+            trust_service: Optional TrustCalibrationService for approval level lookup.
+            dct_minter: Optional DCTMinter for scoped agent permissions.
         """
         self.llm = llm_client
         self.episodic = episodic_memory
@@ -244,6 +254,23 @@ class OODALoop:
         self._cold_memory_retriever = cold_memory_retriever
         self._cost_governor = cost_governor
         self._user_id = user_id
+        self._trust_service = trust_service
+        self._dct_minter = dct_minter
+
+    @staticmethod
+    def _agent_to_category(agent_name: str) -> str:
+        """Map agent name to trust action category."""
+        mapping = {
+            "hunter": "lead_discovery",
+            "analyst": "research",
+            "strategist": "strategy",
+            "scribe": "email_draft",
+            "operator": "crm_action",
+            "scout": "market_monitoring",
+            "verifier": "verification",
+            "executor": "browser_automation",
+        }
+        return mapping.get((agent_name or "").lower(), "general")
 
     async def observe(
         self,
@@ -853,6 +880,42 @@ Select the best action to make progress toward the goal."""
         decision["risk_level"] = chars.risk_level
         decision["risk_score"] = chars.risk_score
 
+        # --- Wave 2: Trust-aware approval level ---
+        if self._trust_service and self._user_id:
+            try:
+                agent_name = decision.get("agent", "")
+                action_category = self._agent_to_category(agent_name)
+                approval_level_str = await self._trust_service.get_approval_level(
+                    user_id=self._user_id,
+                    action_category=action_category,
+                    risk_score=chars.risk_score,
+                )
+                decision["approval_level"] = approval_level_str
+                state.approval_level = approval_level_str
+            except Exception as e:
+                logger.warning("Trust lookup failed in decide (using risk-only): %s", e)
+                decision["approval_level"] = chars.approval_level
+                state.approval_level = chars.approval_level
+        else:
+            decision["approval_level"] = chars.approval_level
+            state.approval_level = chars.approval_level
+
+        # --- Wave 2: Mint DCT for the delegatee agent ---
+        if self._dct_minter and decision.get("agent"):
+            try:
+                dct = self._dct_minter.mint(
+                    delegatee=decision["agent"],
+                    goal_id=state.goal_id,
+                    time_limit=300,
+                )
+                dct_dict = dct.to_dict()
+                decision["capability_token"] = dct_dict
+                state.capability_token = dct_dict
+            except Exception as e:
+                logger.warning(
+                    "DCT minting failed for agent %s: %s", decision.get("agent"), e
+                )
+
         # Update state based on decision
         state.decision = decision
 
@@ -934,6 +997,8 @@ Select the best action to make progress toward the goal."""
                     agent=agent,
                     parameters=parameters,
                     goal=goal,
+                    capability_token=state.capability_token,
+                    approval_level=state.approval_level,
                 )
                 state.action_result = result
             else:
