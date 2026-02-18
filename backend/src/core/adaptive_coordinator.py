@@ -477,7 +477,7 @@ class AdaptiveCoordinator:
         self,
         failure: FailureAnalysis,
         evaluation: AgentOutputEvaluation,
-        effective_count: int,
+        effective_count: int,  # noqa: ARG002
         retry_count: int,
     ) -> AdaptiveDecision:
         return self._make_escalation(failure, evaluation, retry_count=retry_count)
@@ -495,17 +495,14 @@ class AdaptiveCoordinator:
             target_agent=None,
             partial_results=evaluation.output or {},
             reasoning=reasoning
-            or (
-                f"Escalating to user: {failure.trigger.value} — {failure.details}"
-            ),
-            retry_count=retry_count
-            or self._cost_governor._retry_counts.get(evaluation.goal_id, 0),
+            or (f"Escalating to user: {failure.trigger.value} — {failure.details}"),
+            retry_count=retry_count or self._cost_governor._retry_counts.get(evaluation.goal_id, 0),
         )
 
     async def checkpoint_partial_results(
         self,
         goal_id: str,
-        user_id: str,
+        user_id: str,  # noqa: ARG002
         agent_type: str,
         partial_output: dict[str, Any],
         failure_analysis: FailureAnalysis,
