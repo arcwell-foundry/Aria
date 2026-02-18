@@ -84,6 +84,41 @@ class ModalityControllerImpl {
   }
 
   /**
+   * Switch from video/audio back to text chat.
+   *
+   * Unlike endSession(), this calls the context bridge endpoint first
+   * to persist the transcript and extract a summary before ending the
+   * Tavus session and navigating to /.
+   */
+  async switchToChat(): Promise<void> {
+    const store = useModalityStore.getState();
+    const sessionId = store.tavusSession.id;
+
+    if (sessionId) {
+      store.setTavusSession({ status: 'ending' });
+
+      // Fire context bridge before tearing down — this persists the
+      // transcript and posts a video_session_summary via WebSocket.
+      try {
+        await apiClient.post(`/video/sessions/${sessionId}/bridge-to-chat`);
+      } catch (err) {
+        console.warn('[ModalityController] Context bridge call failed:', err);
+      }
+
+      try {
+        await apiClient.post(`/video/sessions/${sessionId}/end`);
+      } catch (err) {
+        console.warn('[ModalityController] Failed to end Tavus session:', err);
+      }
+    }
+
+    store.clearTavusSession();
+    store.setActiveModality('text');
+    store.setIsSpeaking(false);
+    this.navigateFn?.('/');
+  }
+
+  /**
    * Hide the PiP overlay. The Tavus session stays alive in the background.
    */
   dismissPip(): void {

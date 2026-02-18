@@ -1,4 +1,4 @@
-import { Video, VideoOff } from 'lucide-react';
+import { Video, VideoOff, MessageSquare } from 'lucide-react';
 import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
@@ -36,13 +36,23 @@ export function DialogueHeader() {
       <EmotionIndicator />
 
       {(isActive || tavusSession.status === 'connecting') && (
-        <button
-          onClick={() => modalityController.endSession()}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-red-400 hover:bg-red-400/10 transition-colors"
-        >
-          <VideoOff size={14} />
-          <span className="text-xs">End Session</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => modalityController.switchToChat()}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-[#2E66FF] hover:bg-[#2E66FF]/10 transition-colors"
+            title="Switch to Chat"
+          >
+            <MessageSquare size={14} />
+            <span className="text-xs">Chat</span>
+          </button>
+          <button
+            onClick={() => modalityController.endSession()}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          >
+            <VideoOff size={14} />
+            <span className="text-xs">End Session</span>
+          </button>
+        </div>
       )}
     </div>
   );
