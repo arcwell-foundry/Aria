@@ -11,6 +11,7 @@
 import { apiClient } from '@/api/client';
 import { useModalityStore } from '@/stores/modalityStore';
 import type { Modality, TavusSessionType } from '@/stores/modalityStore';
+import { useConversationStore } from '@/stores/conversationStore';
 
 type NavigateFunction = (to: string) => void;
 
@@ -160,9 +161,11 @@ class ModalityControllerImpl {
     store.setIsPipVisible(false);
 
     try {
+      const conversationId = useConversationStore.getState().activeConversationId;
       const response = await apiClient.post<TavusCreateResponse>('/video/sessions', {
         session_type: type,
         audio_only: true,
+        ...(conversationId && { conversation_id: conversationId }),
       });
 
       const { session_id, room_url } = response.data;
@@ -200,8 +203,10 @@ class ModalityControllerImpl {
     store.setIsPipVisible(false);
 
     try {
+      const conversationId = useConversationStore.getState().activeConversationId;
       const response = await apiClient.post<TavusCreateResponse>('/video/sessions', {
         session_type: sessionType,
+        ...(conversationId && { conversation_id: conversationId }),
       });
 
       const { session_id, room_url } = response.data;
