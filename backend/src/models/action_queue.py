@@ -61,6 +61,8 @@ class ActionCreate(BaseModel):
     risk_level: RiskLevel
     payload: dict[str, Any] = Field(default_factory=dict)
     reasoning: str | None = None
+    risk_score: float | None = None
+    task_characteristics: dict[str, Any] | None = None
 
 
 class ActionReject(BaseModel):

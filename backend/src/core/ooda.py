@@ -124,6 +124,8 @@ class OODAState:
     is_blocked: bool = False
     blocked_reason: str | None = None
     total_tokens_used: int = 0
+    thinking_traces: dict[str, str] = field(default_factory=dict)
+    task_characteristics: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize state to dictionary.
@@ -145,6 +147,8 @@ class OODAState:
             "is_blocked": self.is_blocked,
             "blocked_reason": self.blocked_reason,
             "total_tokens_used": self.total_tokens_used,
+            "thinking_traces": self.thinking_traces,
+            "task_characteristics": self.task_characteristics,
         }
 
     @classmethod
@@ -170,6 +174,8 @@ class OODAState:
             is_blocked=data.get("is_blocked", False),
             blocked_reason=data.get("blocked_reason"),
             total_tokens_used=data.get("total_tokens_used", 0),
+            thinking_traces=data.get("thinking_traces", {}),
+            task_characteristics=data.get("task_characteristics"),
         )
 
         # Restore phase logs
@@ -206,6 +212,10 @@ class OODALoop:
         config: OODAConfig | None = None,
         agent_executor: Any | None = None,
         persona_builder: Any | None = None,
+        hot_context_builder: Any | None = None,
+        cold_memory_retriever: Any | None = None,
+        cost_governor: Any | None = None,
+        user_id: str | None = None,
     ) -> None:
         """Initialize OODA loop.
 
@@ -218,6 +228,10 @@ class OODALoop:
             agent_executor: Optional callable for dispatching agent actions.
                 Signature: async (action, agent, parameters, goal) -> dict
             persona_builder: Optional PersonaBuilder for centralized prompt assembly.
+            hot_context_builder: Optional HotContextBuilder for always-loaded context.
+            cold_memory_retriever: Optional ColdMemoryRetriever for on-demand retrieval.
+            cost_governor: Optional CostGovernor for budget-aware thinking.
+            user_id: Optional user ID — enables extended thinking in orient/decide.
         """
         self.llm = llm_client
         self.episodic = episodic_memory
@@ -226,6 +240,10 @@ class OODALoop:
         self.config = config or OODAConfig()
         self.agent_executor = agent_executor
         self.persona_builder = persona_builder
+        self._hot_context_builder = hot_context_builder
+        self._cold_memory_retriever = cold_memory_retriever
+        self._cost_governor = cost_governor
+        self._user_id = user_id
 
     async def observe(
         self,
@@ -250,44 +268,78 @@ class OODALoop:
         # Build search query from goal
         search_query = f"{goal.get('title', '')} {goal.get('description', '')}"
 
-        # Get user_id from working memory
-        user_id = self.working.user_id
+        # Get user_id from working memory (or constructor override)
+        user_id = self._user_id or self.working.user_id
 
-        # Query episodic memory for related events
-        try:
-            episodes = await self.episodic.semantic_search(
-                user_id=user_id,
-                query=search_query,
-                limit=5,
-            )
-            for episode in episodes:
+        # --- Hot/Cold memory path (preferred) ---
+        if self._hot_context_builder is not None:
+            try:
+                hot = await self._hot_context_builder.build(
+                    user_id, working_memory=self.working, active_goal=goal
+                )
                 observations.append(
                     {
-                        "source": "episodic",
-                        "type": "episode",
-                        "data": episode.to_dict() if hasattr(episode, "to_dict") else str(episode),
+                        "source": "hot_context",
+                        "type": "hot",
+                        "data": hot.formatted if hasattr(hot, "formatted") else str(hot),
                     }
                 )
-        except Exception as e:
-            logger.warning(f"Failed to query episodic memory: {e}")
+            except Exception as e:
+                logger.warning("Failed to build hot context: %s", e)
 
-        # Query semantic memory for relevant facts
-        try:
-            facts = await self.semantic.search_facts(
-                user_id=user_id,
-                query=search_query,
-                limit=10,
-            )
-            for fact in facts:
-                observations.append(
-                    {
-                        "source": "semantic",
-                        "type": "fact",
-                        "data": fact.to_dict() if hasattr(fact, "to_dict") else str(fact),
-                    }
+        if self._cold_memory_retriever is not None:
+            try:
+                cold_results = await self._cold_memory_retriever.retrieve(
+                    user_id, query=search_query, limit=10
                 )
-        except Exception as e:
-            logger.warning(f"Failed to query semantic memory: {e}")
+                for result in cold_results:
+                    observations.append(
+                        {
+                            "source": result.source.value if hasattr(result, "source") else "cold",
+                            "type": "cold",
+                            "data": result.to_dict() if hasattr(result, "to_dict") else str(result),
+                        }
+                    )
+            except Exception as e:
+                logger.warning("Failed to retrieve cold memory: %s", e)
+
+        # --- Legacy episodic/semantic path (when Hot/Cold not provided) ---
+        if self._hot_context_builder is None and self._cold_memory_retriever is None:
+            # Query episodic memory for related events
+            try:
+                episodes = await self.episodic.semantic_search(
+                    user_id=user_id,
+                    query=search_query,
+                    limit=5,
+                )
+                for episode in episodes:
+                    observations.append(
+                        {
+                            "source": "episodic",
+                            "type": "episode",
+                            "data": episode.to_dict() if hasattr(episode, "to_dict") else str(episode),
+                        }
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to query episodic memory: {e}")
+
+            # Query semantic memory for relevant facts
+            try:
+                facts = await self.semantic.search_facts(
+                    user_id=user_id,
+                    query=search_query,
+                    limit=10,
+                )
+                for fact in facts:
+                    observations.append(
+                        {
+                            "source": "semantic",
+                            "type": "fact",
+                            "data": fact.to_dict() if hasattr(fact, "to_dict") else str(fact),
+                        }
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to query semantic memory: {e}")
 
         # Get current working memory context
         try:
@@ -399,23 +451,68 @@ Observations:
 
 Analyze these observations and identify patterns, opportunities, and threats relevant to achieving the goal."""
 
-        # Call LLM for analysis
+        # Call LLM for analysis — use extended thinking when user_id is set
         estimated_tokens = 0
-        try:
-            response = await self.llm.generate_response(
-                messages=[{"role": "user", "content": user_prompt}],
-                system_prompt=system_prompt,
-                max_tokens=self.config.orient_budget,
-                temperature=0.3,  # Lower temperature for more focused analysis
-            )
+        orientation = None  # sentinel: set to dict on error, parsed from response otherwise
+        response: str | None = None
 
-            # Estimate tokens: input (prompt) + output (response)
-            # Rough estimate: 4 characters per token
-            input_chars = len(system_prompt) + len(user_prompt)
-            output_chars = len(response)
-            estimated_tokens = (input_chars + output_chars) // 4
+        use_thinking = bool(self._user_id)
+        if use_thinking and self._cost_governor:
+            try:
+                budget = await self._cost_governor.check_budget(self._user_id)
+                if not budget.can_proceed:
+                    use_thinking = False
+            except Exception:
+                use_thinking = False
 
-            # Parse JSON response
+        if use_thinking:
+            try:
+                effort = "complex"
+                if self._cost_governor:
+                    budget = await self._cost_governor.check_budget(self._user_id)  # type: ignore[arg-type]
+                    effort = self._cost_governor.get_thinking_budget(budget, effort)
+
+                llm_response = await self.llm.generate_response_with_thinking(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    max_tokens=self.config.orient_budget,
+                    thinking_effort=effort,
+                    user_id=self._user_id,
+                )
+                response = llm_response.text
+                if llm_response.thinking:
+                    state.thinking_traces["orient"] = llm_response.thinking
+                if llm_response.usage:
+                    estimated_tokens = llm_response.usage.total_tokens
+                else:
+                    estimated_tokens = (len(system_prompt) + len(user_prompt) + len(response)) // 4
+            except Exception as e:
+                logger.error("Extended thinking failed in orient, falling back: %s", e)
+                use_thinking = False  # fall through to standard path
+
+        if not use_thinking and response is None and orientation is None:
+            try:
+                response = await self.llm.generate_response(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    max_tokens=self.config.orient_budget,
+                    temperature=0.3,
+                )
+                input_chars = len(system_prompt) + len(user_prompt)
+                output_chars = len(response)
+                estimated_tokens = (input_chars + output_chars) // 4
+            except Exception as e:
+                logger.error(f"LLM call failed in orient phase: {e}")
+                orientation = {
+                    "patterns": [],
+                    "opportunities": [],
+                    "threats": [],
+                    "recommended_focus": "LLM analysis failed - proceeding cautiously",
+                    "error": str(e),
+                }
+
+        # Parse JSON response (when we got one and no error orientation was set)
+        if response is not None and orientation is None:
             try:
                 orientation = json.loads(response)
             except json.JSONDecodeError:
@@ -428,14 +525,12 @@ Analyze these observations and identify patterns, opportunities, and threats rel
                     "raw_response": response,
                 }
 
-        except Exception as e:
-            logger.error(f"LLM call failed in orient phase: {e}")
+        if orientation is None:
             orientation = {
                 "patterns": [],
                 "opportunities": [],
                 "threats": [],
-                "recommended_focus": "LLM analysis failed - proceeding cautiously",
-                "error": str(e),
+                "recommended_focus": "No analysis available",
             }
 
         # Update state
@@ -508,8 +603,26 @@ Output ONLY valid JSON with this structure:
     "action": "action_name",
     "agent": "agent_type or null",
     "parameters": {"key": "value"},
-    "reasoning": "why this action was chosen"
-}"""
+    "reasoning": "why this action was chosen",
+    "task_characteristics": {
+        "complexity": 0.0-1.0,
+        "criticality": 0.0-1.0,
+        "uncertainty": 0.0-1.0,
+        "reversibility": 0.0-1.0,
+        "verifiability": 0.0-1.0,
+        "subjectivity": 0.0-1.0,
+        "contextuality": 0.0-1.0
+    }
+}
+
+Task characteristics guide:
+- complexity: How many steps / sub-tasks are involved (1.0 = very complex)
+- criticality: Business impact if this goes wrong (1.0 = severe consequences)
+- uncertainty: How much is unknown about the right approach (1.0 = highly uncertain)
+- reversibility: Can the action be undone? (1.0 = fully reversible like research, 0.0 = irreversible like sending email)
+- verifiability: Can the outcome be objectively checked? (1.0 = fully verifiable)
+- subjectivity: Does the task depend on personal judgment? (1.0 = very subjective)
+- contextuality: How much does success depend on user-specific context? (1.0 = highly contextual)"""
 
         # Use PersonaBuilder when available, fall back to hardcoded prompt
         system_prompt = hardcoded_decide_prompt
@@ -542,23 +655,71 @@ Previous action result: {state.action_result if state.action_result else "No pre
 
 Select the best action to make progress toward the goal."""
 
-        # Call LLM for decision
+        # Call LLM for decision — use extended thinking when user_id is set
         estimated_tokens = 0
-        try:
-            response = await self.llm.generate_response(
-                messages=[{"role": "user", "content": user_prompt}],
-                system_prompt=system_prompt,
-                max_tokens=self.config.decide_budget,
-                temperature=0.2,  # Low temperature for more deterministic decisions
-            )
+        decision: dict[str, Any] | None = None
+        response: str | None = None
 
-            # Estimate tokens: input (prompt) + output (response)
-            # Rough estimate: 4 characters per token
-            input_chars = len(system_prompt) + len(user_prompt)
-            output_chars = len(response)
-            estimated_tokens = (input_chars + output_chars) // 4
+        # Determine thinking effort dynamically: upgrade if orient found threats
+        use_thinking = bool(self._user_id)
+        decide_effort = "routine"
+        threats = state.orientation.get("threats", [])
+        if threats:
+            decide_effort = "complex"
 
-            # Parse JSON response
+        if use_thinking and self._cost_governor:
+            try:
+                budget = await self._cost_governor.check_budget(self._user_id)  # type: ignore[arg-type]
+                if not budget.can_proceed:
+                    use_thinking = False
+                else:
+                    decide_effort = self._cost_governor.get_thinking_budget(budget, decide_effort)
+            except Exception:
+                use_thinking = False
+
+        if use_thinking:
+            try:
+                llm_response = await self.llm.generate_response_with_thinking(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    max_tokens=self.config.decide_budget,
+                    thinking_effort=decide_effort,
+                    user_id=self._user_id,
+                )
+                response = llm_response.text
+                if llm_response.thinking:
+                    state.thinking_traces["decide"] = llm_response.thinking
+                if llm_response.usage:
+                    estimated_tokens = llm_response.usage.total_tokens
+                else:
+                    estimated_tokens = (len(system_prompt) + len(user_prompt) + len(response)) // 4
+            except Exception as e:
+                logger.error("Extended thinking failed in decide, falling back: %s", e)
+                use_thinking = False
+
+        if not use_thinking and response is None and decision is None:
+            try:
+                response = await self.llm.generate_response(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    max_tokens=self.config.decide_budget,
+                    temperature=0.2,
+                )
+                input_chars = len(system_prompt) + len(user_prompt)
+                output_chars = len(response)
+                estimated_tokens = (input_chars + output_chars) // 4
+            except Exception as e:
+                logger.error(f"LLM call failed in decide phase: {e}")
+                decision = {
+                    "action": "blocked",
+                    "agent": None,
+                    "parameters": {},
+                    "reasoning": f"Decision failed: {e}",
+                    "error": str(e),
+                }
+
+        # Parse JSON response
+        if response is not None and decision is None:
             try:
                 decision = json.loads(response)
             except json.JSONDecodeError:
@@ -571,15 +732,31 @@ Select the best action to make progress toward the goal."""
                     "raw_response": response,
                 }
 
-        except Exception as e:
-            logger.error(f"LLM call failed in decide phase: {e}")
+        if decision is None:
             decision = {
                 "action": "blocked",
                 "agent": None,
                 "parameters": {},
-                "reasoning": f"Decision failed: {e}",
-                "error": str(e),
+                "reasoning": "No decision produced",
             }
+
+        # Extract and apply TaskCharacteristics
+        from src.core.task_characteristics import TaskCharacteristics
+
+        raw_chars = decision.get("task_characteristics", {})
+        if raw_chars and isinstance(raw_chars, dict):
+            try:
+                chars = TaskCharacteristics.from_dict(raw_chars)
+            except Exception:
+                action_name = decision.get("action", "research")
+                chars = TaskCharacteristics.default_for_action(action_name)
+        else:
+            action_name = decision.get("action", "research")
+            chars = TaskCharacteristics.default_for_action(action_name)
+
+        state.task_characteristics = chars.to_dict()
+        decision["risk_level"] = chars.risk_level
+        decision["risk_score"] = chars.risk_score
 
         # Update state based on decision
         state.decision = decision

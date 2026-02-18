@@ -71,6 +71,10 @@ class ActionQueueService:
             "payload": data.payload,
             "reasoning": data.reasoning,
         }
+        if data.risk_score is not None:
+            insert_data["risk_score"] = data.risk_score
+        if data.task_characteristics is not None:
+            insert_data["task_characteristics"] = data.task_characteristics
         if approved_at:
             insert_data["approved_at"] = approved_at
 
