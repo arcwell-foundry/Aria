@@ -35,11 +35,22 @@ export const WS_EVENTS = {
   EMOTION_DETECTED: 'emotion.detected',
   SESSION_SYNC: 'session.sync',
 
+  // Server → Client: Friction
+  FRICTION_CHALLENGE: 'friction.challenge',
+  FRICTION_FLAG: 'friction.flag',
+
+  // Server → Client: Undo window
+  ACTION_EXECUTED_WITH_UNDO: 'action.executed_with_undo',
+  ACTION_UNDO_EXPIRED: 'action.undo_expired',
+  ACTION_UNDO_COMPLETED: 'action.undo_completed',
+
   // Client → Server
   USER_MESSAGE: 'user.message',
   USER_NAVIGATE: 'user.navigate',
   USER_APPROVE: 'user.approve',
   USER_REJECT: 'user.reject',
+  USER_CONFIRM_FRICTION: 'user.confirm_friction',
+  USER_REQUEST_UNDO: 'user.request_undo',
   MODALITY_CHANGE: 'modality.change',
   HEARTBEAT: 'heartbeat',
 } as const;
@@ -77,6 +88,42 @@ export interface StreamErrorPayload {
 export interface WSEnvelope {
   type: string;
   payload: unknown;
+}
+
+// === Friction Payloads ===
+
+export interface FrictionChallengePayload {
+  challenge_id: string;
+  user_message: string;
+  reasoning: string;
+  original_request: string;
+  proceed_if_confirmed: boolean;
+  conversation_id?: string;
+}
+
+export interface FrictionFlagPayload {
+  flag_message: string;
+  message_id?: string;
+}
+
+// === Undo Window Payloads ===
+
+export interface ActionExecutedWithUndoPayload {
+  action_id: string;
+  title: string;
+  description?: string;
+  agent: string;
+  undo_deadline: string;
+  undo_duration_seconds: number;
+}
+
+export interface ActionUndoExpiredPayload {
+  action_id: string;
+}
+
+export interface ActionUndoCompletedPayload {
+  action_id: string;
+  reversal_summary?: string;
 }
 
 // === Video Session Summary ===

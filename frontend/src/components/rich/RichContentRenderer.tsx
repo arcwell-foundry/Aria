@@ -14,6 +14,8 @@ import { PipelineChart, type PipelineChartData } from './PipelineChart';
 import { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
 import { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
 import { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
+import { FrictionChallengeCard, type FrictionChallengeData } from '@/components/friction/FrictionChallengeCard';
+import { FrictionFlagIndicator, type FrictionFlagData } from '@/components/friction/FrictionFlagIndicator';
 import type { VideoSessionSummaryData } from '@/types/chat';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -118,6 +120,11 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <EmailDraftCard data={item.data as unknown as EmailDraftData} />;
     case 'video_session_summary':
       return <VideoSessionSummaryCard data={item.data as unknown as VideoSessionSummaryData} />;
+    case 'friction_challenge':
+    case 'friction_decision':
+      return <FrictionChallengeCard data={item.data as unknown as FrictionChallengeData} />;
+    case 'friction_flag':
+      return <FrictionFlagIndicator data={item.data as unknown as FrictionFlagData} />;
     default:
       return (
         <div

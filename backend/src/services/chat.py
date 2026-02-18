@@ -1435,10 +1435,13 @@ class ChatService:
                 "conversation_id": conversation_id,
                 "rich_content": [
                     {
-                        "type": "friction_decision",
+                        "type": "friction_challenge",
                         "data": {
-                            "level": friction_decision.level,
+                            "challenge_id": f"friction-{conversation_id}-{int(time.time())}",
+                            "user_message": pushback_msg,
+                            "original_request": message,
                             "proceed_if_confirmed": friction_decision.proceed_if_confirmed,
+                            "conversation_id": conversation_id,
                         },
                     }
                 ],
@@ -1833,6 +1836,19 @@ class ChatService:
                 ui_commands.extend(companion_commands)
             except Exception as e:
                 logger.warning("Companion ui_commands generation failed: %s", e)
+
+        # Append friction flag if the friction engine flagged (but didn't challenge)
+        if (
+            friction_decision
+            and friction_decision.level == FRICTION_FLAG
+            and friction_decision.user_message
+        ):
+            rich_content.append(
+                {
+                    "type": "friction_flag",
+                    "data": {"flag_message": friction_decision.user_message},
+                }
+            )
 
         result: dict[str, Any] = {
             "message": response_text,

@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ServiceHealthBanner } from "@/components/ServiceHealthBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
+import { UndoToastContainer } from "@/components/execution/UndoToastContainer";
 import { useServiceHealth } from "@/hooks/useServiceHealth";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -86,6 +87,7 @@ function App() {
     <ErrorBoundary>
       <OfflineBanner />
       <ErrorToaster />
+      <UndoToastContainer />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>

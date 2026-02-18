@@ -15,6 +15,11 @@ class WSEventType(str, Enum):
     PROGRESS_UPDATE = "progress.update"
     SIGNAL_DETECTED = "signal.detected"
     ARIA_SPEAKING = "aria.speaking"
+    FRICTION_CHALLENGE = "friction.challenge"
+    FRICTION_FLAG = "friction.flag"
+    ACTION_EXECUTED_WITH_UNDO = "action.executed_with_undo"
+    ACTION_UNDO_EXPIRED = "action.undo_expired"
+    ACTION_UNDO_COMPLETED = "action.undo_completed"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -97,3 +102,50 @@ class PongEvent(WSEvent):
     """Heartbeat pong response."""
 
     type: WSEventType = WSEventType.PONG
+
+
+class FrictionChallengeEvent(WSEvent):
+    """Cognitive friction challenge — ARIA pushes back on a user request."""
+
+    type: WSEventType = WSEventType.FRICTION_CHALLENGE
+    challenge_id: str
+    user_message: str
+    reasoning: str
+    original_request: str
+    proceed_if_confirmed: bool
+    conversation_id: str | None = None
+
+
+class FrictionFlagEvent(WSEvent):
+    """Cognitive friction flag — informational concern appended to a response."""
+
+    type: WSEventType = WSEventType.FRICTION_FLAG
+    flag_message: str
+    message_id: str | None = None
+
+
+class ActionExecutedWithUndoEvent(WSEvent):
+    """An action was executed with an undo window."""
+
+    type: WSEventType = WSEventType.ACTION_EXECUTED_WITH_UNDO
+    action_id: str
+    title: str
+    description: str | None = None
+    agent: str
+    undo_deadline: str
+    undo_duration_seconds: int = 300
+
+
+class ActionUndoExpiredEvent(WSEvent):
+    """The undo window for an action has expired."""
+
+    type: WSEventType = WSEventType.ACTION_UNDO_EXPIRED
+    action_id: str
+
+
+class ActionUndoCompletedEvent(WSEvent):
+    """An action was successfully undone."""
+
+    type: WSEventType = WSEventType.ACTION_UNDO_COMPLETED
+    action_id: str
+    reversal_summary: str | None = None

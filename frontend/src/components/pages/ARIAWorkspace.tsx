@@ -8,7 +8,19 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
 import { modalityController } from '@/core/ModalityController';
 import { WS_EVENTS } from '@/types/chat';
-import type { AriaMessagePayload, AriaThinkingPayload, StreamErrorPayload, RichContent, UICommand } from '@/types/chat';
+import type {
+  AriaMessagePayload,
+  AriaThinkingPayload,
+  StreamErrorPayload,
+  FrictionChallengePayload,
+  FrictionFlagPayload,
+  ActionExecutedWithUndoPayload,
+  ActionUndoExpiredPayload,
+  ActionUndoCompletedPayload,
+  RichContent,
+  UICommand,
+} from '@/types/chat';
+import { useUndoStore } from '@/stores/undoStore';
 import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
@@ -230,12 +242,91 @@ export function ARIAWorkspace() {
       // so this is a no-op unless the aria.message is delayed.
     };
 
+    // --- Friction handlers ---
+    const handleFrictionChallenge = (payload: unknown) => {
+      const data = payload as FrictionChallengePayload;
+      addMessage({
+        role: 'aria',
+        content: data.user_message,
+        rich_content: [
+          {
+            type: 'friction_challenge',
+            data: data as unknown as Record<string, unknown>,
+          },
+        ],
+        ui_commands: [],
+        suggestions: [],
+      });
+    };
+
+    const handleFrictionFlag = (payload: unknown) => {
+      const data = payload as FrictionFlagPayload;
+      if (data.message_id) {
+        // Append flag to existing message's rich_content
+        const store = useConversationStore.getState();
+        const msg = store.messages.find((m) => m.id === data.message_id);
+        if (msg) {
+          updateMessageMetadata(data.message_id, {
+            rich_content: [
+              ...msg.rich_content,
+              {
+                type: 'friction_flag',
+                data: { flag_message: data.flag_message } as unknown as Record<string, unknown>,
+              },
+            ],
+          });
+          return;
+        }
+      }
+      // Standalone flag message
+      addMessage({
+        role: 'aria',
+        content: '',
+        rich_content: [
+          {
+            type: 'friction_flag',
+            data: { flag_message: data.flag_message } as unknown as Record<string, unknown>,
+          },
+        ],
+        ui_commands: [],
+        suggestions: [],
+      });
+    };
+
+    // --- Undo window handlers ---
+    const handleActionExecutedWithUndo = (payload: unknown) => {
+      const data = payload as ActionExecutedWithUndoPayload;
+      useUndoStore.getState().addUndoItem({
+        action_id: data.action_id,
+        title: data.title,
+        description: data.description,
+        agent: data.agent,
+        undo_deadline: data.undo_deadline,
+        undo_duration_seconds: data.undo_duration_seconds,
+      });
+    };
+
+    const handleUndoExpired = (payload: unknown) => {
+      const data = payload as ActionUndoExpiredPayload;
+      useUndoStore.getState().markExpired(data.action_id);
+    };
+
+    const handleUndoCompleted = (payload: unknown) => {
+      const data = payload as ActionUndoCompletedPayload;
+      useUndoStore.getState().markUndone(data.action_id);
+    };
+
     wsManager.on(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
     wsManager.on(WS_EVENTS.ARIA_THINKING, handleThinking);
     wsManager.on('aria.token', handleToken);
     wsManager.on('aria.metadata', handleMetadata);
     wsManager.on(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
     wsManager.on(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+    wsManager.on(WS_EVENTS.FRICTION_CHALLENGE, handleFrictionChallenge);
+    wsManager.on(WS_EVENTS.FRICTION_FLAG, handleFrictionFlag);
+    wsManager.on(WS_EVENTS.ACTION_EXECUTED_WITH_UNDO, handleActionExecutedWithUndo);
+    wsManager.on(WS_EVENTS.ACTION_UNDO_EXPIRED, handleUndoExpired);
+    wsManager.on(WS_EVENTS.ACTION_UNDO_COMPLETED, handleUndoCompleted);
 
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
@@ -244,6 +335,11 @@ export function ARIAWorkspace() {
       wsManager.off('aria.metadata', handleMetadata);
       wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+      wsManager.off(WS_EVENTS.FRICTION_CHALLENGE, handleFrictionChallenge);
+      wsManager.off(WS_EVENTS.FRICTION_FLAG, handleFrictionFlag);
+      wsManager.off(WS_EVENTS.ACTION_EXECUTED_WITH_UNDO, handleActionExecutedWithUndo);
+      wsManager.off(WS_EVENTS.ACTION_UNDO_EXPIRED, handleUndoExpired);
+      wsManager.off(WS_EVENTS.ACTION_UNDO_COMPLETED, handleUndoCompleted);
     };
   }, [
     addMessage,

@@ -6,8 +6,13 @@ from typing import Any
 from fastapi import WebSocket
 
 from src.models.ws_events import (
+    ActionExecutedWithUndoEvent,
     ActionPendingEvent,
+    ActionUndoCompletedEvent,
+    ActionUndoExpiredEvent,
     AriaMessageEvent,
+    FrictionChallengeEvent,
+    FrictionFlagEvent,
     ProgressUpdateEvent,
     SignalEvent,
     ThinkingEvent,
@@ -192,6 +197,83 @@ class ConnectionManager:
             title=title,
             severity=severity,
             data=data or {},
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_friction_challenge(
+        self,
+        user_id: str,
+        challenge_id: str,
+        user_message: str,
+        reasoning: str,
+        original_request: str,
+        proceed_if_confirmed: bool,
+        conversation_id: str | None = None,
+    ) -> None:
+        """Send a cognitive friction challenge event."""
+        event = FrictionChallengeEvent(
+            challenge_id=challenge_id,
+            user_message=user_message,
+            reasoning=reasoning,
+            original_request=original_request,
+            proceed_if_confirmed=proceed_if_confirmed,
+            conversation_id=conversation_id,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_friction_flag(
+        self,
+        user_id: str,
+        flag_message: str,
+        message_id: str | None = None,
+    ) -> None:
+        """Send a cognitive friction flag event."""
+        event = FrictionFlagEvent(
+            flag_message=flag_message,
+            message_id=message_id,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_action_executed_with_undo(
+        self,
+        user_id: str,
+        action_id: str,
+        title: str,
+        agent: str,
+        undo_deadline: str,
+        undo_duration_seconds: int = 300,
+        description: str | None = None,
+    ) -> None:
+        """Send an action-executed-with-undo-window event."""
+        event = ActionExecutedWithUndoEvent(
+            action_id=action_id,
+            title=title,
+            agent=agent,
+            undo_deadline=undo_deadline,
+            undo_duration_seconds=undo_duration_seconds,
+            description=description,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_undo_expired(
+        self,
+        user_id: str,
+        action_id: str,
+    ) -> None:
+        """Send an undo-window-expired event."""
+        event = ActionUndoExpiredEvent(action_id=action_id)
+        await self.send_to_user(user_id, event)
+
+    async def send_undo_completed(
+        self,
+        user_id: str,
+        action_id: str,
+        reversal_summary: str | None = None,
+    ) -> None:
+        """Send an undo-completed event."""
+        event = ActionUndoCompletedEvent(
+            action_id=action_id,
+            reversal_summary=reversal_summary,
         )
         await self.send_to_user(user_id, event)
 
