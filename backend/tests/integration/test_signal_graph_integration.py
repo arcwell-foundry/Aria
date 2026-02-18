@@ -1,7 +1,8 @@
 """Integration test: signal -> graph traversal -> implication detection -> WebSocket."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.memory.cold_retrieval import ColdMemoryResult, EntityContext, MemorySource
 from src.services.signal_orient import analyze_signal_with_graph

@@ -100,7 +100,7 @@ class TestOrientGraphEnrichment:
 
         goal = {"title": "Close BioGenix deal", "description": "Q3 target"}
 
-        result = await loop.orient(state, goal)
+        await loop.orient(state, goal)
 
         # Verify graph traversal was attempted
         cold_retriever.retrieve_for_entity.assert_called()

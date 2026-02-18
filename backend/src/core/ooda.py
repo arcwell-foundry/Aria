@@ -633,7 +633,7 @@ If graph context is available, identify implication chains — non-obvious multi
 
         # Format results
         parts: list[str] = []
-        for entity, result in zip(entities, results):
+        for entity, result in zip(entities, results, strict=False):
             if isinstance(result, BaseException):
                 logger.warning("Graph retrieval failed for %s: %s", entity, result)
                 continue
