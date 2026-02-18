@@ -886,6 +886,109 @@ class VideoToolExecutor:
 
         return ToolResult(spoken_text=" ".join(parts))
 
+    async def _handle_trigger_goal_action(self, args: dict[str, Any]) -> ToolResult:
+        goal_description = args["goal_description"]
+
+        # Find matching active goal
+        goals_result = (
+            self.db.table("goals")
+            .select("id, title, description, goal_type, config, progress, status")
+            .eq("user_id", self._user_id)
+            .eq("status", "active")
+            .execute()
+        )
+
+        if not goals_result.data:
+            return ToolResult(
+                spoken_text=(
+                    "You don't have any active goals right now. "
+                    "Would you like me to create one?"
+                )
+            )
+
+        # Find best match by keyword overlap
+        query_words = set(goal_description.lower().split())
+        best_match = None
+        best_score = 0
+        for goal in goals_result.data:
+            title_words = set(goal.get("title", "").lower().split())
+            desc_words = set(goal.get("description", "").lower().split())
+            all_words = title_words | desc_words
+            overlap = len(query_words & all_words)
+            if overlap > best_score:
+                best_score = overlap
+                best_match = goal
+
+        if not best_match or best_score == 0:
+            # No keyword match — use first active goal
+            best_match = goals_result.data[0]
+
+        goal_title = best_match.get("title", "your goal")
+
+        # Run one OODA iteration
+        try:
+            from src.core.ooda import OODAConfig, OODALoop, OODAState
+            from src.memory.episodic import EpisodicMemory
+            from src.memory.semantic import SemanticMemory
+            from src.memory.working import WorkingMemory
+
+            episodic = EpisodicMemory()
+            semantic = SemanticMemory()
+            working = WorkingMemory(
+                conversation_id=f"video-ooda-{best_match['id']}",
+                user_id=self._user_id,
+            )
+
+            ooda = OODALoop(
+                llm_client=self.llm,
+                episodic_memory=episodic,
+                semantic_memory=semantic,
+                working_memory=working,
+                config=OODAConfig(max_iterations=1),
+            )
+
+            state = OODAState(goal_id=best_match["id"])
+            state = await ooda.run_single_iteration(state, best_match)
+
+            decision = state.decision or {}
+            action = decision.get("action", "observe")
+            agent = decision.get("agent", "")
+            reasoning = decision.get("reasoning", "")
+
+            parts = [f"Working on '{goal_title}'."]
+
+            if action == "complete":
+                parts.append("This goal appears to be complete based on current data.")
+            elif state.is_blocked:
+                parts.append(
+                    f"I'm blocked on this goal. {state.blocked_reason or 'I need more information.'}"
+                )
+            else:
+                if reasoning:
+                    parts.append(reasoning[:150])
+                if agent:
+                    parts.append(f"I've dispatched the {agent} agent to take action.")
+                if state.action_result:
+                    summary = (
+                        state.action_result.get("summary", "")
+                        if isinstance(state.action_result, dict)
+                        else str(state.action_result)[:150]
+                    )
+                    if summary:
+                        parts.append(summary[:150])
+
+            parts.append("Want me to continue working on this?")
+            return ToolResult(spoken_text=" ".join(parts))
+
+        except Exception:
+            logger.exception("OODA trigger failed", extra={"goal_id": best_match.get("id")})
+            return ToolResult(
+                spoken_text=(
+                    f"I found your goal '{goal_title}' but ran into an issue "
+                    "processing it right now. I'll keep monitoring it in the background."
+                )
+            )
+
     # ------------------------------------------------------------------
     # Activity logging
     # ------------------------------------------------------------------

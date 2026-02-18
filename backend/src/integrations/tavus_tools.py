@@ -338,6 +338,28 @@ ARIA_VIDEO_TOOLS: list[dict[str, Any]] = [
         },
         required=["company_name"],
     ),
+
+    # ── 13. trigger_goal_action (OODA Loop) ──────────────────────────
+    _tool(
+        name="trigger_goal_action",
+        description=(
+            "Trigger immediate action on one of the user's goals. Use when "
+            "the user says things like 'work on my goal', 'make progress on', "
+            "'take action on', or refers to a specific strategic objective. "
+            "Runs one OODA cycle (observe-orient-decide-act) and returns "
+            "what action was taken."
+        ),
+        properties={
+            "goal_description": {
+                "type": "string",
+                "description": (
+                    "Description of the goal to act on, e.g. 'expand into "
+                    "cell therapy market' or 'close the Lonza deal'"
+                ),
+            },
+        },
+        required=["goal_description"],
+    ),
 ]
 
 # Tool name → agent mapping for routing
@@ -354,6 +376,7 @@ TOOL_AGENT_MAP: dict[str, str] = {
     "schedule_meeting": "operator",
     "get_market_signals": "scout",
     "add_lead_to_pipeline": "service",
+    "trigger_goal_action": "ooda",
 }
 
 VALID_TOOL_NAMES: frozenset[str] = frozenset(TOOL_AGENT_MAP.keys())

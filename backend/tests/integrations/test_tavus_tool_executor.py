@@ -221,3 +221,51 @@ async def test_execute_stores_episodic_memory_on_success():
         assert call_args[0][0] == "search_pubmed"  # tool_name
         assert call_args[0][1] == {"query": "CAR-T"}  # arguments
         assert call_args[0][2].spoken_text == "Found 3 articles on CAR-T therapy."
+
+
+@pytest.mark.asyncio
+async def test_trigger_goal_action_runs_ooda_cycle():
+    """trigger_goal_action should find a matching goal and run one OODA iteration."""
+    from src.integrations.tavus_tool_executor import VideoToolExecutor
+
+    executor = VideoToolExecutor(user_id="user-123")
+    executor._llm = MagicMock()
+
+    # Mock DB — goals table returns a matching goal
+    mock_db = MagicMock()
+    mock_goals_result = MagicMock()
+    mock_goals_result.data = [
+        {
+            "id": "goal-1",
+            "title": "Expand into cell therapy market",
+            "description": "Target cell therapy CDMOs",
+            "goal_type": "research",
+            "config": {},
+            "progress": 25,
+            "status": "active",
+        }
+    ]
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_goals_result
+    executor._db = mock_db
+
+    with patch("src.core.ooda.OODALoop") as MockOODA:
+        mock_ooda = AsyncMock()
+        mock_state = MagicMock()
+        mock_state.is_complete = False
+        mock_state.is_blocked = False
+        mock_state.decision = {"action": "research", "agent": "analyst", "reasoning": "Need more data"}
+        mock_state.action_result = {"summary": "Found 5 cell therapy CDMOs"}
+        mock_ooda.run_single_iteration.return_value = mock_state
+        MockOODA.return_value = mock_ooda
+
+        with (
+            patch("src.memory.episodic.EpisodicMemory"),
+            patch("src.memory.semantic.SemanticMemory"),
+            patch("src.memory.working.WorkingMemory"),
+        ):
+            result = await executor._handle_trigger_goal_action({
+                "goal_description": "cell therapy"
+            })
+
+        assert "cell therapy" in result.spoken_text.lower() or "research" in result.spoken_text.lower()
+        mock_ooda.run_single_iteration.assert_called_once()
