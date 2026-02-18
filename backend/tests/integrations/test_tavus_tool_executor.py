@@ -269,3 +269,28 @@ async def test_trigger_goal_action_runs_ooda_cycle():
 
         assert "cell therapy" in result.spoken_text.lower() or "research" in result.spoken_text.lower()
         mock_ooda.run_single_iteration.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_market_signals_returns_rich_content():
+    """get_market_signals should return rich_content with signal_list type."""
+    from src.integrations.tavus_tool_executor import VideoToolExecutor
+
+    executor = VideoToolExecutor(user_id="user-123")
+    executor._llm = MagicMock()
+
+    with patch("src.agents.ScoutAgent") as MockScout:
+        mock_agent = AsyncMock()
+        mock_agent._call_tool.return_value = [
+            {"title": "Lonza acquires biotech startup", "source": "Reuters", "url": "https://example.com/1", "published_at": "2026-02-15"},
+            {"title": "Cell therapy market grows 15%", "source": "FiercePharma", "url": "https://example.com/2", "published_at": "2026-02-14"},
+        ]
+        MockScout.return_value = mock_agent
+
+        result = await executor._handle_get_market_signals({"topic": "cell therapy CDMOs"})
+
+        assert result.rich_content is not None
+        assert result.rich_content["type"] == "signal_list"
+        assert result.rich_content["data"]["topic"] == "cell therapy CDMOs"
+        assert len(result.rich_content["data"]["signals"]) == 2
+        assert result.rich_content["data"]["signals"][0]["title"] == "Lonza acquires biotech startup"

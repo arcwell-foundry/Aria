@@ -829,7 +829,26 @@ class VideoToolExecutor:
                 parts.append(entry)
 
         parts.append("Would you like me to analyse any of these signals in more detail?")
-        return ToolResult(spoken_text=" ".join(parts))
+
+        # Build rich content for signal overlay
+        signal_items: list[dict[str, str]] = []
+        for article in articles[:5]:
+            signal_items.append({
+                "title": article.get("title", ""),
+                "source": article.get("source", ""),
+                "url": article.get("url", ""),
+                "date": article.get("published_at", article.get("date", "")),
+            })
+
+        rich_content: dict[str, Any] = {
+            "type": "signal_list",
+            "data": {
+                "topic": topic,
+                "signals": signal_items,
+            },
+        }
+
+        return ToolResult(spoken_text=" ".join(parts), rich_content=rich_content)
 
     async def _handle_add_lead_to_pipeline(self, args: dict[str, Any]) -> ToolResult:
         company_name = args["company_name"]
