@@ -22,6 +22,9 @@ class NotificationType(str, Enum):
     LEAD_SILENT = "lead_silent"
     LEAD_HEALTH_DROP = "lead_health_drop"
     VIDEO_SESSION_READY = "video_session_ready"
+    WEEKLY_DIGEST_READY = "weekly_digest_ready"
+    BATTLE_CARD_UPDATED = "battle_card_updated"
+    CONVERSION_SCORE_CHANGE = "conversion_score_change"
 
 
 class NotificationCreate(BaseModel):

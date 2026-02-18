@@ -245,10 +245,14 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                 skipped += 1
                 continue
 
+            # Consume queued insights (LOW-priority items from proactive pipeline)
+            queued_insights = await _consume_briefing_queue(user_id)
+
             # Generate the briefing (this also creates an in-app notification)
             await briefing_service.generate_briefing(
                 user_id=user_id,
                 briefing_date=user_today,
+                queued_insights=queued_insights if queued_insights else None,
             )
             generated += 1
 
@@ -258,8 +262,12 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                     "user_id": user_id,
                     "briefing_date": user_today.isoformat(),
                     "timezone": tz_str,
+                    "queued_insights": len(queued_insights),
                 },
             )
+
+            # Create video briefing session if enabled
+            await _maybe_create_video_briefing(user_id, user_today)
 
             # Send email notification if enabled
             if user.get("notification_email", True):
@@ -285,6 +293,120 @@ async def run_daily_briefing_job() -> dict[str, Any]:
 
     logger.info("Daily briefing job completed", extra=result)
     return result
+
+
+async def _consume_briefing_queue(user_id: str) -> list[dict[str, Any]]:
+    """Consume unconsumed items from briefing_queue for this user.
+
+    Marks all consumed items so they won't be included again.
+
+    Args:
+        user_id: The user's UUID.
+
+    Returns:
+        List of queued insight dicts.
+    """
+    try:
+        db = SupabaseClient.get_client()
+
+        result = (
+            db.table("briefing_queue")
+            .select("id, title, message, category, metadata")
+            .eq("user_id", user_id)
+            .eq("consumed", False)
+            .order("created_at", desc=False)
+            .limit(20)
+            .execute()
+        )
+
+        items = result.data or []
+        if not items:
+            return []
+
+        # Mark as consumed
+        item_ids = [item["id"] for item in items]
+        db.table("briefing_queue").update(
+            {"consumed": True}
+        ).in_("id", item_ids).execute()
+
+        logger.info(
+            "Consumed %d briefing queue items for user %s",
+            len(items),
+            user_id,
+        )
+
+        return items
+
+    except Exception:
+        logger.warning(
+            "Failed to consume briefing queue for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return []
+
+
+async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> None:
+    """Create a Tavus video briefing session if the user has it enabled.
+
+    Args:
+        user_id: The user's UUID.
+        briefing_date: Date of the briefing.
+    """
+    try:
+        db = SupabaseClient.get_client()
+
+        prefs_result = (
+            db.table("user_preferences")
+            .select("video_briefing_enabled")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not prefs_result or not prefs_result.data:
+            return
+
+        if not prefs_result.data.get("video_briefing_enabled", False):
+            return
+
+        from src.services.briefing import BriefingService
+
+        briefing_service = BriefingService()
+        result = await briefing_service.create_video_briefing_session(user_id)
+
+        if result.get("session_id"):
+            logger.info(
+                "Video briefing session created for daily briefing",
+                extra={
+                    "user_id": user_id,
+                    "session_id": result["session_id"],
+                    "briefing_date": briefing_date.isoformat(),
+                },
+            )
+
+            # Create notification about video briefing
+            from src.models.notification import NotificationType
+            from src.services.notification_service import NotificationService
+
+            await NotificationService.create_notification(
+                user_id=user_id,
+                type=NotificationType.VIDEO_SESSION_READY,
+                title="Video Briefing Ready",
+                message="Your morning video briefing is ready to watch.",
+                link="/briefing",
+                metadata={
+                    "session_id": result["session_id"],
+                    "briefing_date": briefing_date.isoformat(),
+                },
+            )
+
+    except Exception:
+        logger.warning(
+            "Video briefing creation failed for user %s",
+            user_id,
+            exc_info=True,
+        )
 
 
 async def run_startup_briefing_check() -> dict[str, Any]:

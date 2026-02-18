@@ -84,6 +84,9 @@ async def websocket_endpoint(
         ws_manager.disconnect(user_id, websocket)
         return
 
+    # Drain login message queue (deliver HIGH-priority insights queued while offline)
+    await _drain_login_queue(user_id)
+
     # Message loop
     try:
         while True:
@@ -132,6 +135,69 @@ async def websocket_endpoint(
         )
     finally:
         ws_manager.disconnect(user_id, websocket)
+
+
+async def _drain_login_queue(user_id: str) -> None:
+    """Deliver queued messages from login_message_queue on WebSocket connect.
+
+    Fetches undelivered messages from the last 7 days (up to 10), delivers
+    them via WebSocket as ARIA messages, and marks them as delivered.
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+
+        result = (
+            db.table("login_message_queue")
+            .select("id, title, message, category")
+            .eq("user_id", user_id)
+            .eq("delivered", False)
+            .gte("created_at", cutoff)
+            .order("created_at", desc=False)
+            .limit(10)
+            .execute()
+        )
+
+        messages = result.data or []
+        if not messages:
+            return
+
+        logger.info(
+            "Draining %d login queue messages for user %s",
+            len(messages),
+            user_id,
+        )
+
+        for msg in messages:
+            try:
+                await ws_manager.send_aria_message(
+                    user_id=user_id,
+                    message=f"While you were away: {msg['message']}",
+                    suggestions=["Tell me more", "Dismiss"],
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to deliver login queue message %s",
+                    msg["id"],
+                )
+
+        # Mark all as delivered
+        msg_ids = [m["id"] for m in messages]
+        db.table("login_message_queue").update(
+            {"delivered": True}
+        ).in_("id", msg_ids).execute()
+
+    except Exception:
+        # Login queue drain is best-effort — don't break the WebSocket connection
+        logger.debug(
+            "Login queue drain failed for user %s",
+            user_id,
+            exc_info=True,
+        )
 
 
 async def _handle_user_message(

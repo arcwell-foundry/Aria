@@ -80,13 +80,19 @@ class BriefingService:
         return self._exa_provider
 
     async def generate_briefing(
-        self, user_id: str, briefing_date: date | None = None
+        self,
+        user_id: str,
+        briefing_date: date | None = None,
+        queued_insights: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Generate a new daily briefing for the user.
 
         Args:
             user_id: The user's ID.
             briefing_date: The date for the briefing (defaults to today).
+            queued_insights: Optional list of insights consumed from the
+                briefing_queue. If provided, these are woven into the
+                LLM-generated summary narrative.
 
         Returns:
             Dict containing the briefing content.
@@ -224,6 +230,7 @@ class BriefingService:
             task_data,
             email_data,
             tone_guidance=tone_guidance,
+            queued_insights=queued_insights,
         )
 
         content: dict[str, Any] = {
@@ -234,6 +241,7 @@ class BriefingService:
             "tasks": task_data,
             "email_summary": email_data,
             "intelligence_insights": jarvis_insights,
+            "queued_insights": queued_insights or [],
             "generated_at": datetime.now(UTC).isoformat(),
         }
 
@@ -933,6 +941,7 @@ class BriefingService:
         tasks: dict[str, Any],
         email_data: dict[str, Any],
         tone_guidance: str = "",
+        queued_insights: list[dict[str, Any]] | None = None,
     ) -> str:
         """Generate executive summary using LLM.
 
@@ -943,6 +952,7 @@ class BriefingService:
             tasks: Task data dict.
             email_data: Email data dict.
             tone_guidance: Personality-calibrated tone guidance.
+            queued_insights: Optional queued insights from briefing_queue.
 
         Returns:
             Generated summary string.
@@ -972,6 +982,11 @@ class BriefingService:
                 if meetings_without_debriefs > 0
                 else ""
             )
+            queued_note = ""
+            if queued_insights:
+                items = [qi.get("title", qi.get("message", "")) for qi in queued_insights[:5]]
+                queued_note = f"\nOvernight insights queued: {', '.join(items)}"
+
             prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
 
 Calendar: {meeting_count} meetings today
@@ -979,7 +994,7 @@ Leads needing attention: {attention_count}
 New signals: {signal_count}
 Overdue tasks: {overdue_count}
 Emails received: {email_count}
-Drafts waiting for review: {drafts_waiting}{debrief_note}
+Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}
 
 Be concise and actionable. Start with "Good morning!"
 """

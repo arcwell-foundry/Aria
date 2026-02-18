@@ -622,6 +622,127 @@ async def _run_competitive_docs_refresh() -> None:
         logger.exception("Competitive docs refresh scheduler run failed")
 
 
+async def _run_scout_signal_scan() -> None:
+    """Run proactive Scout signal scan for market intelligence."""
+    try:
+        from src.jobs.scout_signal_scan_job import run_scout_signal_scan_job
+
+        result = await run_scout_signal_scan_job()
+
+        if result["users_checked"] > 0:
+            logger.info(
+                "Scout signal scan complete: %d users checked, %d signals detected",
+                result["users_checked"],
+                result["signals_detected"],
+            )
+    except Exception:
+        logger.exception("Scout signal scan scheduler run failed")
+
+
+async def _run_daily_briefing_check() -> None:
+    """Run daily briefing generation check for all users."""
+    try:
+        from src.jobs.daily_briefing_job import run_daily_briefing_job
+
+        result = await run_daily_briefing_job()
+
+        if result["generated"] > 0:
+            logger.info(
+                "Daily briefing check: %d generated, %d skipped, %d errors",
+                result["generated"],
+                result["skipped"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Daily briefing check scheduler run failed")
+
+
+async def _run_health_score_refresh() -> None:
+    """Run batch health score recalculation for all leads."""
+    try:
+        from src.jobs.health_score_refresh_job import run_health_score_refresh_job
+
+        result = await run_health_score_refresh_job()
+
+        if result["leads_scored"] > 0:
+            logger.info(
+                "Health score refresh: %d leads scored, %d drops detected",
+                result["leads_scored"],
+                result["drops_detected"],
+            )
+    except Exception:
+        logger.exception("Health score refresh scheduler run failed")
+
+
+async def _run_stale_leads_check() -> None:
+    """Run stale leads detection for all users."""
+    try:
+        from src.jobs.stale_leads_job import run_stale_leads_job
+
+        result = await run_stale_leads_job()
+
+        if result["users_processed"] > 0:
+            logger.info(
+                "Stale leads check: %d users, %d high, %d medium",
+                result["users_processed"],
+                result["stale_leads_high"],
+                result["stale_leads_medium"],
+            )
+    except Exception:
+        logger.exception("Stale leads check scheduler run failed")
+
+
+async def _run_weekly_digest() -> None:
+    """Run weekly digest generation for all users."""
+    try:
+        from src.jobs.weekly_digest_job import run_weekly_digest_job
+
+        result = await run_weekly_digest_job()
+
+        if result["digests_generated"] > 0:
+            logger.info(
+                "Weekly digest: %d generated, %d skipped",
+                result["digests_generated"],
+                result["digests_skipped_existing"],
+            )
+    except Exception:
+        logger.exception("Weekly digest scheduler run failed")
+
+
+async def _run_battle_card_refresh() -> None:
+    """Run weekly battle card refresh for tracked competitors."""
+    try:
+        from src.jobs.battle_card_refresh_job import run_battle_card_refresh_job
+
+        result = await run_battle_card_refresh_job()
+
+        if result["competitors_scanned"] > 0:
+            logger.info(
+                "Battle card refresh: %d competitors scanned, %d cards updated",
+                result["competitors_scanned"],
+                result["cards_updated"],
+            )
+    except Exception:
+        logger.exception("Battle card refresh scheduler run failed")
+
+
+async def _run_conversion_score_batch() -> None:
+    """Run weekly conversion score batch recalculation."""
+    try:
+        from src.jobs.conversion_score_batch_job import run_conversion_score_batch_job
+
+        result = await run_conversion_score_batch_job()
+
+        if result["leads_scored"] > 0:
+            logger.info(
+                "Conversion score batch: %d leads scored, %d significant changes",
+                result["leads_scored"],
+                result["significant_changes"],
+            )
+    except Exception:
+        logger.exception("Conversion score batch scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -689,7 +810,7 @@ async def start_scheduler() -> None:
         )
         _scheduler.add_job(
             _run_periodic_email_check,
-            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="periodic_email_check",
             name="Periodic inbox check for urgent emails",
             replace_existing=True,
@@ -743,6 +864,56 @@ async def start_scheduler() -> None:
             name="Monthly Tavus KB competitive docs refresh",
             replace_existing=True,
         )
+        # --- Proactive Intelligence Pipeline jobs ---
+        _scheduler.add_job(
+            _run_scout_signal_scan,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="scout_signal_scan",
+            name="Proactive Scout market signal scan",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_daily_briefing_check,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="daily_briefing_check",
+            name="Daily briefing generation check",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_health_score_refresh,
+            trigger=CronTrigger(hour=6, minute=30),  # 6:30 AM daily
+            id="health_score_refresh",
+            name="Daily health score batch refresh",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_stale_leads_check,
+            trigger=CronTrigger(hour=7, minute=0),  # 7:00 AM daily
+            id="stale_leads_check",
+            name="Daily stale leads detection",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_weekly_digest,
+            trigger=CronTrigger(day_of_week="mon", hour=7, minute=0),  # Monday 7 AM
+            id="weekly_digest",
+            name="Weekly digest generation",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_battle_card_refresh,
+            trigger=CronTrigger(day_of_week="mon", hour=7, minute=30),  # Monday 7:30 AM
+            id="battle_card_refresh",
+            name="Weekly battle card refresh",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_conversion_score_batch,
+            trigger=CronTrigger(day_of_week="mon", hour=8, minute=0),  # Monday 8 AM
+            id="conversion_score_batch",
+            name="Weekly conversion score batch recalculation",
+            replace_existing=True,
+        )
 
         from apscheduler.triggers.interval import IntervalTrigger
 
@@ -755,22 +926,16 @@ async def start_scheduler() -> None:
         )
         _scheduler.start()
         logger.info(
-            "Background scheduler started — ambient gaps at 06:00 daily, "
-            "calendar meeting checks every 30 min, "
-            "predictive pre-executor every 30 min, "
-            "OODA goal monitoring every 30 min, "
-            "medium action timeout every 5 min, "
-            "prospective memory checks every 5 min, "
-            "working memory sync every 30 sec, "
-            "webset polling every 5 min, "
-            "periodic email check every 30 min, "
-            "draft feedback poll every 30 min, "
-            "deferred draft retry every 15 min, "
-            "debrief prompt checks every 15 min, "
-            "style recalibration weekly on Sunday at 2 AM, "
-            "daily improvement cycle at 23:30, "
-            "weekly improvement report on Sunday at 3 AM, "
-            "competitive docs refresh monthly on 1st at 3 AM"
+            "Background scheduler started with %d jobs — "
+            "includes proactive pipeline: scout scan every 15 min, "
+            "daily briefing check every 15 min, "
+            "health score refresh at 06:30, "
+            "stale leads check at 07:00, "
+            "weekly digest Monday 07:00, "
+            "battle card refresh Monday 07:30, "
+            "conversion score batch Monday 08:00, "
+            "email check every 15 min",
+            len(_scheduler.get_jobs()),
         )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
