@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { Shield, Zap, Check, Lock, AlertTriangle } from 'lucide-react';
 import { useAutonomyStore } from '@/stores/autonomyStore';
 import { ComingSoonIndicator } from './ComingSoonIndicator';
+import { TrustDashboard } from './TrustDashboard';
 import type { AutonomyTier } from '@/api/autonomy';
 
 const TIERS: {
@@ -325,6 +326,9 @@ export function AutonomySettings() {
             </div>
           </div>
         )}
+
+        {/* Per-Category Trust */}
+        <TrustDashboard />
 
         {/* Coming Soon: Full Autonomy */}
         <ComingSoonIndicator
