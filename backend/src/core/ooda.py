@@ -414,15 +414,40 @@ class OODALoop:
         # Build prompt for LLM analysis
         observations_summary = json.dumps(state.observations, indent=2, default=str)
 
+        # --- Graph context enrichment ---
+        graph_context_str = ""
+        if self._cold_memory_retriever is not None:
+            try:
+                user_id_for_graph = self._user_id or self.working.user_id
+                graph_context_str = await self._get_graph_context_for_orient(
+                    state.observations, user_id_for_graph
+                )
+            except Exception as e:
+                logger.warning("Graph context retrieval failed in orient: %s", e)
+
         hardcoded_system_prompt = """You are ARIA's cognitive analysis module. Analyze the observations and produce a structured analysis.
+
+When Knowledge Graph Context is provided, look for non-obvious connections between entities.
+If Company A just lost a key executive AND Company B is expanding in that space AND
+we have an active opportunity with Company A — that's an implication chain the user needs to know about.
 
 Output ONLY valid JSON with this structure:
 {
     "patterns": ["list of patterns identified"],
     "opportunities": ["list of opportunities to pursue the goal"],
     "threats": ["list of obstacles or risks"],
-    "recommended_focus": "single most important area to focus on"
-}"""
+    "recommended_focus": "single most important area to focus on",
+    "implication_chains": [
+        {
+            "signal": "what triggered this chain",
+            "chain": "A → B → C causal connection",
+            "implication": "what this means for the user",
+            "urgency": "high | medium | low"
+        }
+    ]
+}
+
+The implication_chains array can be empty if no multi-hop connections are found."""
 
         # Use PersonaBuilder when available, fall back to hardcoded prompt
         system_prompt = hardcoded_system_prompt
@@ -448,8 +473,15 @@ Description: {goal.get("description", "No description")}
 
 Observations:
 {observations_summary}
-
-Analyze these observations and identify patterns, opportunities, and threats relevant to achieving the goal."""
+"""
+        if graph_context_str:
+            user_prompt += f"""
+Knowledge Graph Context (entity relationships and history):
+{graph_context_str}
+"""
+        user_prompt += """
+Analyze these observations and identify patterns, opportunities, and threats relevant to achieving the goal.
+If graph context is available, identify implication chains — non-obvious multi-hop connections between entities."""
 
         # Call LLM for analysis — use extended thinking when user_id is set
         estimated_tokens = 0
@@ -561,6 +593,69 @@ Analyze these observations and identify patterns, opportunities, and threats rel
         )
 
         return state
+
+    async def _get_graph_context_for_orient(
+        self,
+        observations: list[dict[str, Any]],
+        user_id: str,
+    ) -> str:
+        """Extract entities from observations and retrieve graph context.
+
+        Args:
+            observations: OODA observations from Observe phase.
+            user_id: User ID for scoped graph queries.
+
+        Returns:
+            Formatted string of graph context for the Orient prompt.
+        """
+        if self._cold_memory_retriever is None:
+            return ""
+
+        import asyncio
+
+        from src.core.entity_extractor import extract_entities_from_observations
+
+        entities = extract_entities_from_observations(observations, max_entities=5)
+        if not entities:
+            return ""
+
+        # Query graph for each entity in parallel
+        tasks = [
+            self._cold_memory_retriever.retrieve_for_entity(
+                user_id=user_id,
+                entity_id=entity,
+                hops=3,
+            )
+            for entity in entities
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Format results
+        parts: list[str] = []
+        for entity, result in zip(entities, results):
+            if isinstance(result, BaseException):
+                logger.warning("Graph retrieval failed for %s: %s", entity, result)
+                continue
+
+            section_lines: list[str] = [f"### {entity}"]
+            if result.direct_facts:
+                section_lines.append("Facts:")
+                for fact in result.direct_facts[:3]:
+                    section_lines.append(f"  - {fact.content}")
+            if result.relationships:
+                section_lines.append("Relationships:")
+                for rel in result.relationships[:3]:
+                    section_lines.append(f"  - {rel.content}")
+            if result.recent_interactions:
+                section_lines.append("Recent Interactions:")
+                for interaction in result.recent_interactions[:3]:
+                    section_lines.append(f"  - {interaction.content}")
+
+            if len(section_lines) > 1:  # More than just the header
+                parts.append("\n".join(section_lines))
+
+        return "\n\n".join(parts) if parts else ""
 
     async def decide(
         self,
