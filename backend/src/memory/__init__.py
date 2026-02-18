@@ -18,6 +18,12 @@ from src.memory.audit import (
     MemoryType,
     log_memory_operation,
 )
+from src.memory.cold_retrieval import (
+    ColdMemoryResult,
+    ColdMemoryRetriever,
+    EntityContext,
+    MemorySource,
+)
 from src.memory.confidence import ConfidenceScorer
 from src.memory.conversation import ConversationEpisode, ConversationService
 from src.memory.conversation_intelligence import ConversationIntelligence, Insight
@@ -43,6 +49,7 @@ from src.memory.health_score import (
     HealthScoreCalculator,
     HealthScoreHistory,
 )
+from src.memory.hot_context import HotContext, HotContextBuilder, HotContextSection
 from src.memory.lead_memory import (
     LeadMemory,
     LeadMemoryService,
@@ -174,4 +181,13 @@ __all__ = [
     "RetroactiveEnrichmentService",
     "EnrichmentResult",
     "EnrichmentTrigger",
+    # Hot Context
+    "HotContext",
+    "HotContextBuilder",
+    "HotContextSection",
+    # Cold Retrieval
+    "ColdMemoryResult",
+    "ColdMemoryRetriever",
+    "EntityContext",
+    "MemorySource",
 ]

@@ -19,6 +19,8 @@ from src.agents.base import AgentResult, AgentStatus, BaseAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.memory.cold_retrieval import ColdMemoryRetriever
+    from src.memory.hot_context import HotContextBuilder
     from src.skills.index import SkillIndex
     from src.skills.orchestrator import SkillOrchestrator
 
@@ -106,6 +108,8 @@ class SkillAwareAgent(BaseAgent):
         user_id: str,
         skill_orchestrator: "SkillOrchestrator | None" = None,
         skill_index: "SkillIndex | None" = None,
+        hot_context_builder: "HotContextBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
     ) -> None:
         """Initialize the skill-aware agent.
 
@@ -114,11 +118,18 @@ class SkillAwareAgent(BaseAgent):
             user_id: ID of the user this agent is working for.
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
+            hot_context_builder: Optional builder for always-loaded context.
+            cold_retriever: Optional retriever for on-demand deep memory search.
         """
         self.skill_orchestrator = skill_orchestrator
         self.skill_index = skill_index
         self._last_skill_analysis: SkillAnalysis | None = None
-        super().__init__(llm_client=llm_client, user_id=user_id)
+        super().__init__(
+            llm_client=llm_client,
+            user_id=user_id,
+            hot_context_builder=hot_context_builder,
+            cold_retriever=cold_retriever,
+        )
 
     def _get_available_skills(self) -> list[str]:
         """Get the list of skills this agent is authorized to use.
