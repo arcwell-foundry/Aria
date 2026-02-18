@@ -76,6 +76,36 @@ class IntegrationService:
             logger.exception("Failed to fetch integration")
             return None
 
+    async def get_integration_by_id(
+        self,
+        integration_id: str,
+    ) -> dict[str, Any] | None:
+        """Get a specific integration by its record ID.
+
+        Args:
+            integration_id: The integration record UUID.
+
+        Returns:
+            Integration dictionary or None if not found.
+        """
+        try:
+            client = SupabaseClient.get_client()
+            result = (
+                client.table("user_integrations")
+                .select("*")
+                .eq("id", integration_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if result is None or result.data is None:
+                return None
+            return cast(dict[str, Any], result.data)
+
+        except Exception:
+            logger.exception("Failed to fetch integration by id")
+            return None
+
     async def create_integration(
         self,
         user_id: str,
@@ -288,6 +318,11 @@ class IntegrationService:
     async def trigger_sync(self, integration_id: str) -> dict[str, Any]:
         """Trigger a manual sync for an integration.
 
+        Routes to the appropriate DeepSyncService method based on integration
+        type:
+        - SALESFORCE / HUBSPOT → ``sync_crm_to_aria``
+        - GOOGLE_CALENDAR / OUTLOOK → ``sync_calendar``
+
         Args:
             integration_id: Integration record ID
 
@@ -295,16 +330,50 @@ class IntegrationService:
             Updated integration with sync status
 
         Raises:
-            Exception: If sync fails
+            Exception: If sync fails or integration not found
         """
         try:
-            # Update status to pending
+            # Look up integration to determine type and user
+            record = await self.get_integration_by_id(integration_id)
+            if not record:
+                raise Exception(f"Integration {integration_id} not found")
+
+            user_id = record["user_id"]
+            integration_type_str = record["integration_type"]
+
+            try:
+                integration_type = IntegrationType(integration_type_str)
+            except ValueError as exc:
+                raise Exception(
+                    f"Unknown integration type: {integration_type_str}"
+                ) from exc
+
+            # Mark as pending
             await self.update_sync_status(integration_id, SyncStatus.PENDING)
 
-            # TODO: Implement actual sync logic per integration type
-            # For now, mark as success
-            integration = await self.update_sync_status(integration_id, SyncStatus.SUCCESS)
+            # Route to DeepSyncService by type
+            crm_types = {IntegrationType.SALESFORCE, IntegrationType.HUBSPOT}
+            calendar_types = {IntegrationType.GOOGLE_CALENDAR, IntegrationType.OUTLOOK}
 
+            if integration_type in crm_types:
+                from src.integrations.deep_sync import get_deep_sync_service
+
+                deep_sync = get_deep_sync_service()
+                await deep_sync.sync_crm_to_aria(user_id, integration_type)
+            elif integration_type in calendar_types:
+                from src.integrations.deep_sync import get_deep_sync_service
+
+                deep_sync = get_deep_sync_service()
+                await deep_sync.sync_calendar(user_id, integration_type)
+            else:
+                logger.warning(
+                    "No sync handler for integration type %s; skipping",
+                    integration_type.value,
+                )
+
+            integration = await self.update_sync_status(
+                integration_id, SyncStatus.SUCCESS
+            )
             return integration
 
         except Exception as e:

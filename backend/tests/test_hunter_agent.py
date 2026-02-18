@@ -1,7 +1,7 @@
 """Tests for HunterAgent module."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -963,3 +963,60 @@ async def test_hunter_agent_caches_enrichment() -> None:
     assert "technologies" in first_cached
     assert "linkedin_url" in first_cached
     assert "funding_stage" in first_cached
+
+
+# CostGovernor user_id tests
+
+
+@pytest.mark.asyncio
+async def test_search_companies_via_llm_passes_user_id() -> None:
+    """Test _search_companies_via_llm passes user_id to LLM for cost tracking."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='[{"name":"Acme","domain":"acme.com","description":"","industry":"Bio","size":"","geography":"","website":""}]'
+    )
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-cost-123")
+
+    await agent._search_companies_via_llm(query="biotechnology", limit=5)
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-123"
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_via_llm_passes_user_id() -> None:
+    """Test _enrich_company_via_llm passes user_id to LLM for cost tracking."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"technologies":["Salesforce"],"funding_stage":"Series A","founded_year":2020,"revenue":"$10M","recent_news":[],"competitors":[]}'
+    )
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-cost-456")
+
+    await agent._enrich_company_via_llm(company_name="Acme Corp")
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-456"
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_via_llm_passes_user_id() -> None:
+    """Test _find_contacts_via_llm passes user_id to LLM for cost tracking."""
+    from src.agents.hunter import HunterAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='[{"title":"VP Sales","department":"Sales","seniority":"VP-Level","suggested_outreach":"Discuss partnership"}]'
+    )
+    agent = HunterAgent(llm_client=mock_llm, user_id="user-cost-789")
+
+    await agent._find_contacts_via_llm(company_name="Acme Corp")
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-789"

@@ -1,6 +1,6 @@
 """Tests for ScoutAgent module."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -793,3 +793,90 @@ async def test_scout_agent_noise_filtering() -> None:
         assert signal["relevance_score"] >= 0.5, (
             f"Signal '{signal['headline']}' has low relevance: {signal['relevance_score']}"
         )
+
+
+# CostGovernor user_id tests
+
+
+@pytest.mark.asyncio
+async def test_web_search_llm_fallback_passes_user_id() -> None:
+    """Test _web_search LLM fallback passes user_id for cost tracking."""
+    from unittest.mock import patch
+
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='[{"title":"Result","url":"https://example.com","snippet":"Test"}]'
+    )
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-cost-scout-1")
+
+    # Force Exa unavailable so LLM fallback is used
+    with patch.object(agent, "_get_exa_provider", return_value=None):
+        await agent._web_search(query="biotechnology funding", limit=5)
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-scout-1"
+
+
+@pytest.mark.asyncio
+async def test_news_search_llm_fallback_passes_user_id() -> None:
+    """Test _news_search LLM fallback passes user_id for cost tracking."""
+    from unittest.mock import patch
+
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='[{"title":"News","url":"https://example.com","source":"Reuters","published_at":"2026-02-18T00:00:00Z"}]'
+    )
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-cost-scout-2")
+
+    with patch.object(agent, "_get_exa_provider", return_value=None):
+        await agent._news_search(query="biotech funding", limit=5)
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-scout-2"
+
+
+@pytest.mark.asyncio
+async def test_social_monitor_llm_fallback_passes_user_id() -> None:
+    """Test _social_monitor LLM fallback passes user_id for cost tracking."""
+    from unittest.mock import patch
+
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='[{"content":"Post","author":"@user","platform":"twitter","url":"https://twitter.com/user/1"}]'
+    )
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-cost-scout-3")
+
+    with patch.object(agent, "_get_exa_provider", return_value=None):
+        await agent._social_monitor(entity="Acme Corp", limit=5)
+
+    mock_llm.generate_response.assert_awaited_once()
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs.get("user_id") == "user-cost-scout-3"
+
+
+@pytest.mark.asyncio
+async def test_detect_signals_passes_user_id() -> None:
+    """Test _detect_signals passes user_id to the signal classification LLM call."""
+    from unittest.mock import patch
+
+    from src.agents.scout import ScoutAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(return_value="[]")
+    agent = ScoutAgent(llm_client=mock_llm, user_id="user-cost-scout-4")
+
+    with patch.object(agent, "_get_exa_provider", return_value=None):
+        await agent._detect_signals(entities=["Acme Corp"])
+
+    # All LLM calls should include user_id
+    assert mock_llm.generate_response.await_count >= 1
+    for call in mock_llm.generate_response.call_args_list:
+        assert call.kwargs.get("user_id") == "user-cost-scout-4"

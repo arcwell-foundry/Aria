@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType, SyncStatus
+from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
 from src.integrations.oauth import get_oauth_client
 from src.integrations.service import get_integration_service
 
@@ -308,6 +308,9 @@ async def sync_integration(
 ) -> dict[str, Any]:
     """Manually trigger a sync for an integration.
 
+    Delegates to ``IntegrationService.trigger_sync`` which routes to the
+    appropriate DeepSyncService method based on integration type.
+
     Args:
         integration_id: Integration record ID
         current_user: The authenticated user
@@ -320,23 +323,11 @@ async def sync_integration(
     """
     try:
         service = get_integration_service()
-
-        # Update status to pending
-        await service.update_sync_status(integration_id, SyncStatus.PENDING)
-
-        # TODO: Implement actual sync logic per integration type
-        # For now, mark as success
-        integration = await service.update_sync_status(integration_id, SyncStatus.SUCCESS)
-
+        integration = await service.trigger_sync(integration_id)
         return integration
 
     except Exception as e:
         logger.exception("Error syncing integration")
-        await service.update_sync_status(
-            integration_id,
-            SyncStatus.FAILED,
-            error_message=str(e),
-        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to sync integration",

@@ -315,13 +315,14 @@ class HunterAgent(SkillAwareAgent):
             f"Return ONLY the JSON array, no other text."
         )
 
-        response = await self.llm_client.generate_response(
+        response = await self.llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
                 "You are a life sciences market intelligence analyst. "
                 "Return only valid JSON arrays. No markdown, no explanation."
             ),
             temperature=0.3,
+            user_id=self.user_id,
         )
 
         companies = _extract_json_from_text(response)
@@ -524,13 +525,14 @@ class HunterAgent(SkillAwareAgent):
             f"Return ONLY the JSON object, no other text."
         )
 
-        response = await self.llm_client.generate_response(
+        response = await self.llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
                 "You are a life sciences market intelligence analyst. "
                 "Return only valid JSON objects. No markdown, no explanation."
             ),
             temperature=0.3,
+            user_id=self.user_id,
         )
 
         enrichment_data = _extract_json_from_text(response)
@@ -686,13 +688,14 @@ class HunterAgent(SkillAwareAgent):
             f"Return 3-5 contacts. Return ONLY the JSON array."
         )
 
-        response = await self.llm_client.generate_response(
+        response = await self.llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
                 "You are a life sciences sales intelligence analyst. "
                 "Return only valid JSON arrays. No markdown, no explanation."
             ),
             temperature=0.3,
+            user_id=self.user_id,
         )
 
         contacts = _extract_json_from_text(response)

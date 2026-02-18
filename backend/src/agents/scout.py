@@ -284,6 +284,7 @@ class ScoutAgent(SkillAwareAgent):
                     "Return only valid JSON arrays. No markdown, no explanation."
                 ),
                 temperature=0.3,
+                user_id=self.user_id,
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -389,6 +390,7 @@ class ScoutAgent(SkillAwareAgent):
                     "Return only valid JSON arrays. No markdown, no explanation."
                 ),
                 temperature=0.3,
+                user_id=self.user_id,
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -512,6 +514,7 @@ class ScoutAgent(SkillAwareAgent):
                     "Return only valid JSON arrays. No markdown, no explanation."
                 ),
                 temperature=0.3,
+                user_id=self.user_id,
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -611,6 +614,7 @@ class ScoutAgent(SkillAwareAgent):
                         "Be precise with relevance scoring. Return only valid JSON arrays."
                     ),
                     temperature=0.2,
+                    user_id=self.user_id,
                 )
 
                 parsed = _extract_json_from_text(response_text)

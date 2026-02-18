@@ -151,6 +151,63 @@ class ComposioOAuthClient:
 
         return redirect_url, connection_id
 
+    async def exchange_code_for_connection(
+        self,
+        user_id: str,
+        code: str,
+        integration_type: "Any",
+    ) -> dict[str, Any]:
+        """Exchange an OAuth callback code for connection details.
+
+        In Composio's flow, ``link.create()`` returns a ``connected_account_id``
+        during auth URL generation.  The "code" the frontend sends back after
+        the OAuth redirect IS that connection ID.  This method verifies the
+        connection is active and returns normalised connection metadata.
+
+        Args:
+            user_id: The user's ID (for logging / future validation).
+            code: The connection ID returned by the OAuth callback.
+            integration_type: The integration type (for logging).
+
+        Returns:
+            Dict with ``connection_id``, ``account_id``, and ``account_email``.
+
+        Raises:
+            ValueError: If the connection is not in ACTIVE status.
+        """
+
+        def _retrieve() -> Any:
+            return self._client.client.connected_accounts.retrieve(code)
+
+        result = await asyncio.to_thread(_retrieve)
+
+        status = str(result.status).upper()
+        if status != "ACTIVE":
+            raise ValueError(
+                f"Connection {code} is not active (status={status}). "
+                "The user may need to complete the OAuth flow."
+            )
+
+        # Extract account metadata — fields vary by provider so we
+        # fall back to empty strings when attributes are absent.
+        account_id = getattr(result, "id", None) or code
+        account_email = getattr(result, "member_email", None) or ""
+
+        logger.info(
+            "OAuth code exchanged for connection",
+            extra={
+                "user_id": user_id,
+                "integration_type": str(integration_type),
+                "connection_id": code,
+            },
+        )
+
+        return {
+            "connection_id": code,
+            "account_id": str(account_id),
+            "account_email": account_email,
+        }
+
     async def disconnect_integration(
         self,
         user_id: str,
