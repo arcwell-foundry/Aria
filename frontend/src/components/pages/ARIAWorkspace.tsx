@@ -280,6 +280,11 @@ export function ARIAWorkspace() {
     [addMessage, activeConversationId, setActiveConversation],
   );
 
+  const handleStartTyping = useCallback(() => {
+    const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
+    textarea?.focus();
+  }, []);
+
   // Video briefing handlers
   const handlePlayBriefing = useCallback(() => {
     navigate('/briefing');
@@ -378,7 +383,7 @@ export function ARIAWorkspace() {
         </div>
       )}
 
-      <ConversationThread />
+      <ConversationThread onStartTyping={handleStartTyping} />
       <SuggestionChips onSelect={handleSend} />
       <InputBar onSend={handleSend} />
     </div>

@@ -5,6 +5,7 @@ import { MessageBubble } from './MessageBubble';
 import { TimeDivider } from './TimeDivider';
 import { TypingIndicator } from './TypingIndicator';
 import { UnreadIndicator } from './UnreadIndicator';
+import { WelcomeCTAs } from './WelcomeCTAs';
 import type { Message } from '@/types/chat';
 
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
@@ -37,7 +38,11 @@ function EmptyState() {
   );
 }
 
-export function ConversationThread() {
+interface ConversationThreadProps {
+  onStartTyping?: () => void;
+}
+
+export function ConversationThread({ onStartTyping }: ConversationThreadProps) {
   const messages = useConversationStore((s) => s.messages);
   const isStreaming = useConversationStore((s) => s.isStreaming);
 
@@ -84,7 +89,7 @@ export function ConversationThread() {
         data-aria-id="conversation-thread"
       >
         <UnreadIndicator />
-        <EmptyState />
+        {onStartTyping ? <WelcomeCTAs onStartTyping={onStartTyping} /> : <EmptyState />}
       </div>
     );
   }
