@@ -511,7 +511,39 @@ class AdaptiveCoordinator:
         failure_analysis: FailureAnalysis,
         trace_id: str | None = None,
     ) -> None:
-        raise NotImplementedError
+        """Save partial work before re-delegation (fail-open)."""
+        if self._trace_service is None:
+            logger.debug(
+                "No trace service — skipping checkpoint for %s on goal %s",
+                agent_type,
+                goal_id,
+            )
+            return
+
+        try:
+            if trace_id:
+                await self._trace_service.complete_trace(
+                    trace_id=trace_id,
+                    outputs={
+                        "partial_results": partial_output,
+                        "failure_trigger": failure_analysis.trigger.value,
+                        "failure_details": failure_analysis.details,
+                    },
+                    verification_result=None,
+                    cost_usd=0.0,
+                    status="re_delegated",
+                )
+            logger.info(
+                "Checkpointed partial results for %s on goal %s (trigger=%s)",
+                agent_type,
+                goal_id,
+                failure_analysis.trigger.value,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to checkpoint partial results (fail-open)",
+                exc_info=True,
+            )
 
 
 # ---------------------------------------------------------------------------
