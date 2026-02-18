@@ -597,15 +597,51 @@ class VideoToolExecutor:
 
     async def _handle_draft_email(self, args: dict[str, Any]) -> ToolResult:
         from src.agents import ScribeAgent
+        from src.memory.digital_twin import DigitalTwin
 
         agent = ScribeAgent(llm_client=self.llm, user_id=self._user_id)
 
         recipient = {"name": args["to"]}
-        # If it looks like an email, add it as email
         if "@" in args["to"]:
             recipient = {"email": args["to"]}
 
         tone = args.get("tone", "formal")
+
+        # Load Digital Twin writing style
+        style: dict[str, Any] = {}
+        try:
+            dt = DigitalTwin()
+            fingerprint = await dt.get_fingerprint(self._user_id)
+            if fingerprint:
+                style = {
+                    "preferred_greeting": fingerprint.greeting_style,
+                    "signature": fingerprint.sign_off_style,
+                    "formality": "formal" if fingerprint.formality_score > 0.6 else "casual",
+                }
+            # Check recipient-specific profile
+            if "@" in args["to"]:
+                rp = (
+                    self.db.table("recipient_writing_profiles")
+                    .select("greeting_style, signoff_style, formality_level, tone")
+                    .eq("user_id", self._user_id)
+                    .eq("recipient_email", args["to"])
+                    .limit(1)
+                    .execute()
+                )
+                if rp.data:
+                    profile = rp.data[0]
+                    if profile.get("greeting_style"):
+                        style["preferred_greeting"] = profile["greeting_style"]
+                    if profile.get("signoff_style"):
+                        style["signature"] = profile["signoff_style"]
+                    if profile.get("formality_level") is not None:
+                        style["formality"] = (
+                            "formal" if profile["formality_level"] > 0.6 else "casual"
+                        )
+                    if profile.get("tone"):
+                        tone = profile["tone"]
+        except Exception:
+            logger.debug("Failed to load digital twin style", exc_info=True)
 
         result = await agent._call_tool(
             "draft_email",
@@ -613,6 +649,7 @@ class VideoToolExecutor:
             context=args["subject_context"],
             goal=args["subject_context"],
             tone=tone,
+            style=style,
         )
 
         if not result:
@@ -630,7 +667,10 @@ class VideoToolExecutor:
             parts.append(f"Subject line: {subject}.")
         if word_count:
             parts.append(f"It's {word_count} words.")
-        parts.append("The draft is saved and ready for your review. Would you like me to read it, adjust the tone, or send it?")
+        parts.append(
+            "The draft is saved and ready for your review. "
+            "Would you like me to read it, adjust the tone, or send it?"
+        )
 
         spoken_text = " ".join(parts)
 
