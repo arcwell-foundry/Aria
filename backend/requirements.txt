@@ -61,5 +61,8 @@ apscheduler>=3.10.0,<4.0.0
 # Email Service (US-934)
 resend>=2.0.0,<3.0.0
 
+# MCP (Model Context Protocol) Servers
+mcp>=1.26.0,<2.0.0
+
 # Structured JSON Logging (production)
 python-json-logger>=3.0.0,<4.0.0

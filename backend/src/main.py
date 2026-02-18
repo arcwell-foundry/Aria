@@ -188,6 +188,13 @@ async def lifespan(_app: FastAPI) -> Any:
         logger.info("Daily briefing startup check scheduled")
     except Exception:
         logger.exception("Failed to schedule daily briefing startup check")
+    # Mount MCP servers (SSE transport for external clients + in-process registry)
+    try:
+        from src.mcp_servers.registry import mount_mcp_servers
+
+        mount_mcp_servers(_app)
+    except Exception:
+        logger.exception("Failed to mount MCP servers")
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")

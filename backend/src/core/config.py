@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     SALIENCE_ACCESS_BOOST: float = 0.1  # Boost per memory retrieval
     SALIENCE_MIN: float = 0.01  # Minimum salience (never zero)
 
+    # MCP Server Configuration
+    MCP_SERVERS_ENABLED: bool = True
+    MCP_LIFESCI_PATH: str = "/mcp/lifesci"
+    MCP_EXA_PATH: str = "/mcp/exa"
+    MCP_BUSINESS_PATH: str = "/mcp/business"
+    USE_MCP_TOOLS: bool = False  # Feature flag: agents use MCP client instead of direct calls
+
     # Cost Governor Configuration (Wave 0)
     COST_GOVERNOR_ENABLED: bool = True
     COST_GOVERNOR_DAILY_TOKEN_BUDGET: int = 2_000_000

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
     from src.core.persona import PersonaBuilder
+    from src.mcp_servers.client import MCPToolClient
     from src.memory.cold_retrieval import ColdMemoryRetriever
     from src.memory.hot_context import HotContext, HotContextBuilder
     from src.memory.working import WorkingMemory
@@ -78,6 +79,7 @@ class BaseAgent(ABC):
         persona_builder: "PersonaBuilder | None" = None,
         hot_context_builder: "HotContextBuilder | None" = None,
         cold_retriever: "ColdMemoryRetriever | None" = None,
+        mcp_client: "MCPToolClient | None" = None,
     ) -> None:
         """Initialize the agent.
 
@@ -87,12 +89,14 @@ class BaseAgent(ABC):
             persona_builder: Optional PersonaBuilder for centralized prompt assembly.
             hot_context_builder: Optional builder for always-loaded context.
             cold_retriever: Optional retriever for on-demand deep memory search.
+            mcp_client: Optional MCP tool client for calling tools via MCP servers.
         """
         self.llm = llm_client
         self.user_id = user_id
         self.persona_builder = persona_builder
         self._hot_context_builder = hot_context_builder
         self._cold_retriever = cold_retriever
+        self._mcp_client = mcp_client
         self._hot_context_cache: HotContext | None = None
         self.status = AgentStatus.IDLE
         self.total_tokens_used = 0
@@ -267,6 +271,37 @@ class BaseAgent(ABC):
         if last_error is not None:
             raise last_error
         raise RuntimeError(f"Tool {tool_name} failed with no error captured")
+
+    async def _call_mcp_tool(
+        self,
+        tool_name: str,
+        *,
+        dct: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Call a tool via MCP if a client is available, else fall back to ``_call_tool``.
+
+        This is the preferred way for agents to call tools when
+        ``USE_MCP_TOOLS`` is enabled.  When ``_mcp_client`` is None the
+        call transparently falls back to the agent's locally registered
+        tool.
+
+        Args:
+            tool_name: Name of the tool to call.
+            dct: Optional DelegationCapabilityToken for MCP enforcement.
+            **kwargs: Arguments to pass to the tool.
+
+        Returns:
+            Tool execution result.
+        """
+        if self._mcp_client is not None:
+            return await self._mcp_client.call_tool(
+                tool_name=tool_name,
+                arguments=kwargs,
+                dct=dct,
+                delegatee=getattr(self, "name", "unknown"),
+            )
+        return await self._call_tool(tool_name, **kwargs)
 
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
