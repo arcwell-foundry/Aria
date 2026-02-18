@@ -137,7 +137,37 @@ class AdaptiveCoordinator:
         evaluation: AgentOutputEvaluation,
         task_characteristics: TaskCharacteristics | None = None,
     ) -> AdaptiveDecision:
-        raise NotImplementedError
+        """Evaluate an agent's output and decide what to do next."""
+        failure = self._analyze_failure(evaluation)
+
+        if failure is None:
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.PROCEED,
+                failure_analysis=None,
+                target_agent=None,
+                partial_results=evaluation.output or {},
+                reasoning="Output is acceptable",
+                retry_count=0,
+            )
+
+        if not self._cost_governor.check_retry_budget(evaluation.goal_id):
+            return self._make_escalation(
+                failure=failure,
+                evaluation=evaluation,
+                reasoning=(
+                    f"Retry budget exhausted for goal {evaluation.goal_id}. "
+                    f"Failure: {failure.trigger.value} — {failure.details}"
+                ),
+            )
+
+        retry_count = self._cost_governor.record_retry(evaluation.goal_id)
+
+        return self._determine_decision(
+            failure=failure,
+            evaluation=evaluation,
+            task_characteristics=task_characteristics,
+            retry_count=retry_count,
+        )
 
     def _analyze_failure(
         self,
@@ -248,7 +278,229 @@ class AdaptiveCoordinator:
         failed_agent: str,
         already_tried: list[str] | None = None,
     ) -> str | None:
-        raise NotImplementedError
+        """Find the best alternative agent for re-delegation."""
+        candidates = RE_DELEGATION_MAP.get(failed_agent, [])
+        tried = set(already_tried or [])
+        for candidate in candidates:
+            if candidate not in tried:
+                return candidate
+        return None
+
+    # ------------------------------------------------------------------
+    # Private decision helpers
+    # ------------------------------------------------------------------
+
+    def _determine_decision(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        task_characteristics: TaskCharacteristics | None,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        """Dispatch to the appropriate per-trigger decision method."""
+        is_high_risk = (
+            task_characteristics is not None
+            and task_characteristics.risk_score > HIGH_RISK_THRESHOLD
+        )
+        effective_count = retry_count + 1 if is_high_risk else retry_count
+
+        dispatch = {
+            FailureTrigger.LOW_CONFIDENCE: self._decide_low_confidence,
+            FailureTrigger.NO_RESULTS: self._decide_no_results,
+            FailureTrigger.STALE_DATA: self._decide_stale_data,
+            FailureTrigger.TIMEOUT: self._decide_timeout,
+            FailureTrigger.VERIFICATION_FAILED: self._decide_verification_failed,
+        }
+        handler = dispatch.get(failure.trigger, self._decide_fallback)
+        return handler(
+            failure=failure,
+            evaluation=evaluation,
+            effective_count=effective_count,
+            retry_count=retry_count,
+        )
+
+    def _decide_low_confidence(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        if effective_count <= 1:
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RETRY_SAME,
+                failure_analysis=failure,
+                target_agent=None,
+                retry_params={"refine_query": True, "increase_depth": True},
+                partial_results=evaluation.output or {},
+                reasoning=f"Low confidence ({failure.details}), retrying with refined query",
+                retry_count=retry_count,
+            )
+        if effective_count <= 2:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RE_DELEGATE,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=f"Low confidence persists after retry, re-delegating to {target}",
+                retry_count=retry_count,
+            )
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _decide_no_results(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        if effective_count <= 1:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RE_DELEGATE,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=f"No results from {evaluation.agent_type}, re-delegating to {target}",
+                retry_count=retry_count,
+            )
+        if effective_count <= 2:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.AUGMENT,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=(
+                    f"No results after re-delegation, augmenting with {target} "
+                    "for cross-verification"
+                ),
+                retry_count=retry_count,
+            )
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _decide_stale_data(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        if effective_count <= 1:
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RETRY_SAME,
+                failure_analysis=failure,
+                target_agent=None,
+                retry_params={"force_refresh": True},
+                partial_results=evaluation.output or {},
+                reasoning="Data is stale, retrying with forced refresh",
+                retry_count=retry_count,
+            )
+        if effective_count <= 2:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RE_DELEGATE,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=f"Stale data persists, re-delegating to {target}",
+                retry_count=retry_count,
+            )
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _decide_timeout(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        if effective_count <= 1:
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RETRY_SAME,
+                failure_analysis=failure,
+                target_agent=None,
+                retry_params={"timeout_extended": True},
+                partial_results=evaluation.output or {},
+                reasoning="Agent timed out, retrying with extended timeout",
+                retry_count=retry_count,
+            )
+        if effective_count <= 2:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RE_DELEGATE,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=f"Timeout persists, re-delegating to {target}",
+                retry_count=retry_count,
+            )
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _decide_verification_failed(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        vr = evaluation.verification_result or {}
+        reason = vr.get("reason", "")
+        issues = vr.get("issues", [])
+        if effective_count <= 1:
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RETRY_SAME,
+                failure_analysis=failure,
+                target_agent=None,
+                retry_params={
+                    "verification_feedback": reason,
+                    "address_issues": issues,
+                },
+                partial_results=evaluation.output or {},
+                reasoning=f"Verification failed ({reason}), retrying with feedback",
+                retry_count=retry_count,
+            )
+        if effective_count <= 2:
+            target = self.get_re_delegation_target(evaluation.agent_type)
+            return AdaptiveDecision(
+                decision_type=AdaptiveDecisionType.RE_DELEGATE,
+                failure_analysis=failure,
+                target_agent=target,
+                partial_results=evaluation.output or {},
+                reasoning=f"Verification still failing, re-delegating to {target}",
+                retry_count=retry_count,
+            )
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _decide_fallback(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        effective_count: int,
+        retry_count: int,
+    ) -> AdaptiveDecision:
+        return self._make_escalation(failure, evaluation, retry_count=retry_count)
+
+    def _make_escalation(
+        self,
+        failure: FailureAnalysis,
+        evaluation: AgentOutputEvaluation,
+        reasoning: str = "",
+        retry_count: int = 0,
+    ) -> AdaptiveDecision:
+        return AdaptiveDecision(
+            decision_type=AdaptiveDecisionType.ESCALATE,
+            failure_analysis=failure,
+            target_agent=None,
+            partial_results=evaluation.output or {},
+            reasoning=reasoning
+            or (
+                f"Escalating to user: {failure.trigger.value} — {failure.details}"
+            ),
+            retry_count=retry_count
+            or self._cost_governor._retry_counts.get(evaluation.goal_id, 0),
+        )
 
     async def checkpoint_partial_results(
         self,
