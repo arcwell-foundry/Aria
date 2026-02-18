@@ -37,7 +37,7 @@ function CTAButton({ icon, label, subtitle, onClick }: CTAButtonProps) {
 
 export function WelcomeCTAs({ onStartTyping }: WelcomeCTAsProps) {
   const { user } = useAuth();
-  const firstName = user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'there';
+  const firstName = user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
   const greeting = getGreeting();
 
   return (

@@ -6,12 +6,11 @@
  * Timestamps always visible. Active message full opacity, rest dimmed.
  */
 
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import { Share2, Download } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { TranscriptEntry } from './TranscriptEntry';
 import { ChatContextSection } from './ChatContextSection';
-import { useModalityStore } from '@/stores/modalityStore';
 import { InputBar } from '@/components/conversation/InputBar';
 import { SuggestionChips } from '@/components/conversation/SuggestionChips';
 import { TimeDivider } from '@/components/conversation/TimeDivider';
@@ -29,14 +28,9 @@ export function TranscriptPanel({ onSend }: TranscriptPanelProps) {
   const messages = useConversationStore((s) => s.messages);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Load chat context when video started from an active conversation
-  const conversationId = useModalityStore((s) => s.tavusSession.id);
-  const allMessages = useConversationStore((s) => s.messages);
-  const chatContextMessages = useMemo(() => {
-    // Show last 8 messages that existed before video started
-    // (messages already in store when TranscriptPanel mounts)
-    return allMessages.slice(-8);
-  }, []); // Empty deps: capture messages at mount time only
+  // Capture last 8 chat messages at mount time (snapshot for context display)
+  const chatContextRef = useRef(useConversationStore.getState().messages.slice(-8));
+  const chatContextMessages = chatContextRef.current;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
