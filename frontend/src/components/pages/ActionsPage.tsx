@@ -5,10 +5,12 @@
  * - LIGHT THEME (content pages use light background)
  * - Header: "Actions & Goals" with status dot
  * - Active Goals section with progress bars
+ * - Completed Goals section with "Show how ARIA did this" delegation tree drawer
  * - Agent Activity grid (6 agent status cards)
  * - Action Queue with pending approvals
  */
 
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Target,
@@ -17,6 +19,7 @@ import {
   Clock,
   Loader2,
   AlertCircle,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { UpcomingMeetings } from '@/components/actions/UpcomingMeetings';
@@ -28,6 +31,7 @@ import { AGENT_REGISTRY, AGENT_TYPES, resolveAgent } from '@/constants/agents';
 import type { AgentType } from '@/constants/agents';
 import type { GoalStatus, GoalDashboard } from '@/api/goals';
 import type { Action, ActionStatus, RiskLevel } from '@/api/actionQueue';
+import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
 
 // Status colors
 const GOAL_STATUS_COLORS: Record<GoalStatus, string> = {
@@ -351,9 +355,68 @@ function ActionItem({
   );
 }
 
+// Completed Goal Card Component
+function CompletedGoalCard({
+  goal,
+  onShowTree,
+}: {
+  goal: GoalDashboard;
+  onShowTree: () => void;
+}) {
+  return (
+    <div
+      className="border rounded-lg p-4"
+      style={{
+        borderColor: 'var(--border)',
+        backgroundColor: 'var(--bg-elevated)',
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--success)' }} />
+          <span
+            className="font-medium text-sm truncate"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {goal.title}
+          </span>
+          <span
+            className="px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0"
+            style={{
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              color: 'var(--success)',
+            }}
+          >
+            COMPLETE
+          </span>
+        </div>
+        {goal.completed_at && (
+          <span
+            className="font-mono text-xs flex-shrink-0 mr-3"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {formatRelativeTime(goal.completed_at)}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onShowTree}
+        className="flex items-center gap-1.5 mt-2 ml-6 text-xs font-medium transition-colors hover:opacity-80"
+        style={{ color: 'var(--accent)' }}
+      >
+        <GitBranch className="w-3.5 h-3.5" />
+        Show how ARIA did this
+      </button>
+    </div>
+  );
+}
+
 // Main ActionsPage Component
 export function ActionsPage() {
   const navigate = useNavigate();
+  const [traceGoalId, setTraceGoalId] = useState<string | null>(null);
+  const [traceGoalTitle, setTraceGoalTitle] = useState('');
 
   // Fetch data
   const { data: goals, isLoading: goalsLoading, error: goalsError } = useGoalDashboard();
@@ -370,6 +433,7 @@ export function ActionsPage() {
     .slice(0, 5) ?? [];
 
   const activeGoals = goals?.filter((g) => g.status === 'active' || g.status === 'paused') ?? [];
+  const completedGoals = goals?.filter((g) => g.status === 'complete').slice(0, 5) ?? [];
   const hasGoals = activeGoals.length > 0;
   const hasPending = pendingActions.length > 0;
 
@@ -442,6 +506,30 @@ export function ActionsPage() {
             </div>
           )}
         </section>
+
+        {/* Completed Goals Section */}
+        {completedGoals.length > 0 && (
+          <section className="mb-8">
+            <h2
+              className="font-sans text-sm font-medium mb-4"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              Completed Goals
+            </h2>
+            <div className="space-y-3">
+              {completedGoals.map((goal) => (
+                <CompletedGoalCard
+                  key={goal.id}
+                  goal={goal}
+                  onShowTree={() => {
+                    setTraceGoalId(goal.id);
+                    setTraceGoalTitle(goal.title);
+                  }}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Agent Activity Section */}
         <section className="mb-8">
@@ -557,6 +645,12 @@ export function ActionsPage() {
           )}
         </section>
       </div>
+
+      <DelegationTreeDrawer
+        goalId={traceGoalId}
+        goalTitle={traceGoalTitle}
+        onClose={() => setTraceGoalId(null)}
+      />
     </div>
   );
 }

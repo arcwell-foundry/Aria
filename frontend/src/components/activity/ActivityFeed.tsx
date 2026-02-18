@@ -22,6 +22,7 @@ import {
   Activity,
   ChevronDown,
   ArrowUp,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useActivityFeed, useActivityPoll } from '@/hooks/useActivity';
@@ -29,6 +30,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { resolveAgent } from '@/constants/agents';
 import type { ActivityItem, ActivityFilters } from '@/api/activity';
+import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -167,10 +169,12 @@ const ActivityItemCard = memo(function ActivityItemCard({
   item,
   compact,
   onNavigate,
+  onViewTree,
 }: {
   item: ActivityItem;
   compact?: boolean;
   onNavigate?: (route: string) => void;
+  onViewTree?: (goalId: string, title: string) => void;
 }) {
   const Icon = ACTIVITY_TYPE_ICONS[item.activity_type] ?? Activity;
   const agent = item.agent ? resolveAgent(item.agent) : null;
@@ -257,6 +261,22 @@ const ActivityItemCard = memo(function ActivityItemCard({
                 onClick={handleEntityClick}
               />
             </div>
+          )}
+
+          {/* Delegation tree link for goal-related items */}
+          {item.related_entity_type === 'goal' && item.related_entity_id && onViewTree && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewTree(item.related_entity_id!, item.title);
+              }}
+              className="flex items-center gap-1 mt-1 text-[11px] font-medium transition-colors hover:opacity-80"
+              style={{ color: 'var(--accent)' }}
+            >
+              <GitBranch className="w-3 h-3" />
+              View delegation tree
+            </button>
           )}
         </div>
 
@@ -361,6 +381,8 @@ export function ActivityFeed({
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [pendingItems, setPendingItems] = useState<ActivityItem[]>([]);
+  const [treeGoalId, setTreeGoalId] = useState<string | null>(null);
+  const [treeGoalTitle, setTreeGoalTitle] = useState('');
 
   // Build filters (excluding page/page_size — handled by infinite query)
   const filters = useMemo<Omit<ActivityFilters, 'page' | 'page_size'>>(() => {
@@ -418,6 +440,11 @@ export function ActivityFeed({
 
   const handleNavigate = useCallback((route: string) => navigate(route), [navigate]);
 
+  const handleViewTree = useCallback((goalId: string, title: string) => {
+    setTreeGoalId(goalId);
+    setTreeGoalTitle(title);
+  }, []);
+
   // Virtuoso endReached callback for infinite scroll (full mode only)
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -457,6 +484,7 @@ export function ActivityFeed({
                 item={item}
                 compact
                 onNavigate={handleNavigate}
+                onViewTree={handleViewTree}
               />
             ))}
             {allItems.length > compactLimit && (
@@ -471,6 +499,12 @@ export function ActivityFeed({
             )}
           </div>
         )}
+
+        <DelegationTreeDrawer
+          goalId={treeGoalId}
+          goalTitle={treeGoalTitle}
+          onClose={() => setTreeGoalId(null)}
+        />
       </div>
     );
   }
@@ -653,6 +687,7 @@ export function ActivityFeed({
               <ActivityItemCard
                 item={displayItems[index]}
                 onNavigate={handleNavigate}
+                onViewTree={handleViewTree}
               />
             </div>
           )}
@@ -677,6 +712,12 @@ export function ActivityFeed({
           }}
         />
       )}
+
+      <DelegationTreeDrawer
+        goalId={treeGoalId}
+        goalTitle={treeGoalTitle}
+        onClose={() => setTreeGoalId(null)}
+      />
     </div>
   );
 }
