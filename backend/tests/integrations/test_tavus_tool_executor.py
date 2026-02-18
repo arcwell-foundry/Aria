@@ -194,3 +194,30 @@ async def test_get_battle_card_generates_via_strategist_when_not_in_db():
         assert "Catalent" in result.spoken_text
         assert result.rich_content is not None
         assert result.rich_content["type"] == "battle_card"
+
+
+@pytest.mark.asyncio
+async def test_execute_stores_episodic_memory_on_success():
+    """Successful tool execution should store an episodic memory."""
+    from src.integrations.tavus_tool_executor import ToolResult, VideoToolExecutor
+
+    executor = VideoToolExecutor(user_id="user-123")
+    executor._llm = MagicMock()
+    executor._db = MagicMock()
+
+    # Stub a handler that returns successfully
+    async def mock_handler(_args):
+        return ToolResult(spoken_text="Found 3 articles on CAR-T therapy.")
+
+    with (
+        patch.object(executor, "_handle_search_pubmed", mock_handler),
+        patch.object(executor, "_log_activity", new_callable=AsyncMock),
+        patch.object(executor, "_store_episodic", new_callable=AsyncMock) as mock_store,
+    ):
+        await executor.execute("search_pubmed", {"query": "CAR-T"})
+
+        mock_store.assert_called_once()
+        call_args = mock_store.call_args
+        assert call_args[0][0] == "search_pubmed"  # tool_name
+        assert call_args[0][1] == {"query": "CAR-T"}  # arguments
+        assert call_args[0][2].spoken_text == "Found 3 articles on CAR-T therapy."

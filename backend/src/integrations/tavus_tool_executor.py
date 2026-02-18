@@ -98,6 +98,7 @@ class VideoToolExecutor:
         try:
             result = await handler(arguments)
             await self._log_activity(tool_name, arguments, success=True)
+            await self._store_episodic(tool_name, arguments, result)
             return result
         except Exception:
             logger.exception(
@@ -918,3 +919,38 @@ class VideoToolExecutor:
             )
         except Exception:
             logger.debug("Failed to log video tool activity", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Episodic memory
+    # ------------------------------------------------------------------
+
+    async def _store_episodic(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: ToolResult,
+    ) -> None:
+        """Store video tool execution as an episodic memory."""
+        try:
+            from src.memory.episodic import Episode, EpisodicMemory
+
+            em = EpisodicMemory()
+            now = datetime.now(UTC)
+            episode = Episode(
+                id=str(uuid.uuid4()),
+                user_id=self._user_id,
+                event_type=f"video_tool_{tool_name}",
+                content=result.spoken_text,
+                participants=[self._user_id],
+                occurred_at=now,
+                recorded_at=now,
+                context={
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "source": "tavus_video",
+                    "has_rich_content": result.rich_content is not None,
+                },
+            )
+            await em.store_episode(episode)
+        except Exception:
+            logger.debug("Failed to store episodic memory for video tool", exc_info=True)
