@@ -57,6 +57,7 @@ from src.api.routes import (
     skills,
     social,
     traces,  # Wave 2: Delegation traces
+    trust,  # Wave 4: Trust dashboard
     usage,  # Wave 0: Cost Governor usage tracking
     video,
     webhooks,  # Tavus webhook handler
@@ -280,6 +281,7 @@ app.include_router(skill_replay.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(social.router, prefix="/api/v1")
 app.include_router(traces.router, prefix="/api/v1")  # Wave 2: Delegation traces
+app.include_router(trust.router, prefix="/api/v1")  # Wave 4: Trust dashboard
 app.include_router(usage.router, prefix="/api/v1")  # Wave 0: Cost Governor
 app.include_router(video.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
