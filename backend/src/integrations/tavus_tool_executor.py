@@ -666,7 +666,20 @@ class VideoToolExecutor:
         from src.agents import ScribeAgent
         from src.memory.digital_twin import DigitalTwin
 
-        agent = ScribeAgent(llm_client=self.llm, user_id=self._user_id)
+        # Inject PersonaBuilder for Digital Twin style matching
+        persona_builder = None
+        try:
+            from src.core.persona import get_persona_builder
+
+            persona_builder = get_persona_builder()
+        except Exception:
+            pass
+
+        agent = ScribeAgent(
+            llm_client=self.llm,
+            user_id=self._user_id,
+            persona_builder=persona_builder,
+        )
 
         recipient = {"name": args["to"]}
         if "@" in args["to"]:

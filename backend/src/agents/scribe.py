@@ -15,6 +15,8 @@ from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.core.persona import PersonaBuilder
+    from src.memory.cold_retrieval import ColdMemoryRetriever
     from src.skills.index import SkillIndex
     from src.skills.orchestrator import SkillOrchestrator
 
@@ -116,6 +118,8 @@ class ScribeAgent(SkillAwareAgent):
         user_id: str,
         skill_orchestrator: "SkillOrchestrator | None" = None,
         skill_index: "SkillIndex | None" = None,
+        persona_builder: "PersonaBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
     ) -> None:
         """Initialize the Scribe agent.
 
@@ -124,6 +128,8 @@ class ScribeAgent(SkillAwareAgent):
             user_id: ID of the user this agent is working for.
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
+            persona_builder: Optional PersonaBuilder for Digital Twin style matching.
+            cold_retriever: Optional retriever for on-demand memory search.
         """
         self._templates: dict[str, str] = self._get_builtin_templates()
         self._exa_provider: Any = None
@@ -132,6 +138,8 @@ class ScribeAgent(SkillAwareAgent):
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
+            persona_builder=persona_builder,
+            cold_retriever=cold_retriever,
         )
 
     def _get_exa_provider(self) -> Any:
@@ -196,6 +204,7 @@ class ScribeAgent(SkillAwareAgent):
             "personalize": self._personalize,
             "apply_template": self._apply_template,
             "research_recipient": self._research_recipient,
+            "explain_choices": self._explain_choices,
         }
 
     def validate_input(self, task: dict[str, Any]) -> bool:
@@ -354,6 +363,7 @@ class ScribeAgent(SkillAwareAgent):
             result_data = {
                 "draft_type": draft_type,
                 "content": content,
+                "metadata": content.get("metadata", {}),
                 "style_applied": style_applied,
                 "template_used": template_used,
                 "ready_for_review": True,
@@ -420,6 +430,18 @@ class ScribeAgent(SkillAwareAgent):
                 except Exception as e:
                     logger.warning(f"Recipient research failed: {e}")
 
+        # Retrieve cold memory context about the recipient
+        memory_context = ""
+        memory_sources: list[str] = []
+        if recipient_name != "there":
+            try:
+                memory_context, memory_sources = await self._retrieve_recipient_context(
+                    recipient_name=recipient_name,
+                    recipient_company=recipient_company,
+                )
+            except Exception as e:
+                logger.warning(f"Recipient context retrieval failed: {e}")
+
         logger.info(
             f"Drafting email to {recipient_name}",
             extra={
@@ -427,6 +449,7 @@ class ScribeAgent(SkillAwareAgent):
                 "tone": tone,
                 "goal": goal[:50] if goal else "",
                 "has_research": recipient_research is not None,
+                "has_memory_context": bool(memory_context),
             },
         )
 
@@ -447,6 +470,13 @@ class ScribeAgent(SkillAwareAgent):
                 recipient_info_parts.append(f"Recent Company News: {news_summary}")
             if recipient_research.get("linkedin_url"):
                 recipient_info_parts.append(f"LinkedIn: {recipient_research['linkedin_url']}")
+
+        # Add ARIA memory context if available
+        if memory_context:
+            recipient_info_parts.append(
+                f"\nARIA's memory about this person:\n{memory_context}\n"
+                "Include relevant context naturally — mention shared history the user might forget."
+            )
 
         recipient_info = "\n".join(recipient_info_parts)
 
@@ -478,7 +508,9 @@ class ScribeAgent(SkillAwareAgent):
             f"- Reference the recipient's background or recent news if provided\n\n"
             f"Respond with JSON only:\n"
             f'{{"subject": "email subject line", "body": "full email body text", '
-            f'"tone_notes": "brief note on tone choices made"}}'
+            f'"tone_notes": "brief note on tone choices made", '
+            f'"confidence": 0.0, '
+            f'"alternatives": [{{"approach": "brief description", "rationale": "why this might work"}}]}}'
         )
 
         hardcoded_prompt = (
@@ -503,6 +535,7 @@ class ScribeAgent(SkillAwareAgent):
                 system_prompt=system_prompt,
                 max_tokens=1024,
                 temperature=0.7,
+                user_id=self.user_id,
             )
 
             parsed = _extract_json_from_text(response)
@@ -548,6 +581,20 @@ class ScribeAgent(SkillAwareAgent):
                 "word_count": word_count,
                 "has_call_to_action": has_cta,
                 "research_informed": recipient_research is not None,
+                "metadata": {
+                    "confidence_score": parsed.get("confidence", 0.7),
+                    "context_used": [
+                        s
+                        for s in [
+                            "persona_builder" if system_prompt != hardcoded_prompt else None,
+                            "exa_research" if recipient_research else None,
+                            "cold_memory" if memory_context else None,
+                        ]
+                        if s
+                    ],
+                    "alternatives": parsed.get("alternatives", []),
+                    "persona_layers_used": system_prompt != hardcoded_prompt,
+                },
             }
 
         except Exception as e:
@@ -638,6 +685,150 @@ class ScribeAgent(SkillAwareAgent):
                 "news_count": len(result.get("recent_news", [])),
             },
         )
+
+        return result
+
+    async def _retrieve_recipient_context(
+        self,
+        recipient_name: str,
+        recipient_company: str = "",
+    ) -> tuple[str, list[str]]:
+        """Retrieve ARIA's memory about a recipient for email personalization.
+
+        Uses cold memory retrieval to find entity context and general
+        memories about the recipient.
+
+        Args:
+            recipient_name: Name of the recipient.
+            recipient_company: Optional company name for broader context.
+
+        Returns:
+            Tuple of (formatted context string, list of source types used).
+            Returns ("", []) if no cold_retriever or on failure.
+        """
+        if self._cold_retriever is None:
+            return ("", [])
+
+        context_parts: list[str] = []
+        sources: list[str] = []
+
+        try:
+            # Entity-centric retrieval for structured facts
+            entity_ctx = await self._cold_retriever.retrieve_for_entity(
+                user_id=self.user_id,
+                entity_id=recipient_name,
+                hops=2,
+            )
+            if entity_ctx.direct_facts:
+                facts = [r.content for r in entity_ctx.direct_facts[:5]]
+                context_parts.append("Known facts:\n- " + "\n- ".join(facts))
+                sources.append("entity_facts")
+            if entity_ctx.relationships:
+                rels = [r.content for r in entity_ctx.relationships[:3]]
+                context_parts.append("Relationships:\n- " + "\n- ".join(rels))
+                sources.append("entity_relationships")
+            if entity_ctx.recent_interactions:
+                interactions = [r.content for r in entity_ctx.recent_interactions[:3]]
+                context_parts.append("Recent interactions:\n- " + "\n- ".join(interactions))
+                sources.append("recent_interactions")
+        except Exception as e:
+            logger.debug(f"Entity context retrieval failed for {recipient_name}: {e}")
+
+        try:
+            # General query-based retrieval
+            query = recipient_name
+            if recipient_company:
+                query = f"{recipient_name} {recipient_company}"
+            results = await self.cold_retrieve(query=query, limit=5)
+            if results:
+                memories = [r["content"] for r in results if r.get("content")]
+                if memories:
+                    context_parts.append("Related memories:\n- " + "\n- ".join(memories[:5]))
+                    sources.append("cold_memory")
+        except Exception as e:
+            logger.debug(f"Cold memory retrieval failed for {recipient_name}: {e}")
+
+        formatted = "\n\n".join(context_parts) if context_parts else ""
+        return (formatted, sources)
+
+    async def _explain_choices(
+        self,
+        draft_metadata: dict[str, Any],
+        question: str = "",
+    ) -> dict[str, Any]:
+        """Explain the context and style choices made in a draft.
+
+        Reads metadata from a draft output and builds a human-readable
+        explanation of what context sources were used. Optionally answers
+        a specific question about the draft using a lightweight LLM call.
+
+        Args:
+            draft_metadata: Metadata dict from a draft output.
+            question: Optional specific question to answer about the draft.
+
+        Returns:
+            Dict with explanation, style_references, and context_references.
+        """
+        context_used = draft_metadata.get("context_used", [])
+        confidence = draft_metadata.get("confidence_score", 0.7)
+        alternatives = draft_metadata.get("alternatives", [])
+
+        # Build human-readable explanation
+        explanation_parts: list[str] = []
+
+        if "persona_builder" in context_used:
+            explanation_parts.append(
+                "Used your Digital Twin writing style for tone and voice matching."
+            )
+        if "cold_memory" in context_used:
+            explanation_parts.append(
+                "Retrieved past interactions and facts about the recipient from ARIA's memory."
+            )
+        if "exa_research" in context_used:
+            explanation_parts.append(
+                "Researched the recipient's background and recent company news via web search."
+            )
+
+        if not explanation_parts:
+            explanation_parts.append("Used default professional writing style (no personalization context available).")
+
+        if confidence < 0.5:
+            explanation_parts.append(
+                f"Confidence is relatively low ({confidence:.0%}) — you may want to review carefully."
+            )
+
+        explanation = " ".join(explanation_parts)
+
+        result: dict[str, Any] = {
+            "explanation": explanation,
+            "style_references": ["persona_builder"] if "persona_builder" in context_used else [],
+            "context_references": [s for s in context_used if s != "persona_builder"],
+        }
+
+        if alternatives:
+            result["alternatives"] = alternatives
+
+        # If a specific question is asked, use a lightweight LLM call
+        if question:
+            try:
+                prompt = (
+                    f"The user drafted a communication. Here is the metadata about how it was created:\n"
+                    f"- Context sources: {', '.join(context_used) or 'none'}\n"
+                    f"- Confidence: {confidence:.0%}\n"
+                    f"- Alternatives considered: {len(alternatives)}\n\n"
+                    f"User question: {question}\n\n"
+                    f"Answer briefly and directly."
+                )
+                answer = await self.llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=256,
+                    temperature=0.3,
+                    user_id=self.user_id,
+                )
+                result["answer"] = answer
+            except Exception as e:
+                logger.warning(f"LLM call for explain_choices question failed: {e}")
+                result["answer"] = f"Could not answer: {e}"
 
         return result
 
@@ -770,6 +961,19 @@ class ScribeAgent(SkillAwareAgent):
                 "Use clear headings and structured content."
             )
 
+        # Retrieve cold memory context for the document topic
+        doc_memory_context = ""
+        doc_memory_sources: list[str] = []
+        try:
+            results = await self.cold_retrieve(query=f"{context} {goal}", limit=5)
+            if results:
+                memories = [r["content"] for r in results if r.get("content")]
+                if memories:
+                    doc_memory_context = "\n- ".join(memories[:5])
+                    doc_memory_sources.append("cold_memory")
+        except Exception as e:
+            logger.debug(f"Cold memory retrieval for document failed: {e}")
+
         style_hints = ""
         if style:
             style_parts = []
@@ -778,13 +982,21 @@ class ScribeAgent(SkillAwareAgent):
             if style_parts:
                 style_hints = "\n\nWriting style preferences:\n" + "\n".join(style_parts)
 
+        memory_section = ""
+        if doc_memory_context:
+            memory_section = (
+                f"\n\nRelevant context from ARIA's memory:\n- {doc_memory_context}\n"
+                "Incorporate relevant facts naturally into the document."
+            )
+
         prompt = (
             f"Create a {document_type} document for a life sciences commercial team.\n\n"
             f"Context: {context}\n\n"
             f"Goal/Purpose: {goal}\n\n"
             f"Tone: {tone}\n\n"
             f"Document structure guidance:\n{section_guidance}\n"
-            f"{style_hints}\n\n"
+            f"{style_hints}"
+            f"{memory_section}\n\n"
             f"Requirements:\n"
             f"- Use specific details from the context provided\n"
             f"- Do NOT use placeholder text or generic filler\n"
@@ -792,15 +1004,23 @@ class ScribeAgent(SkillAwareAgent):
             f"- Write in a professional life sciences commercial voice\n\n"
             f"Respond with JSON only:\n"
             f'{{"title": "document title", "body": "full document body as markdown text", '
-            f'"sections": [{{"heading": "Section Title", "content": "section content"}}]}}'
+            f'"sections": [{{"heading": "Section Title", "content": "section content"}}], '
+            f'"confidence": 0.0, '
+            f'"alternatives": [{{"approach": "brief description", "rationale": "why this might work"}}]}}'
         )
 
-        system_prompt = (
+        hardcoded_prompt = (
             "You are a professional document writer for life sciences commercial teams. "
             "You create clear, well-structured documents that inform and drive decisions. "
             "Your writing is precise, evidence-based, and uses appropriate industry terminology "
             "without being overly jargon-heavy. Respond with valid JSON only."
         )
+
+        # Use PersonaBuilder when available, fall back to hardcoded prompt
+        system_prompt = await self._get_persona_system_prompt(
+            task_description=f"Draft {document_type} document about: {goal[:80]}",
+            output_format="json",
+        ) or hardcoded_prompt
 
         try:
             response = await self.llm.generate_response(
@@ -808,6 +1028,7 @@ class ScribeAgent(SkillAwareAgent):
                 system_prompt=system_prompt,
                 max_tokens=2048,
                 temperature=0.7,
+                user_id=self.user_id,
             )
 
             parsed = _extract_json_from_text(response)
@@ -850,6 +1071,19 @@ class ScribeAgent(SkillAwareAgent):
                 "document_type": document_type,
                 "word_count": word_count,
                 "tone": tone,
+                "metadata": {
+                    "confidence_score": parsed.get("confidence", 0.7),
+                    "context_used": [
+                        s
+                        for s in [
+                            "persona_builder" if system_prompt != hardcoded_prompt else None,
+                            "cold_memory" if doc_memory_context else None,
+                        ]
+                        if s
+                    ],
+                    "alternatives": parsed.get("alternatives", []),
+                    "persona_layers_used": system_prompt != hardcoded_prompt,
+                },
             }
 
         except Exception as e:

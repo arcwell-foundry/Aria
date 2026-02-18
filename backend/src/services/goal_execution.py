@@ -337,11 +337,30 @@ class GoalExecutionService:
             except Exception as e:
                 logger.debug(f"Skill infrastructure not available: {e}")
 
+            # Initialize PersonaBuilder + ColdMemoryRetriever (best-effort)
+            persona_builder = None
+            cold_retriever = None
+            try:
+                from src.core.persona import get_persona_builder
+
+                persona_builder = get_persona_builder()
+            except Exception as e:
+                logger.debug(f"PersonaBuilder not available: {e}")
+            try:
+                from src.db.supabase import SupabaseClient
+                from src.memory.cold_retrieval import ColdMemoryRetriever
+
+                cold_retriever = ColdMemoryRetriever(db_client=SupabaseClient.get_client())
+            except Exception as e:
+                logger.debug(f"ColdMemoryRetriever not available: {e}")
+
             return agent_cls(
                 llm_client=self._llm,
                 user_id=user_id,
                 skill_orchestrator=skill_orchestrator,
                 skill_index=skill_index,
+                persona_builder=persona_builder,
+                cold_retriever=cold_retriever,
             )
 
         except Exception as e:

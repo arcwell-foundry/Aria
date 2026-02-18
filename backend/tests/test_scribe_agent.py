@@ -1,7 +1,7 @@
 """Tests for ScribeAgent module."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -38,7 +38,7 @@ def test_scribe_agent_initializes_with_llm_and_user() -> None:
 
 
 def test_scribe_agent_registers_tools() -> None:
-    """Test ScribeAgent._register_tools returns dict with 5 tools."""
+    """Test ScribeAgent._register_tools returns dict with 6 tools."""
     from src.agents.scribe import ScribeAgent
 
     mock_llm = MagicMock()
@@ -46,12 +46,13 @@ def test_scribe_agent_registers_tools() -> None:
 
     tools = agent.tools
 
-    assert len(tools) == 5
+    assert len(tools) == 6
     assert "draft_email" in tools
     assert "draft_document" in tools
     assert "personalize" in tools
     assert "apply_template" in tools
     assert "research_recipient" in tools
+    assert "explain_choices" in tools
 
 
 def test_validate_input_accepts_valid_email_task() -> None:
@@ -1125,3 +1126,338 @@ async def test_scribe_urgent_tone_workflow() -> None:
     subject = content["subject"].lower()
     body = content["body"].lower()
     assert "urgent" in subject or "urgent" in body or "immediate" in body or "asap" in body
+
+
+# ============================================================================
+# New Tests - PersonaBuilder, ColdMemory, CostGovernor, Metadata Integration
+# ============================================================================
+
+
+def test_scribe_agent_accepts_persona_builder() -> None:
+    """Test ScribeAgent accepts persona_builder parameter."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_persona = MagicMock()
+    agent = ScribeAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        persona_builder=mock_persona,
+    )
+
+    assert agent.persona_builder is mock_persona
+
+
+def test_scribe_agent_accepts_cold_retriever() -> None:
+    """Test ScribeAgent accepts cold_retriever parameter."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_retriever = MagicMock()
+    agent = ScribeAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        cold_retriever=mock_retriever,
+    )
+
+    assert agent._cold_retriever is mock_retriever
+
+
+@pytest.mark.asyncio
+async def test_draft_email_passes_user_id_to_llm() -> None:
+    """Test _draft_email passes user_id to generate_response for CostGovernor."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello John, test body.", "tone_notes": "formal", "confidence": 0.8, "alternatives": []}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-456")
+
+    await agent._draft_email(
+        recipient={"name": "John"},
+        context="Test",
+        goal="Test goal",
+        tone="formal",
+    )
+
+    # Verify user_id was passed
+    call_kwargs = mock_llm.generate_response.call_args
+    assert call_kwargs.kwargs.get("user_id") == "user-456"
+
+
+@pytest.mark.asyncio
+async def test_draft_document_passes_user_id_to_llm() -> None:
+    """Test _draft_document passes user_id to generate_response for CostGovernor."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"title": "Report", "body": "Content here.", "sections": [{"heading": "Summary", "content": "Summary text."}], "confidence": 0.85, "alternatives": []}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-789")
+
+    await agent._draft_document(
+        document_type="brief",
+        context="Test context",
+        goal="Test goal",
+        tone="formal",
+    )
+
+    call_kwargs = mock_llm.generate_response.call_args
+    assert call_kwargs.kwargs.get("user_id") == "user-789"
+
+
+@pytest.mark.asyncio
+async def test_draft_email_uses_persona_builder() -> None:
+    """Test _draft_email uses PersonaBuilder when available."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello Sarah, body text.", "tone_notes": "formal", "confidence": 0.9, "alternatives": []}'
+    )
+
+    # Create a mock PersonaBuilder that returns a persona context
+    mock_persona = MagicMock()
+    mock_persona_ctx = MagicMock()
+    mock_persona_ctx.to_system_prompt.return_value = "You are ARIA, a professional colleague."
+    mock_persona.build = AsyncMock(return_value=mock_persona_ctx)
+
+    agent = ScribeAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        persona_builder=mock_persona,
+    )
+
+    result = await agent._draft_email(
+        recipient={"name": "Sarah", "company": "BioTech"},
+        context="Follow up",
+        goal="Schedule call",
+        tone="formal",
+    )
+
+    # PersonaBuilder should have been called
+    mock_persona.build.assert_called_once()
+    # Metadata should reflect persona_builder was used
+    assert "persona_builder" in result["metadata"]["context_used"]
+    assert result["metadata"]["persona_layers_used"] is True
+
+
+@pytest.mark.asyncio
+async def test_draft_document_uses_persona_builder() -> None:
+    """Test _draft_document uses PersonaBuilder when available."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"title": "Report", "body": "Report body.", "sections": [{"heading": "Summary", "content": "Text."}], "confidence": 0.8, "alternatives": []}'
+    )
+
+    mock_persona = MagicMock()
+    mock_persona_ctx = MagicMock()
+    mock_persona_ctx.to_system_prompt.return_value = "You are ARIA writing a document."
+    mock_persona.build = AsyncMock(return_value=mock_persona_ctx)
+
+    agent = ScribeAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        persona_builder=mock_persona,
+    )
+
+    result = await agent._draft_document(
+        document_type="brief",
+        context="Q4 data",
+        goal="Summarize results",
+        tone="formal",
+    )
+
+    mock_persona.build.assert_called_once()
+    assert "persona_builder" in result["metadata"]["context_used"]
+    assert result["metadata"]["persona_layers_used"] is True
+
+
+@pytest.mark.asyncio
+async def test_draft_email_retrieves_cold_memory() -> None:
+    """Test _draft_email retrieves cold memory for recipient context."""
+    from src.agents.scribe import ScribeAgent
+    from src.memory.cold_retrieval import ColdMemoryResult, EntityContext, MemorySource
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello John, body.", "tone_notes": "formal", "confidence": 0.8, "alternatives": []}'
+    )
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve_for_entity = AsyncMock(
+        return_value=EntityContext(
+            entity_id="John",
+            direct_facts=[
+                ColdMemoryResult(
+                    source=MemorySource.SEMANTIC,
+                    content="John is VP of Sales at Acme",
+                    relevance_score=0.9,
+                )
+            ],
+        )
+    )
+    mock_retriever.retrieve = AsyncMock(return_value=[])
+
+    agent = ScribeAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        cold_retriever=mock_retriever,
+    )
+
+    result = await agent._draft_email(
+        recipient={"name": "John", "company": "Acme"},
+        context="Follow up",
+        goal="Schedule call",
+        tone="formal",
+    )
+
+    # Cold retriever should have been called for entity context
+    mock_retriever.retrieve_for_entity.assert_called_once()
+    assert "cold_memory" in result["metadata"]["context_used"]
+
+
+@pytest.mark.asyncio
+async def test_draft_email_metadata_includes_confidence() -> None:
+    """Test _draft_email metadata includes confidence score."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello, test.", "tone_notes": "formal", "confidence": 0.92, "alternatives": []}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Test"},
+        context="Test",
+        goal="Test",
+        tone="formal",
+    )
+
+    assert "metadata" in result
+    assert "confidence_score" in result["metadata"]
+    assert result["metadata"]["confidence_score"] == 0.92
+
+
+@pytest.mark.asyncio
+async def test_draft_document_metadata_includes_confidence() -> None:
+    """Test _draft_document metadata includes confidence score."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"title": "Doc", "body": "Content.", "sections": [{"heading": "S", "content": "C"}], "confidence": 0.75, "alternatives": []}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_document(
+        document_type="brief",
+        context="Test",
+        goal="Test",
+        tone="formal",
+    )
+
+    assert "metadata" in result
+    assert result["metadata"]["confidence_score"] == 0.75
+
+
+@pytest.mark.asyncio
+async def test_draft_email_metadata_includes_alternatives() -> None:
+    """Test _draft_email metadata includes alternatives from LLM."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello, body.", "tone_notes": "formal", "confidence": 0.8, "alternatives": [{"approach": "shorter version", "rationale": "more concise"}]}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    result = await agent._draft_email(
+        recipient={"name": "Test"},
+        context="Test",
+        goal="Test",
+        tone="formal",
+    )
+
+    assert len(result["metadata"]["alternatives"]) == 1
+    assert result["metadata"]["alternatives"][0]["approach"] == "shorter version"
+
+
+@pytest.mark.asyncio
+async def test_explain_choices_returns_explanation() -> None:
+    """Test _explain_choices returns a structured explanation."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    metadata = {
+        "confidence_score": 0.85,
+        "context_used": ["persona_builder", "exa_research"],
+        "alternatives": [{"approach": "direct", "rationale": "shorter"}],
+    }
+
+    result = await agent._explain_choices(draft_metadata=metadata)
+
+    assert "explanation" in result
+    assert "style_references" in result
+    assert "context_references" in result
+    assert "persona_builder" in result["style_references"]
+    assert "exa_research" in result["context_references"]
+    assert "alternatives" in result
+
+
+@pytest.mark.asyncio
+async def test_explain_choices_with_question_calls_llm() -> None:
+    """Test _explain_choices with a question makes an LLM call."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(return_value="The tone was chosen because the recipient is senior.")
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    metadata = {
+        "confidence_score": 0.8,
+        "context_used": ["persona_builder"],
+        "alternatives": [],
+    }
+
+    result = await agent._explain_choices(
+        draft_metadata=metadata,
+        question="Why was this tone chosen?",
+    )
+
+    assert "answer" in result
+    mock_llm.generate_response.assert_called_once()
+    assert result["answer"] == "The tone was chosen because the recipient is senior."
+
+
+@pytest.mark.asyncio
+async def test_execute_propagates_metadata() -> None:
+    """Test execute() propagates metadata from draft content to result_data."""
+    from src.agents.scribe import ScribeAgent
+
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock(
+        return_value='{"subject": "Test", "body": "Hello, body text here.", "tone_notes": "formal", "confidence": 0.85, "alternatives": []}'
+    )
+    agent = ScribeAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "communication_type": "email",
+        "recipient": {"name": "Test"},
+        "context": "Test context",
+        "goal": "Test goal",
+        "tone": "formal",
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert "metadata" in result.data
+    assert "confidence_score" in result.data["metadata"]
