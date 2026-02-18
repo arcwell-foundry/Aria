@@ -36,6 +36,7 @@ class VideoSessionCreate(BaseModel):
     context: str | None = None
     custom_greeting: str | None = None
     lead_id: str | None = None
+    conversation_id: str | None = None
     audio_only: bool = False
 
 
@@ -53,6 +54,7 @@ class VideoSessionResponse(BaseModel):
     duration_seconds: int | None
     created_at: datetime
     lead_id: str | None = None
+    conversation_id: str | None = None
     is_audio_only: bool = False
     perception_analysis: dict[str, Any] | None = None
     transcripts: list["TranscriptEntryResponse"] | None = None

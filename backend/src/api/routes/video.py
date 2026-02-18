@@ -23,6 +23,7 @@ from src.models.video import (
     VideoToolCallResponse,
 )
 from src.models.ws_events import AriaSpeakingEvent
+from src.services.context_bridge import get_context_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +179,24 @@ async def create_video_session(
         lead_id=request.lead_id,
     )
 
-    # Combine user-provided context with ARIA context
-    full_context = aria_context
-    if request.context:
-        full_context = f"{request.context}\n\n{aria_context}" if aria_context else request.context
+    # Bridge chat context into video if a conversation_id is provided
+    chat_context = ""
+    if request.conversation_id:
+        try:
+            bridge = get_context_bridge()
+            chat_context = await bridge.chat_to_video_context(
+                user_id=current_user.id,
+                conversation_id=request.conversation_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load chat context for video session",
+                extra={"user_id": current_user.id, "conversation_id": request.conversation_id},
+            )
+
+    # Combine user-provided context, chat context, and ARIA context
+    context_parts = [p for p in [request.context, chat_context, aria_context] if p]
+    full_context = "\n\n".join(context_parts)
 
     try:
         tavus_response = await tavus.create_conversation(
@@ -230,6 +245,7 @@ async def create_video_session(
         "duration_seconds": None,
         "created_at": now,
         "lead_id": request.lead_id,
+        "conversation_id": request.conversation_id,
         "is_audio_only": request.audio_only,
     }
 
@@ -269,6 +285,7 @@ async def create_video_session(
         duration_seconds=saved.get("duration_seconds"),
         created_at=saved["created_at"],
         lead_id=saved.get("lead_id"),
+        conversation_id=saved.get("conversation_id"),
         is_audio_only=saved.get("is_audio_only", False),
         perception_analysis=saved.get("perception_analysis"),
     )
@@ -325,6 +342,7 @@ async def list_video_sessions(
             duration_seconds=session.get("duration_seconds"),
             created_at=session["created_at"],
             lead_id=session.get("lead_id"),
+            conversation_id=session.get("conversation_id"),
             is_audio_only=session.get("is_audio_only", False),
             perception_analysis=session.get("perception_analysis"),
         )
@@ -412,6 +430,7 @@ async def get_video_session(
         duration_seconds=session.get("duration_seconds"),
         created_at=session["created_at"],
         lead_id=session.get("lead_id"),
+        conversation_id=session.get("conversation_id"),
         is_audio_only=session.get("is_audio_only", False),
         perception_analysis=session.get("perception_analysis"),
         transcripts=transcripts,
@@ -512,6 +531,20 @@ async def end_video_session(
     # Notify frontend that ARIA avatar has stopped speaking
     await ws_manager.send_to_user(current_user.id, AriaSpeakingEvent(is_speaking=False))
 
+    # Bridge video context back to linked chat conversation
+    if updated.get("conversation_id"):
+        try:
+            bridge = get_context_bridge()
+            await bridge.video_to_chat_context(
+                user_id=current_user.id,
+                video_session_id=session_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to bridge video context back to chat",
+                extra={"session_id": session_id, "user_id": current_user.id},
+            )
+
     return VideoSessionResponse(
         id=updated["id"],
         user_id=updated["user_id"],
@@ -524,6 +557,7 @@ async def end_video_session(
         duration_seconds=updated.get("duration_seconds"),
         created_at=updated["created_at"],
         lead_id=updated.get("lead_id"),
+        conversation_id=updated.get("conversation_id"),
         is_audio_only=updated.get("is_audio_only", False),
         perception_analysis=updated.get("perception_analysis"),
     )
