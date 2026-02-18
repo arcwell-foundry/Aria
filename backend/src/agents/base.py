@@ -15,6 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.core.persona import PersonaBuilder
+    from src.memory.cold_retrieval import ColdMemoryRetriever
+    from src.memory.hot_context import HotContext, HotContextBuilder
+    from src.memory.working import WorkingMemory
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +71,29 @@ class BaseAgent(ABC):
     name: str
     description: str
 
-    def __init__(self, llm_client: "LLMClient", user_id: str) -> None:
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        user_id: str,
+        persona_builder: "PersonaBuilder | None" = None,
+        hot_context_builder: "HotContextBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
+    ) -> None:
         """Initialize the agent.
 
         Args:
             llm_client: LLM client for reasoning and generation.
             user_id: ID of the user this agent is working for.
+            persona_builder: Optional PersonaBuilder for centralized prompt assembly.
+            hot_context_builder: Optional builder for always-loaded context.
+            cold_retriever: Optional retriever for on-demand deep memory search.
         """
         self.llm = llm_client
         self.user_id = user_id
+        self.persona_builder = persona_builder
+        self._hot_context_builder = hot_context_builder
+        self._cold_retriever = cold_retriever
+        self._hot_context_cache: HotContext | None = None
         self.status = AgentStatus.IDLE
         self.total_tokens_used = 0
         self.tools: dict[str, Callable[..., Any]] = self._register_tools()
@@ -138,6 +156,54 @@ class BaseAgent(ABC):
     def is_failed(self) -> bool:
         """Check if agent failed."""
         return self.status == AgentStatus.FAILED
+
+    async def _get_persona_system_prompt(
+        self,
+        task_description: str = "",
+        output_format: str = "json",
+        include_relationship: bool = False,
+        lead_id: str | None = None,
+        account_name: str | None = None,
+        recipient_name: str | None = None,
+    ) -> str | None:
+        """Build a persona-based system prompt if PersonaBuilder is available.
+
+        Returns None if no persona_builder is set, allowing the caller
+        to fall back to its hardcoded prompt.
+
+        Args:
+            task_description: What this agent is currently doing.
+            output_format: Expected output format.
+            include_relationship: Whether to include relationship context.
+            lead_id: Optional lead ID for relationship context.
+            account_name: Optional account name for relationship context.
+            recipient_name: Optional recipient name for relationship context.
+
+        Returns:
+            System prompt string or None.
+        """
+        if self.persona_builder is None:
+            return None
+
+        try:
+            from src.core.persona import PersonaRequest
+
+            request = PersonaRequest(
+                user_id=self.user_id,
+                agent_name=getattr(self, "name", None),
+                agent_role_description=getattr(self, "description", None),
+                task_description=task_description,
+                output_format=output_format,
+                include_relationship_context=include_relationship,
+                lead_id=lead_id,
+                account_name=account_name,
+                recipient_name=recipient_name,
+            )
+            ctx = await self.persona_builder.build(request)
+            return ctx.to_system_prompt()
+        except Exception as e:
+            logger.warning("PersonaBuilder failed, falling back to hardcoded prompt: %s", e)
+            return None
 
     async def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
         """Call a registered tool with error handling.
@@ -214,6 +280,50 @@ class BaseAgent(ABC):
         """
         pass
 
+    async def get_hot_context(
+        self,
+        working_memory: "WorkingMemory | None" = None,
+    ) -> "HotContext | None":
+        """Lazy-load hot context, cached per run.
+
+        Args:
+            working_memory: Optional working memory with recent messages.
+
+        Returns:
+            HotContext if builder is configured, None otherwise.
+        """
+        if self._hot_context_builder is None:
+            return None
+        if self._hot_context_cache is None:
+            self._hot_context_cache = await self._hot_context_builder.build(
+                self.user_id,
+                working_memory=working_memory,
+            )
+        return self._hot_context_cache
+
+    async def cold_retrieve(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """On-demand cold memory retrieval.
+
+        Args:
+            query: Natural language search query.
+            limit: Maximum results to return.
+
+        Returns:
+            List of result dicts, or empty list if no retriever.
+        """
+        if self._cold_retriever is None:
+            return []
+        results = await self._cold_retriever.retrieve(
+            user_id=self.user_id,
+            query=query,
+            limit=limit,
+        )
+        return [r.to_dict() for r in results]
+
     async def run(self, task: dict[str, Any]) -> AgentResult:
         """Run the agent with full lifecycle management.
 
@@ -227,6 +337,7 @@ class BaseAgent(ABC):
             AgentResult with execution outcome.
         """
         start_time = time.perf_counter()
+        self._hot_context_cache = None  # Reset per execution
         self.status = AgentStatus.RUNNING
 
         logger.info(

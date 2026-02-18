@@ -700,6 +700,10 @@ _SKILL_CONFIDENCE_THRESHOLD = 0.7
 class ChatService:
     """Service for memory-integrated chat interactions."""
 
+    # Feature flag: set True to use PersonaBuilder for system prompt assembly.
+    # When False, uses the existing _build_system_prompt method.
+    _use_persona_builder: bool = False
+
     def __init__(self) -> None:
         """Initialize chat service with dependencies."""
         self._memory_service = MemoryQueryService()
@@ -717,6 +721,9 @@ class ChatService:
             db_client=db,
         )
         self._episodic_memory = EpisodicMemory()
+
+        # PersonaBuilder — lazily initialized on first use
+        self._persona_builder: Any = None
 
         # Skill detection — lazily initialized on first use
         self._skill_registry: Any = None
@@ -1369,16 +1376,27 @@ class ChatService:
         priming_context = await self._get_priming_context(user_id, message)
 
         # Build system prompt with all context layers
-        system_prompt = self._build_system_prompt(
-            memories,
-            load_state,
-            proactive_insights,
-            personality,
-            style_guidelines,
-            priming_context,
-            web_context,
-            companion_context=companion_ctx,
-        )
+        if self._use_persona_builder:
+            system_prompt = await self._build_system_prompt_v2(
+                user_id,
+                memories,
+                load_state,
+                proactive_insights,
+                priming_context,
+                web_context,
+                companion_context=companion_ctx,
+            )
+        else:
+            system_prompt = self._build_system_prompt(
+                memories,
+                load_state,
+                proactive_insights,
+                personality,
+                style_guidelines,
+                priming_context,
+                web_context,
+                companion_context=companion_ctx,
+            )
 
         logger.info(
             "Processing chat message",
@@ -1965,6 +1983,63 @@ class ChatService:
             base_prompt = HIGH_LOAD_INSTRUCTION + "\n\n" + base_prompt
 
         return base_prompt
+
+    async def _build_system_prompt_v2(
+        self,
+        user_id: str,
+        memories: list[dict[str, Any]],
+        load_state: CognitiveLoadState | None = None,
+        proactive_insights: list[ProactiveInsight] | None = None,
+        priming_context: ConversationContext | None = None,
+        web_context: dict[str, Any] | None = None,
+        companion_context: Any = None,
+    ) -> str:
+        """Build system prompt using PersonaBuilder (v2).
+
+        Delegates all prompt assembly to PersonaBuilder.build_chat_system_prompt().
+        Falls back to _build_system_prompt if PersonaBuilder fails.
+
+        Args:
+            user_id: The user's ID.
+            memories: List of memory dicts.
+            load_state: Optional cognitive load state.
+            proactive_insights: Optional proactive insights.
+            priming_context: Optional conversation priming context.
+            web_context: Optional web-grounded context.
+            companion_context: Optional CompanionContext.
+
+        Returns:
+            Formatted system prompt string.
+        """
+        try:
+            if self._persona_builder is None:
+                from src.core.persona import get_persona_builder
+
+                self._persona_builder = get_persona_builder()
+
+            from src.core.persona import PersonaRequest
+
+            request = PersonaRequest(
+                user_id=user_id,
+                memories=memories,
+                priming_context=priming_context,
+                companion_context=companion_context,
+                load_state=load_state,
+                proactive_insights=proactive_insights,
+                web_context=web_context,
+            )
+            return await self._persona_builder.build_chat_system_prompt(request)
+
+        except Exception as e:
+            logger.warning("PersonaBuilder v2 prompt failed, falling back: %s", e)
+            # Fallback to existing method
+            personality = await self._get_personality_calibration(user_id)
+            style_guidelines = await self._get_style_guidelines(user_id)
+            return self._build_system_prompt(
+                memories, load_state, proactive_insights,
+                personality, style_guidelines, priming_context,
+                web_context, companion_context=companion_context,
+            )
 
     def _build_citations(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Build citations list from memories."""

@@ -205,6 +205,7 @@ class OODALoop:
         working_memory: "WorkingMemory",
         config: OODAConfig | None = None,
         agent_executor: Any | None = None,
+        persona_builder: Any | None = None,
     ) -> None:
         """Initialize OODA loop.
 
@@ -216,6 +217,7 @@ class OODALoop:
             config: Optional configuration for budgets.
             agent_executor: Optional callable for dispatching agent actions.
                 Signature: async (action, agent, parameters, goal) -> dict
+            persona_builder: Optional PersonaBuilder for centralized prompt assembly.
         """
         self.llm = llm_client
         self.episodic = episodic_memory
@@ -223,6 +225,7 @@ class OODALoop:
         self.working = working_memory
         self.config = config or OODAConfig()
         self.agent_executor = agent_executor
+        self.persona_builder = persona_builder
 
     async def observe(
         self,
@@ -359,7 +362,7 @@ class OODALoop:
         # Build prompt for LLM analysis
         observations_summary = json.dumps(state.observations, indent=2, default=str)
 
-        system_prompt = """You are ARIA's cognitive analysis module. Analyze the observations and produce a structured analysis.
+        hardcoded_system_prompt = """You are ARIA's cognitive analysis module. Analyze the observations and produce a structured analysis.
 
 Output ONLY valid JSON with this structure:
 {
@@ -368,6 +371,25 @@ Output ONLY valid JSON with this structure:
     "threats": ["list of obstacles or risks"],
     "recommended_focus": "single most important area to focus on"
 }"""
+
+        # Use PersonaBuilder when available, fall back to hardcoded prompt
+        system_prompt = hardcoded_system_prompt
+        if self.persona_builder is not None:
+            try:
+                from src.core.persona import PersonaRequest
+
+                user_id = self.working.user_id
+                request = PersonaRequest(
+                    user_id=user_id,
+                    agent_name="ooda_orient",
+                    agent_role_description="ARIA's cognitive analysis module",
+                    task_description=f"Analyze observations for goal: {goal.get('title', 'Unknown')[:80]}",
+                    output_format="json",
+                )
+                ctx = await self.persona_builder.build(request)
+                system_prompt = ctx.to_system_prompt() + "\n\n" + hardcoded_system_prompt
+            except Exception as e:
+                logger.warning("PersonaBuilder failed in orient, using hardcoded: %s", e)
 
         user_prompt = f"""Goal: {goal.get("title", "Unknown")}
 Description: {goal.get("description", "No description")}
@@ -469,7 +491,7 @@ Analyze these observations and identify patterns, opportunities, and threats rel
         # Build prompt for decision
         orientation_summary = json.dumps(state.orientation, indent=2, default=str)
 
-        system_prompt = """You are ARIA's decision module. Based on the analysis, select the best action to take.
+        hardcoded_decide_prompt = """You are ARIA's decision module. Based on the analysis, select the best action to take.
 
 Available actions:
 - "research": Use Analyst agent to gather information
@@ -488,6 +510,25 @@ Output ONLY valid JSON with this structure:
     "parameters": {"key": "value"},
     "reasoning": "why this action was chosen"
 }"""
+
+        # Use PersonaBuilder when available, fall back to hardcoded prompt
+        system_prompt = hardcoded_decide_prompt
+        if self.persona_builder is not None:
+            try:
+                from src.core.persona import PersonaRequest
+
+                user_id = self.working.user_id
+                request = PersonaRequest(
+                    user_id=user_id,
+                    agent_name="ooda_decide",
+                    agent_role_description="ARIA's decision module",
+                    task_description=f"Select action for goal: {goal.get('title', 'Unknown')[:80]}",
+                    output_format="json",
+                )
+                ctx = await self.persona_builder.build(request)
+                system_prompt = ctx.to_system_prompt() + "\n\n" + hardcoded_decide_prompt
+            except Exception as e:
+                logger.warning("PersonaBuilder failed in decide, using hardcoded: %s", e)
 
         user_prompt = f"""Goal: {goal.get("title", "Unknown")}
 Description: {goal.get("description", "No description")}

@@ -481,12 +481,21 @@ class ScribeAgent(SkillAwareAgent):
             f'"tone_notes": "brief note on tone choices made"}}'
         )
 
-        system_prompt = (
+        hardcoded_prompt = (
             "You are a professional email writer for life sciences commercial teams. "
             "You write clear, persuasive, and appropriately-toned emails that drive "
             "action. Your emails are concise, avoid jargon overload, and always include "
             "a clear next step or call to action. Respond with valid JSON only."
         )
+
+        # Use PersonaBuilder when available, fall back to hardcoded prompt
+        system_prompt = await self._get_persona_system_prompt(
+            task_description=f"Draft {tone} email about: {goal[:80]}",
+            output_format="json",
+            include_relationship=bool(recipient_name != "there"),
+            recipient_name=recipient_name if recipient_name != "there" else None,
+            account_name=recipient_company or None,
+        ) or hardcoded_prompt
 
         try:
             response = await self.llm.generate_response(

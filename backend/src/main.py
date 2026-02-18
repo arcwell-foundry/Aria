@@ -47,6 +47,7 @@ from src.api.routes import (
     notifications,
     onboarding,
     perception,
+    persona,
     predictions,
     preferences,
     profile,
@@ -268,6 +269,7 @@ app.include_router(memory.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(perception.router, prefix="/api/v1")
+app.include_router(persona.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
 app.include_router(preferences.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
