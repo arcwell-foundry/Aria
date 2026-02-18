@@ -16,6 +16,9 @@ from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.core.persona import PersonaBuilder
+    from src.memory.cold_retrieval import ColdMemoryRetriever
+    from src.memory.hot_context import HotContextBuilder
     from src.skills.index import SkillIndex
     from src.skills.orchestrator import SkillOrchestrator
 
@@ -112,6 +115,9 @@ class StrategistAgent(SkillAwareAgent):
         user_id: str,
         skill_orchestrator: "SkillOrchestrator | None" = None,
         skill_index: "SkillIndex | None" = None,
+        persona_builder: "PersonaBuilder | None" = None,
+        hot_context_builder: "HotContextBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
     ) -> None:
         """Initialize the Strategist agent.
 
@@ -120,12 +126,18 @@ class StrategistAgent(SkillAwareAgent):
             user_id: ID of the user this agent is working for.
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
+            persona_builder: Optional PersonaBuilder for centralized prompt assembly.
+            hot_context_builder: Optional builder for always-loaded context.
+            cold_retriever: Optional retriever for on-demand deep memory search.
         """
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
+            persona_builder=persona_builder,
+            hot_context_builder=hot_context_builder,
+            cold_retriever=cold_retriever,
         )
 
     def _register_tools(self) -> dict[str, Any]:
@@ -233,6 +245,17 @@ class StrategistAgent(SkillAwareAgent):
             deadline=deadline,
         )
 
+        # Aggregate confidence scores from analysis and strategy
+        analysis_confidence = analysis.get("confidence", {})
+        strategy_confidence = strategy.get("confidence", {})
+        analysis_overall = analysis_confidence.get("overall", 0.5)
+        strategy_overall = strategy_confidence.get("overall", 0.5)
+        aggregate_confidence = {
+            "analysis": analysis_overall,
+            "strategy": strategy_overall,
+            "overall": round((analysis_overall + strategy_overall) / 2, 2),
+        }
+
         # Build complete result data
         result_data: dict[str, Any] = {
             "goal_id": str(uuid.uuid4()),
@@ -240,6 +263,7 @@ class StrategistAgent(SkillAwareAgent):
             "analysis": analysis,
             "strategy": strategy,
             "timeline": timeline,
+            "confidence": aggregate_confidence,
         }
 
         logger.info(
@@ -258,26 +282,156 @@ class StrategistAgent(SkillAwareAgent):
         goal: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Analyze account context and opportunities.
+        """Analyze account context and opportunities using LLM-primary reasoning.
 
-        Evaluates the goal, target company, competitive landscape,
-        and stakeholder map to identify opportunities and challenges.
+        Uses LLM to generate the full account analysis. Falls back to
+        algorithmic heuristics if LLM is unavailable or fails.
 
         Args:
             goal: Goal details including target company.
             context: Optional context with competitive landscape, stakeholders.
 
         Returns:
-            Account analysis with opportunities, challenges, and recommendations.
+            Account analysis with opportunities, challenges, recommendations,
+            and confidence scores.
         """
         context = context or {}
         target_company = goal.get("target_company", "Unknown")
         goal_type = goal.get("type", "general")
+        goal_title = goal.get("title", "")
 
         logger.info(
-            f"Analyzing account for goal: {goal.get('title')}",
+            f"Analyzing account for goal: {goal_title}",
             extra={"target_company": target_company, "goal_type": goal_type},
         )
+
+        try:
+            # 1. Gather cold memory context
+            cold_memory = await self.cold_retrieve(
+                query=f"{target_company} {goal_title}",
+            )
+
+            # 2. Build system prompt via PersonaBuilder (or fall back to hardcoded)
+            system_prompt = await self._get_persona_system_prompt(
+                task_description=(
+                    f"Analyze account '{target_company}' for a '{goal_type}' pursuit. "
+                    f"Identify opportunities, challenges, key actions, and provide "
+                    f"a strategic recommendation."
+                ),
+                output_format="json",
+                account_name=target_company,
+            )
+            if system_prompt is None:
+                system_prompt = (
+                    "You are ARIA's Strategist agent — a senior life sciences commercial "
+                    "strategist with deep expertise in pharma, biotech, and CDMO sales. "
+                    "Return only valid JSON. No markdown, no explanation."
+                )
+
+            # 3. Build user prompt with all available context
+            competitive_landscape = context.get("competitive_landscape", {})
+            stakeholder_map = context.get("stakeholder_map", {})
+
+            context_sections = [
+                f"Goal: {json.dumps(goal, default=str)}",
+            ]
+            if competitive_landscape:
+                context_sections.append(
+                    f"Competitive Landscape: {json.dumps(competitive_landscape, default=str)}"
+                )
+            if stakeholder_map:
+                context_sections.append(
+                    f"Stakeholder Map: {json.dumps(stakeholder_map, default=str)}"
+                )
+            if cold_memory:
+                context_sections.append(
+                    f"Memory Context: {json.dumps(cold_memory[:5], default=str)}"
+                )
+
+            user_prompt = (
+                f"Analyze the following account for a '{goal_type}' pursuit "
+                f"targeting '{target_company}'.\n\n"
+                + "\n\n".join(context_sections)
+                + "\n\nProvide ONLY a JSON object with these fields:\n"
+                '{"target_company": "string", '
+                '"opportunities": ["opp1", ...], '
+                '"challenges": ["challenge1", ...], '
+                '"key_actions": ["action1", ...], '
+                '"recommendation": "A nuanced 1-3 sentence recommendation", '
+                '"strategic_insights": ["insight1", ...], '
+                '"competitive_analysis": {"competitor_count": N, "competitive_position": "strong|needs_improvement", ...}, '
+                '"stakeholder_analysis": {"decision_maker_count": N, "risk_level": "high|low", ...}, '
+                '"confidence": {"overall": 0.0-1.0, "opportunities": 0.0-1.0, '
+                '"challenges": 0.0-1.0, "recommendation": 0.0-1.0}}\n\n'
+                "Focus on:\n"
+                "- Non-obvious opportunities specific to life sciences\n"
+                "- Competitive dynamics and stakeholder psychology\n"
+                "- Timing and sequencing considerations\n"
+                "Return ONLY the JSON object, no other text."
+            )
+
+            # 4. Call LLM with user_id for CostGovernor budget checks
+            llm_response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                temperature=0.5,
+                user_id=self.user_id,
+            )
+
+            # 5. Parse and validate
+            analysis = _extract_json_from_text(llm_response)
+            if not isinstance(analysis, dict):
+                raise ValueError("LLM returned non-dict JSON")
+
+            # Ensure required fields exist
+            analysis.setdefault("target_company", target_company)
+            analysis.setdefault("goal_type", goal_type)
+            analysis.setdefault("opportunities", [])
+            analysis.setdefault("challenges", [])
+            analysis.setdefault("key_actions", [])
+            analysis.setdefault("recommendation", "")
+            analysis.setdefault("confidence", {"overall": 0.8})
+
+            logger.info(
+                "LLM-primary account analysis complete",
+                extra={
+                    "target_company": target_company,
+                    "opportunities": len(analysis["opportunities"]),
+                    "challenges": len(analysis["challenges"]),
+                    "confidence": analysis["confidence"].get("overall", 0),
+                },
+            )
+
+            return analysis
+
+        except Exception:
+            logger.warning(
+                "LLM-primary account analysis failed, using algorithmic fallback",
+                exc_info=True,
+            )
+            return self._analyze_account_fallback(goal, context)
+
+    def _analyze_account_fallback(
+        self,
+        goal: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Algorithmic fallback for account analysis.
+
+        Uses heuristic rules and template logic to produce a baseline
+        account analysis when LLM is unavailable.
+
+        Args:
+            goal: Goal details including target company.
+            context: Optional context with competitive landscape, stakeholders.
+
+        Returns:
+            Account analysis with opportunities, challenges, recommendations,
+            and default confidence scores.
+        """
+        context = context or {}
+        target_company = goal.get("target_company", "Unknown")
+        goal_type = goal.get("type", "general")
 
         analysis: dict[str, Any] = {
             "target_company": target_company,
@@ -292,10 +446,8 @@ class StrategistAgent(SkillAwareAgent):
         competitive_landscape = context.get("competitive_landscape")
         if competitive_landscape:
             analysis["competitive_analysis"] = self._analyze_competitive(competitive_landscape)
-            # Add opportunities from strengths
             for strength in competitive_landscape.get("our_strengths", []):
                 analysis["opportunities"].append(f"Leverage strength: {strength}")
-            # Add challenges from weaknesses
             for weakness in competitive_landscape.get("our_weaknesses", []):
                 analysis["challenges"].append(f"Address weakness: {weakness}")
 
@@ -303,7 +455,6 @@ class StrategistAgent(SkillAwareAgent):
         stakeholder_map = context.get("stakeholder_map")
         if stakeholder_map:
             analysis["stakeholder_analysis"] = self._analyze_stakeholders(stakeholder_map)
-            # Add key actions based on stakeholders
             for dm in stakeholder_map.get("decision_makers", []):
                 analysis["key_actions"].append(
                     f"Engage decision maker: {dm.get('name', 'Unknown')}"
@@ -329,73 +480,13 @@ class StrategistAgent(SkillAwareAgent):
             goal_type, analysis["opportunities"], analysis["challenges"]
         )
 
-        # --- LLM Enhancement: Layer strategic reasoning on top of algorithmic analysis ---
-        try:
-            llm_prompt = (
-                f"You are a senior life sciences commercial strategist.\n\n"
-                f"I have an algorithmic analysis for a '{goal_type}' pursuit "
-                f"targeting '{target_company}'. Review it and enhance with your "
-                f"strategic reasoning.\n\n"
-                f"Goal: {json.dumps(goal, default=str)}\n\n"
-                f"Current analysis:\n{json.dumps(analysis, default=str)}\n\n"
-                f"Provide ONLY a JSON object with these fields:\n"
-                f'{{"strategic_insights": ["insight1", "insight2", ...], '
-                f'"additional_opportunities": ["opp1", ...], '
-                f'"additional_challenges": ["challenge1", ...], '
-                f'"enhanced_recommendation": "A nuanced 1-3 sentence recommendation"}}\n\n'
-                f"Focus on:\n"
-                f"- Non-obvious opportunities specific to life sciences\n"
-                f"- Competitive dynamics and stakeholder psychology\n"
-                f"- Timing and sequencing considerations\n"
-                f"Return ONLY the JSON object, no other text."
-            )
-
-            llm_response = await self.llm_client.generate_response(
-                messages=[{"role": "user", "content": llm_prompt}],
-                system_prompt=(
-                    "You are a senior life sciences commercial strategist with deep "
-                    "expertise in pharma, biotech, and CDMO sales. Return only valid "
-                    "JSON. No markdown, no explanation."
-                ),
-                temperature=0.5,
-            )
-
-            enhancements = _extract_json_from_text(llm_response)
-
-            # Merge LLM insights into the algorithmic analysis (additive only)
-            if isinstance(enhancements, dict):
-                if "strategic_insights" in enhancements and isinstance(
-                    enhancements["strategic_insights"], list
-                ):
-                    analysis["strategic_insights"] = enhancements["strategic_insights"]
-
-                if "additional_opportunities" in enhancements and isinstance(
-                    enhancements["additional_opportunities"], list
-                ):
-                    analysis["opportunities"].extend(enhancements["additional_opportunities"])
-
-                if "additional_challenges" in enhancements and isinstance(
-                    enhancements["additional_challenges"], list
-                ):
-                    analysis["challenges"].extend(enhancements["additional_challenges"])
-
-                if "enhanced_recommendation" in enhancements and isinstance(
-                    enhancements["enhanced_recommendation"], str
-                ):
-                    analysis["recommendation"] = enhancements["enhanced_recommendation"]
-
-                logger.info(
-                    "LLM enhanced account analysis",
-                    extra={
-                        "insights_added": len(enhancements.get("strategic_insights", [])),
-                        "opps_added": len(enhancements.get("additional_opportunities", [])),
-                    },
-                )
-        except Exception:
-            logger.warning(
-                "LLM enhancement failed for account analysis, using algorithmic output",
-                exc_info=True,
-            )
+        # Default confidence for algorithmic fallback
+        analysis["confidence"] = {
+            "overall": 0.5,
+            "opportunities": 0.4,
+            "challenges": 0.4,
+            "recommendation": 0.5,
+        }
 
         return analysis
 
@@ -489,7 +580,12 @@ class StrategistAgent(SkillAwareAgent):
         resources: dict[str, Any],
         constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate pursuit strategy with phases.
+        """Generate pursuit strategy using LLM-primary reasoning.
+
+        Uses LLM to generate phases, battle card, risks, and positioning.
+        Agent tasks are always generated algorithmically (deterministic
+        capability matching). Falls back to template-based strategy if
+        LLM is unavailable.
 
         Args:
             goal: Goal details.
@@ -498,7 +594,8 @@ class StrategistAgent(SkillAwareAgent):
             constraints: Optional constraints like deadlines.
 
         Returns:
-            Strategy with phases, milestones, and agent tasks.
+            Strategy with phases, agent tasks, risks, battle card,
+            and confidence scores.
         """
         goal_type = goal.get("type", "general")
         time_horizon = resources.get("time_horizon_days", 90)
@@ -510,30 +607,175 @@ class StrategistAgent(SkillAwareAgent):
             extra={"goal_type": goal_type, "time_horizon": time_horizon},
         )
 
-        # Generate phases based on goal type
+        try:
+            # 1. Build system prompt via PersonaBuilder (or fall back to hardcoded)
+            system_prompt = await self._get_persona_system_prompt(
+                task_description=(
+                    f"Generate a pursuit strategy for a '{goal_type}' goal "
+                    f"with a {time_horizon}-day time horizon. Include phases, "
+                    f"risks, battle card, and success criteria."
+                ),
+                output_format="json",
+            )
+            if system_prompt is None:
+                system_prompt = (
+                    "You are ARIA's Strategist agent — a senior life sciences commercial "
+                    "strategist with deep expertise in pharma, biotech, and CDMO sales. "
+                    "Return only valid JSON. No markdown, no explanation."
+                )
+
+            # 2. Build user prompt
+            user_prompt = (
+                f"Generate a pursuit strategy for the following goal.\n\n"
+                f"Goal: {json.dumps(goal, default=str)}\n\n"
+                f"Account Analysis: {json.dumps(analysis, default=str)}\n\n"
+                f"Resources: {json.dumps(resources, default=str)}\n\n"
+                f"Constraints: {json.dumps(constraints, default=str)}\n\n"
+                f"Provide ONLY a JSON object with these fields:\n"
+                '{"phases": [{"phase_number": 1, "name": "string", '
+                '"description": "string", "duration_pct": 0.0-1.0, '
+                '"objectives": ["obj1", ...]}], '
+                '"risks": [{"description": "string", "likelihood": "low|medium|high", '
+                '"impact": "low|medium|high", "mitigation": "string"}], '
+                '"success_criteria": ["criterion1", ...], '
+                '"battle_card": {"how_to_win": ["point1", ...], '
+                '"objection_handling": [{"objection": "...", "response": "..."}], '
+                '"key_differentiators": ["diff1", ...]}, '
+                '"strategic_positioning": "A concise positioning statement", '
+                '"summary": "Executive summary of the strategy", '
+                '"confidence": {"overall": 0.0-1.0, "phases": 0.0-1.0, '
+                '"risks": 0.0-1.0, "battle_card": 0.0-1.0}}\n\n'
+                "Focus on:\n"
+                "- Concrete, actionable phases with clear objectives\n"
+                "- Realistic risk assessment for life sciences sales\n"
+                "- Competitive differentiation and objection handling\n"
+                "Return ONLY the JSON object, no other text."
+            )
+
+            # 3. Call LLM with user_id for CostGovernor budget checks
+            llm_response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                temperature=0.5,
+                user_id=self.user_id,
+            )
+
+            # 4. Parse and validate
+            llm_strategy = _extract_json_from_text(llm_response)
+            if not isinstance(llm_strategy, dict):
+                raise ValueError("LLM returned non-dict JSON")
+
+            # 5. Post-process: convert duration_pct to duration_days for phases
+            llm_phases = llm_strategy.get("phases", [])
+            if not isinstance(llm_phases, list) or len(llm_phases) == 0:
+                raise ValueError("LLM returned no phases")
+
+            phases = []
+            for i, phase in enumerate(llm_phases):
+                duration_pct = phase.get("duration_pct", 1.0 / len(llm_phases))
+                duration_days = max(1, int(time_horizon * duration_pct))
+                phases.append(
+                    {
+                        "phase_number": phase.get("phase_number", i + 1),
+                        "name": phase.get("name", f"Phase {i + 1}"),
+                        "description": phase.get("description", ""),
+                        "duration_days": duration_days,
+                        "objectives": phase.get("objectives", []),
+                    }
+                )
+
+            # 6. Agent tasks are ALWAYS algorithmic (deterministic capability matching)
+            agent_tasks = self._generate_agent_tasks(goal_type, available_agents, phases, analysis)
+
+            # 7. Build constraints_applied
+            constraints_applied = {
+                "has_deadline": "deadline" in constraints,
+                "has_exclusions": "exclusions" in constraints,
+                "has_compliance_notes": "compliance_notes" in constraints,
+            }
+
+            strategy: dict[str, Any] = {
+                "goal_type": goal_type,
+                "phases": phases,
+                "agent_tasks": agent_tasks,
+                "risks": llm_strategy.get("risks", []),
+                "success_criteria": llm_strategy.get("success_criteria", []),
+                "summary": llm_strategy.get("summary", ""),
+                "constraints_applied": constraints_applied,
+                "confidence": llm_strategy.get(
+                    "confidence", {"overall": 0.8, "phases": 0.8, "risks": 0.7, "battle_card": 0.7}
+                ),
+            }
+
+            # Add battle card if present
+            battle_card = llm_strategy.get("battle_card")
+            if isinstance(battle_card, dict):
+                strategy["battle_card"] = battle_card
+
+            # Add strategic positioning if present
+            positioning = llm_strategy.get("strategic_positioning")
+            if isinstance(positioning, str):
+                strategy["strategic_positioning"] = positioning
+
+            logger.info(
+                "LLM-primary strategy generation complete",
+                extra={
+                    "phases": len(phases),
+                    "has_battle_card": "battle_card" in strategy,
+                    "confidence": strategy["confidence"].get("overall", 0),
+                },
+            )
+
+            return strategy
+
+        except Exception:
+            logger.warning(
+                "LLM-primary strategy generation failed, using algorithmic fallback",
+                exc_info=True,
+            )
+            return self._generate_strategy_fallback(goal, analysis, resources, constraints)
+
+    def _generate_strategy_fallback(
+        self,
+        goal: dict[str, Any],
+        analysis: dict[str, Any],
+        resources: dict[str, Any],
+        constraints: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Algorithmic fallback for strategy generation.
+
+        Uses template phases, keyword-based risks, and heuristic success
+        criteria when LLM is unavailable.
+
+        Args:
+            goal: Goal details.
+            analysis: Account analysis results.
+            resources: Available resources and agents.
+            constraints: Optional constraints like deadlines.
+
+        Returns:
+            Strategy with phases, agent tasks, risks, success criteria,
+            summary, and default confidence scores.
+        """
+        goal_type = goal.get("type", "general")
+        time_horizon = resources.get("time_horizon_days", 90)
+        available_agents = resources.get("available_agents", [])
+        constraints = constraints or {}
+
         phases = self._generate_phases(goal_type, time_horizon)
-
-        # Generate agent tasks based on available agents and phases
         agent_tasks = self._generate_agent_tasks(goal_type, available_agents, phases, analysis)
-
-        # Generate risks from challenges and constraints
         challenges = analysis.get("challenges", [])
         risks = self._generate_risks(challenges, constraints)
-
-        # Generate success criteria
         success_criteria = self._generate_success_criteria(goal_type, goal)
-
-        # Generate summary
         summary = self._generate_summary(goal, phases, agent_tasks)
 
-        # Track applied constraints
         constraints_applied = {
             "has_deadline": "deadline" in constraints,
             "has_exclusions": "exclusions" in constraints,
             "has_compliance_notes": "compliance_notes" in constraints,
         }
 
-        strategy: dict[str, Any] = {
+        return {
             "goal_type": goal_type,
             "phases": phases,
             "agent_tasks": agent_tasks,
@@ -541,92 +783,13 @@ class StrategistAgent(SkillAwareAgent):
             "success_criteria": success_criteria,
             "summary": summary,
             "constraints_applied": constraints_applied,
+            "confidence": {
+                "overall": 0.5,
+                "phases": 0.5,
+                "risks": 0.4,
+                "battle_card": 0.0,
+            },
         }
-
-        # --- LLM Enhancement: Layer strategic reasoning on top of algorithmic strategy ---
-        try:
-            llm_prompt = (
-                f"You are a senior life sciences commercial strategist.\n\n"
-                f"I have generated an algorithmic pursuit strategy. Review it and "
-                f"provide tactical enhancements.\n\n"
-                f"Goal: {json.dumps(goal, default=str)}\n\n"
-                f"Strategy:\n{json.dumps(strategy, default=str)}\n\n"
-                f"Provide ONLY a JSON object with these fields:\n"
-                f'{{"phase_refinements": [{{"phase_number": 1, '
-                f'"refined_objectives": ["obj1", ...], '
-                f'"tactical_actions": ["action1", ...]}}], '
-                f'"battle_card": {{"how_to_win": ["point1", ...], '
-                f'"objection_handling": [{{"objection": "...", "response": "..."}}], '
-                f'"key_differentiators": ["diff1", ...]}}, '
-                f'"strategic_positioning": "A concise positioning statement"}}\n\n'
-                f"Focus on:\n"
-                f"- Concrete tactical actions for each phase\n"
-                f"- Realistic objection handling for life sciences sales\n"
-                f"- Competitive differentiation specific to the goal\n"
-                f"Return ONLY the JSON object, no other text."
-            )
-
-            llm_response = await self.llm_client.generate_response(
-                messages=[{"role": "user", "content": llm_prompt}],
-                system_prompt=(
-                    "You are a senior life sciences commercial strategist with deep "
-                    "expertise in pharma, biotech, and CDMO sales. Return only valid "
-                    "JSON. No markdown, no explanation."
-                ),
-                temperature=0.5,
-            )
-
-            enhancements = _extract_json_from_text(llm_response)
-
-            # Merge LLM enhancements into the algorithmic strategy (additive only)
-            if isinstance(enhancements, dict):
-                # Merge phase refinements — add tactical_actions to matching phases
-                phase_refinements = enhancements.get("phase_refinements", [])
-                if isinstance(phase_refinements, list):
-                    for refinement in phase_refinements:
-                        if not isinstance(refinement, dict):
-                            continue
-                        phase_num = refinement.get("phase_number")
-                        for phase in strategy["phases"]:
-                            if phase.get("phase_number") == phase_num:
-                                if "tactical_actions" in refinement and isinstance(
-                                    refinement["tactical_actions"], list
-                                ):
-                                    phase["tactical_actions"] = refinement["tactical_actions"]
-                                if "refined_objectives" in refinement and isinstance(
-                                    refinement["refined_objectives"], list
-                                ):
-                                    # Extend objectives, don't replace
-                                    existing = set(phase.get("objectives", []))
-                                    for obj in refinement["refined_objectives"]:
-                                        if obj not in existing:
-                                            phase.setdefault("objectives", []).append(obj)
-                                break
-
-                # Add battle card
-                battle_card = enhancements.get("battle_card")
-                if isinstance(battle_card, dict):
-                    strategy["battle_card"] = battle_card
-
-                # Add strategic positioning
-                positioning = enhancements.get("strategic_positioning")
-                if isinstance(positioning, str):
-                    strategy["strategic_positioning"] = positioning
-
-                logger.info(
-                    "LLM enhanced strategy generation",
-                    extra={
-                        "refinements": len(phase_refinements),
-                        "has_battle_card": "battle_card" in enhancements,
-                    },
-                )
-        except Exception:
-            logger.warning(
-                "LLM enhancement failed for strategy generation, using algorithmic output",
-                exc_info=True,
-            )
-
-        return strategy
 
     def _generate_phases(
         self,
@@ -1313,6 +1476,8 @@ class StrategistAgent(SkillAwareAgent):
             "milestone_count": len(timeline.get("milestones", [])),
             "risk_count": len(strategy.get("risks", [])),
             "time_horizon_days": timeline.get("time_horizon_days", 0),
+            "has_battle_card": "battle_card" in strategy,
+            "confidence": data.get("confidence", {}),
         }
 
         data["summary_stats"] = summary_stats

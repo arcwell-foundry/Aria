@@ -1,6 +1,7 @@
 """Tests for StrategistAgent module."""
 
-from unittest.mock import MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -334,9 +335,7 @@ async def test_generate_strategy_returns_strategy_dict() -> None:
         "time_horizon_days": 90,
     }
 
-    result = await agent._generate_strategy(
-        goal=goal, analysis=analysis, resources=resources
-    )
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
 
     assert isinstance(result, dict)
     assert "phases" in result
@@ -357,9 +356,7 @@ async def test_generate_strategy_creates_phases() -> None:
     analysis = {"opportunities": [], "challenges": [], "key_actions": []}
     resources = {"available_agents": ["Hunter"], "time_horizon_days": 90}
 
-    result = await agent._generate_strategy(
-        goal=goal, analysis=analysis, resources=resources
-    )
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
 
     assert len(result["phases"]) >= 2
     for phase in result["phases"]:
@@ -382,9 +379,7 @@ async def test_generate_strategy_creates_agent_tasks() -> None:
     analysis = {"opportunities": [], "challenges": [], "key_actions": []}
     resources = {"available_agents": ["Hunter", "Analyst"], "time_horizon_days": 30}
 
-    result = await agent._generate_strategy(
-        goal=goal, analysis=analysis, resources=resources
-    )
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
 
     assert len(result["agent_tasks"]) > 0
     for task in result["agent_tasks"]:
@@ -413,9 +408,7 @@ async def test_generate_strategy_identifies_risks() -> None:
     }
     resources = {"available_agents": ["Scribe"], "time_horizon_days": 60}
 
-    result = await agent._generate_strategy(
-        goal=goal, analysis=analysis, resources=resources
-    )
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
 
     assert len(result["risks"]) > 0
     for risk in result["risks"]:
@@ -471,9 +464,7 @@ async def test_create_timeline_returns_timeline_dict() -> None:
         ],
     }
 
-    result = await agent._create_timeline(
-        strategy=strategy, time_horizon_days=30
-    )
+    result = await agent._create_timeline(strategy=strategy, time_horizon_days=30)
 
     assert isinstance(result, dict)
     assert "milestones" in result
@@ -490,15 +481,23 @@ async def test_create_timeline_creates_milestones() -> None:
 
     strategy = {
         "phases": [
-            {"phase_number": 1, "name": "Discovery", "duration_days": 10, "objectives": ["Find leads"]},
-            {"phase_number": 2, "name": "Engagement", "duration_days": 20, "objectives": ["Contact leads"]},
+            {
+                "phase_number": 1,
+                "name": "Discovery",
+                "duration_days": 10,
+                "objectives": ["Find leads"],
+            },
+            {
+                "phase_number": 2,
+                "name": "Engagement",
+                "duration_days": 20,
+                "objectives": ["Contact leads"],
+            },
         ],
         "agent_tasks": [],
     }
 
-    result = await agent._create_timeline(
-        strategy=strategy, time_horizon_days=30
-    )
+    result = await agent._create_timeline(strategy=strategy, time_horizon_days=30)
 
     assert len(result["milestones"]) >= 2
     for milestone in result["milestones"]:
@@ -554,9 +553,7 @@ async def test_create_timeline_schedules_tasks() -> None:
         ],
     }
 
-    result = await agent._create_timeline(
-        strategy=strategy, time_horizon_days=30
-    )
+    result = await agent._create_timeline(strategy=strategy, time_horizon_days=30)
 
     assert "task_schedule" in result
     assert len(result["task_schedule"]) == 2
@@ -581,9 +578,7 @@ async def test_create_timeline_calculates_dates() -> None:
         "agent_tasks": [],
     }
 
-    result = await agent._create_timeline(
-        strategy=strategy, time_horizon_days=30
-    )
+    result = await agent._create_timeline(strategy=strategy, time_horizon_days=30)
 
     # Should have start_date and computed milestone dates
     assert "start_date" in result
@@ -973,3 +968,398 @@ def test_strategist_agent_exported_from_module() -> None:
     from src.agents import StrategistAgent
 
     assert StrategistAgent.name == "Strategist"
+
+
+# ============================================================================
+# LLM-Primary Path Tests
+# ============================================================================
+
+
+def _make_llm_mock() -> MagicMock:
+    """Create a MagicMock LLM client with async generate_response."""
+    mock_llm = MagicMock()
+    mock_llm.generate_response = AsyncMock()
+    return mock_llm
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_llm_primary_path() -> None:
+    """Test _analyze_account uses LLM output when LLM succeeds."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_analysis = {
+        "target_company": "BioGenix",
+        "opportunities": ["First-mover advantage in gene therapy"],
+        "challenges": ["Regulatory complexity"],
+        "key_actions": ["Engage VP of R&D"],
+        "recommendation": "Pursue aggressively — pipeline timing is ideal.",
+        "strategic_insights": ["Q3 FDA window is critical"],
+        "confidence": {
+            "overall": 0.85,
+            "opportunities": 0.9,
+            "challenges": 0.8,
+            "recommendation": 0.85,
+        },
+    }
+    mock_llm.generate_response.return_value = json.dumps(llm_analysis)
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Close deal with BioGenix",
+        "type": "close",
+        "target_company": "BioGenix",
+    }
+
+    result = await agent._analyze_account(goal=goal)
+
+    assert result["target_company"] == "BioGenix"
+    assert "First-mover advantage in gene therapy" in result["opportunities"]
+    assert result["recommendation"] == "Pursue aggressively — pipeline timing is ideal."
+    assert result["confidence"]["overall"] == 0.85
+    mock_llm.generate_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_llm_failure_fallback() -> None:
+    """Test _analyze_account falls back to algorithmic output when LLM fails."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    mock_llm.generate_response.side_effect = RuntimeError("LLM unavailable")
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {
+        "title": "Research Acme Corp",
+        "type": "research",
+        "target_company": "Acme Corp",
+    }
+
+    result = await agent._analyze_account(goal=goal)
+
+    # Should get fallback output with default confidence
+    assert result["target_company"] == "Acme Corp"
+    assert result["confidence"]["overall"] == 0.5
+    assert "Gather competitive intelligence" in result["opportunities"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_uses_persona_builder() -> None:
+    """Test _analyze_account uses PersonaBuilder when available."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_analysis = {
+        "target_company": "TestCo",
+        "opportunities": ["Test opp"],
+        "challenges": [],
+        "key_actions": [],
+        "recommendation": "Test recommendation",
+        "confidence": {"overall": 0.9},
+    }
+    mock_llm.generate_response.return_value = json.dumps(llm_analysis)
+
+    mock_persona_builder = MagicMock()
+    mock_persona_ctx = MagicMock()
+    mock_persona_ctx.to_system_prompt.return_value = "You are ARIA's Strategist (persona-built)"
+    mock_persona_builder.build = AsyncMock(return_value=mock_persona_ctx)
+
+    agent = StrategistAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        persona_builder=mock_persona_builder,
+    )
+
+    goal = {"title": "Test goal", "type": "lead_gen", "target_company": "TestCo"}
+    await agent._analyze_account(goal=goal)
+
+    # PersonaBuilder.build should have been called
+    mock_persona_builder.build.assert_called_once()
+    # The LLM should have received the persona-built system prompt
+    call_kwargs = mock_llm.generate_response.call_args
+    assert call_kwargs.kwargs["system_prompt"] == "You are ARIA's Strategist (persona-built)"
+
+
+@pytest.mark.asyncio
+async def test_analyze_account_with_cold_memory() -> None:
+    """Test _analyze_account includes cold memory context in LLM prompt."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_analysis = {
+        "target_company": "MemCo",
+        "opportunities": ["Leverage existing relationship"],
+        "challenges": [],
+        "key_actions": [],
+        "recommendation": "Build on prior engagement",
+        "confidence": {"overall": 0.88},
+    }
+    mock_llm.generate_response.return_value = json.dumps(llm_analysis)
+
+    mock_cold_retriever = MagicMock()
+    mock_result = MagicMock()
+    mock_result.to_dict.return_value = {
+        "content": "Previous meeting with MemCo VP in Q1",
+        "type": "episodic",
+    }
+    mock_cold_retriever.retrieve = AsyncMock(return_value=[mock_result])
+
+    agent = StrategistAgent(
+        llm_client=mock_llm,
+        user_id="user-123",
+        cold_retriever=mock_cold_retriever,
+    )
+
+    goal = {"title": "Follow up MemCo", "type": "outreach", "target_company": "MemCo"}
+    await agent._analyze_account(goal=goal)
+
+    # Cold retriever should have been called
+    mock_cold_retriever.retrieve.assert_called_once()
+    # The LLM prompt should contain memory context
+    call_args = mock_llm.generate_response.call_args
+    user_prompt = call_args.kwargs["messages"][0]["content"]
+    assert "Memory Context" in user_prompt
+    assert "Previous meeting with MemCo VP" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_llm_primary_path() -> None:
+    """Test _generate_strategy uses LLM output including battle card and confidence."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_strategy = {
+        "phases": [
+            {
+                "phase_number": 1,
+                "name": "Intelligence Gathering",
+                "description": "Research target account",
+                "duration_pct": 0.3,
+                "objectives": ["Map stakeholders", "Understand pipeline"],
+            },
+            {
+                "phase_number": 2,
+                "name": "Engagement",
+                "description": "Build relationships",
+                "duration_pct": 0.7,
+                "objectives": ["Schedule meetings", "Present solution"],
+            },
+        ],
+        "risks": [
+            {
+                "description": "Budget freeze risk",
+                "likelihood": "medium",
+                "impact": "high",
+                "mitigation": "Prepare ROI case early",
+            }
+        ],
+        "success_criteria": ["Meeting with decision maker", "Proposal delivered"],
+        "battle_card": {
+            "how_to_win": ["Emphasize speed to deployment"],
+            "objection_handling": [
+                {"objection": "Too expensive", "response": "Show ROI in 6 months"}
+            ],
+            "key_differentiators": ["Integrated platform"],
+        },
+        "strategic_positioning": "The fastest path to value in gene therapy analytics",
+        "summary": "Two-phase approach targeting quick wins",
+        "confidence": {"overall": 0.82, "phases": 0.85, "risks": 0.75, "battle_card": 0.8},
+    }
+    mock_llm.generate_response.return_value = json.dumps(llm_strategy)
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Close deal", "type": "close"}
+    analysis = {"opportunities": [], "challenges": [], "key_actions": []}
+    resources = {"available_agents": ["Hunter", "Analyst"], "time_horizon_days": 60}
+
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
+
+    assert len(result["phases"]) == 2
+    assert result["phases"][0]["name"] == "Intelligence Gathering"
+    assert result["phases"][0]["duration_days"] == 18  # 60 * 0.3
+    assert "battle_card" in result
+    assert result["battle_card"]["how_to_win"] == ["Emphasize speed to deployment"]
+    assert result["strategic_positioning"] == "The fastest path to value in gene therapy analytics"
+    assert result["confidence"]["overall"] == 0.82
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_llm_failure_fallback() -> None:
+    """Test _generate_strategy falls back to algorithmic output when LLM fails."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    mock_llm.generate_response.side_effect = RuntimeError("LLM unavailable")
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Lead gen", "type": "lead_gen"}
+    analysis = {"opportunities": [], "challenges": ["Budget"], "key_actions": []}
+    resources = {"available_agents": ["Hunter"], "time_horizon_days": 30}
+
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
+
+    # Should get fallback with template phases and default confidence
+    assert len(result["phases"]) >= 2
+    assert result["confidence"]["overall"] == 0.5
+    assert "battle_card" not in result
+
+
+@pytest.mark.asyncio
+async def test_generate_strategy_agent_tasks_always_algorithmic() -> None:
+    """Test agent_tasks are generated algorithmically even when LLM succeeds."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_strategy = {
+        "phases": [
+            {
+                "phase_number": 1,
+                "name": "Phase 1",
+                "description": "Do stuff",
+                "duration_pct": 1.0,
+                "objectives": [],
+            },
+        ],
+        "risks": [],
+        "success_criteria": [],
+        "summary": "Simple strategy",
+        "confidence": {"overall": 0.8},
+    }
+    mock_llm.generate_response.return_value = json.dumps(llm_strategy)
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    goal = {"title": "Lead gen", "type": "lead_gen"}
+    analysis = {"opportunities": [], "challenges": [], "key_actions": []}
+    resources = {"available_agents": ["Hunter", "Analyst"], "time_horizon_days": 30}
+
+    result = await agent._generate_strategy(goal=goal, analysis=analysis, resources=resources)
+
+    # Agent tasks should be generated by _generate_agent_tasks (algorithmic)
+    assert len(result["agent_tasks"]) > 0
+    for task in result["agent_tasks"]:
+        assert task["agent"] in ["Hunter", "Analyst"]
+
+
+@pytest.mark.asyncio
+async def test_execute_includes_confidence_scores() -> None:
+    """Test execute result includes aggregated confidence scores."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+
+    # Return different JSON for analysis vs strategy calls
+    analysis_json = json.dumps(
+        {
+            "target_company": "TestCo",
+            "opportunities": ["Opp"],
+            "challenges": [],
+            "key_actions": [],
+            "recommendation": "Go",
+            "confidence": {"overall": 0.9},
+        }
+    )
+    strategy_json = json.dumps(
+        {
+            "phases": [
+                {
+                    "phase_number": 1,
+                    "name": "P1",
+                    "description": "D",
+                    "duration_pct": 1.0,
+                    "objectives": [],
+                },
+            ],
+            "risks": [],
+            "success_criteria": ["Done"],
+            "summary": "Simple",
+            "confidence": {"overall": 0.7},
+        }
+    )
+    mock_llm.generate_response.side_effect = [analysis_json, strategy_json]
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    task = {
+        "goal": {"title": "Test", "type": "research", "target_company": "TestCo"},
+        "resources": {"available_agents": [], "time_horizon_days": 30},
+    }
+
+    result = await agent.execute(task)
+
+    assert result.success is True
+    assert "confidence" in result.data
+    assert result.data["confidence"]["analysis"] == 0.9
+    assert result.data["confidence"]["strategy"] == 0.7
+    assert result.data["confidence"]["overall"] == 0.8  # (0.9 + 0.7) / 2
+
+
+@pytest.mark.asyncio
+async def test_llm_calls_pass_user_id() -> None:
+    """Test that LLM generate_response is called with user_id for CostGovernor."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = _make_llm_mock()
+    llm_analysis = json.dumps(
+        {
+            "target_company": "Co",
+            "opportunities": [],
+            "challenges": [],
+            "key_actions": [],
+            "recommendation": "Go",
+            "confidence": {"overall": 0.8},
+        }
+    )
+    mock_llm.generate_response.return_value = llm_analysis
+
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-cost-check")
+
+    goal = {"title": "Test", "type": "research", "target_company": "Co"}
+    await agent._analyze_account(goal=goal)
+
+    call_kwargs = mock_llm.generate_response.call_args.kwargs
+    assert call_kwargs["user_id"] == "user-cost-check"
+
+
+def test_format_output_includes_battle_card_and_confidence() -> None:
+    """Test format_output includes has_battle_card and confidence in summary_stats."""
+    from src.agents.strategist import StrategistAgent
+
+    mock_llm = MagicMock()
+    agent = StrategistAgent(llm_client=mock_llm, user_id="user-123")
+
+    data = {
+        "strategy": {
+            "phases": [{"phase_number": 1}],
+            "agent_tasks": [],
+            "risks": [],
+            "battle_card": {"how_to_win": ["Be fast"]},
+        },
+        "timeline": {
+            "milestones": [],
+            "time_horizon_days": 30,
+        },
+        "confidence": {
+            "analysis": 0.85,
+            "strategy": 0.75,
+            "overall": 0.8,
+        },
+    }
+
+    formatted = agent.format_output(data)
+
+    assert formatted["summary_stats"]["has_battle_card"] is True
+    assert formatted["summary_stats"]["confidence"]["overall"] == 0.8
+
+    # Also test without battle card
+    data_no_bc = {
+        "strategy": {"phases": [], "agent_tasks": [], "risks": []},
+        "timeline": {"milestones": [], "time_horizon_days": 30},
+        "confidence": {"overall": 0.5},
+    }
+    formatted_no_bc = agent.format_output(data_no_bc)
+    assert formatted_no_bc["summary_stats"]["has_battle_card"] is False
