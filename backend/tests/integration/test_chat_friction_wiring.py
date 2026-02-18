@@ -212,3 +212,82 @@ class TestChatFrictionWiring:
         assert len(captured_prompts) == 1
         assert "Cognitive Friction Note" in captured_prompts[0]
         assert flag_decision.user_message in captured_prompts[0]
+
+
+class TestAutonomyUpgradeRequest:
+    """Verify autonomy upgrade request is surfaced after successful skill execution."""
+
+    @pytest.mark.asyncio
+    async def test_autonomy_request_included_when_eligible(self):
+        """After skill execution, if trust is high enough, include autonomy request."""
+        svc = _make_chat_service()
+
+        # Mock skill routing to return a completed skill result
+        svc._detect_plan_extension = AsyncMock(return_value=None)
+        svc._detect_skill_match = AsyncMock(return_value=(True, [], 0.9))
+        svc._route_through_skill = AsyncMock(
+            return_value={
+                "status": "completed",
+                "agent_type": "analyst",
+                "plan_id": "plan-1",
+                "steps_completed": 2,
+                "steps_failed": 0,
+            }
+        )
+
+        mock_trust = MagicMock()
+        mock_trust.can_request_autonomy_upgrade = AsyncMock(return_value=True)
+        mock_trust.format_autonomy_request = AsyncMock(
+            return_value="I've completed 15 research tasks with 100% accuracy. Can I run these automatically?"
+        )
+        svc._trust_service = mock_trust
+
+        result = await svc.process_message("user-1", "conv-1", "Research BioGenix pipeline")
+
+        assert "autonomy_request" in result
+        assert "15 research tasks" in result["autonomy_request"]
+        mock_trust.can_request_autonomy_upgrade.assert_called_once()
+        mock_trust.format_autonomy_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_autonomy_request_when_not_eligible(self):
+        """If trust is not high enough, no autonomy request included."""
+        svc = _make_chat_service()
+
+        mock_trust = MagicMock()
+        mock_trust.can_request_autonomy_upgrade = AsyncMock(return_value=False)
+        svc._trust_service = mock_trust
+
+        result = await svc.process_message("user-1", "conv-1", "Research BioGenix pipeline")
+
+        assert "autonomy_request" not in result
+
+    @pytest.mark.asyncio
+    async def test_autonomy_check_error_fails_open(self):
+        """If trust check raises, no autonomy request but response proceeds."""
+        svc = _make_chat_service()
+
+        # Mock skill routing to return a completed skill result
+        svc._detect_plan_extension = AsyncMock(return_value=None)
+        svc._detect_skill_match = AsyncMock(return_value=(True, [], 0.9))
+        svc._route_through_skill = AsyncMock(
+            return_value={
+                "status": "completed",
+                "agent_type": "scout",
+                "plan_id": "plan-2",
+                "steps_completed": 1,
+                "steps_failed": 0,
+            }
+        )
+
+        mock_trust = MagicMock()
+        mock_trust.can_request_autonomy_upgrade = AsyncMock(
+            side_effect=RuntimeError("db error")
+        )
+        svc._trust_service = mock_trust
+
+        result = await svc.process_message("user-1", "conv-1", "Monitor BioGenix news")
+
+        # Should still succeed despite autonomy check failure
+        assert "message" in result
+        assert "autonomy_request" not in result

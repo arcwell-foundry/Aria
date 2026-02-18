@@ -43,6 +43,18 @@ from src.core.cognitive_friction import (
 
 logger = logging.getLogger(__name__)
 
+# Agent-to-trust-category mapping for autonomy upgrade checks
+_AGENT_TO_CATEGORY: dict[str, str] = {
+    "hunter": "lead_discovery",
+    "analyst": "research",
+    "strategist": "strategy",
+    "scribe": "email_draft",
+    "operator": "crm_action",
+    "scout": "market_monitoring",
+    "verifier": "verification",
+    "executor": "browser_automation",
+}
+
 
 # ---------------------------------------------------------------------------
 # Web Grounding Service
@@ -1858,6 +1870,24 @@ class ChatService:
                 "steps_completed": skill_result.get("steps_completed", 0),
                 "steps_failed": skill_result.get("steps_failed", 0),
             }
+
+        # Check if ARIA can request autonomy upgrade after successful skill execution
+        if skill_result and skill_result.get("status") == "completed":
+            try:
+                trust_svc = self._get_trust_service()
+                if trust_svc:
+                    skill_agent = skill_result.get("agent_type", "general")
+                    category = _AGENT_TO_CATEGORY.get(skill_agent, "general")
+                    can_upgrade = await trust_svc.can_request_autonomy_upgrade(
+                        user_id, category
+                    )
+                    if can_upgrade:
+                        autonomy_request = await trust_svc.format_autonomy_request(
+                            user_id, category
+                        )
+                        result["autonomy_request"] = autonomy_request
+            except Exception as e:
+                logger.warning("Autonomy upgrade check failed: %s", e)
 
         return result
 
