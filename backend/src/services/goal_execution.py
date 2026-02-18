@@ -380,6 +380,7 @@ class GoalExecutionService:
                 ScribeAgent,
                 StrategistAgent,
             )
+            from src.agents.executor import ExecutorAgent
             from src.skills.index import SkillIndex
             from src.skills.orchestrator import SkillOrchestrator
 
@@ -390,6 +391,7 @@ class GoalExecutionService:
                 "strategist": StrategistAgent,
                 "scribe": ScribeAgent,
                 "operator": OperatorAgent,
+                "executor": ExecutorAgent,
             }
 
             agent_cls = agent_classes.get(agent_type)
@@ -425,6 +427,15 @@ class GoalExecutionService:
                 cold_retriever = ColdMemoryRetriever(db_client=SupabaseClient.get_client())
             except Exception as e:
                 logger.debug(f"ColdMemoryRetriever not available: {e}")
+
+            # Executor extends BaseAgent (not SkillAwareAgent), separate path
+            if agent_type == "executor":
+                return agent_cls(
+                    llm_client=self._llm,
+                    user_id=user_id,
+                    persona_builder=persona_builder,
+                    cold_retriever=cold_retriever,
+                )
 
             return agent_cls(
                 llm_client=self._llm,
@@ -512,6 +523,13 @@ class GoalExecutionService:
             return {
                 "entities": entities if entities else ["Unknown"],
                 "signal_types": config.get("signal_types"),
+            }
+        elif agent_type == "executor":
+            return {
+                "task_description": config.get("task_description", goal.get("title", "")),
+                "url": config.get("url", ""),
+                "url_approved": config.get("url_approved", False),
+                "steps": config.get("steps"),
             }
 
         return None

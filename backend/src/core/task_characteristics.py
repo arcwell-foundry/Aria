@@ -73,6 +73,15 @@ _ACTION_DEFAULTS: dict[str, dict[str, float]] = {
         "subjectivity": 0.6,
         "contextuality": 0.7,
     },
+    "browser_automate": {
+        "complexity": 0.6,
+        "criticality": 0.7,
+        "uncertainty": 0.6,
+        "reversibility": 0.2,
+        "verifiability": 0.7,
+        "subjectivity": 0.3,
+        "contextuality": 0.5,
+    },
 }
 
 _DEFAULT_DIMS: dict[str, float] = {
