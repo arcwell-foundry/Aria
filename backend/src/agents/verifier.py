@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VerificationResult:
     """Result of verifying an agent output."""
@@ -122,6 +123,7 @@ Return ONLY the JSON object, no other text."""
 # Agent
 # ---------------------------------------------------------------------------
 
+
 class VerifierAgent(BaseAgent):
     """Quality verification agent for ARIA.
 
@@ -158,9 +160,7 @@ class VerifierAgent(BaseAgent):
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate task contains agent_output."""
-        if "agent_output" not in task or not isinstance(task.get("agent_output"), dict):
-            return False
-        return True
+        return "agent_output" in task and isinstance(task.get("agent_output"), dict)
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute verification via the standard agent interface.
@@ -207,7 +207,8 @@ class VerifierAgent(BaseAgent):
         try:
             system_prompt = await self._build_verifier_prompt(verification_policy)
             user_message = self._build_verification_request(
-                agent_output, verification_policy,
+                agent_output,
+                verification_policy,
             )
 
             response = await self.llm.generate_response_with_thinking(

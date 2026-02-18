@@ -20,6 +20,7 @@ from src.agents.scout import ScoutAgent
 from src.agents.scribe import ScribeAgent
 from src.agents.skill_aware_agent import AGENT_SKILLS, SkillAnalysis, SkillAwareAgent
 from src.agents.strategist import StrategistAgent
+from src.agents.verifier import VerificationPolicy, VerificationResult, VerifierAgent
 
 __all__ = [
     "AGENT_SKILLS",
@@ -40,4 +41,7 @@ __all__ = [
     "SkillAnalysis",
     "SkillAwareAgent",
     "StrategistAgent",
+    "VerificationPolicy",
+    "VerificationResult",
+    "VerifierAgent",
 ]
