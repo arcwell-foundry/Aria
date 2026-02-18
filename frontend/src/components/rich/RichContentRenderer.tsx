@@ -13,6 +13,8 @@ import { BattleCard, type BattleCardData } from './BattleCard';
 import { PipelineChart, type PipelineChartData } from './PipelineChart';
 import { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
 import { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
+import { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
+import type { VideoSessionSummaryData } from '@/types/chat';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -114,6 +116,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <ResearchResultsCard data={item.data as unknown as ResearchResultsData} />;
     case 'email_draft':
       return <EmailDraftCard data={item.data as unknown as EmailDraftData} />;
+    case 'video_session_summary':
+      return <VideoSessionSummaryCard data={item.data as unknown as VideoSessionSummaryData} />;
     default:
       return (
         <div

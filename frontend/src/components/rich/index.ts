@@ -9,3 +9,4 @@ export { BattleCard, type BattleCardData } from './BattleCard';
 export { PipelineChart, type PipelineChartData } from './PipelineChart';
 export { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
 export { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
+export { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
