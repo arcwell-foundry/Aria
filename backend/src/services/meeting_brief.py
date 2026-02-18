@@ -23,9 +23,14 @@ logger = logging.getLogger(__name__)
 class MeetingBriefService:
     """Service for managing pre-meeting research briefs."""
 
-    def __init__(self) -> None:
-        """Initialize meeting brief service."""
+    def __init__(self, cold_retriever: Any | None = None) -> None:
+        """Initialize meeting brief service.
+
+        Args:
+            cold_retriever: Optional ColdMemoryRetriever for graph intelligence.
+        """
         self._db = SupabaseClient.get_client()
+        self._cold_retriever = cold_retriever
 
     async def get_brief(self, user_id: str, calendar_event_id: str) -> dict[str, Any] | None:
         """Get a meeting brief by calendar event ID.
@@ -289,8 +294,30 @@ class MeetingBriefService:
                     if scout_result.success:
                         company_signals = scout_result.data
 
+            # Step 4b: Get graph context for attendees and companies
+            graph_contexts: dict[str, Any] = {}
+            if self._cold_retriever is not None:
+                entities_to_query = list(companies)
+                for profile in attendee_profiles.values():
+                    name = profile.get("name")
+                    if name:
+                        entities_to_query.append(name)
+
+                import asyncio
+
+                graph_tasks = [
+                    self._cold_retriever.retrieve_for_entity(
+                        user_id=user_id, entity_id=entity, hops=3,
+                    )
+                    for entity in entities_to_query[:8]
+                ]
+                results = await asyncio.gather(*graph_tasks, return_exceptions=True)
+                for entity, result in zip(entities_to_query[:8], results, strict=False):
+                    if not isinstance(result, BaseException):
+                        graph_contexts[entity] = result
+
             # Step 5: Build context and call Claude
-            context = self._build_brief_context(brief, attendee_profiles, company_signals)
+            context = self._build_brief_context(brief, attendee_profiles, company_signals, graph_contexts)
 
             # Call Claude to synthesize the brief
             client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
@@ -322,6 +349,7 @@ class MeetingBriefService:
                 "summary": llm_output.get("summary", ""),
                 "suggested_agenda": llm_output.get("suggested_agenda", []),
                 "risks_opportunities": llm_output.get("risks_opportunities", []),
+                "hidden_connections": llm_output.get("hidden_connections", []),
                 "attendee_profiles": attendee_profiles,
                 "company_signals": company_signals,
             }
@@ -372,6 +400,7 @@ class MeetingBriefService:
         brief: dict[str, Any],
         attendee_profiles: dict[str, dict[str, Any]],
         company_signals: list[dict[str, Any]],
+        graph_contexts: dict[str, Any] | None = None,
     ) -> str:
         """Build context string for Claude to generate the brief.
 
@@ -379,13 +408,16 @@ class MeetingBriefService:
             brief: The meeting brief data.
             attendee_profiles: Dict of attendee email to profile data.
             company_signals: List of company signals from Scout.
+            graph_contexts: Optional dict of entity_id to EntityContext from Graphiti.
 
         Returns:
             Formatted context string for the LLM.
         """
         context_parts = [
             "Generate a pre-meeting brief for the following meeting.",
-            "Return a JSON object with 'summary', 'suggested_agenda', and 'risks_opportunities'.",
+            "Return a JSON object with 'summary', 'suggested_agenda', 'risks_opportunities', and 'hidden_connections'.",
+            "The 'hidden_connections' field should contain non-obvious relationships between attendees,",
+            "companies, and the user's current deals that might be relevant.",
             "",
             f"Meeting Title: {brief.get('meeting_title', 'Unknown')}",
             f"Meeting Time: {brief.get('meeting_time', 'Unknown')}",
@@ -406,9 +438,28 @@ class MeetingBriefService:
         if company_signals:
             context_parts.append("")
             context_parts.append("Recent Company News/Signals:")
-            for signal in company_signals[:5]:  # Limit to top 5 signals
+            for signal in company_signals[:5]:
                 headline = signal.get("headline", "")
                 company_name = signal.get("company_name", "")
                 context_parts.append(f"- {company_name}: {headline}")
+
+        # Graph relationship intelligence
+        if graph_contexts:
+            has_content = False
+            graph_parts: list[str] = ["", "Relationship Intelligence (from knowledge graph):"]
+            for entity_id, ctx in graph_contexts.items():
+                entity_lines: list[str] = []
+                for fact in getattr(ctx, "direct_facts", [])[:3]:
+                    entity_lines.append(f"  - {fact.content}")
+                for rel in getattr(ctx, "relationships", [])[:3]:
+                    entity_lines.append(f"  - {rel.content}")
+                for interaction in getattr(ctx, "recent_interactions", [])[:2]:
+                    entity_lines.append(f"  - {interaction.content}")
+                if entity_lines:
+                    has_content = True
+                    graph_parts.append(f"  {entity_id}:")
+                    graph_parts.extend(entity_lines)
+            if has_content:
+                context_parts.extend(graph_parts)
 
         return "\n".join(context_parts)
