@@ -143,7 +143,105 @@ class AdaptiveCoordinator:
         self,
         evaluation: AgentOutputEvaluation,
     ) -> FailureAnalysis | None:
-        raise NotImplementedError
+        """Detect what (if anything) is wrong with the output.
+
+        Priority: verification_failed > no_results > low_confidence > timeout > stale_data.
+        Returns None if output is acceptable.
+        """
+        # 1. Verification failure (highest priority)
+        vr = evaluation.verification_result
+        if vr is not None and vr.get("passed") is False:
+            reason = vr.get("reason", "Verification rejected output")
+            return FailureAnalysis(
+                trigger=FailureTrigger.VERIFICATION_FAILED,
+                severity=0.7,
+                details=f"Verifier rejected: {reason}",
+                recoverable=True,
+            )
+
+        # 2. No results
+        if self._is_empty_output(evaluation.output):
+            return FailureAnalysis(
+                trigger=FailureTrigger.NO_RESULTS,
+                severity=0.8,
+                details="Agent produced no meaningful results",
+                recoverable=True,
+            )
+
+        # 3. Low confidence
+        if evaluation.confidence < LOW_CONFIDENCE_THRESHOLD:
+            return FailureAnalysis(
+                trigger=FailureTrigger.LOW_CONFIDENCE,
+                severity=round(1.0 - evaluation.confidence, 2),
+                details=(
+                    f"Confidence {evaluation.confidence:.2f} "
+                    f"below threshold {LOW_CONFIDENCE_THRESHOLD}"
+                ),
+                recoverable=True,
+            )
+
+        # 4. Timeout
+        threshold_ms = evaluation.expected_duration_ms * TIMEOUT_MULTIPLIER
+        if evaluation.execution_time_ms > threshold_ms:
+            return FailureAnalysis(
+                trigger=FailureTrigger.TIMEOUT,
+                severity=0.5,
+                details=(
+                    f"Execution took {evaluation.execution_time_ms}ms, "
+                    f"expected <{threshold_ms:.0f}ms"
+                ),
+                recoverable=True,
+            )
+
+        # 5. Stale data
+        if self._has_stale_data(evaluation.output):
+            return FailureAnalysis(
+                trigger=FailureTrigger.STALE_DATA,
+                severity=0.4,
+                details=f"Data older than {STALE_DATA_HOURS} hours",
+                recoverable=True,
+            )
+
+        return None
+
+    @staticmethod
+    def _is_empty_output(output: dict[str, Any] | None) -> bool:
+        """Check whether the output is effectively empty."""
+        if output is None or len(output) == 0:
+            return True
+        for key in _EMPTY_RESULT_KEYS:
+            if key in output:
+                val = output[key]
+                if val is not None and val != [] and val != {}:
+                    return False
+        has_content = any(
+            v is not None and v != [] and v != {} and v != ""
+            for k, v in output.items()
+            if k not in _EMPTY_RESULT_KEYS
+        )
+        return not has_content
+
+    @staticmethod
+    def _has_stale_data(output: dict[str, Any] | None) -> bool:
+        """Check if output metadata indicates stale data."""
+        if output is None:
+            return False
+        from datetime import UTC, datetime, timedelta
+
+        ts = output.get("data_timestamp") or output.get("fetched_at")
+        if ts is None:
+            return False
+        try:
+            if isinstance(ts, str):
+                dt = datetime.fromisoformat(ts)
+            elif isinstance(ts, datetime):
+                dt = ts
+            else:
+                return False
+            threshold = datetime.now(UTC) - timedelta(hours=STALE_DATA_HOURS)
+            return dt < threshold
+        except (ValueError, TypeError):
+            return False
 
     def get_re_delegation_target(
         self,
