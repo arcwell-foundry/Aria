@@ -151,6 +151,78 @@ class TrustCalibrationService:
             )
         return TrustProfile(user_id=user_id, action_category=action_category)
 
+    async def get_all_profiles(self, user_id: str) -> list[TrustProfile]:
+        """Get all trust profiles for a user across all action categories.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            List of TrustProfile instances (empty on error or no data).
+        """
+        try:
+            from src.db.supabase import SupabaseClient
+
+            client = SupabaseClient.get_client()
+            response = (
+                client.table("user_trust_profiles")
+                .select("*")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if response.data:
+                return [
+                    TrustProfile(
+                        user_id=row["user_id"],
+                        action_category=row["action_category"],
+                        trust_score=float(row["trust_score"]),
+                        successful_actions=int(row["successful_actions"]),
+                        failed_actions=int(row["failed_actions"]),
+                        override_count=int(row["override_count"]),
+                        last_failure_at=row.get("last_failure_at"),
+                        last_override_at=row.get("last_override_at"),
+                    )
+                    for row in response.data
+                ]
+        except Exception:
+            logger.exception("Failed to fetch all trust profiles for user %s", user_id)
+        return []
+
+    async def get_trust_history(
+        self, user_id: str, category: str | None = None, days: int = 30
+    ) -> list[dict]:
+        """Get trust score change history for a user.
+
+        Args:
+            user_id: The user's UUID.
+            category: Optional action category filter.
+            days: Number of days of history to return (default 30).
+
+        Returns:
+            List of history dicts with recorded_at, trust_score, change_type,
+            action_category. Empty list on error.
+        """
+        try:
+            from datetime import timedelta
+            from datetime import timezone as tz
+
+            from src.db.supabase import SupabaseClient
+
+            client = SupabaseClient.get_client()
+            cutoff = (datetime.now(tz.utc) - timedelta(days=days)).isoformat()
+            query = (
+                client.table("trust_score_history")
+                .select("recorded_at, trust_score, change_type, action_category")
+                .eq("user_id", user_id)
+            )
+            if category:
+                query = query.eq("action_category", category)
+            response = query.gte("recorded_at", cutoff).order("recorded_at").limit(500).execute()
+            return response.data or []
+        except Exception:
+            logger.exception("Failed to fetch trust history for user %s", user_id)
+        return []
+
     async def update_on_success(self, user_id: str, action_category: str) -> float:
         """Record a successful action and increase trust.
 
@@ -171,6 +243,7 @@ class TrustCalibrationService:
             new_score=new_score,
             success_delta=1,
         )
+        await self._record_history(user_id, action_category, new_score, "success")
         return new_score
 
     async def update_on_failure(self, user_id: str, action_category: str) -> float:
@@ -194,6 +267,7 @@ class TrustCalibrationService:
             failure_delta=1,
             set_last_failure=True,
         )
+        await self._record_history(user_id, action_category, new_score, "failure")
         return new_score
 
     async def update_on_override(self, user_id: str, action_category: str) -> float:
@@ -217,6 +291,7 @@ class TrustCalibrationService:
             override_delta=1,
             set_last_override=True,
         )
+        await self._record_history(user_id, action_category, new_score, "override")
         return new_score
 
     async def get_approval_level(
@@ -316,6 +391,30 @@ class TrustCalibrationService:
             f"Would you be comfortable letting me handle these with "
             f"less oversight?"
         )
+
+    async def _record_history(
+        self, user_id: str, action_category: str, new_score: float, change_type: str
+    ) -> None:
+        """Record a trust score change in the history table. Fail-open on errors.
+
+        Args:
+            user_id: The user's UUID.
+            action_category: The action category.
+            new_score: The trust score after the change.
+            change_type: One of 'success', 'failure', 'override', 'manual'.
+        """
+        try:
+            from src.db.supabase import SupabaseClient
+
+            client = SupabaseClient.get_client()
+            client.table("trust_score_history").insert({
+                "user_id": user_id,
+                "action_category": action_category,
+                "trust_score": new_score,
+                "change_type": change_type,
+            }).execute()
+        except Exception:
+            logger.exception("Failed to record trust history for user %s", user_id)
 
     async def _call_update_rpc(
         self,
