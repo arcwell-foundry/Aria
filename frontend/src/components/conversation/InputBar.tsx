@@ -1,10 +1,11 @@
 import { useCallback, useRef, useEffect } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Send, Phone } from 'lucide-react';
+import { Send, Phone, Video } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { VoiceIndicator } from './VoiceIndicator';
 import { modalityController } from '@/core/ModalityController';
+import { useModalityStore } from '@/stores/modalityStore';
 
 interface InputBarProps {
   onSend: (message: string) => void;
@@ -53,6 +54,13 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
     modalityController.switchToAudioCall('chat');
   }, []);
 
+  const handleVideoCall = useCallback(() => {
+    modalityController.switchTo('avatar', 'chat');
+  }, []);
+
+  const tavusStatus = useModalityStore((s) => s.tavusSession.status);
+  const hasActiveSession = tavusStatus === 'active' || tavusStatus === 'connecting';
+
   const { isListening, isSupported, toggleListening } = useVoiceInput({
     onTranscript: (text) => {
       onSend(text);
@@ -87,12 +95,25 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
         <button
           type="button"
           onClick={handleAudioCall}
-          className="flex-shrink-0 p-2 rounded-lg text-[var(--text-secondary)] transition-colors hover:text-[#2E66FF] hover:bg-[rgba(46,102,255,0.1)]"
+          disabled={hasActiveSession}
+          className="flex-shrink-0 p-2 rounded-lg text-[var(--text-secondary)] transition-colors hover:text-[#2E66FF] hover:bg-[rgba(46,102,255,0.1)] disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Call ARIA (audio only)"
           data-aria-id="audio-call-button"
-          title="Call ARIA"
+          title={hasActiveSession ? 'Already in a call' : 'Call ARIA'}
         >
           <Phone size={16} />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleVideoCall}
+          disabled={hasActiveSession}
+          className="flex-shrink-0 p-2 rounded-lg text-[var(--text-secondary)] transition-colors hover:text-[#2E66FF] hover:bg-[rgba(46,102,255,0.1)] disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Video call ARIA"
+          data-aria-id="video-call-button"
+          title={hasActiveSession ? 'Already in a call' : 'Video call'}
+        >
+          <Video size={16} />
         </button>
 
         <textarea
