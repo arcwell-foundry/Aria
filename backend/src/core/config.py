@@ -98,6 +98,16 @@ class Settings(BaseSettings):
     SALIENCE_ACCESS_BOOST: float = 0.1  # Boost per memory retrieval
     SALIENCE_MIN: float = 0.01  # Minimum salience (never zero)
 
+    # Cost Governor Configuration (Wave 0)
+    COST_GOVERNOR_ENABLED: bool = True
+    COST_GOVERNOR_DAILY_TOKEN_BUDGET: int = 2_000_000
+    COST_GOVERNOR_DAILY_THINKING_BUDGET: int = 500_000
+    COST_GOVERNOR_SOFT_LIMIT_PERCENT: float = 0.80
+    COST_GOVERNOR_MAX_RETRIES_PER_GOAL: int = 3
+    COST_GOVERNOR_INPUT_TOKEN_COST_PER_M: float = 3.00
+    COST_GOVERNOR_OUTPUT_TOKEN_COST_PER_M: float = 15.00
+    COST_GOVERNOR_THINKING_TOKEN_COST_PER_M: float = 15.00
+
     @field_validator("SUPABASE_URL")
     @classmethod
     def validate_supabase_url(cls, v: str) -> str:

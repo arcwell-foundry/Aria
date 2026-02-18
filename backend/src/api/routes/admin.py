@@ -892,3 +892,70 @@ async def get_perf_stats(
     from src.middleware.performance import perf_stats
 
     return perf_stats.summarize()
+
+
+# --- Usage Tracking Routes (Wave 0: Cost Governor) ---
+
+
+@router.get(
+    "/usage",
+    status_code=status.HTTP_200_OK,
+)
+async def get_all_usage_today(
+    _current_user: AdminUser,
+) -> dict[str, Any]:
+    """Get all users' token usage for today.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        List of today's usage rows and aggregate totals.
+    """
+    from src.core.cost_governor import CostGovernor
+
+    governor = CostGovernor()
+    rows = await governor.get_all_users_usage_today()
+
+    total_cost = sum(float(r.get("estimated_cost_usd", 0)) for r in rows)
+    total_calls = sum(int(r.get("llm_calls_total", 0)) for r in rows)
+
+    return {
+        "date": str(datetime.utcnow().date()),
+        "users": rows,
+        "total_users": len(rows),
+        "total_estimated_cost_usd": round(total_cost, 6),
+        "total_llm_calls": total_calls,
+    }
+
+
+@router.get(
+    "/usage/{user_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_user_usage(
+    user_id: str,
+    _current_user: AdminUser,
+    days: int = Query(30, ge=1, le=90, description="Number of days of history"),
+) -> dict[str, Any]:
+    """Get a specific user's usage history.
+
+    Args:
+        user_id: The user's UUID.
+        _current_user: Authenticated admin user.
+        days: Number of days of history.
+
+    Returns:
+        Budget status and daily usage history for the user.
+    """
+    from src.core.cost_governor import CostGovernor
+
+    governor = CostGovernor()
+    budget = await governor.check_budget(user_id)
+    history = await governor.get_usage_summary(user_id, days=days)
+
+    return {
+        "user_id": user_id,
+        "budget": budget.model_dump(),
+        "history": history,
+    }

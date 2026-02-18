@@ -17,6 +17,7 @@ _SAFE_MESSAGES: dict[str, str] = {
     "GraphitiConnectionError": "A service dependency is temporarily unavailable.",
     "CircuitBreakerOpen": "A service dependency is temporarily unavailable. Please try again in a moment.",
     "RateLimitError": "Too many requests. Please try again later.",
+    "BudgetExceededError": "ARIA has reached her daily analysis limit. She'll be back at full capacity tomorrow.",
     "BillingError": "Billing service temporarily unavailable.",
     "SkillNotFoundError": "The requested skill was not found.",
     "SkillExecutionError": "Skill execution failed. Please try again.",
@@ -811,4 +812,30 @@ class RateLimitError(ARIAException):
             code="RATE_LIMIT_EXCEEDED",
             status_code=429,
             details={"retry_after": retry_after, "limit": limit},
+        )
+
+
+class BudgetExceededError(ARIAException):
+    """Daily token budget exceeded error (429).
+
+    Raised when a user's daily LLM token budget has been exhausted.
+    """
+
+    def __init__(self, user_id: str, tokens_used: int, daily_budget: int) -> None:
+        """Initialize budget exceeded error.
+
+        Args:
+            user_id: The user who exceeded their budget.
+            tokens_used: Total tokens used today.
+            daily_budget: The daily token budget.
+        """
+        super().__init__(
+            message="ARIA has reached her daily analysis limit. She'll be back at full capacity tomorrow.",
+            code="BUDGET_EXCEEDED",
+            status_code=429,
+            details={
+                "user_id": user_id,
+                "tokens_used": tokens_used,
+                "daily_budget": daily_budget,
+            },
         )

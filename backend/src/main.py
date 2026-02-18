@@ -55,6 +55,7 @@ from src.api.routes import (
     skill_replay,
     skills,
     social,
+    usage,  # Wave 0: Cost Governor usage tracking
     video,
     webhooks,  # Tavus webhook handler
     websets,  # Phase 3: Websets integration
@@ -275,6 +276,7 @@ app.include_router(signals.router, prefix="/api/v1")
 app.include_router(skill_replay.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(social.router, prefix="/api/v1")
+app.include_router(usage.router, prefix="/api/v1")  # Wave 0: Cost Governor
 app.include_router(video.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(websets.router, prefix="/api/v1")
