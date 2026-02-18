@@ -563,6 +563,31 @@ async def end_video_session(
     )
 
 
+@router.post("/sessions/{session_id}/bridge-to-chat")
+async def bridge_to_chat(
+    current_user: CurrentUser,
+    session_id: str,
+) -> dict:
+    """Transfer video session context back to the linked chat conversation.
+
+    Persists transcript, extracts action items, and posts a summary
+    message via WebSocket for real-time delivery to the frontend.
+
+    Args:
+        current_user: The authenticated user.
+        session_id: The video session ID to bridge.
+
+    Returns:
+        Dict with summary, action_items, messages_stored, tasks_created.
+    """
+    bridge = get_context_bridge()
+    result = await bridge.video_to_chat_context(
+        user_id=current_user.id,
+        video_session_id=session_id,
+    )
+    return result
+
+
 @router.post("/tools/execute", response_model=VideoToolCallResponse)
 async def execute_video_tool(
     current_user: CurrentUser,
