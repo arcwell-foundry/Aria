@@ -39,6 +39,15 @@ class RiskLevel(str, Enum):
     CRITICAL = "critical"
 
 
+class ExecutionMode(str, Enum):
+    """Execution mode determined by trust × risk matrix."""
+
+    AUTO_EXECUTE = "auto_execute"
+    EXECUTE_AND_NOTIFY = "execute_and_notify"
+    APPROVE_PLAN = "approve_plan"
+    APPROVE_EACH = "approve_each"
+
+
 class ActionStatus(str, Enum):
     """Current status of an action."""
 
@@ -49,6 +58,7 @@ class ActionStatus(str, Enum):
     COMPLETED = "completed"
     REJECTED = "rejected"
     FAILED = "failed"
+    UNDO_PENDING = "undo_pending"
 
 
 class ActionCreate(BaseModel):

@@ -6,7 +6,9 @@ from typing import Any
 from fastapi import WebSocket
 
 from src.models.ws_events import (
+    ActionExecutedEvent,
     ActionPendingEvent,
+    ActionUndoneEvent,
     AriaMessageEvent,
     ProgressUpdateEvent,
     SignalEvent,
@@ -192,6 +194,42 @@ class ConnectionManager:
             title=title,
             severity=severity,
             data=data or {},
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_action_executed(
+        self,
+        user_id: str,
+        action_id: str,
+        title: str,
+        agent: str,
+        undo_deadline: str,
+        countdown_seconds: int = 300,
+    ) -> None:
+        """Send an action executed with undo window event."""
+        event = ActionExecutedEvent(
+            action_id=action_id,
+            title=title,
+            agent=agent,
+            undo_deadline=undo_deadline,
+            countdown_seconds=countdown_seconds,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_action_undone(
+        self,
+        user_id: str,
+        action_id: str,
+        title: str,
+        success: bool,
+        message: str | None = None,
+    ) -> None:
+        """Send an action undone confirmation event."""
+        event = ActionUndoneEvent(
+            action_id=action_id,
+            title=title,
+            success=success,
+            message=message,
         )
         await self.send_to_user(user_id, event)
 

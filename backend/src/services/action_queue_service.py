@@ -1,10 +1,10 @@
 """Action queue service for ARIA (US-937).
 
 This service handles:
-- Submitting actions for approval or auto-execution
+- Submitting actions for approval or auto-execution (4-level trust model)
 - Approving, rejecting, and batch-approving actions
 - Querying the action queue with status filters
-- Executing approved actions
+- Executing approved actions via ActionExecutionService
 """
 
 import logging
@@ -13,32 +13,38 @@ from typing import Any, cast
 
 from src.db.supabase import SupabaseClient
 from src.models.action_queue import ActionCreate, ActionStatus
+from src.services.action_execution import (
+    ActionExecutionService,
+    action_type_to_category,
+    get_action_execution_service,
+    risk_level_to_score,
+)
 from src.services.activity_service import ActivityService
-from src.services.autonomy_calibration import get_autonomy_calibration_service
 
 logger = logging.getLogger(__name__)
 
 
 class ActionQueueService:
-    """Manages ARIA's autonomous actions with approval workflow."""
+    """Manages ARIA's autonomous actions with trust-based approval workflow."""
 
     def __init__(self) -> None:
         """Initialize with Supabase client."""
         self._db = SupabaseClient.get_client()
         self._activity_service = ActivityService()
-        self._autonomy = get_autonomy_calibration_service()
+        self._exec_svc: ActionExecutionService = get_action_execution_service()
 
     async def submit_action(
         self,
         user_id: str,
         data: ActionCreate,
     ) -> dict[str, Any]:
-        """Submit an action for approval or auto-execution.
+        """Submit an action routed through the 4-level trust × risk matrix.
 
-        LOW risk + trust established -> auto_approved
-        MEDIUM risk -> pending (notify, auto-approve after timeout)
-        HIGH risk -> pending (require explicit approval)
-        CRITICAL -> pending (always require approval)
+        Execution modes:
+        - AUTO_EXECUTE: Execute immediately, log in activity
+        - EXECUTE_AND_NOTIFY: Execute with 5-min undo window
+        - APPROVE_PLAN: Submit as pending, batch-approvable
+        - APPROVE_EACH: Submit as pending, individual approval required
 
         Args:
             user_id: The user's ID.
@@ -47,19 +53,20 @@ class ActionQueueService:
         Returns:
             Created action dict.
         """
-        # Check autonomy calibration to determine if action should auto-execute
-        auto_execute = await self._autonomy.should_auto_execute(
-            user_id=user_id,
-            action_type=data.action_type.value,
-            context={"risk_level": data.risk_level.value, "agent": data.agent.value},
-        )
-        if auto_execute:
+        # Determine execution mode from trust × risk
+        category = action_type_to_category(data.action_type.value)
+        risk_score = data.risk_score if data.risk_score is not None else risk_level_to_score(data.risk_level.value)
+        mode = await self._exec_svc.determine_execution_mode(user_id, category, risk_score)
+
+        # Determine initial status based on mode
+        if mode in ("AUTO_EXECUTE", "EXECUTE_AND_NOTIFY"):
             initial_status = ActionStatus.AUTO_APPROVED.value
             approved_at = datetime.now(UTC).isoformat()
         else:
             initial_status = ActionStatus.PENDING.value
             approved_at = None
 
+        # Insert action record
         insert_data: dict[str, Any] = {
             "user_id": user_id,
             "agent": data.agent.value,
@@ -79,14 +86,15 @@ class ActionQueueService:
             insert_data["approved_at"] = approved_at
 
         result = self._db.table("aria_action_queue").insert(insert_data).execute()
-
         action = cast(dict[str, Any], result.data[0])
+
         logger.info(
             "Action submitted",
             extra={
                 "action_id": action["id"],
                 "user_id": user_id,
                 "risk_level": data.risk_level.value,
+                "execution_mode": mode,
                 "status": initial_status,
             },
         )
@@ -105,6 +113,7 @@ class ActionQueueService:
                     "action_id": action["id"],
                     "action_type": data.action_type.value,
                     "risk_level": data.risk_level.value,
+                    "execution_mode": mode,
                     "status": initial_status,
                 },
             )
@@ -114,8 +123,29 @@ class ActionQueueService:
                 extra={"action_id": action["id"]},
             )
 
-        # Broadcast action.pending WebSocket event for pending actions
-        if initial_status == ActionStatus.PENDING.value:
+        # Route by execution mode
+        if mode == "AUTO_EXECUTE":
+            try:
+                await self._exec_svc.execute_action(action["id"], user_id, action)
+            except Exception:
+                logger.warning(
+                    "Auto-execute failed, action remains auto_approved",
+                    extra={"action_id": action["id"]},
+                    exc_info=True,
+                )
+
+        elif mode == "EXECUTE_AND_NOTIFY":
+            try:
+                await self._exec_svc.execute_with_undo_window(action["id"], user_id, action)
+            except Exception:
+                logger.warning(
+                    "Execute-and-notify failed",
+                    extra={"action_id": action["id"]},
+                    exc_info=True,
+                )
+
+        else:
+            # APPROVE_PLAN or APPROVE_EACH — broadcast pending event
             try:
                 from src.core.ws import ws_manager
 
@@ -127,13 +157,6 @@ class ActionQueueService:
                     risk_level=data.risk_level.value,
                     description=data.description,
                     payload=data.payload,
-                )
-                logger.info(
-                    "ActionPendingEvent broadcast via WebSocket",
-                    extra={
-                        "action_id": action["id"],
-                        "user_id": user_id,
-                    },
                 )
             except Exception:
                 logger.warning(
@@ -192,7 +215,7 @@ class ActionQueueService:
         user_id: str,
         reason: str | None = None,
     ) -> dict[str, Any] | None:
-        """Reject a pending action.
+        """Reject a pending action and update trust (override).
 
         Args:
             action_id: The action ID.
@@ -218,11 +241,22 @@ class ActionQueueService:
         )
 
         if result.data:
+            action = cast(dict[str, Any], result.data[0])
             logger.info(
                 "Action rejected",
                 extra={"action_id": action_id, "user_id": user_id, "reason": reason},
             )
-            return cast(dict[str, Any], result.data[0])
+            # Update trust: rejection = user override
+            try:
+                category = action_type_to_category(action.get("action_type", ""))
+                await self._exec_svc._trust.update_on_override(user_id, category)
+            except Exception:
+                logger.warning(
+                    "Failed to update trust on rejection",
+                    extra={"action_id": action_id},
+                    exc_info=True,
+                )
+            return action
 
         logger.warning(
             "Action not found or not pending for rejection",
@@ -337,60 +371,35 @@ class ActionQueueService:
         action_id: str,
         user_id: str,
     ) -> dict[str, Any] | None:
-        """Execute an approved action.
+        """Execute an approved action via ActionExecutionService.
 
         Transitions from approved/auto_approved to executing, then completed.
-        Actual execution is delegated to the appropriate agent.
+        Trust is updated on success by the execution service.
 
         Args:
             action_id: The action ID.
             user_id: The user's ID.
 
         Returns:
-            Updated action dict, or None if not found.
+            Updated action dict, or None if not found/approved.
         """
-        now = datetime.now(UTC).isoformat()
+        # Fetch the action to pass full record to execution service
+        action = await self.get_action(action_id, user_id)
+        if not action:
+            return None
 
-        # Mark as executing
-        result = (
-            self._db.table("aria_action_queue")
-            .update({"status": ActionStatus.EXECUTING.value})
-            .eq("id", action_id)
-            .eq("user_id", user_id)
-            .in_("status", [ActionStatus.APPROVED.value, ActionStatus.AUTO_APPROVED.value])
-            .execute()
-        )
-
-        if not result.data:
+        status = action.get("status")
+        if status not in (ActionStatus.APPROVED.value, ActionStatus.AUTO_APPROVED.value):
             logger.warning(
-                "Action not found or not approved for execution",
-                extra={"action_id": action_id},
+                "Action not approved for execution",
+                extra={"action_id": action_id, "status": status},
             )
             return None
 
-        # Mark as completed (agent execution is delegated externally)
-        completed_result = (
-            self._db.table("aria_action_queue")
-            .update(
-                {
-                    "status": ActionStatus.COMPLETED.value,
-                    "completed_at": now,
-                    "result": {"executed": True},
-                }
-            )
-            .eq("id", action_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        await self._exec_svc.execute_action(action_id, user_id, action)
 
-        if completed_result.data:
-            logger.info(
-                "Action executed and completed",
-                extra={"action_id": action_id},
-            )
-            return cast(dict[str, Any], completed_result.data[0])
-
-        return None
+        # Re-fetch to return updated record
+        return await self.get_action(action_id, user_id)
 
     async def get_pending_count(self, user_id: str) -> int:
         """Get count of pending actions for a user.

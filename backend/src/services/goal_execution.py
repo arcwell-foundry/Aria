@@ -357,6 +357,173 @@ class GoalExecutionService:
 
         return all_results
 
+    async def execute_approved_plan(
+        self,
+        goal_id: str,
+        user_id: str,
+        plan_tasks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Execute all steps of an approved plan sequentially.
+
+        Called when user approves a goal plan via APPROVE_PLAN mode.
+        Each sub-task is executed, verified, and retried if needed via
+        AdaptiveCoordinator.
+
+        Args:
+            goal_id: The goal being executed.
+            user_id: The user who owns this goal.
+            plan_tasks: List of task dicts, each with agent_type, description, etc.
+
+        Returns:
+            Dict with goal_id, status, and list of step results.
+        """
+        total = len(plan_tasks)
+        results: list[dict[str, Any]] = []
+        context = await self._gather_execution_context(user_id)
+        trust_svc = self._get_trust_service()
+        adaptive = self._get_adaptive_coordinator()
+
+        logger.info(
+            "Starting approved plan execution",
+            extra={"goal_id": goal_id, "user_id": user_id, "total_steps": total},
+        )
+
+        for i, task in enumerate(plan_tasks):
+            step_num = i + 1
+            agent_type = task.get("agent_type", "analyst")
+
+            # Send progress WS event
+            try:
+                await ws_manager.send_progress_update(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    progress=int((step_num / total) * 100),
+                    status="executing",
+                    agent_name=agent_type,
+                    message=f"Step {step_num} of {total}: {task.get('description', '')}",
+                )
+            except Exception:
+                logger.debug("Failed to send progress event for plan step %d", step_num)
+
+            # Build a synthetic goal dict for agent execution
+            step_goal = {
+                "id": goal_id,
+                "title": task.get("description", f"Step {step_num}"),
+                "config": task.get("config", {}),
+                "user_id": user_id,
+            }
+
+            # Execute with retry logic
+            max_retries = 2
+            step_result: dict[str, Any] | None = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    step_result = await self._execute_agent(
+                        user_id=user_id,
+                        goal=step_goal,
+                        agent_type=agent_type,
+                        context=context,
+                    )
+
+                    if step_result.get("status") == "complete":
+                        # Trust update on success
+                        if trust_svc:
+                            category = _AGENT_TO_CATEGORY.get(agent_type, "general")
+                            try:  # noqa: SIM105
+                                await trust_svc.update_on_success(user_id, category)
+                            except Exception:
+                                pass
+                        break
+
+                    # Step failed — try adaptive coordinator
+                    if adaptive and attempt < max_retries:
+                        decision = await adaptive.evaluate_failure(
+                            task=task,
+                            result=step_result,
+                            attempt=attempt + 1,
+                        )
+                        if decision == "RETRY_SAME":
+                            continue
+                        if decision == "ESCALATE":
+                            break
+                    break
+
+                except Exception as e:
+                    logger.warning(
+                        "Plan step %d failed (attempt %d): %s",
+                        step_num,
+                        attempt + 1,
+                        e,
+                    )
+                    step_result = {
+                        "agent": agent_type,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                    if attempt >= max_retries and trust_svc:
+                        category = _AGENT_TO_CATEGORY.get(agent_type, "general")
+                        try:  # noqa: SIM105
+                            await trust_svc.update_on_failure(user_id, category)
+                        except Exception:
+                            pass
+
+            results.append(step_result or {"agent": agent_type, "status": "skipped"})
+
+            # If step failed after retries, escalate to user
+            if step_result and step_result.get("status") == "failed":
+                try:  # noqa: SIM105
+                    await ws_manager.send_aria_message(
+                        user_id=user_id,
+                        message=(
+                            f"Step {step_num} of your plan encountered an issue: "
+                            f"{step_result.get('error', 'Unknown error')}. "
+                            f"Should I continue with the remaining steps?"
+                        ),
+                        suggestions=["Continue", "Stop here"],
+                    )
+                except Exception:
+                    pass
+                # Don't halt — continue executing remaining steps
+                # User can cancel via the goal cancellation endpoint
+
+        # Mark goal complete
+        all_succeeded = all(r.get("status") == "complete" for r in results)
+        final_status = "complete" if all_succeeded else "partial"
+
+        now = datetime.now(UTC).isoformat()
+        self._db.table("goals").update(
+            {"status": final_status, "completed_at": now, "updated_at": now}
+        ).eq("id", goal_id).execute()
+
+        # Final progress event
+        try:  # noqa: SIM105
+            await ws_manager.send_progress_update(
+                user_id=user_id,
+                goal_id=goal_id,
+                progress=100,
+                status=final_status,
+                message=f"Plan execution {final_status}: {len(results)} steps processed",
+            )
+        except Exception:
+            pass
+
+        logger.info(
+            "Approved plan execution complete",
+            extra={
+                "goal_id": goal_id,
+                "user_id": user_id,
+                "status": final_status,
+                "steps": len(results),
+            },
+        )
+
+        return {
+            "goal_id": goal_id,
+            "status": final_status,
+            "results": results,
+        }
+
     def _create_agent_instance(
         self,
         agent_type: str,

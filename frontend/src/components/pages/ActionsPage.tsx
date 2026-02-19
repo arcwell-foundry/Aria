@@ -57,6 +57,7 @@ const ACTION_STATUS_COLORS: Record<ActionStatus, string> = {
   completed: 'var(--success)',
   rejected: 'var(--text-secondary)',
   failed: 'var(--critical)',
+  undo_pending: 'var(--warning)',
 };
 
 // Format relative time

@@ -11,7 +11,8 @@ export type ActionStatus =
   | "executing"
   | "completed"
   | "rejected"
-  | "failed";
+  | "failed"
+  | "undo_pending";
 
 // Response types
 export interface Action {
@@ -95,5 +96,17 @@ export async function getPendingCount(): Promise<number> {
 
 export async function executeAction(actionId: string): Promise<Action> {
   const response = await apiClient.post<Action>(`/actions/${actionId}/execute`);
+  return response.data;
+}
+
+export interface UndoResponse {
+  success: boolean;
+  action_id: string;
+  reversal?: Record<string, unknown>;
+  reason?: string;
+}
+
+export async function undoAction(actionId: string): Promise<UndoResponse> {
+  const response = await apiClient.post<UndoResponse>(`/actions/${actionId}/undo`);
   return response.data;
 }

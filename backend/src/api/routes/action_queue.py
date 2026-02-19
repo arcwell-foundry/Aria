@@ -201,3 +201,28 @@ async def execute_action(
     )
 
     return action
+
+
+@router.post("/{action_id}/undo")
+async def undo_action(
+    action_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Request undo of a recently executed action within the 5-min window.
+
+    Only actions in undo_pending status with an active undo window can be undone.
+    """
+    from src.services.action_execution import get_action_execution_service
+
+    svc = get_action_execution_service()
+    result = await svc.request_undo(action_id, current_user.id)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("reason", "Undo failed"))
+
+    logger.info(
+        "Action undo requested via API",
+        extra={"action_id": action_id, "user_id": current_user.id},
+    )
+
+    return result

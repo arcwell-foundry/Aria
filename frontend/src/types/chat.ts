@@ -30,6 +30,8 @@ export const WS_EVENTS = {
   ARIA_STREAM_ERROR: 'aria.stream_error',
   ACTION_PENDING: 'action.pending',
   ACTION_COMPLETED: 'action.completed',
+  ACTION_EXECUTED_WITH_UNDO: 'action.executed_with_undo',
+  ACTION_UNDONE: 'action.undone',
   PROGRESS_UPDATE: 'progress.update',
   SIGNAL_DETECTED: 'signal.detected',
   EMOTION_DETECTED: 'emotion.detected',
@@ -40,6 +42,7 @@ export const WS_EVENTS = {
   USER_NAVIGATE: 'user.navigate',
   USER_APPROVE: 'user.approve',
   USER_REJECT: 'user.reject',
+  USER_UNDO: 'user.undo',
   MODALITY_CHANGE: 'modality.change',
   HEARTBEAT: 'heartbeat',
 } as const;

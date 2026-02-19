@@ -6,6 +6,7 @@ import {
   rejectAction,
   batchApproveActions,
   getPendingCount,
+  undoAction,
   type ActionStatus,
 } from "@/api/actionQueue";
 
@@ -83,6 +84,19 @@ export function useBatchApprove() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: actionKeys.lists() });
       queryClient.invalidateQueries({ queryKey: actionKeys.pendingCount() });
+    },
+  });
+}
+
+// Undo action mutation
+export function useUndoAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (actionId: string) => undoAction(actionId),
+    onSuccess: (_result, actionId) => {
+      queryClient.invalidateQueries({ queryKey: actionKeys.detail(actionId) });
+      queryClient.invalidateQueries({ queryKey: actionKeys.lists() });
     },
   });
 }

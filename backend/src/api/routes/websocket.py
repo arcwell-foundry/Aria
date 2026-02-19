@@ -116,6 +116,9 @@ async def websocket_endpoint(
             elif msg_type == "user.reject":
                 await _handle_action_rejection(websocket, data, user_id)
 
+            elif msg_type == "user.undo":
+                await _handle_undo_request(websocket, data, user_id)
+
             elif msg_type == "modality.change":
                 payload = data.get("payload", {})
                 logger.info(
@@ -421,7 +424,7 @@ async def _handle_action_approval(
     if not action_id:
         return
     try:
-        from src.services.action_queue import ActionQueueService
+        from src.services.action_queue_service import ActionQueueService
 
         svc = ActionQueueService()
         await svc.approve_action(action_id=action_id, user_id=user_id)
@@ -446,7 +449,7 @@ async def _handle_action_rejection(
     if not action_id:
         return
     try:
-        from src.services.action_queue import ActionQueueService
+        from src.services.action_queue_service import ActionQueueService
 
         svc = ActionQueueService()
         await svc.reject_action(action_id=action_id, user_id=user_id)
@@ -458,3 +461,32 @@ async def _handle_action_rejection(
         )
     except Exception as e:
         logger.warning("Action rejection failed: %s", e)
+
+
+async def _handle_undo_request(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle a user.undo event — undo a recently executed action."""
+    payload = data.get("payload", {})
+    action_id = payload.get("action_id")
+    if not action_id:
+        return
+    try:
+        from src.services.action_execution import get_action_execution_service
+
+        svc = get_action_execution_service()
+        result = await svc.request_undo(action_id=action_id, user_id=user_id)
+        await websocket.send_json(
+            {
+                "type": "action.undo_result",
+                "payload": {
+                    "action_id": action_id,
+                    "success": result.get("success", False),
+                    "reason": result.get("reason"),
+                },
+            }
+        )
+    except Exception as e:
+        logger.warning("Undo request failed: %s", e)

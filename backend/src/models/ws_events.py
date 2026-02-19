@@ -15,6 +15,8 @@ class WSEventType(str, Enum):
     PROGRESS_UPDATE = "progress.update"
     SIGNAL_DETECTED = "signal.detected"
     ARIA_SPEAKING = "aria.speaking"
+    ACTION_EXECUTED = "action.executed_with_undo"
+    ACTION_UNDONE = "action.undone"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -91,6 +93,27 @@ class ConnectedEvent(WSEvent):
     type: WSEventType = WSEventType.CONNECTED
     user_id: str
     session_id: str | None = None
+
+
+class ActionExecutedEvent(WSEvent):
+    """An action was executed with an undo window."""
+
+    type: WSEventType = WSEventType.ACTION_EXECUTED
+    action_id: str
+    title: str
+    agent: str
+    undo_deadline: str  # ISO timestamp
+    countdown_seconds: int = 300
+
+
+class ActionUndoneEvent(WSEvent):
+    """An action was undone within the undo window."""
+
+    type: WSEventType = WSEventType.ACTION_UNDONE
+    action_id: str
+    title: str
+    success: bool
+    message: str | None = None
 
 
 class PongEvent(WSEvent):
