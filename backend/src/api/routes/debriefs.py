@@ -182,7 +182,7 @@ async def initiate_debrief(
         )
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to initiate debrief: {str(e)}",
+            detail="Failed to initiate debrief. Please try again.",
         ) from e
 
     logger.info(
@@ -263,7 +263,10 @@ async def submit_debrief(
                 "error": str(e),
             },
         )
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid debrief data. Please check and try again.",
+        ) from e
     except Exception as e:
         logger.exception(
             "Debrief processing failed unexpectedly",
@@ -274,7 +277,7 @@ async def submit_debrief(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process debrief: {str(e)}",
+            detail="Failed to process debrief. Please try again.",
         ) from e
 
     logger.info(

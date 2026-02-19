@@ -94,13 +94,14 @@ def test_analyst_agent_registers_tools() -> None:
 
     tools = agent.tools
 
-    assert len(tools) == 6
+    assert len(tools) == 7
     assert "pubmed_search" in tools
     assert "clinical_trials_search" in tools
     assert "fda_drug_search" in tools
     assert "chembl_search" in tools
     assert "answer_question" in tools
     assert "web_research" in tools
+    assert "evaluate_mcp_server" in tools
 
 
 # Task 5: PubMed article details fetcher tests

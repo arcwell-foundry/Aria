@@ -389,7 +389,7 @@ async def batch_score_leads(current_user: CurrentUser) -> BatchScoreResponse:
         logger.exception("Failed to batch score leads")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to batch score leads: {e}",
+            detail="Failed to batch score leads. Please try again.",
         ) from e
 
 
@@ -473,7 +473,7 @@ async def get_conversion_rankings(
         logger.exception("Failed to get conversion rankings")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get conversion rankings: {e}",
+            detail="Failed to get conversion rankings. Please try again.",
         ) from e
 
 
@@ -720,19 +720,19 @@ async def get_conversion_score(
     except ScoringLeadNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lead not found for scoring: {e}",
+            detail="The requested lead was not found.",
         ) from e
     except ScoringError as e:
         logger.exception("Scoring error")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
+            detail="Unable to calculate conversion score. Please try again.",
         ) from e
     except Exception as e:
         logger.exception("Failed to get conversion score")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to calculate conversion score: {e}",
+            detail="Failed to calculate conversion score. Please try again.",
         ) from e
 
 

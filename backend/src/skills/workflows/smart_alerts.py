@@ -32,10 +32,11 @@ logger = logging.getLogger(__name__)
 # LLM prompt for urgency scoring
 # ---------------------------------------------------------------------------
 
-_URGENCY_SYSTEM_PROMPT = """\
+_FALLBACK_URGENCY_PROMPT = """\
 You are ARIA's Urgency Scorer. Given a market signal and its implications,
-assign an urgency level and recommended response window.
+assign an urgency level and recommended response window."""
 
+_URGENCY_TASK_INSTRUCTIONS = """\
 Urgency levels:
 - CRITICAL: Requires immediate action (within 1 hour). Revenue at risk or
   competitive threat demanding same-day response.
@@ -127,6 +128,33 @@ class SmartAlertsWorkflow(BaseWorkflow):
             signal_summary = json.dumps(signal, indent=2, default=str)
             implications_summary = json.dumps(implications, indent=2, default=str)
 
+            # Primary: PersonaBuilder for system prompt
+            urgency_system_prompt = (
+                _FALLBACK_URGENCY_PROMPT + "\n\n" + _URGENCY_TASK_INSTRUCTIONS
+            )
+            if user_id:
+                try:
+                    from src.core.persona import PersonaRequest, get_persona_builder
+
+                    builder = get_persona_builder()
+                    persona_ctx = await builder.build(PersonaRequest(
+                        user_id=user_id,
+                        agent_name="smart_alerts",
+                        agent_role_description=(
+                            "Urgency Scorer assigning urgency levels and recommended "
+                            "response windows to market signals and their implications"
+                        ),
+                        task_description="Score urgency of detected market signal",
+                        output_format="json",
+                    ))
+                    urgency_system_prompt = (
+                        persona_ctx.to_system_prompt()
+                        + "\n\n"
+                        + _URGENCY_TASK_INSTRUCTIONS
+                    )
+                except Exception as e:
+                    logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
             scoring_text = await self._llm.generate_response(
                 messages=[
                     {
@@ -136,7 +164,7 @@ class SmartAlertsWorkflow(BaseWorkflow):
                         ),
                     }
                 ],
-                system_prompt=_URGENCY_SYSTEM_PROMPT,
+                system_prompt=urgency_system_prompt,
                 max_tokens=1024,
                 temperature=0.2,
             )

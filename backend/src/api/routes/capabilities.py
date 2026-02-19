@@ -212,14 +212,16 @@ async def install_capability(
             "capability": capability.to_dict(),
         }
     except RuntimeError as exc:
+        logger.warning("Capability installation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail="Capability installation failed. Please check configuration and try again.",
         ) from exc
     except ValueError as exc:
+        logger.warning("Invalid capability configuration: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail="Invalid capability configuration. Please check and try again.",
         ) from exc
 
 

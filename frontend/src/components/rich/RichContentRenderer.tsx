@@ -17,6 +17,7 @@ import { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
 import type { VideoSessionSummaryData } from '@/types/chat';
 import { ExecutionProgressCard } from './ExecutionProgressCard';
 import type { ExecutionProgressData } from '@/types/execution';
+import { ChallengeCard, type ChallengeCardProps } from '@/components/friction';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -122,6 +123,17 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <VideoSessionSummaryCard data={item.data as unknown as VideoSessionSummaryData} />;
     case 'execution_progress':
       return <ExecutionProgressCard data={item.data as unknown as ExecutionProgressData} />;
+    case 'friction_decision': {
+      const fd = item.data as unknown as Omit<ChallengeCardProps, 'onApprove' | 'onModify' | 'onCancel'>;
+      return (
+        <ChallengeCard
+          frictionId={fd.frictionId}
+          level={fd.level}
+          reasoning={fd.reasoning}
+          userMessage={fd.userMessage}
+        />
+      );
+    }
     default:
       return (
         <div

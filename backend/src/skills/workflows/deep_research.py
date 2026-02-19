@@ -34,10 +34,11 @@ logger = logging.getLogger(__name__)
 # LLM prompt for research synthesis
 # ---------------------------------------------------------------------------
 
-_SYNTHESIS_SYSTEM_PROMPT = """\
+_FALLBACK_SYNTHESIS_PROMPT = """\
 You are ARIA's Research Analyst. Synthesise the following raw intelligence
-into a structured research brief.
+into a structured research brief."""
 
+_SYNTHESIS_TASK_INSTRUCTIONS = """\
 Structure your output as valid JSON with these sections:
 {
   "executive_summary": "2-3 sentence overview",
@@ -151,6 +152,33 @@ class DeepResearchWorkflow(BaseWorkflow):
         try:
             research_context = _build_synthesis_context(accumulated, company)
 
+            # Primary: PersonaBuilder for system prompt
+            synthesis_system_prompt = (
+                _FALLBACK_SYNTHESIS_PROMPT + "\n\n" + _SYNTHESIS_TASK_INSTRUCTIONS
+            )
+            if user_id:
+                try:
+                    from src.core.persona import PersonaRequest, get_persona_builder
+
+                    builder = get_persona_builder()
+                    persona_ctx = await builder.build(PersonaRequest(
+                        user_id=user_id,
+                        agent_name="deep_research",
+                        agent_role_description=(
+                            "Research Analyst synthesising raw intelligence "
+                            "into a structured research brief"
+                        ),
+                        task_description=f"Synthesise deep research findings for {company}",
+                        output_format="json",
+                    ))
+                    synthesis_system_prompt = (
+                        persona_ctx.to_system_prompt()
+                        + "\n\n"
+                        + _SYNTHESIS_TASK_INSTRUCTIONS
+                    )
+                except Exception as e:
+                    logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
             synthesis_text = await self._llm.generate_response(
                 messages=[
                     {
@@ -160,7 +188,7 @@ class DeepResearchWorkflow(BaseWorkflow):
                         ),
                     }
                 ],
-                system_prompt=_SYNTHESIS_SYSTEM_PROMPT,
+                system_prompt=synthesis_system_prompt,
                 max_tokens=4096,
                 temperature=0.4,
             )

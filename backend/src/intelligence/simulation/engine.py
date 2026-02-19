@@ -197,8 +197,7 @@ class MentalSimulationEngine:
         # Gather minimal context
         context = await self._gather_minimal_context(user_id)
 
-        system_prompt = f"""You are ARIA, an AI assistant helping a life sciences professional think through scenarios.
-
+        _task_instructions = f"""
 User context:
 {self._format_context_for_llm(context)}
 
@@ -215,6 +214,31 @@ Format your response as JSON:
   "key_points": ["point 1", "point 2", "point 3"],
   "confidence": 0.0-1.0
 }}"""
+
+        _fallback_prompt = (
+            "You are ARIA, an AI assistant helping a life sciences "
+            "professional think through scenarios."
+        )
+
+        # Primary: PersonaBuilder
+        system_prompt = _fallback_prompt + "\n\n" + _task_instructions
+        try:
+            from src.core.persona import PersonaRequest, get_persona_builder
+
+            builder = get_persona_builder()
+            persona_ctx = await builder.build(PersonaRequest(
+                user_id=user_id,
+                agent_name="simulation",
+                agent_role_description=(
+                    "Helping a life sciences professional think through "
+                    "what-if scenarios with direct, practical analysis"
+                ),
+                task_description="Quick scenario simulation for chat question",
+                output_format="json",
+            ))
+            system_prompt = persona_ctx.to_system_prompt() + "\n\n" + _task_instructions
+        except Exception as e:
+            logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
 
         try:
             response = await self._llm.generate_response(

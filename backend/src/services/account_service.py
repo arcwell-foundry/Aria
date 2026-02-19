@@ -472,35 +472,36 @@ class AccountService:
             user_id: The user's UUID.
 
         Returns:
-            List of active sessions with device, IP, and last active info.
+            List of session info derived from Supabase Auth metadata.
+            Only the current session's last_sign_in_at is available;
+            device/IP/user_agent are included only if present in user metadata.
 
         Note:
-            Supabase Auth doesn't provide direct access to all sessions via client.
-            This returns a mock response for the current session.
-            Full implementation requires Supabase Auth Admin API access.
+            Supabase Auth does not expose a multi-session list via the client SDK.
+            Only metadata from the most recent authentication is available.
         """
         try:
-            # Supabase Auth sessions are managed via JWT tokens
-            # We can track session metadata via our own table if needed
-            # For now, return current session info
-
             user_data = self.client.auth.admin.get_user_by_id(user_id)
             if not user_data.user:
                 return []
 
-            # Get user metadata for session info
             user_metadata = user_data.user.user_metadata or {}
 
-            return [
-                {
-                    "id": "current",
-                    "device": user_metadata.get("device", "Current Device"),
-                    "ip_address": user_metadata.get("ip", "Unknown"),
-                    "user_agent": user_metadata.get("user_agent", "Unknown"),
-                    "last_active": user_data.user.last_sign_in_at,
-                    "is_current": True,
-                }
-            ]
+            session: dict[str, Any] = {
+                "id": "current",
+                "last_active": user_data.user.last_sign_in_at,
+                "is_current": True,
+            }
+
+            # Only include fields that have real values from auth metadata
+            if user_metadata.get("device"):
+                session["device"] = user_metadata["device"]
+            if user_metadata.get("ip"):
+                session["ip_address"] = user_metadata["ip"]
+            if user_metadata.get("user_agent"):
+                session["user_agent"] = user_metadata["user_agent"]
+
+            return [session]
 
         except Exception:
             logger.exception("Error listing sessions", extra={"user_id": user_id})

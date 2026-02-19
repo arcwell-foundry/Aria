@@ -53,6 +53,24 @@ def sanitize_error(e: Exception) -> str:
     return _DEFAULT_MESSAGE
 
 
+def safe_error_detail(e: Exception, fallback: str = "An error occurred") -> str:
+    """Log the full exception and return a safe user-facing message.
+
+    Convenience wrapper around :func:`sanitize_error` that also logs
+    the raw exception at ERROR level so developers can diagnose issues
+    without leaking internals to the client.
+
+    Args:
+        e: The exception to handle.
+        fallback: Fallback message used only as a log prefix.
+
+    Returns:
+        A sanitized, user-safe error string.
+    """
+    logger.exception(fallback)
+    return sanitize_error(e)
+
+
 class ARIAException(Exception):
     """Base exception for all ARIA-specific errors."""
 

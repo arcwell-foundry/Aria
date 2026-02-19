@@ -109,8 +109,9 @@ class AutonomousDraftEngine:
     8. Tracks processing run in email_processing_runs table
     """
 
-    REPLY_SYSTEM_PROMPT = """You are ARIA, an AI assistant drafting an email reply.
+    _FALLBACK_REPLY_PROMPT = """You are ARIA, an AI assistant drafting an email reply."""
 
+    _REPLY_TASK_INSTRUCTIONS = """
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
 {
   "subject": "The reply subject line (usually Re: original subject)",
@@ -412,7 +413,7 @@ Do not include any text outside the JSON object."""
 
             # d. Generate draft via LLM
             draft_content = await self._generate_reply_draft(
-                user_name, email, context, style_guidelines, tone_guidance
+                user_id, user_name, email, context, style_guidelines, tone_guidance
             )
 
             # e. Score style match
@@ -549,6 +550,7 @@ Do not include any text outside the JSON object."""
 
     async def _generate_reply_draft(
         self,
+        user_id: str,
         user_name: str,
         email: Any,
         context: DraftContext,
@@ -558,7 +560,7 @@ Do not include any text outside the JSON object."""
         """Generate reply draft via LLM with full context.
 
         Args:
-            user_id: User ID (for logging).
+            user_id: User ID (for PersonaBuilder and logging).
             user_name: User's name for signature.
             email: Original email (EmailCategory).
             context: Full context from EmailContextGatherer.
@@ -572,9 +574,26 @@ Do not include any text outside the JSON object."""
             user_name, email, context, style_guidelines, tone_guidance
         )
 
+        # Primary: PersonaBuilder for system prompt
+        system_prompt = self._FALLBACK_REPLY_PROMPT + "\n\n" + self._REPLY_TASK_INSTRUCTIONS
+        try:
+            from src.core.persona import PersonaRequest, get_persona_builder
+
+            builder = get_persona_builder()
+            ctx = await builder.build(PersonaRequest(
+                user_id=user_id,
+                agent_name="draft_engine",
+                agent_role_description="Drafting an email reply on behalf of the user",
+                task_description=f"Reply to email from {email.sender_email} re: {email.subject}",
+                output_format="json",
+            ))
+            system_prompt = ctx.to_system_prompt() + "\n\n" + self._REPLY_TASK_INSTRUCTIONS
+        except Exception as e:
+            logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt=self.REPLY_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             temperature=0.7,
         )
 

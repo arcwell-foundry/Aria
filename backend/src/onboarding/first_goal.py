@@ -355,9 +355,31 @@ class FirstGoalService:
         """
         prompt = self._build_suggestion_prompt(context)
 
+        # Primary: PersonaBuilder for system prompt
+        system_prompt: str | None = None
+        user_id = context.get("user_id", "")
+        if user_id:
+            try:
+                from src.core.persona import PersonaRequest, get_persona_builder
+
+                builder = get_persona_builder()
+                ctx = await builder.build(PersonaRequest(
+                    user_id=user_id,
+                    agent_name="onboarding_goal",
+                    agent_role_description=(
+                        "Generating personalized goal suggestions during onboarding"
+                    ),
+                    task_description="Suggest 2-3 specific, actionable goals based on user context",
+                    output_format="json",
+                ))
+                system_prompt = ctx.to_system_prompt()
+            except Exception as e:
+                logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
         try:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
+                system_prompt=system_prompt,
                 max_tokens=1024,
                 temperature=0.4,
             )

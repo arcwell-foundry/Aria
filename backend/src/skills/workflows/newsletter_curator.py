@@ -33,10 +33,11 @@ logger = logging.getLogger(__name__)
 # LLM prompt for signal curation
 # ---------------------------------------------------------------------------
 
-_CURATION_SYSTEM_PROMPT = """\
+_FALLBACK_CURATION_PROMPT = """\
 You are ARIA's Newsletter Curator. Given a list of market signals, select the
-top 5 most relevant and impactful for a life-sciences commercial team.
+top 5 most relevant and impactful for a life-sciences commercial team."""
 
+_CURATION_TASK_INSTRUCTIONS = """\
 For each selected signal, provide:
 - A concise headline (max 12 words)
 - A 2-sentence summary of why it matters
@@ -111,6 +112,33 @@ class NewsletterCuratorWorkflow(BaseWorkflow):
             signals_raw = accumulated.get("latest_output", {})
             signals_json = _format_signals_for_prompt(signals_raw)
 
+            # Primary: PersonaBuilder for system prompt
+            curation_system_prompt = (
+                _FALLBACK_CURATION_PROMPT + "\n\n" + _CURATION_TASK_INSTRUCTIONS
+            )
+            if user_id:
+                try:
+                    from src.core.persona import PersonaRequest, get_persona_builder
+
+                    builder = get_persona_builder()
+                    persona_ctx = await builder.build(PersonaRequest(
+                        user_id=user_id,
+                        agent_name="newsletter_curator",
+                        agent_role_description=(
+                            "Newsletter Curator selecting the most relevant and "
+                            "impactful market signals for a life-sciences commercial team"
+                        ),
+                        task_description="Curate top market signals for weekly newsletter",
+                        output_format="json",
+                    ))
+                    curation_system_prompt = (
+                        persona_ctx.to_system_prompt()
+                        + "\n\n"
+                        + _CURATION_TASK_INSTRUCTIONS
+                    )
+                except Exception as e:
+                    logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
             curated_text = await self._llm.generate_response(
                 messages=[
                     {
@@ -121,7 +149,7 @@ class NewsletterCuratorWorkflow(BaseWorkflow):
                         ),
                     }
                 ],
-                system_prompt=_CURATION_SYSTEM_PROMPT,
+                system_prompt=curation_system_prompt,
                 max_tokens=2048,
                 temperature=0.3,
             )

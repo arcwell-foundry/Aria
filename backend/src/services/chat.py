@@ -722,7 +722,7 @@ class ChatService:
 
     # Feature flag: set True to use PersonaBuilder for system prompt assembly.
     # When False, uses the existing _build_system_prompt method.
-    _use_persona_builder: bool = False
+    _use_persona_builder: bool = True
 
     def __init__(self) -> None:
         """Initialize chat service with dependencies."""

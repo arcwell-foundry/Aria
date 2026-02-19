@@ -181,7 +181,7 @@ async def scan_inbox_now(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to scan inbox: {e}",
+            detail="Failed to scan inbox. Please try again.",
         ) from e
 
 
@@ -388,7 +388,7 @@ async def get_scan_decisions(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve scan decisions: {e}",
+            detail="Failed to retrieve scan decisions. Please try again.",
         ) from e
 
 

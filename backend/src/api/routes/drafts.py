@@ -297,11 +297,11 @@ async def save_draft_to_client(
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(e),
+            detail="Failed to save draft to email client. Please try again.",
         ) from e
     except Exception as e:
         logger.exception("Unexpected error saving draft to client")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save draft to email client: {e}",
+            detail="Failed to save draft to email client. Please try again.",
         ) from e

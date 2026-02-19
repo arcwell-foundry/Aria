@@ -241,7 +241,8 @@ class FirstConversationGenerator:
         # Build style guidance
         style_guidance = self._build_style_guidance(style)
 
-        system_prompt = (
+        # Fallback system prompt
+        _fallback_system_prompt = (
             "You are ARIA, an AI Department Director for a life sciences "
             "commercial team. You are writing your FIRST message to a new "
             "user. This message must demonstrate real intelligence — proving "
@@ -252,7 +253,29 @@ class FirstConversationGenerator:
         # Inject personality calibration tone guidance if available
         tone_guidance = (personality or {}).get("tone_guidance")
         if tone_guidance:
-            system_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
+            _fallback_system_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
+
+        # Primary: PersonaBuilder
+        system_prompt = _fallback_system_prompt
+        user_id = (user_profile or {}).get("id", "")
+        if user_id:
+            try:
+                from src.core.persona import PersonaRequest, get_persona_builder
+
+                builder = get_persona_builder()
+                ctx = await builder.build(PersonaRequest(
+                    user_id=user_id,
+                    agent_name="first_conversation",
+                    agent_role_description=(
+                        "Writing ARIA's FIRST message to a new user, demonstrating "
+                        "real intelligence and proving value from the first interaction"
+                    ),
+                    task_description="Generate intelligence-demonstrating first conversation message",
+                    output_format="text",
+                ))
+                system_prompt = ctx.to_system_prompt()
+            except Exception as e:
+                logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
 
         user_prompt = (
             f"Write your FIRST message to {user_name or 'the user'}.\n\n"

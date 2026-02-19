@@ -859,8 +859,8 @@ class OnboardingCompletionOrchestrator:
             "Sound like an impressive colleague, not a chatbot. Be concise."
         )
 
-        # Fetch personality calibration tone guidance for this user
-        briefing_system_prompt = (
+        # Fallback system prompt
+        _fallback_briefing_prompt = (
             "You are ARIA, an AI Department Director for life sciences commercial teams."
         )
         try:
@@ -879,9 +879,28 @@ class OnboardingCompletionOrchestrator:
                 .get("tone_guidance")
             )
             if tone_guidance:
-                briefing_system_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
+                _fallback_briefing_prompt += f"\n\nAdapt your communication style: {tone_guidance}"
         except Exception:
             pass  # Non-critical — fall back to default tone
+
+        # Primary: PersonaBuilder
+        briefing_system_prompt = _fallback_briefing_prompt
+        try:
+            from src.core.persona import PersonaRequest, get_persona_builder
+
+            builder = get_persona_builder()
+            ctx = await builder.build(PersonaRequest(
+                user_id=user_id,
+                agent_name="activation_briefing",
+                agent_role_description=(
+                    "Generating the user's first daily briefing after onboarding activation"
+                ),
+                task_description="Create a warm, confident morning briefing highlighting initial findings",
+                output_format="text",
+            ))
+            briefing_system_prompt = ctx.to_system_prompt()
+        except Exception as e:
+            logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
 
         try:
             summary = await self._llm.generate_response(

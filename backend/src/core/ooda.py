@@ -254,13 +254,36 @@ class OODALoop:
         self.config = config or OODAConfig()
         self.agent_executor = agent_executor
         self.persona_builder = persona_builder
-        self._hot_context_builder = hot_context_builder
-        self._cold_memory_retriever = cold_memory_retriever
         self._cost_governor = cost_governor
         self._user_id = user_id
         self._trust_service = trust_service
         self._dct_minter = dct_minter
         self._ooda_logger = ooda_logger
+
+        # Auto-initialize memory builders when not provided (fail-open)
+        self._hot_context_builder = hot_context_builder
+        if self._hot_context_builder is None:
+            try:
+                from src.db.supabase import SupabaseClient
+                from src.memory.hot_context import HotContextBuilder
+
+                self._hot_context_builder = HotContextBuilder(
+                    db_client=SupabaseClient.get_client()
+                )
+            except Exception as e:
+                logger.warning("Auto-init HotContextBuilder failed (non-fatal): %s", e)
+
+        self._cold_memory_retriever = cold_memory_retriever
+        if self._cold_memory_retriever is None:
+            try:
+                from src.db.supabase import SupabaseClient
+                from src.memory.cold_retrieval import ColdMemoryRetriever
+
+                self._cold_memory_retriever = ColdMemoryRetriever(
+                    db_client=SupabaseClient.get_client()
+                )
+            except Exception as e:
+                logger.warning("Auto-init ColdMemoryRetriever failed (non-fatal): %s", e)
 
     @staticmethod
     def _agent_to_category(agent_name: str) -> str:
@@ -457,7 +480,7 @@ class OODALoop:
             except Exception as e:
                 logger.warning("Graph context retrieval failed in orient: %s", e)
 
-        hardcoded_system_prompt = """You are ARIA's cognitive analysis module. Analyze the observations and produce a structured analysis.
+        orient_task_instructions = """Analyze the observations and produce a structured analysis.
 
 When Knowledge Graph Context is provided, look for non-obvious connections between entities.
 If Company A just lost a key executive AND Company B is expanding in that space AND
@@ -481,8 +504,8 @@ Output ONLY valid JSON with this structure:
 
 The implication_chains array can be empty if no multi-hop connections are found."""
 
-        # Use PersonaBuilder when available, fall back to hardcoded prompt
-        system_prompt = hardcoded_system_prompt
+        # Use PersonaBuilder as primary, fall back to task instructions only
+        system_prompt: str | None = None
         if self.persona_builder is not None:
             try:
                 from src.core.persona import PersonaRequest
@@ -496,9 +519,12 @@ The implication_chains array can be empty if no multi-hop connections are found.
                     output_format="json",
                 )
                 ctx = await self.persona_builder.build(request)
-                system_prompt = ctx.to_system_prompt() + "\n\n" + hardcoded_system_prompt
+                system_prompt = ctx.to_system_prompt() + "\n\n" + orient_task_instructions
             except Exception as e:
-                logger.warning("PersonaBuilder failed in orient, using hardcoded: %s", e)
+                logger.warning("PersonaBuilder failed in orient, using fallback: %s", e)
+
+        if system_prompt is None:
+            system_prompt = orient_task_instructions
 
         user_prompt = f"""Goal: {goal.get("title", "Unknown")}
 Description: {goal.get("description", "No description")}
@@ -713,7 +739,7 @@ If graph context is available, identify implication chains — non-obvious multi
         # Build prompt for decision
         orientation_summary = json.dumps(state.orientation, indent=2, default=str)
 
-        hardcoded_decide_prompt = """You are ARIA's decision module. Based on the analysis, select the best action to take.
+        decide_task_instructions = """Based on the analysis, select the best action to take.
 
 Available actions:
 - "research": Use Analyst agent to gather information
@@ -751,8 +777,8 @@ Task characteristics guide:
 - subjectivity: Does the task depend on personal judgment? (1.0 = very subjective)
 - contextuality: How much does success depend on user-specific context? (1.0 = highly contextual)"""
 
-        # Use PersonaBuilder when available, fall back to hardcoded prompt
-        system_prompt = hardcoded_decide_prompt
+        # Use PersonaBuilder as primary, fall back to task instructions only
+        system_prompt: str | None = None
         if self.persona_builder is not None:
             try:
                 from src.core.persona import PersonaRequest
@@ -766,9 +792,12 @@ Task characteristics guide:
                     output_format="json",
                 )
                 ctx = await self.persona_builder.build(request)
-                system_prompt = ctx.to_system_prompt() + "\n\n" + hardcoded_decide_prompt
+                system_prompt = ctx.to_system_prompt() + "\n\n" + decide_task_instructions
             except Exception as e:
-                logger.warning("PersonaBuilder failed in decide, using hardcoded: %s", e)
+                logger.warning("PersonaBuilder failed in decide, using fallback: %s", e)
+
+        if system_prompt is None:
+            system_prompt = decide_task_instructions
 
         user_prompt = f"""Goal: {goal.get("title", "Unknown")}
 Description: {goal.get("description", "No description")}

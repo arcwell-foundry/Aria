@@ -8,6 +8,7 @@ from src.api.routes import drafts as drafts
 from src.api.routes import email as email
 from src.api.routes import email_preferences as email_preferences
 from src.api.routes import feedback as feedback
+from src.api.routes import friction as friction
 from src.api.routes import leads as leads
 from src.api.routes import notifications as notifications
 from src.api.routes import onboarding as onboarding

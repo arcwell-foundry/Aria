@@ -725,7 +725,14 @@ async def create_strategic_plan(
         return _plan_to_response(plan)
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.warning(
+            "Invalid strategic plan request",
+            extra={"user_id": current_user.id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid plan parameters. Please check and try again.",
+        ) from e
     except Exception as e:
         logger.exception(
             "Failed to create strategic plan",
@@ -733,7 +740,7 @@ async def create_strategic_plan(
         )
         raise HTTPException(
             status_code=500,
-            detail="Failed to create strategic plan",
+            detail="Failed to create strategic plan. Please try again.",
         ) from e
 
 

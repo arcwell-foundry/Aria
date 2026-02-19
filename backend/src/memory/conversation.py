@@ -321,7 +321,7 @@ class ConversationService:
         # Parse the extraction response (handles malformed JSON gracefully)
         extracted = self._parse_extraction_response(extraction_response)
 
-        # Step 3: Extract entities (stub for now)
+        # Step 3: Extract entities via Graphiti (returns [] if Graphiti not configured)
         entities = await self._extract_entities(messages)
 
         # Step 4: Calculate duration from timestamps

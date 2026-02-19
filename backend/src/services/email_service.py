@@ -125,7 +125,7 @@ class EmailService:
             # Return defaults
             return defaults
 
-    async def send_welcome(self, to: str, name: str) -> str:
+    async def send_welcome(self, to: str, name: str) -> str | None:
         """Send welcome email to new user.
 
         Args:
@@ -133,7 +133,7 @@ class EmailService:
             name: User's full name.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -150,7 +150,7 @@ class EmailService:
             html=html,
         )
 
-    async def send_onboarding_complete(self, to: str, name: str, readiness_score: int) -> str:
+    async def send_onboarding_complete(self, to: str, name: str, readiness_score: int) -> str | None:
         """Send onboarding complete email.
 
         Args:
@@ -159,7 +159,7 @@ class EmailService:
             readiness_score: User's readiness score (0-100).
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -179,7 +179,7 @@ class EmailService:
 
     async def send_team_invite(
         self, to: str, inviter_name: str, company_name: str, invite_url: str
-    ) -> str:
+    ) -> str | None:
         """Send team invite email.
 
         Args:
@@ -189,7 +189,7 @@ class EmailService:
             invite_url: Invite acceptance URL.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -207,7 +207,7 @@ class EmailService:
             html=html,
         )
 
-    async def send_password_reset(self, to: str, reset_url: str) -> str:
+    async def send_password_reset(self, to: str, reset_url: str) -> str | None:
         """Send password reset email.
 
         Args:
@@ -215,7 +215,7 @@ class EmailService:
             reset_url: Password reset URL.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -229,7 +229,7 @@ class EmailService:
             html=html,
         )
 
-    async def send_weekly_summary(self, to: str, name: str, summary_data: dict[str, Any]) -> str:
+    async def send_weekly_summary(self, to: str, name: str, summary_data: dict[str, Any]) -> str | None:
         """Send weekly summary email (opt-in).
 
         Args:
@@ -238,7 +238,7 @@ class EmailService:
             summary_data: Dictionary with summary content.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -268,7 +268,7 @@ class EmailService:
             html=html,
         )
 
-    async def send_payment_receipt(self, to: str, amount: int, date: str) -> str:
+    async def send_payment_receipt(self, to: str, amount: int, date: str) -> str | None:
         """Send payment receipt email.
 
         Args:
@@ -277,7 +277,7 @@ class EmailService:
             date: Payment date in ISO format.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -298,7 +298,7 @@ class EmailService:
             html=html,
         )
 
-    async def send_payment_failed(self, to: str, name: str) -> str:
+    async def send_payment_failed(self, to: str, name: str) -> str | None:
         """Send payment failed notification email.
 
         Args:
@@ -306,7 +306,7 @@ class EmailService:
             name: User's full name.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
@@ -323,7 +323,7 @@ class EmailService:
             html=html,
         )
 
-    async def _send_email(self, to: str, subject: str, html: str) -> str:
+    async def _send_email(self, to: str, subject: str, html: str) -> str | None:
         """Send an email via Resend.
 
         Args:
@@ -332,21 +332,20 @@ class EmailService:
             html: Email HTML content.
 
         Returns:
-            Email ID from Resend.
+            Email ID from Resend, or None if email service is not configured.
 
         Raises:
             EmailError: If sending fails.
         """
         if not self._api_key:
-            # Log instead of sending if not configured
-            logger.info(
-                "Email not sent (RESEND_API_KEY not configured)",
+            logger.warning(
+                "RESEND_API_KEY not configured, email not sent",
                 extra={
                     "to": to,
                     "subject": subject,
                 },
             )
-            return "mock_email_id"
+            return None
 
         try:
             params: resend.Emails.SendParams = {

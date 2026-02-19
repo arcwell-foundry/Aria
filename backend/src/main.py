@@ -38,6 +38,7 @@ from src.api.routes import (
     email,  # Real-time email urgency detection
     email_preferences,
     feedback,
+    friction,  # Wave 2: Cognitive friction decisions
     goals,
     health,
     insights,
@@ -278,6 +279,7 @@ app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(email.router, prefix="/api/v1")
 app.include_router(email_preferences.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
+app.include_router(friction.router, prefix="/api/v1")  # Wave 2: Cognitive friction
 app.include_router(goals.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(insights.router, prefix="/api/v1")

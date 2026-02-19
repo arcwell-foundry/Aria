@@ -612,7 +612,7 @@ async def extract_text_for_writing_sample(
         logger.warning("Failed to extract text from file: %s", e)
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to extract text from file: {str(e)}",
+            detail="Failed to extract text from file. Please try again.",
         ) from e
 
     # Clean up and truncate if needed
@@ -1505,7 +1505,7 @@ async def answer_injected_question(
     so ARIA can incorporate this intelligence into memory construction.
     """
     db = SupabaseClient.get_client()
-    state = (
+    state = await (
         db.table("onboarding_state")
         .select("step_data")
         .eq("user_id", current_user.id)
@@ -1529,7 +1529,7 @@ async def answer_injected_question(
     }
     step_data["ooda_answers"] = ooda_answers
 
-    db.table("onboarding_state").update({"step_data": step_data}).eq(
+    await db.table("onboarding_state").update({"step_data": step_data}).eq(
         "user_id", current_user.id
     ).execute()
 

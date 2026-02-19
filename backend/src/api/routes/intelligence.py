@@ -181,7 +181,7 @@ async def traverse_causal_chains(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Causal chain analysis failed: {str(e)}",
+            detail="Causal chain analysis failed. Please try again.",
         ) from e
 
 
@@ -508,7 +508,7 @@ async def analyze_implications(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Implication analysis failed: {str(e)}",
+            detail="Implication analysis failed. Please try again.",
         ) from e
 
 
@@ -819,7 +819,7 @@ async def detect_butterfly_effect(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Butterfly detection failed: {str(e)}",
+            detail="Butterfly detection failed. Please try again.",
         ) from e
 
 
@@ -1011,7 +1011,7 @@ async def scan_for_connections(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Connection scan failed: {str(e)}",
+            detail="Connection scan failed. Please try again.",
         ) from e
 
 
@@ -1189,7 +1189,7 @@ async def get_timeline(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Timeline retrieval failed: {str(e)}",
+            detail="Timeline retrieval failed. Please try again.",
         ) from e
 
 
@@ -1255,7 +1255,7 @@ async def get_goal_impact_summary(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Goal impact summary failed: {str(e)}",
+            detail="Goal impact summary failed. Please try again.",
         ) from e
 
 
@@ -1309,9 +1309,13 @@ async def get_goal_impact(
         return result
 
     except ValueError as e:
+        logger.warning(
+            "Goal impact not found",
+            extra={"user_id": current_user.id, "goal_id": str(goal_id), "error": str(e)},
+        )
         raise HTTPException(
             status_code=404,
-            detail=str(e),
+            detail="The requested goal impact data was not found.",
         ) from e
     except Exception as e:
         logger.exception(
@@ -1320,7 +1324,7 @@ async def get_goal_impact(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Goal impact retrieval failed: {str(e)}",
+            detail="Failed to retrieve goal impact data. Please try again.",
         ) from e
 
 
@@ -1375,7 +1379,7 @@ async def get_active_predictions(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve predictions: {str(e)}",
+            detail="Failed to retrieve predictions. Please try again.",
         ) from e
 
 
@@ -1429,7 +1433,7 @@ async def get_prediction_calibration(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve calibration: {str(e)}",
+            detail="Failed to retrieve calibration. Please try again.",
         ) from e
 
 
@@ -1488,7 +1492,7 @@ async def detect_prediction_errors(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to detect prediction errors: {str(e)}",
+            detail="Failed to detect prediction errors. Please try again.",
         ) from e
 
 
@@ -1588,7 +1592,7 @@ async def run_simulation(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Simulation failed: {str(e)}",
+            detail="Simulation failed. Please try again.",
         ) from e
 
 
@@ -1676,7 +1680,7 @@ async def list_simulations(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve simulations: {str(e)}",
+            detail="Failed to retrieve simulations. Please try again.",
         ) from e
 
 
@@ -1766,7 +1770,7 @@ async def get_simulation(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve simulation: {str(e)}",
+            detail="Failed to retrieve simulation. Please try again.",
         ) from e
 
 
@@ -1816,7 +1820,7 @@ async def quick_simulation(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Quick simulation failed: {str(e)}",
+            detail="Quick simulation failed. Please try again.",
         ) from e
 
 
@@ -1884,7 +1888,7 @@ async def analyze_decision_temporal(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Temporal analysis failed: {str(e)}",
+            detail="Temporal analysis failed. Please try again.",
         ) from e
 
 
@@ -1984,7 +1988,7 @@ async def generate_intelligence_briefing(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Intelligence briefing failed: {str(e)}",
+            detail="Intelligence briefing failed. Please try again.",
         ) from e
 
 
@@ -2045,7 +2049,7 @@ async def process_intelligence_event(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Event processing failed: {str(e)}",
+            detail="Event processing failed. Please try again.",
         ) from e
 
 
@@ -2091,7 +2095,7 @@ async def record_insight_feedback(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Feedback recording failed: {str(e)}",
+            detail="Feedback recording failed. Please try again.",
         ) from e
 
 
@@ -2117,7 +2121,7 @@ async def get_intelligence_metrics(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Metrics retrieval failed: {str(e)}",
+            detail="Metrics retrieval failed. Please try again.",
         ) from e
 
 
@@ -2216,5 +2220,5 @@ async def get_metacognition(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Metacognition assessment failed: {str(e)}",
+            detail="Metacognition assessment failed. Please try again.",
         ) from e
