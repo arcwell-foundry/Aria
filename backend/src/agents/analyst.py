@@ -105,6 +105,7 @@ class AnalystAgent(SkillAwareAgent):
             "chembl_search": self._chembl_search,
             "web_research": self._web_research,
             "answer_question": self._answer_question,
+            "evaluate_mcp_server": self._evaluate_mcp_server,
         }
 
     def validate_input(self, task: dict[str, Any]) -> bool:
@@ -769,3 +770,32 @@ class AnalystAgent(SkillAwareAgent):
         except Exception as e:
             logger.error(f"Answer question failed: {e}")
             return {"error": str(e), "answer": ""}
+
+    async def _evaluate_mcp_server(
+        self,
+        server_info_dict: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate an MCP server's security and reliability.
+
+        Performs rule-based analysis of publisher identity, open-source status,
+        permission scope, freshness, and community adoption.
+
+        Args:
+            server_info_dict: MCP server metadata dict (from registry discovery).
+
+        Returns:
+            Security assessment dict with risk level and recommendation.
+        """
+        logger.info("Evaluating MCP server: %s", server_info_dict.get("name", "unknown"))
+
+        try:
+            from src.agents.capabilities.mcp_evaluator import MCPEvaluatorCapability
+            from src.mcp_servers.models import MCPServerInfo
+
+            server_info = MCPServerInfo.from_dict(server_info_dict)
+            evaluator = MCPEvaluatorCapability(llm_client=self.llm)
+            assessment = await evaluator.evaluate(server_info)
+            return assessment.to_dict()
+        except Exception as e:
+            logger.error("MCP server evaluation failed: %s", e)
+            return {"error": str(e), "recommendation": "reject"}

@@ -25,6 +25,7 @@ from src.api.routes import (
     battle_cards,
     billing,
     briefings,
+    capabilities,  # Prompt 5B: MCP capability management
     chat,
     cognitive_load,
     communication,
@@ -198,6 +199,13 @@ async def lifespan(_app: FastAPI) -> Any:
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
+    # Close external MCP connections
+    try:
+        from src.mcp_servers.connection_pool import ExternalConnectionPool
+
+        await ExternalConnectionPool.instance().close_all()
+    except Exception:
+        logger.exception("Error closing external MCP connections")
     # US-942: Stop the sync scheduler
     await scheduler.stop()
     # P2-36: Stop ambient gap filler scheduler
@@ -251,6 +259,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(battle_cards.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(briefings.router, prefix="/api/v1")
+app.include_router(capabilities.router, prefix="/api/v1")  # Prompt 5B: MCP capabilities
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")
 app.include_router(communication.router, prefix="/api/v1")

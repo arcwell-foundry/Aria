@@ -4,6 +4,11 @@
 and the DCT action it requires.  ``mount_mcp_servers(app)`` mounts each
 server's SSE transport on FastAPI and stores server instances for
 in-process calls via ``MCPToolClient``.
+
+``EXTERNAL_TOOL_SERVER_MAP`` is a per-user mapping for external MCP servers
+installed via the capability management system (Prompt 5B).
+
+``resolve_tool()`` checks built-in tools first, then user-specific external tools.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from src.core.config import settings
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from mcp.server.fastmcp import FastMCP
+    from src.mcp_servers.capability_store import CapabilityStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +75,133 @@ def get_server(name: str) -> FastMCP:
 def get_all_servers() -> dict[str, FastMCP]:
     """Return all registered servers as a dict keyed by name."""
     return dict(_servers)
+
+
+# ---------------------------------------------------------------------------
+# External tool → (server_name, dct_action) per-user mapping
+# ---------------------------------------------------------------------------
+
+# user_id → tool_name → (server_name, dct_action)
+EXTERNAL_TOOL_SERVER_MAP: dict[str, dict[str, tuple[str, str]]] = {}
+
+
+def resolve_tool(
+    tool_name: str, user_id: str | None = None
+) -> tuple[str, str, bool]:
+    """Resolve a tool name to its server, checking built-in first then external.
+
+    Args:
+        tool_name: The MCP tool name to resolve.
+        user_id: Optional user ID for external tool lookup.
+
+    Returns:
+        Tuple of (server_name, dct_action, is_external).
+
+    Raises:
+        KeyError: If the tool is not found in any map.
+    """
+    # Built-in tools take priority
+    if tool_name in TOOL_SERVER_MAP:
+        server_name, dct_action = TOOL_SERVER_MAP[tool_name]
+        return server_name, dct_action, False
+
+    # Check user's external tools
+    if user_id and user_id in EXTERNAL_TOOL_SERVER_MAP:
+        user_tools = EXTERNAL_TOOL_SERVER_MAP[user_id]
+        if tool_name in user_tools:
+            server_name, dct_action = user_tools[tool_name]
+            return server_name, dct_action, True
+
+    raise KeyError(
+        f"Unknown MCP tool: '{tool_name}'. "
+        f"Not found in built-in or external tool maps."
+    )
+
+
+def register_external_tools(
+    user_id: str,
+    server_name: str,
+    tools: list[dict[str, Any]],
+    default_dct_action: str = "read_external",
+) -> None:
+    """Register tools from an installed external MCP server.
+
+    Args:
+        user_id: The user's UUID.
+        server_name: External server identifier.
+        tools: List of tool metadata dicts (each must have ``"name"``).
+        default_dct_action: Default DCT action for tools without one.
+    """
+    if user_id not in EXTERNAL_TOOL_SERVER_MAP:
+        EXTERNAL_TOOL_SERVER_MAP[user_id] = {}
+
+    user_tools = EXTERNAL_TOOL_SERVER_MAP[user_id]
+    registered = 0
+    for tool in tools:
+        name = tool.get("name", "")
+        if not name:
+            continue
+        dct_action = tool.get("dct_action", default_dct_action)
+        user_tools[name] = (server_name, dct_action)
+        registered += 1
+
+    logger.info(
+        "Registered %d external tools for user %s from server '%s'",
+        registered,
+        user_id,
+        server_name,
+    )
+
+
+def unregister_external_tools(user_id: str, server_name: str) -> None:
+    """Remove all tools for a specific external server from a user's map.
+
+    Args:
+        user_id: The user's UUID.
+        server_name: External server identifier.
+    """
+    if user_id not in EXTERNAL_TOOL_SERVER_MAP:
+        return
+
+    user_tools = EXTERNAL_TOOL_SERVER_MAP[user_id]
+    to_remove = [
+        name for name, (srv, _) in user_tools.items() if srv == server_name
+    ]
+    for name in to_remove:
+        del user_tools[name]
+
+    logger.info(
+        "Unregistered %d external tools for user %s from server '%s'",
+        len(to_remove),
+        user_id,
+        server_name,
+    )
+
+
+async def load_user_external_tools(
+    user_id: str, store: CapabilityStore
+) -> None:
+    """Load a user's external tools from DB into the in-memory map.
+
+    Called lazily on first request for a user's external tools.
+
+    Args:
+        user_id: The user's UUID.
+        store: CapabilityStore instance for DB access.
+    """
+    capabilities = await store.list_user_capabilities(user_id, enabled_only=True)
+    for cap in capabilities:
+        register_external_tools(
+            user_id=user_id,
+            server_name=cap.server_name,
+            tools=cap.declared_tools,
+        )
+
+    logger.info(
+        "Loaded external tools for user %s from %d capabilities",
+        user_id,
+        len(capabilities),
+    )
 
 
 # ---------------------------------------------------------------------------

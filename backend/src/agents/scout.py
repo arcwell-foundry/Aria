@@ -171,6 +171,7 @@ class ScoutAgent(SkillAwareAgent):
             "detect_signals": self._detect_signals,
             "deduplicate_signals": self._deduplicate_signals,
             "find_similar_pages": self._find_similar_pages,
+            "search_mcp_registries": self._search_mcp_registries,
         }
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
@@ -743,6 +744,39 @@ class ScoutAgent(SkillAwareAgent):
         similarity = len(intersection) / len(union) if union else 0
 
         return similarity >= threshold
+
+    async def _search_mcp_registries(
+        self,
+        query: str,
+        context: str = "",
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Search MCP registries for servers matching a capability need.
+
+        Searches Smithery, npm, and mcp.run in parallel for MCP servers
+        that can provide the requested capability.
+
+        Args:
+            query: Description of the needed capability (e.g. ``"slack messaging"``).
+            context: Optional context about why this capability is needed.
+            limit: Maximum number of results.
+
+        Returns:
+            List of MCP server metadata dicts.
+        """
+        logger.info("Searching MCP registries for: %s (limit=%d)", query, limit)
+
+        try:
+            from src.agents.capabilities.mcp_discovery import MCPDiscoveryCapability
+
+            discovery = MCPDiscoveryCapability()
+            results = await discovery.search_for_capability(
+                needed_capability=query, context=context, limit=limit
+            )
+            return [r.to_dict() for r in results]
+        except Exception as e:
+            logger.warning("MCP registry search failed: %s", e)
+            return []
 
     async def _find_similar_pages(
         self,

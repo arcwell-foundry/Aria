@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     MCP_BUSINESS_PATH: str = "/mcp/business"
     USE_MCP_TOOLS: bool = False  # Feature flag: agents use MCP client instead of direct calls
 
+    # MCP External Server Configuration (Prompt 5B)
+    MCP_EXTERNAL_ENABLED: bool = True
+    MCP_EXTERNAL_MAX_PER_USER: int = 20
+    MCP_EXTERNAL_SUBPROCESS_TIMEOUT: float = 30.0
+    MCP_EXTERNAL_HEALTH_CHECK_INTERVAL: int = 3600  # seconds
+
+    # MCP Registry URLs
+    MCP_REGISTRY_SMITHERY_URL: str = "https://registry.smithery.ai/api/v1"
+    MCP_REGISTRY_NPMJS_URL: str = "https://registry.npmjs.org"
+    MCP_REGISTRY_MCP_RUN_URL: str = "https://www.mcp.run"
+
     # Cost Governor Configuration (Wave 0)
     COST_GOVERNOR_ENABLED: bool = True
     COST_GOVERNOR_DAILY_TOKEN_BUDGET: int = 2_000_000
