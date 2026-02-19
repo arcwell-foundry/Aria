@@ -13,6 +13,7 @@ Phases:
 Each phase is logged for transparency and debugging.
 """
 
+import contextlib
 import logging
 import time
 import uuid
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from src.memory.episodic import EpisodicMemory
     from src.memory.semantic import SemanticMemory
     from src.memory.working import WorkingMemory
+    from src.services.ooda_logger import OODALogger
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +226,7 @@ class OODALoop:
         user_id: str | None = None,
         trust_service: Any | None = None,
         dct_minter: Any | None = None,
+        ooda_logger: "OODALogger | None" = None,
     ) -> None:
         """Initialize OODA loop.
 
@@ -242,6 +245,7 @@ class OODALoop:
             user_id: Optional user ID — enables extended thinking in orient/decide.
             trust_service: Optional TrustCalibrationService for approval level lookup.
             dct_minter: Optional DCTMinter for scoped agent permissions.
+            ooda_logger: Optional OODALogger for persisting phase data to admin dashboard.
         """
         self.llm = llm_client
         self.episodic = episodic_memory
@@ -256,6 +260,7 @@ class OODALoop:
         self._user_id = user_id
         self._trust_service = trust_service
         self._dct_minter = dct_minter
+        self._ooda_logger = ooda_logger
 
     @staticmethod
     def _agent_to_category(agent_name: str) -> str:
@@ -1078,6 +1083,7 @@ Select the best action to make progress toward the goal."""
         """
         # Generate a unique goal ID for this run
         goal_id = str(uuid.uuid4())
+        cycle_id = uuid.uuid4()
 
         # Create initial state
         state = OODAState(
@@ -1092,6 +1098,7 @@ Select the best action to make progress toward the goal."""
             "OODA loop starting",
             extra={
                 "goal_id": goal_id,
+                "cycle_id": str(cycle_id),
                 "goal": goal,
                 "max_iterations": self.config.max_iterations,
                 "total_budget": self.config.total_budget,
@@ -1108,6 +1115,9 @@ Select the best action to make progress toward the goal."""
                         "iterations": state.iteration,
                     },
                 )
+                if self._ooda_logger:
+                    with contextlib.suppress(Exception):
+                        await self._ooda_logger.mark_cycle_complete(cycle_id=cycle_id)
                 raise OODAMaxIterationsError(
                     goal_id=goal_id,
                     iterations=state.iteration,
@@ -1123,6 +1133,9 @@ Select the best action to make progress toward the goal."""
                         "budget": self.config.total_budget,
                     },
                 )
+                if self._ooda_logger:
+                    with contextlib.suppress(Exception):
+                        await self._ooda_logger.mark_cycle_complete(cycle_id=cycle_id)
                 raise OODAMaxIterationsError(
                     goal_id=goal_id,
                     iterations=state.iteration,
@@ -1140,12 +1153,15 @@ Select the best action to make progress toward the goal."""
             # Execute OODA cycle: observe -> orient -> decide -> act
             state = await self.observe(state, goal_dict)
             self._update_token_count(state)
+            await self._log_phase(cycle_id, state, "observe")
 
             state = await self.orient(state, goal_dict)
             self._update_token_count(state)
+            await self._log_phase(cycle_id, state, "orient")
 
             state = await self.decide(state, goal_dict)
             self._update_token_count(state)
+            await self._log_phase(cycle_id, state, "decide")
 
             # Check if blocked after decide
             if state.is_blocked:
@@ -1156,6 +1172,9 @@ Select the best action to make progress toward the goal."""
                         "reason": state.blocked_reason,
                     },
                 )
+                if self._ooda_logger:
+                    with contextlib.suppress(Exception):
+                        await self._ooda_logger.mark_cycle_complete(cycle_id=cycle_id)
                 raise OODABlockedError(
                     goal_id=goal_id,
                     reason=state.blocked_reason or "Unknown reason",
@@ -1171,11 +1190,15 @@ Select the best action to make progress toward the goal."""
                         "tokens_used": state.total_tokens_used,
                     },
                 )
+                if self._ooda_logger:
+                    with contextlib.suppress(Exception):
+                        await self._ooda_logger.mark_cycle_complete(cycle_id=cycle_id)
                 return state
 
             # Execute action (only if not complete/blocked)
             state = await self.act(state, goal_dict)
             self._update_token_count(state)
+            await self._log_phase(cycle_id, state, "act")
 
             logger.info(
                 "OODA loop iteration complete",
@@ -1246,3 +1269,63 @@ Select the best action to make progress toward the goal."""
             state: The current OODA state.
         """
         state.total_tokens_used = sum(log.tokens_used for log in state.phase_logs)
+
+    async def _log_phase(
+        self,
+        cycle_id: uuid.UUID,
+        state: OODAState,
+        phase: str,
+    ) -> None:
+        """Persist the latest phase log entry via OODALogger (fail-open).
+
+        Args:
+            cycle_id: UUID grouping this OODA run.
+            state: Current OODA state (reads the last phase_log entry).
+            phase: Phase name (observe/orient/decide/act).
+        """
+        if not self._ooda_logger:
+            return
+        try:
+            log_entry = state.phase_logs[-1] if state.phase_logs else None
+            agents: list[str] | None = None
+            if phase == "act" and state.decision:
+                agent = state.decision.get("agent")
+                if agent:
+                    agents = [agent]
+
+            await self._ooda_logger.log_phase(
+                cycle_id=cycle_id,
+                goal_id=state.goal_id,
+                user_id=self._user_id or "",
+                phase=phase,
+                iteration=state.iteration,
+                input_summary=log_entry.input_summary if log_entry else "",
+                output_summary=log_entry.output_summary if log_entry else "",
+                tokens_used=log_entry.tokens_used if log_entry else 0,
+                duration_ms=log_entry.duration_ms if log_entry else 0,
+                thinking_effort=self._get_thinking_effort(phase, state),
+                agents_dispatched=agents,
+            )
+        except Exception:
+            logger.warning("Failed to persist OODA phase %s", phase, exc_info=True)
+
+    def _get_thinking_effort(self, phase: str, state: OODAState) -> str | None:
+        """Determine thinking effort used for a phase.
+
+        Args:
+            phase: The OODA phase name.
+            state: Current state with task characteristics.
+
+        Returns:
+            Thinking effort level or None if not applicable.
+        """
+        if phase == "orient":
+            return "complex"
+        if phase == "decide" and state.task_characteristics:
+            risk = state.task_characteristics.get("risk_score", 0)
+            if risk > 0.7:
+                return "critical"
+            if risk > 0.4:
+                return "complex"
+            return "routine"
+        return None

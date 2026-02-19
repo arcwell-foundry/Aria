@@ -17,6 +17,7 @@ from src.api.routes import (
     action_queue,
     activity,
     admin,
+    admin_dashboard,
     ambient_onboarding,
     analytics,
     aria_config,
@@ -253,6 +254,7 @@ app.include_router(activity.router, prefix="/api/v1")
 app.include_router(autonomy.router, prefix="/api/v1")
 app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(admin_dashboard.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(aria_config.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
