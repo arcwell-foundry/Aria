@@ -13,6 +13,7 @@ import { useSession } from '@/contexts/SessionContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
+import { useExecutionProgress } from '@/hooks/useExecutionProgress';
 import { useBriefingStatus } from '@/hooks/useBriefingStatus';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
@@ -33,6 +34,7 @@ export function ARIAWorkspace() {
   const { user } = useAuth();
   useUICommands();
   useEmotionDetection();
+  useExecutionProgress();
 
   const streamingIdRef = useRef<string | null>(null);
   const conversationLoadedRef = useRef(false);

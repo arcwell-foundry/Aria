@@ -10,8 +10,12 @@ from src.models.ws_events import (
     ActionPendingEvent,
     ActionUndoneEvent,
     AriaMessageEvent,
+    ExecutionCompleteEvent,
     ProgressUpdateEvent,
     SignalEvent,
+    StepCompletedEvent,
+    StepRetryingEvent,
+    StepStartedEvent,
     ThinkingEvent,
     WSEvent,
 )
@@ -230,6 +234,84 @@ class ConnectionManager:
             title=title,
             success=success,
             message=message,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_step_started(
+        self,
+        user_id: str,
+        goal_id: str,
+        step_id: str,
+        agent: str,
+        title: str,
+    ) -> None:
+        """Send an execution step started event."""
+        event = StepStartedEvent(
+            goal_id=goal_id,
+            step_id=step_id,
+            agent=agent,
+            title=title,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_step_completed(
+        self,
+        user_id: str,
+        goal_id: str,
+        step_id: str,
+        agent: str,
+        success: bool,
+        result_summary: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Send an execution step completed event."""
+        event = StepCompletedEvent(
+            goal_id=goal_id,
+            step_id=step_id,
+            agent=agent,
+            success=success,
+            result_summary=result_summary,
+            error_message=error_message,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_step_retrying(
+        self,
+        user_id: str,
+        goal_id: str,
+        step_id: str,
+        agent: str,
+        retry_count: int,
+        reason: str,
+    ) -> None:
+        """Send an execution step retrying event."""
+        event = StepRetryingEvent(
+            goal_id=goal_id,
+            step_id=step_id,
+            agent=agent,
+            retry_count=retry_count,
+            reason=reason,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_execution_complete(
+        self,
+        user_id: str,
+        goal_id: str,
+        title: str,
+        success: bool,
+        steps_completed: int,
+        steps_total: int,
+        summary: str | None = None,
+    ) -> None:
+        """Send an execution complete event."""
+        event = ExecutionCompleteEvent(
+            goal_id=goal_id,
+            title=title,
+            success=success,
+            steps_completed=steps_completed,
+            steps_total=steps_total,
+            summary=summary,
         )
         await self.send_to_user(user_id, event)
 

@@ -2095,6 +2095,19 @@ class GoalExecutionService:
             # All tasks done — complete the goal
             await self.complete_goal_with_retro(goal_id, user_id)
 
+            # Emit execution complete WS event for live frontend progress
+            try:
+                await ws_manager.send_execution_complete(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    title=goal.get("title", "Unknown"),
+                    success=True,
+                    steps_completed=completed_tasks,
+                    steps_total=total_tasks,
+                )
+            except Exception:
+                logger.warning("Failed to send execution_complete WS event", extra={"goal_id": goal_id})
+
         except asyncio.CancelledError:
             logger.info("Goal background execution cancelled", extra={"goal_id": goal_id})
             raise
@@ -2116,6 +2129,28 @@ class GoalExecutionService:
                     data={"error": str(e)},
                 )
             )
+
+            # Emit execution complete (failure) WS event
+            try:
+                _title = goal.get("title", "Unknown") if isinstance(goal, dict) else "Unknown"  # noqa: F841
+                _completed = completed_tasks  # noqa: F841
+                _total = total_tasks  # noqa: F841
+            except NameError:
+                _title = "Unknown"
+                _completed = 0
+                _total = 0
+            try:
+                await ws_manager.send_execution_complete(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    title=_title,
+                    success=False,
+                    steps_completed=_completed,
+                    steps_total=_total,
+                    summary=str(e),
+                )
+            except Exception:
+                logger.warning("Failed to send execution_complete WS event", extra={"goal_id": goal_id})
 
     async def _handle_agent_result(
         self,
@@ -2247,6 +2282,7 @@ class GoalExecutionService:
         """
         event_bus = EventBus.get_instance()
         agent_type = task.get("agent_type", "analyst")
+        step_id = task.get("id", task.get("title", ""))
 
         await event_bus.publish(
             GoalEvent(
@@ -2259,6 +2295,18 @@ class GoalExecutionService:
                 },
             )
         )
+
+        # Emit step-started WS event for live frontend progress
+        try:
+            await ws_manager.send_step_started(
+                user_id=user_id,
+                goal_id=goal_id,
+                step_id=step_id,
+                agent=agent_type,
+                title=task.get("title", ""),
+            )
+        except Exception:
+            logger.warning("Failed to send step_started WS event", extra={"goal_id": goal_id})
 
         try:
             result = await self._execute_agent(
@@ -2275,6 +2323,19 @@ class GoalExecutionService:
                 result=result,
                 task=task,
             )
+
+            # Emit step-completed WS event (success)
+            try:
+                await ws_manager.send_step_completed(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    step_id=step_id,
+                    agent=agent_type,
+                    success=result.get("success", False),
+                    result_summary=result.get("summary"),
+                )
+            except Exception:
+                logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
             return {
                 "task_title": task.get("title", ""),
@@ -2303,6 +2364,20 @@ class GoalExecutionService:
                     },
                 )
             )
+
+            # Emit step-completed WS event (failure)
+            try:
+                await ws_manager.send_step_completed(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    step_id=step_id,
+                    agent=agent_type,
+                    success=False,
+                    error_message=str(e),
+                )
+            except Exception:
+                logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
+
             return {
                 "task_title": task.get("title", ""),
                 "agent_type": agent_type,

@@ -31,6 +31,7 @@ import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { resolveAgent } from '@/constants/agents';
 import type { ActivityItem, ActivityFilters } from '@/api/activity';
 import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
+import { AutoExecutionGroup } from './AutoExecutionGroup';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -80,6 +81,75 @@ const ENTITY_LABELS: Record<string, string> = {
   contact: 'Contact',
   company: 'Company',
 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Auto-execution grouping
+// ---------------------------------------------------------------------------
+
+interface DisplayEntry {
+  kind: 'single';
+  item: ActivityItem;
+}
+
+interface GroupedEntry {
+  kind: 'group';
+  activityType: string;
+  items: ActivityItem[];
+}
+
+type FeedEntry = DisplayEntry | GroupedEntry;
+
+/**
+ * Groups consecutive auto-executed items of the same activity_type and date
+ * into collapsed groups. Non-auto items pass through as singles.
+ */
+function groupAutoExecutions(items: ActivityItem[]): FeedEntry[] {
+  const entries: FeedEntry[] = [];
+  let i = 0;
+
+  while (i < items.length) {
+    const item = items[i];
+    const isAuto = item.metadata?.auto_executed === true;
+
+    if (!isAuto) {
+      entries.push({ kind: 'single', item });
+      i++;
+      continue;
+    }
+
+    // Collect consecutive auto-executed items of same type and date
+    const group: ActivityItem[] = [item];
+    const itemDate = item.created_at.slice(0, 10); // YYYY-MM-DD
+    let j = i + 1;
+
+    while (j < items.length) {
+      const next = items[j];
+      const nextIsAuto = next.metadata?.auto_executed === true;
+      const sameType = next.activity_type === item.activity_type;
+      const sameDate = next.created_at.slice(0, 10) === itemDate;
+
+      if (nextIsAuto && sameType && sameDate) {
+        group.push(next);
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    if (group.length >= 2) {
+      entries.push({ kind: 'group', activityType: item.activity_type, items: group });
+    } else {
+      entries.push({ kind: 'single', item: group[0] });
+    }
+    i = j;
+  }
+
+  return entries;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -455,6 +525,9 @@ export function ActivityFeed({
   // In compact mode, only show compactLimit items
   const displayItems = compact ? allItems.slice(0, compactLimit) : allItems;
 
+  // Group auto-executed items for display
+  const groupedEntries = useMemo(() => groupAutoExecutions(displayItems), [displayItems]);
+
   // -------------------------------------------------------------------------
   // Compact mode render
   // -------------------------------------------------------------------------
@@ -478,15 +551,23 @@ export function ActivityFeed({
             {pendingItems.length > 0 && (
               <NewActivityBanner count={pendingItems.length} onClick={flushPending} />
             )}
-            {displayItems.map((item) => (
-              <ActivityItemCard
-                key={item.id}
-                item={item}
-                compact
-                onNavigate={handleNavigate}
-                onViewTree={handleViewTree}
-              />
-            ))}
+            {groupedEntries.map((entry) =>
+              entry.kind === 'group' ? (
+                <AutoExecutionGroup
+                  key={`group-${entry.activityType}-${entry.items[0].id}`}
+                  items={entry.items}
+                  activityType={entry.activityType}
+                />
+              ) : (
+                <ActivityItemCard
+                  key={entry.item.id}
+                  item={entry.item}
+                  compact
+                  onNavigate={handleNavigate}
+                  onViewTree={handleViewTree}
+                />
+              ),
+            )}
             {allItems.length > compactLimit && (
               <button
                 type="button"
@@ -679,18 +760,28 @@ export function ActivityFeed({
       {!isLoading && !error && displayItems.length > 0 && (
         <Virtuoso
           useWindowScroll
-          totalCount={displayItems.length}
+          totalCount={groupedEntries.length}
           endReached={handleEndReached}
           overscan={200}
-          itemContent={(index) => (
-            <div className="pb-3">
-              <ActivityItemCard
-                item={displayItems[index]}
-                onNavigate={handleNavigate}
-                onViewTree={handleViewTree}
-              />
-            </div>
-          )}
+          itemContent={(index) => {
+            const entry = groupedEntries[index];
+            return (
+              <div className="pb-3">
+                {entry.kind === 'group' ? (
+                  <AutoExecutionGroup
+                    items={entry.items}
+                    activityType={entry.activityType}
+                  />
+                ) : (
+                  <ActivityItemCard
+                    item={entry.item}
+                    onNavigate={handleNavigate}
+                    onViewTree={handleViewTree}
+                  />
+                )}
+              </div>
+            );
+          }}
           components={{
             Footer: () => (
               <>

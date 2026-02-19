@@ -36,6 +36,10 @@ export const WS_EVENTS = {
   SIGNAL_DETECTED: 'signal.detected',
   EMOTION_DETECTED: 'emotion.detected',
   SESSION_SYNC: 'session.sync',
+  STEP_STARTED: 'execution.step_started',
+  STEP_COMPLETED: 'execution.step_completed',
+  STEP_RETRYING: 'execution.step_retrying',
+  EXECUTION_COMPLETE: 'execution.complete',
 
   // Client → Server
   USER_MESSAGE: 'user.message',

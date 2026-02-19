@@ -17,6 +17,10 @@ class WSEventType(str, Enum):
     ARIA_SPEAKING = "aria.speaking"
     ACTION_EXECUTED = "action.executed_with_undo"
     ACTION_UNDONE = "action.undone"
+    STEP_STARTED = "execution.step_started"
+    STEP_COMPLETED = "execution.step_completed"
+    STEP_RETRYING = "execution.step_retrying"
+    EXECUTION_COMPLETE = "execution.complete"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -85,6 +89,51 @@ class SignalEvent(WSEvent):
     title: str
     severity: str = "medium"
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class StepStartedEvent(WSEvent):
+    """An execution step has started."""
+
+    type: WSEventType = WSEventType.STEP_STARTED
+    goal_id: str
+    step_id: str
+    agent: str
+    title: str
+
+
+class StepCompletedEvent(WSEvent):
+    """An execution step has completed (success or failure)."""
+
+    type: WSEventType = WSEventType.STEP_COMPLETED
+    goal_id: str
+    step_id: str
+    agent: str
+    success: bool
+    result_summary: str | None = None
+    error_message: str | None = None
+
+
+class StepRetryingEvent(WSEvent):
+    """An execution step is being retried."""
+
+    type: WSEventType = WSEventType.STEP_RETRYING
+    goal_id: str
+    step_id: str
+    agent: str
+    retry_count: int
+    reason: str
+
+
+class ExecutionCompleteEvent(WSEvent):
+    """An entire goal execution has completed."""
+
+    type: WSEventType = WSEventType.EXECUTION_COMPLETE
+    goal_id: str
+    title: str
+    success: bool
+    steps_completed: int
+    steps_total: int
+    summary: str | None = None
 
 
 class ConnectedEvent(WSEvent):

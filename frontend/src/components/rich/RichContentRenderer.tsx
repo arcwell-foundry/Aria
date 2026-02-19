@@ -15,6 +15,8 @@ import { ResearchResultsCard, type ResearchResultsData } from './ResearchResults
 import { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
 import { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
 import type { VideoSessionSummaryData } from '@/types/chat';
+import { ExecutionProgressCard } from './ExecutionProgressCard';
+import type { ExecutionProgressData } from '@/types/execution';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -118,6 +120,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <EmailDraftCard data={item.data as unknown as EmailDraftData} />;
     case 'video_session_summary':
       return <VideoSessionSummaryCard data={item.data as unknown as VideoSessionSummaryData} />;
+    case 'execution_progress':
+      return <ExecutionProgressCard data={item.data as unknown as ExecutionProgressData} />;
     default:
       return (
         <div
