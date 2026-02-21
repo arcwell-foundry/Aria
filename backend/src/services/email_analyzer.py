@@ -835,7 +835,7 @@ class EmailAnalyzer:
         return not in_to and in_cc
 
     async def _get_user_email(self, user_id: str) -> str | None:
-        """Get the user's email address from their profile.
+        """Get the user's email address from Supabase Auth.
 
         Args:
             user_id: The user's ID.
@@ -844,15 +844,9 @@ class EmailAnalyzer:
             The user's email address, or None if not found.
         """
         try:
-            result = (
-                self._db.table("profiles")
-                .select("email")
-                .eq("id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            if result and result.data:
-                return result.data.get("email")
+            result = self._db.auth.admin.get_user_by_id(user_id)
+            if result.user and result.user.email:
+                return result.user.email
         except Exception as e:
             logger.warning(
                 "EMAIL_ANALYZER: Failed to get user email for %s: %s", user_id, e
@@ -1111,6 +1105,7 @@ class EmailAnalyzer:
                     "email_id": categorized.email_id,
                     "thread_id": categorized.thread_id,
                     "sender_email": categorized.sender_email,
+                    "sender_name": categorized.sender_name,
                     "subject": categorized.subject[:500],
                     "category": categorized.category,
                     "urgency": categorized.urgency,
@@ -1171,6 +1166,9 @@ class EmailAnalyzer:
         Returns:
             The sender's display name.
         """
+        # Check pre-extracted field first (Outlook normalization sets this)
+        if email.get("sender_name"):
+            return email["sender_name"]
         sender = email.get("from", email.get("sender", ""))
         if isinstance(sender, dict):
             return sender.get("name", sender.get("email", ""))

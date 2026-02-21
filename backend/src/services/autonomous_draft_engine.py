@@ -167,6 +167,9 @@ Do not include any text outside the JSON object."""
             started_at=started_at,
         )
 
+        # Clean up any orphaned runs from previous crashes
+        await self._cleanup_stale_runs(user_id)
+
         # Create processing run record
         await self._create_processing_run(run_id, user_id, started_at)
 
@@ -961,6 +964,24 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             logger.warning("DRAFT_ENGINE: Failed to get user name: %s", e)
 
         return "there"
+
+    async def _cleanup_stale_runs(self, user_id: str) -> None:
+        """Mark runs stuck in 'running' for >10min as failed."""
+        try:
+            from datetime import timedelta
+
+            cutoff = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+            self._db.table("email_processing_runs").update(
+                {
+                    "status": "failed",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "error_message": "Orphaned: server restart or timeout",
+                }
+            ).eq("user_id", user_id).eq("status", "running").lt(
+                "started_at", cutoff
+            ).execute()
+        except Exception as e:
+            logger.warning("DRAFT_ENGINE: Failed to cleanup stale runs: %s", e)
 
     async def _create_processing_run(
         self,
