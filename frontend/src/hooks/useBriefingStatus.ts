@@ -101,14 +101,15 @@ export function useBriefingStatus(): UseBriefingStatusReturn {
   // Listen for WebSocket briefing.ready event
   useEffect(() => {
     const handleBriefingReady = (payload: unknown) => {
-      const event = payload as BriefingReadyPayload;
+      if (!payload || typeof payload !== 'object') return;
+      const event = payload as Partial<BriefingReadyPayload>;
       // Update the query cache with new briefing data
       queryClient.setQueryData(briefingStatusKeys.status, {
         ready: true,
         viewed: false,
-        briefing_id: event.briefing_id,
-        duration: event.duration,
-        topics: event.topics,
+        briefing_id: event.briefing_id ?? null,
+        duration: event.duration ?? 5,
+        topics: event.topics ?? [],
       });
       // Reset dismissed state for new briefing
       setDismissed(false);

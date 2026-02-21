@@ -57,16 +57,27 @@ export const useConversationStore = create<ConversationState>((set) => ({
   setActiveConversation: (id) => set({ activeConversationId: id }),
 
   addMessage: (message) =>
-    set((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          ...message,
-          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    })),
+    set((state) => {
+      // Deduplicate briefing messages — only one briefing card allowed in the thread
+      const isBriefing = message.rich_content?.some((rc) => rc.type === 'briefing');
+      if (isBriefing) {
+        const alreadyHasBriefing = state.messages.some(
+          (msg) => msg.role === 'aria' && msg.rich_content?.some((rc) => rc.type === 'briefing'),
+        );
+        if (alreadyHasBriefing) return state;
+      }
+
+      return {
+        messages: [
+          ...state.messages,
+          {
+            ...message,
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      };
+    }),
 
   appendToMessage: (id, content) =>
     set((state) => ({

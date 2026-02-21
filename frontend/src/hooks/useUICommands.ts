@@ -24,13 +24,15 @@ export function useUICommands() {
   // Listen for aria.message events and auto-execute ui_commands
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
-      const data = payload as AriaMessagePayload;
+      if (!payload || typeof payload !== 'object') return;
+      const data = payload as Partial<AriaMessagePayload>;
       if (data.ui_commands?.length) {
         void uiCommandExecutor.executeCommands(data.ui_commands as UICommand[]);
       }
     };
 
     const handleMetadata = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
       const data = payload as { ui_commands?: UICommand[] };
       if (data.ui_commands?.length) {
         void uiCommandExecutor.executeCommands(data.ui_commands);

@@ -125,7 +125,9 @@ export function UndoToastContainer() {
 
   useEffect(() => {
     const handleExecuted = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
       const data = payload as UndoableAction;
+      if (!data.action_id) return;
       setActions((prev) => {
         // Prevent duplicates
         if (prev.some((a) => a.action_id === data.action_id)) return prev;
@@ -134,7 +136,8 @@ export function UndoToastContainer() {
     };
 
     const handleUndone = (payload: unknown) => {
-      const data = payload as { action_id: string };
+      const data = (payload ?? {}) as Partial<{ action_id: string }>;
+      if (!data.action_id) return;
       setActions((prev) => prev.filter((a) => a.action_id !== data.action_id));
     };
 

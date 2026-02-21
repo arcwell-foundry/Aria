@@ -88,8 +88,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     if (!isBriefing) return;
 
     const handleBriefingSpeaking = (payload: unknown) => {
-      const data = payload as { is_speaking: boolean };
-      setIsBriefingPlaying(data.is_speaking);
+      const data = (payload ?? {}) as Partial<{ is_speaking: boolean }>;
+      setIsBriefingPlaying(data.is_speaking ?? false);
 
       if (data.is_speaking) {
         // Start gradual progress increment while speaking
@@ -137,29 +137,29 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   // Wire up event listeners (same pattern as ARIAWorkspace + speaking events)
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
-      const data = payload as AriaMessagePayload;
+      const data = (payload ?? {}) as Partial<AriaMessagePayload>;
       setStreaming(false);
       setIsSpeaking(false);
 
       if (streamingIdRef.current) {
         updateMessageMetadata(streamingIdRef.current, {
-          rich_content: data.rich_content || [],
-          ui_commands: data.ui_commands || [],
-          suggestions: data.suggestions || [],
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
         });
         streamingIdRef.current = null;
       } else {
         addMessage({
           role: 'aria',
-          content: data.message,
-          rich_content: data.rich_content || [],
-          ui_commands: data.ui_commands || [],
-          suggestions: data.suggestions || [],
+          content: data.message ?? '',
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
         });
       }
 
       // Create toast notifications for video content overlay
-      const richItems = data.rich_content || [];
+      const richItems = data.rich_content ?? [];
       const VIDEO_CONTENT_TYPES = ['lead_card', 'battle_card', 'pipeline_chart', 'research_results', 'email_draft'];
       for (const item of richItems) {
         if (VIDEO_CONTENT_TYPES.includes(item.type)) {
@@ -180,17 +180,18 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
 
     const handleThinking = (payload: unknown) => {
-      const data = payload as AriaThinkingPayload;
+      const data = (payload ?? {}) as Partial<AriaThinkingPayload>;
       if (data.is_thinking) setStreaming(true);
     };
 
     const handleToken = (payload: unknown) => {
-      const data = payload as { content: string; full_content: string };
+      const data = (payload ?? {}) as Partial<{ content: string; full_content: string }>;
+      const tokenContent = data.content ?? '';
       if (!streamingIdRef.current) {
         const store = useConversationStore.getState();
         store.addMessage({
           role: 'aria',
-          content: data.content,
+          content: tokenContent,
           rich_content: [],
           ui_commands: [],
           suggestions: [],
@@ -200,40 +201,40 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         streamingIdRef.current = msgs[msgs.length - 1]?.id ?? null;
         setStreaming(true, streamingIdRef.current);
       } else {
-        appendToMessage(streamingIdRef.current, data.content);
+        appendToMessage(streamingIdRef.current, tokenContent);
       }
     };
 
     const handleMetadata = (payload: unknown) => {
-      const data = payload as {
+      const data = (payload ?? {}) as Partial<{
         message_id: string;
         rich_content: RichContent[];
         ui_commands: UICommand[];
         suggestions: string[];
-      };
+      }>;
       if (streamingIdRef.current) {
         updateMessageMetadata(streamingIdRef.current, {
-          rich_content: data.rich_content,
-          ui_commands: data.ui_commands,
-          suggestions: data.suggestions,
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
         });
       }
     };
 
     const handleSpeaking = (payload: unknown) => {
-      const data = payload as { is_speaking: boolean };
-      setIsSpeaking(data.is_speaking);
+      const data = (payload ?? {}) as Partial<{ is_speaking: boolean }>;
+      setIsSpeaking(data.is_speaking ?? false);
     };
 
     const handleStreamError = (payload: unknown) => {
-      const data = payload as StreamErrorPayload;
+      const data = (payload ?? {}) as Partial<StreamErrorPayload>;
       setStreaming(false);
       setIsSpeaking(false);
       streamingIdRef.current = null;
 
       addMessage({
         role: 'system',
-        content: data.error,
+        content: data.error ?? 'An unexpected error occurred.',
         rich_content: [],
         ui_commands: [],
         suggestions: data.recoverable ? ['Try again'] : [],

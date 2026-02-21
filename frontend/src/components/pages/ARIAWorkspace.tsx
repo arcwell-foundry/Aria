@@ -20,6 +20,10 @@ import { listConversations, getConversation } from '@/api/chat';
 import { useTodayBriefing, useGenerateBriefing } from '@/hooks/useBriefing';
 import { VideoBriefingCard } from '@/components/briefing';
 
+// Module-level flag to prevent re-injecting briefing across remounts within the same session.
+// Reset when the page fully reloads (new session), which is the intended behavior.
+let briefingInjectedForSession = false;
+
 export function ARIAWorkspace() {
   const navigate = useNavigate();
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -105,7 +109,7 @@ export function ARIAWorkspace() {
 
   // Inject daily briefing as ARIA's first message when available
   useEffect(() => {
-    if (briefingInjectedRef.current) return;
+    if (briefingInjectedRef.current || briefingInjectedForSession) return;
     if (briefingLoading) return;
 
     // If no briefing exists yet, generate one (only once per session)
@@ -117,13 +121,24 @@ export function ARIAWorkspace() {
 
     if (!briefing) return;
 
+    // Check if a briefing message already exists in the store (dedup guard)
+    const store = useConversationStore.getState();
+    const hasBriefing = store.messages.some(
+      (msg) => msg.role === 'aria' && msg.rich_content?.some((rc) => rc.type === 'briefing'),
+    );
+    if (hasBriefing) {
+      briefingInjectedRef.current = true;
+      briefingInjectedForSession = true;
+      return;
+    }
+
     briefingInjectedRef.current = true;
+    briefingInjectedForSession = true;
 
     // Time-appropriate greeting
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-    const store = useConversationStore.getState();
     store.addMessage({
       role: 'aria',
       content: `${greeting}. Here's your intelligence briefing for today.`,

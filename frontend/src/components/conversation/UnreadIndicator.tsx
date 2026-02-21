@@ -32,7 +32,7 @@ export function UnreadIndicator() {
     const handleMessage = (payload: unknown) => {
       if (!isAwayRef.current) return;
 
-      const data = payload as { message_id?: string };
+      const data = (payload ?? {}) as Partial<{ message_id: string }>;
       setUnreadCount((prev) => {
         if (prev === 0 && data.message_id) {
           setFirstUnreadId(data.message_id);

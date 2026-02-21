@@ -17,13 +17,14 @@ export function BackgroundWorkIndicator() {
 
   useEffect(() => {
     const handleStarted = (payload: unknown) => {
-      const data = payload as { id: string; description?: string; agent?: string };
+      const data = (payload ?? {}) as Partial<{ id: string; description: string; agent: string }>;
+      if (!data.id) return;
       setTasks((prev) => {
         if (prev.some((t) => t.id === data.id)) return prev;
         return [
           ...prev,
           {
-            id: data.id,
+            id: data.id!,
             description: data.description || 'Working on task...',
             agent: data.agent,
           },
@@ -32,7 +33,8 @@ export function BackgroundWorkIndicator() {
     };
 
     const handleCompleted = (payload: unknown) => {
-      const data = payload as { id: string };
+      const data = (payload ?? {}) as Partial<{ id: string }>;
+      if (!data.id) return;
       setTasks((prev) => prev.filter((t) => t.id !== data.id));
     };
 
