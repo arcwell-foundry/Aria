@@ -7,12 +7,12 @@ import {
   FileText,
   Mail,
   Check,
-  Target,
   Building2,
   Calendar,
   MessageSquare,
   ExternalLink,
   ChevronLeft,
+  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 import { MessageBubble } from "@/components/conversation/MessageBubble";
@@ -249,7 +249,7 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
     ariaMessage:
       "What should I focus on first? I'll suggest goals based on what I've learned about your company, but you can set your own priority.",
     inputMode: "action_panel",
-    skippable: false,
+    skippable: true,
   },
   activation: {
     ariaMessage:
@@ -1473,19 +1473,35 @@ function IntegrationWizardPanel({
 
 function FirstGoalPanel({
   onComplete,
+  onSkip,
 }: {
   onComplete: (response: OnboardingStateResponse) => void;
+  onSkip: () => void;
 }) {
   const suggestionsQuery = useFirstGoalSuggestions(true);
   const createGoalMutation = useCreateFirstGoal();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [manualTitle, setManualTitle] = useState("");
+  const [manualGoal, setManualGoal] = useState("");
 
-  const suggestions: GoalSuggestion[] =
-    suggestionsQuery.data?.suggestions ?? [];
+  const suggestions: GoalSuggestion[] = useMemo(
+    () => suggestionsQuery.data?.suggestions ?? [],
+    [suggestionsQuery.data?.suggestions],
+  );
 
-  const handleSelectGoal = useCallback(
-    async (suggestion: GoalSuggestion) => {
+  const categoryColors: Record<string, string> = {
+    pipeline: "bg-[var(--info)]/15 text-[var(--info)]",
+    intelligence: "bg-[var(--interactive)]/15 text-[var(--interactive)]",
+    communication: "bg-[var(--success)]/15 text-[var(--success)]",
+    strategy: "bg-[var(--warning)]/15 text-[var(--warning)]",
+  };
+
+  const canSubmit = selectedIndex !== null || manualGoal.trim().length > 0;
+
+  const handleSubmit = useCallback(async () => {
+    if (createGoalMutation.isPending) return;
+
+    if (selectedIndex !== null && suggestions[selectedIndex]) {
+      const suggestion = suggestions[selectedIndex];
       const goalResult = await createGoalMutation.mutateAsync({
         title: suggestion.title,
         description: suggestion.description,
@@ -1495,33 +1511,16 @@ function FirstGoalPanel({
         goal_id: goalResult.goal.id,
       });
       onComplete(response);
-    },
-    [createGoalMutation, onComplete],
-  );
-
-  const handleManualGoal = useCallback(async () => {
-    if (!manualTitle.trim()) return;
-    const goalResult = await createGoalMutation.mutateAsync({
-      title: manualTitle.trim(),
-    });
-    const response = await completeStep("first_goal", {
-      goal_id: goalResult.goal.id,
-    });
-    onComplete(response);
-  }, [manualTitle, createGoalMutation, onComplete]);
-
-  const categoryColors: Record<string, string> = {
-    pipeline: "bg-blue-500/20 text-blue-400",
-    intelligence: "bg-purple-500/20 text-purple-400",
-    communication: "bg-green-500/20 text-green-400",
-    strategy: "bg-amber-500/20 text-amber-400",
-  };
-
-  const urgencyColors: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400",
-    medium: "bg-yellow-500/20 text-yellow-400",
-    low: "bg-green-500/20 text-green-400",
-  };
+    } else if (manualGoal.trim()) {
+      const goalResult = await createGoalMutation.mutateAsync({
+        title: manualGoal.trim(),
+      });
+      const response = await completeStep("first_goal", {
+        goal_id: goalResult.goal.id,
+      });
+      onComplete(response);
+    }
+  }, [selectedIndex, suggestions, manualGoal, createGoalMutation, onComplete]);
 
   if (suggestionsQuery.isLoading) {
     return (
@@ -1529,7 +1528,7 @@ function FirstGoalPanel({
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="h-28 animate-pulse rounded-lg border border-white/5 bg-white/[0.02]"
+            className="h-28 animate-pulse rounded-lg border border-[var(--border)]/50 bg-[var(--bg-subtle)]"
           />
         ))}
       </div>
@@ -1537,83 +1536,119 @@ function FirstGoalPanel({
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-3">
-      {suggestions.length > 0 ? (
-        suggestions.map((suggestion, idx) => (
+    <div className="mx-auto w-full max-w-2xl">
+      {/* Suggestion cards */}
+      <div className="space-y-3" role="radiogroup" aria-label="Suggested goals">
+        {suggestions.map((suggestion, idx) => (
           <button
             key={idx}
+            type="button"
+            role="radio"
+            aria-checked={selectedIndex === idx}
             onClick={() => {
               setSelectedIndex(idx);
-              void handleSelectGoal(suggestion);
+              setManualGoal("");
             }}
             disabled={createGoalMutation.isPending}
-            className={`w-full rounded-lg border p-4 text-left transition ${
+            className={`onboarding-field-in onboarding-field-delay-${idx} w-full rounded-lg border p-4 text-left transition-all duration-150 ${
               selectedIndex === idx
-                ? "border-[var(--color-accent,#2E66FF)] bg-[var(--color-accent,#2E66FF)]/5"
-                : "border-white/5 bg-white/[0.02] hover:border-white/15"
+                ? "border-[var(--interactive)] bg-[var(--interactive)]/5 ring-1 ring-[var(--interactive)]"
+                : "border-[var(--border)] bg-[var(--bg-elevated)] hover:border-[var(--interactive)] hover:shadow-[var(--shadow-sm)]"
             } disabled:opacity-60`}
           >
-            <div className="mb-2 flex items-start justify-between">
-              <h3 className="text-sm font-medium text-[var(--text-primary,#F1F1F1)]">
-                {suggestion.title}
-              </h3>
-              <div className="flex gap-1.5">
-                <span
-                  className={`rounded px-1.5 py-0.5 text-xs ${categoryColors[suggestion.category] ?? "bg-white/10 text-white/60"}`}
+            <div className="flex items-start gap-3">
+              {/* Radio indicator */}
+              <div className="mt-0.5 flex-shrink-0">
+                <div
+                  className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors ${
+                    selectedIndex === idx
+                      ? "border-[var(--interactive)] bg-[var(--interactive)]"
+                      : "border-[var(--border)]"
+                  }`}
                 >
-                  {suggestion.category}
-                </span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-xs ${urgencyColors[suggestion.urgency] ?? "bg-white/10 text-white/60"}`}
-                >
-                  {suggestion.urgency}
-                </span>
+                  {selectedIndex === idx && (
+                    <div className="h-2 w-2 rounded-full bg-white" />
+                  )}
+                </div>
+              </div>
+
+              {/* Card content */}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1.5 flex items-start justify-between gap-2">
+                  <h3 className="text-base font-medium text-[var(--text-primary)]">
+                    {suggestion.title}
+                  </h3>
+                  <span
+                    className={`flex-shrink-0 rounded px-1.5 py-0.5 text-xs ${categoryColors[suggestion.category] ?? "bg-[var(--bg-subtle)] text-[var(--text-secondary)]"}`}
+                  >
+                    {suggestion.category}
+                  </span>
+                </div>
+                <p className="mb-1.5 text-sm text-[var(--text-secondary)]">
+                  {suggestion.description}
+                </p>
+                <p className="text-sm italic text-[var(--text-secondary)]">
+                  {suggestion.reason}
+                </p>
               </div>
             </div>
-            <p className="mb-1.5 text-sm text-[var(--text-secondary,#A1A1AA)]">
-              {suggestion.description}
-            </p>
-            <p className="text-xs italic text-[var(--text-tertiary,#6B7280)]">
-              {suggestion.reason}
-            </p>
-            {selectedIndex === idx && createGoalMutation.isPending && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-accent,#2E66FF)]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Creating goal...
-              </div>
-            )}
           </button>
-        ))
-      ) : (
-        /* Fallback: manual goal entry */
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--text-secondary,#A1A1AA)]">
-            Tell me what you'd like to accomplish first:
-          </p>
-          <div className="flex gap-3">
-            <input
-              value={manualTitle}
-              onChange={(e) => setManualTitle(e.target.value)}
-              placeholder="e.g. Build pipeline for Q3 targets"
-              className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-[var(--text-primary,#F1F1F1)] placeholder-[var(--text-tertiary,#6B7280)] outline-none transition focus:border-[var(--color-accent,#2E66FF)]"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void handleManualGoal();
-              }}
-            />
-            <button
-              onClick={() => void handleManualGoal()}
-              disabled={!manualTitle.trim() || createGoalMutation.isPending}
-              className="rounded-lg bg-[var(--color-accent,#2E66FF)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--color-accent,#2E66FF)]/90 disabled:opacity-40"
-            >
-              {createGoalMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Target className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div className={`onboarding-field-in onboarding-field-delay-${Math.min(suggestions.length, 5)} relative my-6 flex items-center`}>
+        <div className="flex-1 border-t border-[var(--border)]" />
+        <span className="px-4 text-sm text-[var(--text-secondary)]">
+          or set your own priority
+        </span>
+        <div className="flex-1 border-t border-[var(--border)]" />
+      </div>
+
+      {/* Free-form textarea */}
+      <div className={`onboarding-field-in onboarding-field-delay-${Math.min(suggestions.length + 1, 5)}`}>
+        <textarea
+          value={manualGoal}
+          onChange={(e) => {
+            setManualGoal(e.target.value);
+            setSelectedIndex(null);
+          }}
+          placeholder="Describe what you want ARIA to focus on first..."
+          rows={3}
+          disabled={createGoalMutation.isPending}
+          className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] outline-none transition focus:border-[var(--interactive)] focus:ring-1 focus:ring-[var(--interactive)]/30 disabled:opacity-60"
+        />
+      </div>
+
+      {/* Action buttons */}
+      <div className="mt-6 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onSkip}
+          disabled={createGoalMutation.isPending}
+          className="text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+        >
+          Skip for now
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={!canSubmit || createGoalMutation.isPending}
+          className="inline-flex items-center gap-2 rounded-lg bg-[var(--interactive)] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--interactive-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {createGoalMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            <>
+              Set Goal
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2167,7 +2202,10 @@ export function OnboardingPage() {
             )}
 
             {activeActionPanel === "first_goal" && (
-              <FirstGoalPanel onComplete={advanceFromResponse} />
+              <FirstGoalPanel
+                onComplete={advanceFromResponse}
+                onSkip={() => void handleSkip()}
+              />
             )}
 
             {currentStep === "activation" && (

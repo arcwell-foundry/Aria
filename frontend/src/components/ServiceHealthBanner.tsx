@@ -28,7 +28,7 @@ export function ServiceHealthBanner({ health }: ServiceHealthBannerProps) {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-40 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5"
+      className="fixed top-0 left-0 right-0 z-40 bg-[var(--warning)]/10 border-b border-[var(--warning)]/20 px-4 py-2.5"
       role="status"
       aria-live="polite"
       data-aria-id="service-health-banner"
@@ -36,18 +36,18 @@ export function ServiceHealthBanner({ health }: ServiceHealthBannerProps) {
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <AlertTriangle
-            className="w-4 h-4 text-amber-400 flex-shrink-0"
+            className="w-4 h-4 text-[var(--warning)] flex-shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
-          <p className="text-[13px] font-sans text-amber-200">
+          <p className="text-[13px] font-sans text-[var(--text-primary)]">
             ARIA is experiencing some delays with {serviceNames}. Core features still available.
           </p>
         </div>
 
         <button
           onClick={() => setIsDismissed(true)}
-          className="flex-shrink-0 p-1 rounded-md text-amber-300 hover:bg-amber-500/20 transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-500"
+          className="flex-shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--warning)]/20 transition-colors duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--warning)]"
           aria-label="Dismiss service health notification"
         >
           <X className="w-3.5 h-3.5" strokeWidth={2} />
