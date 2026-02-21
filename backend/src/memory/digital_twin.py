@@ -467,6 +467,13 @@ class DigitalTwin:
     querying and temporal tracking.
     """
 
+    # Default style guidelines returned when no user data exists
+    _DEFAULT_STYLE_GUIDELINES = (
+        "Write in a clear, professional tone.\n"
+        "Use straightforward language.\n"
+        "Keep sentences concise and readable."
+    )
+
     def __init__(self) -> None:
         """Initialize the DigitalTwin service."""
         self._analyzer = TextStyleAnalyzer()
@@ -486,6 +493,62 @@ class DigitalTwin:
             return await GraphitiClient.get_instance()
         except Exception as e:
             raise DigitalTwinError(f"Failed to get Graphiti client: {e}") from e
+
+    async def _get_style_guidelines_from_db(self, user_id: str) -> str | None:
+        """Fall back to DB-backed style data when Graphiti is unavailable.
+
+        Queries recipient_writing_profiles and digital_twin_profiles tables
+        to build style guidelines without the knowledge graph.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            Style guidelines string, or None if no DB data exists.
+        """
+        from src.db.supabase import SupabaseClient
+
+        try:
+            db = SupabaseClient.get_client()
+
+            # Try digital_twin_profiles first (general style)
+            result = (
+                db.table("digital_twin_profiles")
+                .select("tone, writing_style, vocabulary_patterns, formality_level")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if result and result.data:
+                row = result.data
+                lines = []
+                tone = row.get("tone", "professional")
+                formality = row.get("formality_level", "business")
+                writing_style = row.get("writing_style", "")
+
+                if writing_style:
+                    lines.append(f"Writing style: {writing_style}")
+                if tone:
+                    lines.append(f"Tone: {tone}")
+                if formality:
+                    lines.append(f"Formality level: {formality}")
+
+                if lines:
+                    logger.info(
+                        "[EMAIL_PIPELINE] Using DB-backed style guidelines for user %s",
+                        user_id,
+                    )
+                    return "\n".join(lines)
+
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] DB fallback for style guidelines failed for user %s: %s",
+                user_id,
+                e,
+            )
+
+        return None
 
     def _build_fingerprint_body(self, fingerprint: WritingStyleFingerprint) -> str:
         """Build a structured fingerprint body string for storage.
@@ -798,21 +861,36 @@ class DigitalTwin:
 
         Returns a multi-line string with style instructions that can
         be included in LLM prompts to generate style-matched content.
+        Falls back to DB-backed profiles when Graphiti is unavailable.
 
         Args:
             user_id: The user ID.
 
         Returns:
-            Style guidelines string.
+            Style guidelines string (never raises).
         """
-        fingerprint = await self.get_fingerprint(user_id)
+        fingerprint = None
+        try:
+            fingerprint = await self.get_fingerprint(user_id)
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] Graphiti unavailable for style guidelines, "
+                "using DB fallback for user %s: %s",
+                user_id,
+                e,
+            )
+            # Try DB fallback
+            db_guidelines = await self._get_style_guidelines_from_db(user_id)
+            if db_guidelines:
+                return db_guidelines
+            return self._DEFAULT_STYLE_GUIDELINES
 
         if not fingerprint:
-            return (
-                "Write in a clear, professional tone.\n"
-                "Use straightforward language.\n"
-                "Keep sentences concise and readable."
-            )
+            # No Graphiti data — try DB fallback before returning defaults
+            db_guidelines = await self._get_style_guidelines_from_db(user_id)
+            if db_guidelines:
+                return db_guidelines
+            return self._DEFAULT_STYLE_GUIDELINES
 
         lines = []
 
@@ -866,18 +944,28 @@ class DigitalTwin:
 
         Compares the features of generated text against the user's
         fingerprint to produce a similarity score.
+        Falls back gracefully when Graphiti is unavailable.
 
         Args:
             user_id: The user ID.
             generated_text: The text to score.
 
         Returns:
-            Similarity score from 0.0 to 1.0.
+            Similarity score from 0.0 to 1.0 (never raises).
         """
-        fingerprint = await self.get_fingerprint(user_id)
+        try:
+            fingerprint = await self.get_fingerprint(user_id)
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] Graphiti unavailable for style scoring, "
+                "returning default score for user %s: %s",
+                user_id,
+                e,
+            )
+            return 0.5  # Neutral default when scoring is unavailable
 
         if not fingerprint:
-            return 0.0
+            return 0.5  # Neutral default rather than 0.0 when no data exists
 
         scores: list[float] = []
 

@@ -70,7 +70,7 @@ class ProcessingRunResult:
     started_at: datetime
     completed_at: datetime | None = None
     emails_scanned: int = 0
-    emails_needing_reply: int = 0
+    emails_needs_reply: int = 0
     drafts: list[DraftResult] = field(default_factory=list)
     drafts_generated: int = 0
     drafts_failed: int = 0
@@ -181,12 +181,12 @@ Do not include any text outside the JSON object."""
             # 1. Scan inbox via EmailAnalyzer
             scan_result = await self._email_analyzer.scan_inbox(user_id, since_hours)
             result.emails_scanned = scan_result.total_emails
-            result.emails_needing_reply = len(scan_result.needs_reply)
+            result.emails_needs_reply = len(scan_result.needs_reply)
 
             logger.info(
                 "[EMAIL_PIPELINE] Stage: scan_complete | emails_scanned=%d | needs_reply=%d | fyi=%d | skipped=%d | run_id=%s",
                 result.emails_scanned,
-                result.emails_needing_reply,
+                result.emails_needs_reply,
                 len(scan_result.fyi),
                 len(scan_result.skipped),
                 run_id,
@@ -199,11 +199,11 @@ Do not include any text outside the JSON object."""
                     agent="scout",
                     activity_type="inbox_scanned",
                     title=f"Inbox scanned: {result.emails_scanned} emails",
-                    description=f"{result.emails_needing_reply} need attention, {len(scan_result.fyi)} FYI, {len(scan_result.skipped)} filtered",
+                    description=f"{result.emails_needs_reply} need attention, {len(scan_result.fyi)} FYI, {len(scan_result.skipped)} filtered",
                     confidence=0.95,
                     metadata={
                         "emails_scanned": result.emails_scanned,
-                        "needs_reply": result.emails_needing_reply,
+                        "needs_reply": result.emails_needs_reply,
                         "fyi_count": len(scan_result.fyi),
                         "filtered_count": len(scan_result.skipped),
                     },
@@ -339,7 +339,7 @@ Do not include any text outside the JSON object."""
             elif result.drafts_generated > 0:
                 result.status = "partial_failure"
             else:
-                if result.emails_needing_reply == 0:
+                if result.emails_needs_reply == 0:
                     result.status = "completed"
                 else:
                     result.status = "failed"
@@ -974,7 +974,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                     "started_at": started_at.isoformat(),
                     "status": "running",
                     "emails_scanned": 0,
-                    "emails_needing_reply": 0,
+                    "emails_needs_reply": 0,
                     "drafts_generated": 0,
                     "drafts_failed": 0,
                 }
@@ -1009,7 +1009,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                     result.completed_at.isoformat() if result.completed_at else datetime.now(UTC).isoformat()
                 ),
                 "emails_scanned": result.emails_scanned,
-                "emails_needing_reply": result.emails_needing_reply,
+                "emails_needs_reply": result.emails_needs_reply,
                 "drafts_generated": result.drafts_generated,
                 "drafts_failed": result.drafts_failed,
                 "status": result.status,

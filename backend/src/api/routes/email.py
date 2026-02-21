@@ -124,7 +124,7 @@ async def scan_inbox_now(
             user_id,
             run_result.run_id,
             run_result.emails_scanned,
-            run_result.emails_needing_reply,
+            run_result.emails_needs_reply,
             run_result.drafts_generated,
             run_result.drafts_failed,
             run_result.status,
@@ -189,7 +189,7 @@ async def scan_inbox_now(
 
         return {
             "total_emails": run_result.emails_scanned,
-            "needs_reply": run_result.emails_needing_reply,
+            "needs_reply": run_result.emails_needs_reply,
             "urgent": len([d for d in run_result.drafts if d.success]),
             "drafts_generated": run_result.drafts_generated,
             "drafts_failed": run_result.drafts_failed,
