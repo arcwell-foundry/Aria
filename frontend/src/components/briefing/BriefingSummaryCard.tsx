@@ -58,7 +58,7 @@ export function BriefingSummaryCard({
             className="text-sm font-medium"
             style={{ color: 'var(--text-primary)' }}
           >
-            Morning Briefing Complete
+            Briefing Complete
           </span>
         </div>
         <span

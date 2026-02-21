@@ -32,8 +32,10 @@ export function VideoBriefingCard({
     return 'Good evening';
   };
 
-  // Format topics preview
-  const topicsPreview = topics.slice(0, 3).join(', ') || 'Your daily briefing';
+  // Format topics preview — convert any snake_case to Title Case as safety net
+  const formatTopic = (topic: string) =>
+    topic.includes('_') ? topic.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : topic;
+  const topicsPreview = topics.slice(0, 3).map(formatTopic).join(', ') || 'Your daily briefing';
 
   return (
     <div
@@ -46,13 +48,6 @@ export function VideoBriefingCard({
     >
       {/* Header */}
       <div className="flex items-center gap-2 mb-2">
-        <span
-          className="text-2xl"
-          role="img"
-          aria-label="sun"
-        >
-          🌅
-        </span>
         <h2
           className="text-xl font-medium"
           style={{ color: 'var(--text-primary)' }}
@@ -99,7 +94,7 @@ export function VideoBriefingCard({
               className="text-sm font-medium"
               style={{ color: 'var(--text-primary)' }}
             >
-              {duration} min briefing ready
+              {duration > 0 ? `${duration} min briefing ready` : 'Briefing ready'}
             </span>
           </div>
           <p

@@ -56,7 +56,7 @@ export async function listActions(status?: ActionStatus, limit?: number): Promis
   if (limit) params.append("limit", limit.toString());
 
   const url = params.toString() ? `/actions?${params}` : "/actions";
-  const response = await apiClient.get<Action[]>(url);
+  const response = await apiClient.get<Action[]>(url, { headers: { "X-Background": "true" } });
   return response.data;
 }
 
@@ -90,7 +90,7 @@ export async function batchApproveActions(actionIds: string[]): Promise<BatchApp
 }
 
 export async function getPendingCount(): Promise<number> {
-  const response = await apiClient.get<{ count: number }>("/actions/pending-count");
+  const response = await apiClient.get<{ count: number }>("/actions/pending-count", { headers: { "X-Background": "true" } });
   return response.data.count;
 }
 

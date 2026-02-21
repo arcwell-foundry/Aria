@@ -69,10 +69,17 @@ export function getBackoffDelay(attempt: number, baseMs = 1000): number {
  * Handle a non-retryable API error by showing the appropriate
  * user-facing notification via the error event system.
  *
+ * Background/non-user-initiated requests (marked with X-Background: true header)
+ * will NOT show error toasts — only auth errors and network errors are shown
+ * since those affect the entire session.
+ *
  * Returns `true` when a notification was emitted so callers can
  * decide whether to add their own handling.
  */
 export function handleApiError(error: AxiosError): boolean {
+  // Check if this was a background request — suppress most toasts
+  const isBackground = error.config?.headers?.["X-Background"] === "true";
+
   if (error.response) {
     const { status } = error.response;
     const statusText = error.response.statusText || "Unknown error";
@@ -81,6 +88,11 @@ export function handleApiError(error: AxiosError): boolean {
       showError("auth", "Authentication required", "Please log in to continue.");
       redirectToLogin();
       return true;
+    }
+
+    // Suppress non-critical toasts for background fetches
+    if (isBackground) {
+      return false;
     }
 
     if (status === 429) {
@@ -116,7 +128,7 @@ export function handleApiError(error: AxiosError): boolean {
       return true;
     }
   } else if (error.request) {
-    // Request was made but no response received — network error
+    // Network errors affect the entire session — always show
     const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
     showError(
       "network",

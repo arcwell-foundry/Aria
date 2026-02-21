@@ -86,12 +86,18 @@ interface TodayBriefingResponse {
 // API functions
 export async function getTodayBriefing(regenerate = false): Promise<BriefingContent | null> {
   const params = regenerate ? "?regenerate=true" : "";
-  const response = await apiClient.get<TodayBriefingResponse>(`/briefings/today${params}`);
+  const response = await apiClient.get<TodayBriefingResponse>(
+    `/briefings/today${params}`,
+    { headers: { "X-Background": "true" } },
+  );
   return response.data.briefing;
 }
 
 export async function listBriefings(limit = 7): Promise<BriefingListItem[]> {
-  const response = await apiClient.get<BriefingListItem[]>(`/briefings?limit=${limit}`);
+  const response = await apiClient.get<BriefingListItem[]>(
+    `/briefings?limit=${limit}`,
+    { headers: { "X-Background": "true" } },
+  );
   return response.data;
 }
 
@@ -128,9 +134,12 @@ export interface BriefingActionItem {
   status: 'pending' | 'done';
 }
 
+// Background request config — suppresses error toasts for non-user-initiated fetches
+const backgroundConfig = { headers: { "X-Background": "true" } };
+
 // Video briefing API functions
 export async function getBriefingStatus(): Promise<BriefingStatusResponse> {
-  const response = await apiClient.get<BriefingStatusResponse>("/briefings/status");
+  const response = await apiClient.get<BriefingStatusResponse>("/briefings/status", backgroundConfig);
   return response.data;
 }
 
@@ -140,6 +149,6 @@ export async function markBriefingViewed(briefingId: string): Promise<BriefingVi
 }
 
 export async function getTextBriefing(briefingId: string): Promise<string> {
-  const response = await apiClient.get<string>(`/briefings/${briefingId}/text`);
-  return response.data;
+  const response = await apiClient.get<{ text: string; briefing_id: string }>(`/briefings/${briefingId}/text`, backgroundConfig);
+  return response.data.text;
 }

@@ -38,9 +38,18 @@ async def list_actions(
     """List actions in the queue.
 
     Returns a list of actions for the current user, optionally filtered by status.
+    Returns empty list on any service initialization or query failure.
     """
-    service = _get_service()
-    actions = await service.get_queue(current_user.id, status, limit)
+    try:
+        service = _get_service()
+        actions = await service.get_queue(current_user.id, status, limit)
+    except Exception:
+        logger.warning(
+            "Failed to list actions, returning empty list",
+            extra={"user_id": current_user.id},
+            exc_info=True,
+        )
+        return []
 
     logger.info(
         "Actions listed via API",
@@ -81,8 +90,16 @@ async def get_pending_count(
     current_user: CurrentUser,
 ) -> dict[str, int]:
     """Get count of pending actions for the current user."""
-    service = _get_service()
-    count = await service.get_pending_count(current_user.id)
+    try:
+        service = _get_service()
+        count = await service.get_pending_count(current_user.id)
+    except Exception:
+        logger.warning(
+            "Failed to get pending count, returning 0",
+            extra={"user_id": current_user.id},
+            exc_info=True,
+        )
+        return {"count": 0}
     return {"count": count}
 
 

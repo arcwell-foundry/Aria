@@ -39,6 +39,7 @@ export function ARIAWorkspace() {
   const streamingIdRef = useRef<string | null>(null);
   const conversationLoadedRef = useRef(false);
   const briefingInjectedRef = useRef(false);
+  const briefingGenerateCalledRef = useRef(false);
   const { data: briefing, isLoading: briefingLoading } = useTodayBriefing();
   const generateBriefing = useGenerateBriefing();
 
@@ -107,8 +108,9 @@ export function ARIAWorkspace() {
     if (briefingInjectedRef.current) return;
     if (briefingLoading) return;
 
-    // If no briefing exists yet, generate one
-    if (!briefing && !generateBriefing.isPending) {
+    // If no briefing exists yet, generate one (only once per session)
+    if (!briefing && !briefingGenerateCalledRef.current && !generateBriefing.isPending) {
+      briefingGenerateCalledRef.current = true;
       generateBriefing.mutate(undefined);
       return;
     }
@@ -117,10 +119,14 @@ export function ARIAWorkspace() {
 
     briefingInjectedRef.current = true;
 
+    // Time-appropriate greeting
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
     const store = useConversationStore.getState();
     store.addMessage({
       role: 'aria',
-      content: `Good morning. Here's your intelligence briefing for today.`,
+      content: `${greeting}. Here's your intelligence briefing for today.`,
       rich_content: [
         {
           type: 'briefing',
@@ -137,14 +143,14 @@ export function ARIAWorkspace() {
   // Wire up event listeners
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
-      const data = payload as AriaMessagePayload;
+      const data = (payload ?? {}) as Partial<AriaMessagePayload>;
       setStreaming(false);
 
       if (streamingIdRef.current) {
         updateMessageMetadata(streamingIdRef.current, {
-          rich_content: data.rich_content || [],
-          ui_commands: data.ui_commands || [],
-          suggestions: data.suggestions || [],
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
         });
         streamingIdRef.current = null;
         return;
@@ -152,10 +158,10 @@ export function ARIAWorkspace() {
 
       addMessage({
         role: 'aria',
-        content: data.message,
-        rich_content: data.rich_content || [],
-        ui_commands: data.ui_commands || [],
-        suggestions: data.suggestions || [],
+        content: data.message ?? '',
+        rich_content: data.rich_content ?? [],
+        ui_commands: data.ui_commands ?? [],
+        suggestions: data.suggestions ?? [],
       });
 
       if (data.suggestions?.length) {
@@ -168,20 +174,21 @@ export function ARIAWorkspace() {
     };
 
     const handleThinking = (payload: unknown) => {
-      const data = payload as AriaThinkingPayload;
+      const data = (payload ?? {}) as Partial<AriaThinkingPayload>;
       if (data.is_thinking) {
         setStreaming(true);
       }
     };
 
     const handleToken = (payload: unknown) => {
-      const data = payload as { content: string; full_content: string };
+      const data = (payload ?? {}) as Partial<{ content: string; full_content: string }>;
 
+      const tokenContent = data.content ?? '';
       if (!streamingIdRef.current) {
         const store = useConversationStore.getState();
         store.addMessage({
           role: 'aria',
-          content: data.content,
+          content: tokenContent,
           rich_content: [],
           ui_commands: [],
           suggestions: [],
@@ -191,35 +198,35 @@ export function ARIAWorkspace() {
         streamingIdRef.current = msgs[msgs.length - 1]?.id ?? null;
         setStreaming(true, streamingIdRef.current);
       } else {
-        appendToMessage(streamingIdRef.current, data.content);
+        appendToMessage(streamingIdRef.current, tokenContent);
       }
     };
 
     const handleMetadata = (payload: unknown) => {
-      const data = payload as {
+      const data = (payload ?? {}) as Partial<{
         message_id: string;
         rich_content: RichContent[];
         ui_commands: UICommand[];
         suggestions: string[];
-      };
+      }>;
 
       if (streamingIdRef.current) {
         updateMessageMetadata(streamingIdRef.current, {
-          rich_content: data.rich_content,
-          ui_commands: data.ui_commands,
-          suggestions: data.suggestions,
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
         });
       }
     };
 
     const handleStreamError = (payload: unknown) => {
-      const data = payload as StreamErrorPayload;
+      const data = (payload ?? {}) as Partial<StreamErrorPayload>;
       setStreaming(false);
       streamingIdRef.current = null;
 
       addMessage({
         role: 'system',
-        content: data.error,
+        content: data.error ?? 'An unexpected error occurred.',
         rich_content: [],
         ui_commands: [],
         suggestions: data.recoverable ? ['Try again'] : [],

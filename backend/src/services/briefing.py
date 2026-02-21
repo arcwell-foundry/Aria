@@ -338,13 +338,15 @@ class BriefingService:
             .select("*")
             .eq("user_id", user_id)
             .eq("briefing_date", briefing_date.isoformat())
-            .maybe_single()
+            .order("created_at", desc=True)
+            .limit(1)
             .execute()
         )
 
         if not result or not result.data:
             return None
-        return result.data if isinstance(result.data, dict) else None
+        row = result.data[0] if isinstance(result.data, list) and result.data else result.data
+        return row if isinstance(row, dict) else None
 
     @staticmethod
     def _briefing_cache_key(*args: Any, **kwargs: Any) -> str:
@@ -968,13 +970,24 @@ class BriefingService:
             meeting_count + attention_count + signal_count + overdue_count + email_count
         )
 
+        # Determine time-appropriate greeting
+        hour = datetime.now().hour
+        if hour < 12:
+            greeting = "Good morning"
+        elif hour < 17:
+            greeting = "Good afternoon"
+        else:
+            greeting = "Good evening"
+
         if total_activity == 0:
             prompt = (
-                "Generate a brief, friendly morning briefing summary (2-3 sentences) "
-                "for a new user who just started using the platform. They have no meetings, "
-                "leads, signals, or tasks yet. Welcome them warmly and encourage them to "
-                "explore the platform — add leads, connect their calendar, set goals. "
-                'Start with "Good morning!"'
+                "Generate a brief, professional briefing summary (2-3 sentences) "
+                "for a user whose intelligence feeds are still initializing. They have no meetings, "
+                "leads, signals, or tasks yet. Let them know ARIA is still building their "
+                "intelligence profile and encourage them to add leads, connect their calendar, "
+                "or set goals so ARIA can start working for them. "
+                "Do not use emojis. Use clean, professional language. "
+                f'Start with "{greeting}."'
             )
         else:
             debrief_note = (
@@ -987,7 +1000,7 @@ class BriefingService:
                 items = [qi.get("title", qi.get("message", "")) for qi in queued_insights[:5]]
                 queued_note = f"\nOvernight insights queued: {', '.join(items)}"
 
-            prompt = f"""Generate a brief, friendly morning briefing summary (2-3 sentences) based on:
+            prompt = f"""Generate a brief, professional briefing summary (2-3 sentences) based on:
 
 Calendar: {meeting_count} meetings today
 Leads needing attention: {attention_count}
@@ -996,7 +1009,7 @@ Overdue tasks: {overdue_count}
 Emails received: {email_count}
 Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}
 
-Be concise and actionable. Start with "Good morning!"
+Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
 """
 
         # Inject tone guidance if available
@@ -1215,8 +1228,15 @@ Be concise and actionable. Start with "Good morning!"
         # Build conversational script
         script_parts = []
 
-        # Opening greeting
-        script_parts.append(f"Good morning, {user_name}.")
+        # Opening greeting (time-appropriate)
+        hour = datetime.now().hour
+        if hour < 12:
+            video_greeting = "Good morning"
+        elif hour < 17:
+            video_greeting = "Good afternoon"
+        else:
+            video_greeting = "Good evening"
+        script_parts.append(f"{video_greeting}, {user_name}.")
 
         # Summary (the LLM-generated executive summary)
         summary = briefing.get("summary", "")
@@ -1410,8 +1430,10 @@ Be concise and actionable. Start with "Good morning!"
         # Generate the conversational briefing script
         briefing_script = await self.generate_video_briefing_context(user_id)
 
-        # Build custom greeting for briefing
-        custom_greeting = "Good morning! I have your daily briefing ready. Let me walk you through what's important today."
+        # Build custom greeting for briefing (time-appropriate)
+        _hour = datetime.now().hour
+        _greet = "Good morning" if _hour < 12 else ("Good afternoon" if _hour < 17 else "Good evening")
+        custom_greeting = f"{_greet}. I have your daily briefing ready. Let me walk you through what's important today."
 
         try:
             # Create video session via VideoSessionService

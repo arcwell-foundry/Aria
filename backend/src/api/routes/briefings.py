@@ -1,7 +1,7 @@
 """Briefing API routes for daily morning briefings."""
 
 import logging
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -101,20 +101,46 @@ async def get_briefing_status(
         if existing and isinstance(existing.get("content"), dict):
             briefing_content = existing["content"]
             topics: list[str] = []
-            # Extract topic names from briefing sections
-            for section in ("leads", "signals", "tasks"):
-                section_data = briefing_content.get(section, {})
-                if isinstance(section_data, dict):
-                    topics.extend(
-                        k for k in section_data if isinstance(k, str)
-                    )
+            # Extract meaningful topic names from briefing sections
+            leads_data = briefing_content.get("leads", {})
+            if isinstance(leads_data, dict):
+                hot_count = len(leads_data.get("hot_leads", []))
+                attention_count = len(leads_data.get("needs_attention", []))
+                if hot_count > 0:
+                    topics.append(f"{hot_count} hot lead{'s' if hot_count != 1 else ''}")
+                if attention_count > 0:
+                    topics.append(f"{attention_count} need{'s' if attention_count == 1 else ''} attention")
+
+            signals_data = briefing_content.get("signals", {})
+            if isinstance(signals_data, dict):
+                signal_total = sum(
+                    len(signals_data.get(k, []))
+                    for k in ("company_news", "market_trends", "competitive_intel")
+                )
+                if signal_total > 0:
+                    topics.append(f"{signal_total} market signal{'s' if signal_total != 1 else ''}")
+
+            tasks_data = briefing_content.get("tasks", {})
+            if isinstance(tasks_data, dict):
+                overdue_count = len(tasks_data.get("overdue", []))
+                if overdue_count > 0:
+                    topics.append(f"{overdue_count} overdue task{'s' if overdue_count != 1 else ''}")
+
+            calendar_data = briefing_content.get("calendar", {})
+            if isinstance(calendar_data, dict):
+                meeting_count = calendar_data.get("meeting_count", 0)
+                if meeting_count > 0:
+                    topics.append(f"{meeting_count} meeting{'s' if meeting_count != 1 else ''}")
+
+            if not topics:
+                topics.append("Your daily briefing")
 
             return {
                 "ready": True,
                 "viewed": existing.get("viewed", False),
                 "briefing_id": existing.get("id"),
                 "duration": 0,
-                "topics": topics[:10],
+                "topics": topics[:5],
             }
     except Exception:
         logger.warning(
@@ -150,6 +176,104 @@ async def list_briefings(
     )
 
     return [BriefingListResponse(**b) for b in briefings]
+
+
+@router.post("/{briefing_id}/view")
+async def mark_briefing_viewed(
+    current_user: CurrentUser,
+    briefing_id: str,
+) -> dict[str, Any]:
+    """Mark a briefing as viewed and return summary data.
+
+    Updates the viewed flag on the briefing and returns key points
+    and action items for the post-briefing summary card.
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Update viewed flag
+        db.table("daily_briefings").update(
+            {"viewed": True}
+        ).eq("id", briefing_id).eq("user_id", current_user.id).execute()
+
+        # Fetch the briefing content for summary
+        result = (
+            db.table("daily_briefings")
+            .select("content")
+            .eq("id", briefing_id)
+            .eq("user_id", current_user.id)
+            .maybe_single()
+            .execute()
+        )
+
+        content = result.data.get("content", {}) if result and result.data else {}
+        summary = content.get("summary", "") if isinstance(content, dict) else ""
+
+        return {
+            "key_points": [summary] if summary else ["Briefing reviewed"],
+            "action_items": [],
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+
+    except Exception:
+        logger.warning(
+            "Failed to mark briefing viewed",
+            extra={"user_id": current_user.id, "briefing_id": briefing_id},
+            exc_info=True,
+        )
+        return {
+            "key_points": [],
+            "action_items": [],
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+
+
+@router.get("/{briefing_id}/text")
+async def get_briefing_text(
+    current_user: CurrentUser,
+    briefing_id: str,
+) -> dict[str, Any]:
+    """Get the text version of a specific briefing.
+
+    Returns the summary text content of a briefing by its ID.
+    Used by the 'Read instead' option on the video briefing card.
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        result = (
+            db.table("daily_briefings")
+            .select("content")
+            .eq("id", briefing_id)
+            .eq("user_id", current_user.id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not result or not result.data:
+            raise HTTPException(status_code=404, detail="Briefing not found")
+
+        content = result.data.get("content", {})
+        summary = content.get("summary", "") if isinstance(content, dict) else ""
+
+        if not summary:
+            # Generate a text version from the briefing data
+            summary = "Your daily briefing is available. Check the dashboard for details."
+
+        return {"text": summary, "briefing_id": briefing_id}
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning(
+            "Failed to get briefing text",
+            extra={"user_id": current_user.id, "briefing_id": briefing_id},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=404, detail="Briefing not found")
 
 
 @router.get("/{briefing_date}", response_model=BriefingResponse)
