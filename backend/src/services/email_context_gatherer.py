@@ -244,11 +244,15 @@ class EmailContextGatherer:
             context.sources_used.append("crm")
 
         # 8. Persist to database
-        await self._save_context(context)
+        saved = await self._save_context(context)
+        if not saved:
+            # Clear the ID so callers know the context row doesn't exist in DB
+            context.id = ""
 
         logger.info(
-            "CONTEXT_GATHERER: Completed for email %s, sources used: %s",
+            "[EMAIL_PIPELINE] Stage: context_complete | email_id=%s | saved=%s | sources=%s",
             email_id,
+            saved,
             context.sources_used,
         )
 
@@ -1240,11 +1244,14 @@ Summary:"""
     # Persistence
     # ------------------------------------------------------------------
 
-    async def _save_context(self, context: DraftContext) -> None:
+    async def _save_context(self, context: DraftContext) -> bool:
         """Persist context to draft_context table.
 
         Args:
             context: The DraftContext to save.
+
+        Returns:
+            True if the context was saved successfully, False otherwise.
         """
         try:
             self._db.table("draft_context").insert(
@@ -1252,17 +1259,21 @@ Summary:"""
             ).execute()
 
             logger.info(
-                "CONTEXT_GATHERER: Saved context %s for email %s",
+                "[EMAIL_PIPELINE] Stage: context_saved | context_id=%s | email_id=%s",
                 context.id,
                 context.email_id,
             )
+            return True
 
         except Exception as e:
             logger.error(
-                "CONTEXT_GATHERER: Failed to save context: %s",
+                "[EMAIL_PIPELINE] Stage: context_save_failed | context_id=%s | email_id=%s | error=%s",
+                context.id,
+                context.email_id,
                 str(e),
                 exc_info=True,
             )
+            return False
 
     async def get_existing_context(
         self,

@@ -1,7 +1,9 @@
 """Graphiti client module for temporal knowledge graph operations."""
 
+import asyncio
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,7 +16,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_graphiti_circuit_breaker = CircuitBreaker("graphiti_neo4j")
+# Reduced thresholds: open circuit after 3 failures, recover after 60s
+_graphiti_circuit_breaker = CircuitBreaker(
+    "graphiti_neo4j", failure_threshold=3, recovery_timeout=60.0
+)
+
+# Maximum seconds to wait for Neo4j connection during initialization
+_NEO4J_INIT_TIMEOUT = 10.0
 
 
 class GraphitiClient:
@@ -26,6 +34,7 @@ class GraphitiClient:
 
     _instance: "Graphiti | None" = None
     _initialized: bool = False
+    _init_failed: bool = False
 
     @classmethod
     async def get_instance(cls) -> "Graphiti":
@@ -37,54 +46,102 @@ class GraphitiClient:
         Raises:
             GraphitiConnectionError: If client initialization fails.
         """
+        # Fast-fail if a previous initialization already failed — avoids
+        # repeated timeout waits on every call when Neo4j is down.
+        if cls._init_failed:
+            raise GraphitiConnectionError(
+                "Graphiti initialization previously failed; "
+                "call reset_client() to retry"
+            )
         if cls._instance is None:
             await cls._initialize()
         return cls._instance  # type: ignore[return-value]
 
     @classmethod
     async def _initialize(cls) -> None:
-        """Initialize the Graphiti client with Neo4j connection."""
-        if not settings.OPENAI_API_KEY.get_secret_value():
+        """Initialize the Graphiti client with Neo4j connection.
+
+        Fast-fails when OPENAI_API_KEY is missing or when Neo4j is
+        unreachable within ``_NEO4J_INIT_TIMEOUT`` seconds, preventing
+        the retry storm that would otherwise hang the server.
+        """
+        # Early bail-out: OPENAI_API_KEY is required for the embedder
+        openai_key = os.environ.get("OPENAI_API_KEY", "") or (
+            settings.OPENAI_API_KEY.get_secret_value()
+            if settings.OPENAI_API_KEY
+            else ""
+        )
+        if not openai_key:
+            cls._init_failed = True
             logger.warning(
-                "OPENAI_API_KEY not set — Graphiti/Neo4j embeddings will fail. Set this in .env"
+                "[EMAIL_PIPELINE] OPENAI_API_KEY not set, skipping Graphiti/Neo4j initialization"
+            )
+            raise GraphitiConnectionError(
+                "OPENAI_API_KEY not set — cannot initialize Graphiti embedder"
             )
 
         try:
-            from graphiti_core import Graphiti
-            from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
-            from graphiti_core.llm_client import LLMConfig
-            from graphiti_core.llm_client.anthropic_client import AnthropicClient
-
-            llm_client = AnthropicClient(
-                config=LLMConfig(
-                    api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
-                    model="claude-sonnet-4-20250514",
-                    small_model="claude-3-5-haiku-20241022",
-                )
+            await asyncio.wait_for(
+                cls._do_initialize(openai_key), timeout=_NEO4J_INIT_TIMEOUT
             )
-
-            embedder = OpenAIEmbedder(
-                config=OpenAIEmbedderConfig(
-                    api_key=settings.OPENAI_API_KEY.get_secret_value(),
-                    embedding_model="text-embedding-3-small",
-                )
+        except TimeoutError as exc:
+            cls._init_failed = True
+            cls._instance = None
+            cls._initialized = False
+            logger.warning(
+                "[EMAIL_PIPELINE] Neo4j connection timed out after %.0fs, "
+                "skipping graph operations",
+                _NEO4J_INIT_TIMEOUT,
             )
-
-            cls._instance = Graphiti(
-                uri=settings.NEO4J_URI,
-                user=settings.NEO4J_USER,
-                password=settings.NEO4J_PASSWORD.get_secret_value(),
-                llm_client=llm_client,
-                embedder=embedder,
-            )
-
-            await cls._instance.build_indices_and_constraints()
-            cls._initialized = True
-            logger.info("Graphiti client initialized successfully")
-
+            raise GraphitiConnectionError(
+                f"Neo4j connection timed out after {_NEO4J_INIT_TIMEOUT}s"
+            ) from exc
+        except GraphitiConnectionError:
+            cls._init_failed = True
+            raise
         except Exception as e:
-            logger.exception("Failed to initialize Graphiti client")
+            cls._init_failed = True
+            cls._instance = None
+            cls._initialized = False
+            logger.exception(
+                "[EMAIL_PIPELINE] Graphiti initialization failed: %s", e
+            )
             raise GraphitiConnectionError(str(e)) from e
+
+    @classmethod
+    async def _do_initialize(cls, openai_key: str) -> None:
+        """Inner initialization logic, called with a timeout wrapper."""
+        from graphiti_core import Graphiti
+        from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+        from graphiti_core.llm_client import LLMConfig
+        from graphiti_core.llm_client.anthropic_client import AnthropicClient
+
+        llm_client = AnthropicClient(
+            config=LLMConfig(
+                api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
+                model="claude-sonnet-4-20250514",
+                small_model="claude-3-5-haiku-20241022",
+            )
+        )
+
+        embedder = OpenAIEmbedder(
+            config=OpenAIEmbedderConfig(
+                api_key=openai_key,
+                embedding_model="text-embedding-3-small",
+            )
+        )
+
+        cls._instance = Graphiti(
+            uri=settings.NEO4J_URI,
+            user=settings.NEO4J_USER,
+            password=settings.NEO4J_PASSWORD.get_secret_value(),
+            llm_client=llm_client,
+            embedder=embedder,
+        )
+
+        await cls._instance.build_indices_and_constraints()
+        cls._initialized = True
+        logger.info("Graphiti client initialized successfully")
 
     @classmethod
     async def close(cls) -> None:
@@ -101,9 +158,10 @@ class GraphitiClient:
 
     @classmethod
     def reset_client(cls) -> None:
-        """Reset the client singleton (useful for testing)."""
+        """Reset the client singleton (useful for testing or retrying init)."""
         cls._instance = None
         cls._initialized = False
+        cls._init_failed = False
 
     @classmethod
     def is_initialized(cls) -> bool:
@@ -125,8 +183,11 @@ class GraphitiClient:
             return False
 
         try:
-            # Execute a simple query to verify connectivity
-            await cls._instance.driver.execute_query("RETURN 1 AS health")
+            # Execute a simple query to verify connectivity (5s timeout)
+            await asyncio.wait_for(
+                cls._instance.driver.execute_query("RETURN 1 AS health"),
+                timeout=5.0,
+            )
             return True
         except Exception as e:
             logger.warning(f"Graphiti health check failed: {e}")

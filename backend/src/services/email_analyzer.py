@@ -1134,21 +1134,31 @@ class EmailAnalyzer:
     def _extract_sender_email(email: dict[str, Any]) -> str:
         """Extract sender email address from various email dict formats.
 
+        Outlook normalization stores the address in 'sender_email', while
+        Gmail uses 'from' or 'sender'.  Check all known keys.
+
         Args:
             email: Raw email dict.
 
         Returns:
             The sender's email address (lowercased).
         """
-        sender = email.get("from", email.get("sender", ""))
-        if isinstance(sender, dict):
-            return sender.get("email", sender.get("address", "")).lower()
-        if isinstance(sender, str):
-            # Handle "Name <email>" format
-            match = re.search(r"<([^>]+)>", sender)
-            if match:
-                return match.group(1).lower()
-            return sender.lower()
+        # Check these keys in order — covers Gmail ('from'/'sender')
+        # and Outlook-normalized ('sender_email'/'from_email') formats
+        for key in ("from", "sender", "sender_email", "from_email"):
+            value = email.get(key)
+            if not value:
+                continue
+            if isinstance(value, dict):
+                addr = value.get("email", value.get("address", ""))
+                if addr:
+                    return addr.lower()
+            if isinstance(value, str) and value.strip():
+                # Handle "Name <email>" format
+                match = re.search(r"<([^>]+)>", value)
+                if match:
+                    return match.group(1).lower()
+                return value.strip().lower()
         return ""
 
     @staticmethod

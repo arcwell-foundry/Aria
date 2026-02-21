@@ -890,7 +890,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         body: str,
         original_email_id: str,
         thread_id: str,
-        context_id: str,
+        context_id: str | None,
         style_match_score: float,
         confidence_level: float,
         aria_notes: str,
@@ -900,6 +900,9 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
+
+        # Safety: only reference draft_context_id if the context was actually saved
+        safe_context_id = context_id if context_id else None
 
         insert_data = {
             "id": draft_id,
@@ -912,7 +915,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             "tone": "urgent" if urgency == "URGENT" else "friendly",
             "original_email_id": original_email_id,
             "thread_id": thread_id,
-            "draft_context_id": context_id,
+            "draft_context_id": safe_context_id,
             "style_match_score": style_match_score,
             "confidence_level": confidence_level,
             "aria_notes": aria_notes,
