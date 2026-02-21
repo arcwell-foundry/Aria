@@ -63,69 +63,89 @@ async def get_autonomy_status(
     Returns the current tier, recommended tier, selectable tiers,
     action statistics, and recent actions.
     """
-    calibration = get_autonomy_calibration_service()
-    action_service = ActionQueueService()
+    try:
+        calibration = get_autonomy_calibration_service()
+        action_service = ActionQueueService()
 
-    # Get current and recommended levels
-    recommended = await calibration.calculate_autonomy_level(current_user.id)
-    recommended_level = recommended["level"]
-    recommended_tier = LEVEL_TO_TIER.get(recommended_level, "guided")
+        # Get current and recommended levels
+        recommended = await calibration.calculate_autonomy_level(current_user.id)
+        recommended_level = recommended["level"]
+        recommended_tier = LEVEL_TO_TIER.get(recommended_level, "guided")
 
-    # Get current stored level
-    current_level = await calibration._get_autonomy_level(current_user.id)
-    current_tier = LEVEL_TO_TIER.get(current_level, "guided")
+        # Get current stored level
+        current_level = await calibration._get_autonomy_level(current_user.id)
+        current_tier = LEVEL_TO_TIER.get(current_level, "guided")
 
-    # Determine selectable tiers (lower or equal to recommended)
-    recommended_backend_level = TIER_TO_LEVEL.get(recommended_tier, 1)
-    can_select = [
-        tier for tier, level in TIER_TO_LEVEL.items()
-        if level <= recommended_backend_level
-    ]
+        # Determine selectable tiers (lower or equal to recommended)
+        recommended_backend_level = TIER_TO_LEVEL.get(recommended_tier, 1)
+        can_select = [
+            tier for tier, level in TIER_TO_LEVEL.items()
+            if level <= recommended_backend_level
+        ]
 
-    # Get action stats
-    stats = await calibration._get_action_stats(current_user.id)
-    total_actions = stats["total"]
-    approval_rate = (
-        stats["completed"] / total_actions if total_actions > 0 else 0.0
-    )
+        # Get action stats
+        stats = await calibration._get_action_stats(current_user.id)
+        total_actions = stats["total"]
+        approval_rate = (
+            stats["completed"] / total_actions if total_actions > 0 else 0.0
+        )
 
-    # Get recent actions
-    recent_actions = await action_service.get_queue(current_user.id, limit=10)
+        # Get recent actions
+        recent_actions = await action_service.get_queue(current_user.id, limit=10)
 
-    logger.info(
-        "Autonomy status retrieved",
-        extra={
-            "user_id": current_user.id,
+        logger.info(
+            "Autonomy status retrieved",
+            extra={
+                "user_id": current_user.id,
+                "current_tier": current_tier,
+                "recommended_tier": recommended_tier,
+            },
+        )
+
+        return {
+            "current_level": current_level,
             "current_tier": current_tier,
+            "recommended_level": recommended_level,
             "recommended_tier": recommended_tier,
-        },
-    )
-
-    return {
-        "current_level": current_level,
-        "current_tier": current_tier,
-        "recommended_level": recommended_level,
-        "recommended_tier": recommended_tier,
-        "can_select_tiers": can_select,
-        "stats": {
-            "total_actions": total_actions,
-            "approval_rate": round(approval_rate, 2),
-            "auto_executed": stats["completed"],
-            "rejected": stats["rejected"],
-        },
-        "recent_actions": [
-            {
-                "id": a.get("id", ""),
-                "title": a.get("title", ""),
-                "action_type": a.get("action_type", ""),
-                "risk_level": a.get("risk_level", ""),
-                "status": a.get("status", ""),
-                "agent": a.get("agent", ""),
-                "created_at": a.get("created_at", ""),
-            }
-            for a in recent_actions
-        ],
-    }
+            "can_select_tiers": can_select,
+            "stats": {
+                "total_actions": total_actions,
+                "approval_rate": round(approval_rate, 2),
+                "auto_executed": stats["completed"],
+                "rejected": stats["rejected"],
+            },
+            "recent_actions": [
+                {
+                    "id": a.get("id", ""),
+                    "title": a.get("title", ""),
+                    "action_type": a.get("action_type", ""),
+                    "risk_level": a.get("risk_level", ""),
+                    "status": a.get("status", ""),
+                    "agent": a.get("agent", ""),
+                    "created_at": a.get("created_at", ""),
+                }
+                for a in recent_actions
+            ],
+        }
+    except Exception:
+        logger.exception(
+            "Failed to retrieve autonomy status, returning defaults",
+            extra={"user_id": current_user.id},
+        )
+        return {
+            "current_level": 1,
+            "current_tier": "guided",
+            "recommended_level": 1,
+            "recommended_tier": "guided",
+            "can_select_tiers": ["guided"],
+            "stats": {
+                "total_actions": 0,
+                "approval_rate": 0.0,
+                "auto_executed": 0,
+                "rejected": 0,
+            },
+            "recent_actions": [],
+        }
 
 
 @router.post("/level")

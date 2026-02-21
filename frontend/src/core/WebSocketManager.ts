@@ -123,7 +123,10 @@ class WebSocketManagerImpl {
 
       if (this.intentionalDisconnect) return;
 
-      if (event.code >= 4000 && event.code < 5000) {
+      // Auth failures (1008 policy violation) and custom app codes (4xxx)
+      // should immediately fall back to SSE — retrying won't help.
+      if (event.code === 1008 || (event.code >= 4000 && event.code < 5000)) {
+        console.debug(`[WebSocketManager] Auth/policy close (code=${event.code}), falling back to SSE`);
         this.fallbackToSSE();
         return;
       }

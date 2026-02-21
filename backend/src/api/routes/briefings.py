@@ -85,6 +85,53 @@ async def get_today_briefing(
     return {"briefing": None, "status": "not_generated"}
 
 
+@router.get("/status")
+async def get_briefing_status(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get the current briefing status for the user.
+
+    Returns whether a briefing is ready, whether it has been viewed,
+    and metadata about the briefing. Used by the dashboard on page load.
+    """
+    try:
+        service = BriefingService()
+        existing = await service.get_briefing(current_user.id)
+
+        if existing and isinstance(existing.get("content"), dict):
+            briefing_content = existing["content"]
+            topics: list[str] = []
+            # Extract topic names from briefing sections
+            for section in ("leads", "signals", "tasks"):
+                section_data = briefing_content.get(section, {})
+                if isinstance(section_data, dict):
+                    topics.extend(
+                        k for k in section_data if isinstance(k, str)
+                    )
+
+            return {
+                "ready": True,
+                "viewed": existing.get("viewed", False),
+                "briefing_id": existing.get("id"),
+                "duration": 0,
+                "topics": topics[:10],
+            }
+    except Exception:
+        logger.warning(
+            "Failed to fetch briefing status",
+            extra={"user_id": current_user.id},
+            exc_info=True,
+        )
+
+    return {
+        "ready": False,
+        "viewed": False,
+        "briefing_id": None,
+        "duration": 0,
+        "topics": [],
+    }
+
+
 @router.get("", response_model=list[BriefingListResponse])
 async def list_briefings(
     current_user: CurrentUser,

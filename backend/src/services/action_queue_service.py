@@ -320,19 +320,27 @@ class ActionQueueService:
         Returns:
             List of action dicts ordered by created_at desc.
         """
-        query = self._db.table("aria_action_queue").select("*").eq("user_id", user_id)
+        try:
+            query = self._db.table("aria_action_queue").select("*").eq("user_id", user_id)
 
-        if status:
-            query = query.eq("status", status)
+            if status:
+                query = query.eq("status", status)
 
-        result = query.order("created_at", desc=True).limit(limit).execute()
+            result = query.order("created_at", desc=True).limit(limit).execute()
 
-        actions = cast(list[dict[str, Any]], result.data)
-        logger.info(
-            "Action queue retrieved",
-            extra={"user_id": user_id, "count": len(actions)},
-        )
-        return actions
+            actions = cast(list[dict[str, Any]], result.data or [])
+            logger.info(
+                "Action queue retrieved",
+                extra={"user_id": user_id, "count": len(actions)},
+            )
+            return actions
+        except Exception:
+            logger.warning(
+                "Failed to fetch action queue, returning empty list",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            return []
 
     async def get_action(
         self,

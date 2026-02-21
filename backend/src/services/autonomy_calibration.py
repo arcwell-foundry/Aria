@@ -284,7 +284,7 @@ class AutonomyCalibrationService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .single()
+                .maybe_single()
                 .execute()
             )
             if result.data:
@@ -311,7 +311,7 @@ class AutonomyCalibrationService:
                 self._db.table("user_profiles")
                 .select("created_at")
                 .eq("user_id", user_id)
-                .single()
+                .maybe_single()
                 .execute()
             )
             if result.data and result.data.get("created_at"):
