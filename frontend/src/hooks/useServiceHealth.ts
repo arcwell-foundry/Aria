@@ -105,9 +105,14 @@ export function useServiceHealth(enabled = true): ServiceHealthState {
 /**
  * Format degraded service names into a human-readable string.
  * e.g. { neo4j: "degraded", tavus: "down" } → "Neo4j, Tavus"
+ * Returns "some services" as fallback if the map is empty.
  */
 export function formatDegradedServices(services: Record<string, string>): string {
-  return Object.keys(services)
+  const names = Object.keys(services);
+  if (names.length === 0) {
+    return "some services";
+  }
+  return names
     .map((name) => name.charAt(0).toUpperCase() + name.slice(1))
     .join(", ");
 }

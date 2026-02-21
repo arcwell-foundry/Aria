@@ -1238,40 +1238,50 @@ async def activate_aria(
         }
     ).eq("user_id", user_id).execute()
 
-    logger.info("ARIA activated for user %s", user_id)
+    logger.info("[AGENT_DEPLOY] Stage: activated | user=%s", user_id)
 
     # Fire all post-activation work as non-blocking background tasks
     async def _run_post_activation(uid: str, onboarding_data: dict[str, Any]) -> None:
         """Run all post-activation pipelines, catching errors individually."""
+        logger.info("[AGENT_DEPLOY] Stage: personality_calibration_start | user=%s", uid)
         try:
             from src.onboarding.personality_calibrator import PersonalityCalibrator
 
             await PersonalityCalibrator().calibrate(uid)
+            logger.info("[AGENT_DEPLOY] Stage: personality_calibration_done | user=%s", uid)
         except Exception as e:
-            logger.warning("Personality calibration failed: %s", e)
+            logger.warning("[AGENT_DEPLOY] Stage: personality_calibration_failed | user=%s | error=%s", uid, e)
 
+        logger.info("[AGENT_DEPLOY] Stage: memory_construction_start | user=%s", uid)
         try:
             from src.onboarding.memory_constructor import MemoryConstructionOrchestrator
 
             await MemoryConstructionOrchestrator().run_construction(uid)
+            logger.info("[AGENT_DEPLOY] Stage: memory_construction_done | user=%s", uid)
         except Exception as e:
-            logger.warning("Memory construction failed: %s", e)
+            logger.warning("[AGENT_DEPLOY] Stage: memory_construction_failed | user=%s | error=%s", uid, e)
 
         # Create agent activation goals BEFORE running the pipeline that executes them
+        logger.info("[AGENT_DEPLOY] Stage: goal_creation_start | user=%s", uid)
         try:
             from src.onboarding.activation import OnboardingCompletionOrchestrator
 
             activator = OnboardingCompletionOrchestrator()
             await activator.activate(uid, onboarding_data)
+            logger.info("[AGENT_DEPLOY] Stage: goal_creation_done | user=%s", uid)
         except Exception as e:
-            logger.warning("Agent activation (goal creation) failed: %s", e)
+            logger.warning("[AGENT_DEPLOY] Stage: goal_creation_failed | user=%s | error=%s", uid, e)
 
+        logger.info("[AGENT_DEPLOY] Stage: post_activation_pipeline_start | user=%s", uid)
         try:
             from src.onboarding.activation import OnboardingCompletionOrchestrator
 
             await OnboardingCompletionOrchestrator().run_post_activation_pipeline(uid)
+            logger.info("[AGENT_DEPLOY] Stage: post_activation_pipeline_done | user=%s", uid)
         except Exception as e:
-            logger.warning("Post-activation pipeline failed: %s", e)
+            logger.warning("[AGENT_DEPLOY] Stage: post_activation_pipeline_failed | user=%s | error=%s", uid, e)
+
+        logger.info("[AGENT_DEPLOY] Stage: all_background_tasks_complete | user=%s", uid)
 
     asyncio.create_task(_run_post_activation(user_id, state.get("step_data", {})))
 
@@ -1421,8 +1431,28 @@ async def get_activation_status(
             overall = "running"
         elif statuses == {"complete"}:
             overall = "complete"
+        elif statuses <= {"complete", "failed"}:
+            # All finished (mix of complete/failed) — treat as complete
+            overall = "complete"
         elif "pending" in statuses:
             overall = "pending"
+    else:
+        # No activation goals yet — check if onboarding is complete.
+        # If so, background tasks are still creating goals → return "pending"
+        # to keep the frontend polling.
+        state = (
+            db.table("onboarding_state")
+            .select("completed_at")
+            .eq("user_id", current_user.id)
+            .maybe_single()
+            .execute()
+        )
+        if state and state.data and state.data.get("completed_at"):
+            overall = "pending"
+            logger.info(
+                "[AGENT_DEPLOY] Stage: awaiting_goal_creation | user=%s",
+                current_user.id,
+            )
 
     return {"status": overall, "activations": activations}
 

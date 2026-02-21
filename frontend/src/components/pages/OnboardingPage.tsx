@@ -1662,7 +1662,7 @@ function ActivationPanel({
 }) {
   const activateMutation = useActivateAria();
   const enrichment = useEnrichmentStatus(true);
-  const activation = useActivationStatus(true);
+  const activation = useActivationStatus(activateMutation.isSuccess);
   const hasTriggered = useRef(false);
   const hasCompleted = useRef(false);
 
@@ -1675,20 +1675,57 @@ function ActivationPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Timeout fallback: if activation takes > 30s after the POST succeeds,
+  // navigate to dashboard anyway — background tasks will continue.
+  useEffect(() => {
+    if (!activateMutation.isSuccess) return;
+    const timer = setTimeout(() => {
+      if (!hasCompleted.current) {
+        hasCompleted.current = true;
+        onReady();
+      }
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [activateMutation.isSuccess, onReady]);
+
   const enrichmentDone = enrichment.isComplete;
-  const activationDone = activation.data?.status === "complete";
+  // Activation is done when status is "complete", OR when the POST succeeded
+  // and there are simply no activation goals (status stays "idle")
+  const activationStatus = activation.data?.status;
+  const activationDone =
+    activationStatus === "complete" ||
+    (activateMutation.isSuccess && activationStatus === "idle" && enrichmentDone);
   const allDone = enrichmentDone && activationDone;
+
+  // Also consider activation "effectively done" when the POST succeeded
+  // and we've been polling for a while without any goals appearing
+  const activateMutationDone = activateMutation.isSuccess;
 
   // Derive progress
   let progress = 10;
   let statusText = "Enriching company data...";
 
-  if (enrichmentDone && !activationDone) {
-    progress = 60;
-    statusText = "Deploying agents...";
-  } else if (allDone) {
+  if (allDone) {
     progress = 100;
     statusText = "Almost ready...";
+  } else if (enrichmentDone && activateMutationDone) {
+    // POST succeeded, enrichment done, waiting on agent goals
+    const agentProgress = activation.data?.activations?.length
+      ? Math.max(
+          60,
+          Math.min(
+            95,
+            60 +
+              (activation.data.activations.filter(
+                (a) => a.status === "complete",
+              ).length /
+                Math.max(activation.data.activations.length, 1)) *
+                35,
+          ),
+        )
+      : 70;
+    progress = agentProgress;
+    statusText = "Deploying agents...";
   } else if (enrichment.isInProgress) {
     progress = 35;
     statusText = "Enriching company data...";

@@ -8,7 +8,9 @@ export const activationKeys = {
 
 /**
  * Poll activation status after onboarding completes.
- * Polls every 10s while any agents are still pending/running.
+ * Polls every 3s while agents are idle/pending/running.
+ * "idle" means the background task hasn't created goals yet — keep polling.
+ * Stops only when status is "complete" or "failed".
  */
 export function useActivationStatus(enabled = true) {
   return useQuery({
@@ -17,10 +19,11 @@ export function useActivationStatus(enabled = true) {
     enabled,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "pending" || status === "running") {
-        return 10_000;
+      if (status === "complete") {
+        return false;
       }
-      return false;
+      // Keep polling for idle/pending/running — goals may not exist yet
+      return 3_000;
     },
   });
 }
