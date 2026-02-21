@@ -1,20 +1,20 @@
-"""Email API routes for inbox scanning and urgency detection.
+"""Email API routes for inbox scanning, draft generation, and urgency detection.
 
 Provides endpoints for:
-- Manual inbox scan trigger
+- Manual inbox scan trigger with full draft pipeline
 - Real-time urgent email notifications
+- Email bootstrap trigger for memory/digital twin population
 """
 
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.services.email_analyzer import EmailAnalyzer
-from src.services.realtime_email_notifier import get_realtime_email_notifier
+from src.services.autonomous_draft_engine import get_autonomous_draft_engine
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,10 @@ class ScanInboxResponse(BaseModel):
     total_emails: int = Field(..., description="Total emails scanned")
     needs_reply: int = Field(..., description="Emails needing a reply")
     urgent: int = Field(..., description="Urgent emails found")
+    drafts_generated: int = Field(0, description="Draft replies generated")
+    drafts_failed: int = Field(0, description="Draft generation failures")
+    run_id: str | None = Field(None, description="Processing run ID for tracking")
+    run_status: str | None = Field(None, description="Processing run final status")
     urgent_emails: list[UrgentEmailInfo] = Field(
         default_factory=list,
         description="Details of urgent emails",
@@ -61,6 +65,7 @@ class ScanInboxResponse(BaseModel):
 @router.post("/scan-now", response_model=ScanInboxResponse)
 async def scan_inbox_now(
     current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
     since_hours: int = Query(
         24,
         ge=1,
@@ -69,33 +74,31 @@ async def scan_inbox_now(
     ),
     generate_drafts: bool = Query(
         True,
-        description="Whether to generate draft replies for urgent emails",
+        description="Whether to generate draft replies for NEEDS_REPLY emails",
     ),
     notify: bool = Query(
         True,
         description="Whether to send real-time notifications for urgent emails",
     ),
 ) -> dict[str, Any]:
-    """Trigger immediate inbox scan and return results.
+    """Trigger immediate inbox scan with full draft generation pipeline.
 
-    This endpoint is used when:
-    - User explicitly requests "ARIA, check my email"
-    - User clicks a refresh button in the UI
-    - Manual periodic check is needed
-
-    For each urgent email found:
-    1. Generate draft reply (if generate_drafts=True)
-    2. Save draft to email client (Gmail/Outlook)
-    3. Send real-time WebSocket notification (if notify=True and user active)
+    This endpoint runs the complete email pipeline:
+    1. Scan inbox and categorize emails (NEEDS_REPLY / FYI / SKIP)
+    2. For each NEEDS_REPLY email: gather context, generate draft, save
+    3. Track the processing run with counters and timing
+    4. Send real-time notifications for urgent emails
+    5. Trigger bootstrap enrichment for memory/digital twin (background)
 
     Args:
         current_user: The authenticated user.
+        background_tasks: FastAPI background tasks for bootstrap.
         since_hours: How many hours of history to scan (1-168).
         generate_drafts: Whether to generate draft replies.
         notify: Whether to send real-time notifications.
 
     Returns:
-        ScanInboxResponse with scan results and urgent email details.
+        ScanInboxResponse with scan results, draft stats, and urgent email details.
 
     Raises:
         HTTPException: If scan fails due to integration or API errors.
@@ -104,69 +107,94 @@ async def scan_inbox_now(
     scanned_at = datetime.now(UTC).isoformat()
 
     logger.info(
-        "EMAIL_API: Manual inbox scan requested by user %s (since %d hours)",
+        "[EMAIL_PIPELINE] Stage: scan_requested | user_id=%s | since_hours=%d | generate_drafts=%s",
         user_id,
         since_hours,
+        generate_drafts,
     )
 
     try:
-        # Scan inbox via EmailAnalyzer
-        analyzer = EmailAnalyzer()
-        result = await analyzer.scan_inbox(user_id, since_hours=since_hours)
+        # Run the FULL draft engine pipeline (scan + context + draft + save)
+        engine = get_autonomous_draft_engine()
+        run_result = await engine.process_inbox(user_id, since_hours=since_hours)
 
         logger.info(
-            "EMAIL_API: Scan complete for user %s - %d total, %d needs_reply, %d urgent",
+            "[EMAIL_PIPELINE] Stage: pipeline_complete | user_id=%s | run_id=%s | "
+            "emails_scanned=%d | needs_reply=%d | drafts_generated=%d | drafts_failed=%d | status=%s",
             user_id,
-            result.total_emails,
-            len(result.needs_reply),
-            len(result.urgent),
+            run_result.run_id,
+            run_result.emails_scanned,
+            run_result.emails_needing_reply,
+            run_result.drafts_generated,
+            run_result.drafts_failed,
+            run_result.status,
         )
 
-        # Build response with urgent email details
+        # Process urgent email notifications separately
         urgent_emails: list[dict[str, Any]] = []
         notifications_sent = 0
 
-        if result.urgent:
-            # Process urgent emails with notifications and drafts
-            if notify:
-                notifier = get_realtime_email_notifier()
-                notifications = await notifier.process_and_notify(
-                    user_id=user_id,
-                    urgent_emails=result.urgent,
-                    generate_drafts=generate_drafts,
-                )
-                notifications_sent = len(notifications)
+        # Build urgent email info from drafts that were for urgent emails
+        urgent_drafts = [d for d in run_result.drafts if d.success]
+        for draft in urgent_drafts:
+            urgent_emails.append({
+                "email_id": draft.original_email_id,
+                "sender": draft.recipient_name or draft.recipient_email,
+                "sender_email": draft.recipient_email,
+                "subject": draft.subject,
+                "urgency": "NORMAL",
+                "topic_summary": f"Draft reply generated (confidence: {draft.confidence_level:.0%})",
+                "reason": draft.aria_notes[:200] if draft.aria_notes else "Draft generated",
+                "draft_id": draft.draft_id,
+            })
 
-                # Build urgent email info from notifications
-                for notification in notifications:
-                    urgent_emails.append({
-                        "email_id": notification.email_id,
-                        "sender": notification.sender_name,
-                        "sender_email": notification.sender_email,
-                        "subject": notification.subject,
-                        "urgency": "URGENT",
-                        "topic_summary": notification.topic_summary,
-                        "reason": notification.urgency_reason,
-                        "draft_id": notification.draft_id,
-                    })
-            else:
-                # Just build info from email categories
-                for email in result.urgent:
-                    urgent_emails.append({
-                        "email_id": email.email_id,
-                        "sender": email.sender_name,
-                        "sender_email": email.sender_email,
-                        "subject": email.subject,
-                        "urgency": email.urgency,
-                        "topic_summary": email.topic_summary,
-                        "reason": email.reason,
-                        "draft_id": None,
-                    })
+        # Send real-time notifications for urgent emails if requested
+        if notify and urgent_drafts:
+            try:
+                from src.core.ws import ws_manager
+
+                if ws_manager.is_connected(user_id):
+                    for draft in urgent_drafts:
+                        try:
+                            await ws_manager.send_aria_message(
+                                user_id=user_id,
+                                message=f"Drafted reply to {draft.recipient_name or draft.recipient_email}: {draft.subject}",
+                                rich_content=[{
+                                    "type": "email_draft",
+                                    "draft_id": draft.draft_id,
+                                    "recipient": draft.recipient_email,
+                                    "subject": draft.subject,
+                                    "confidence": draft.confidence_level,
+                                }],
+                                suggestions=["Review draft", "Edit draft", "Send now"],
+                            )
+                            notifications_sent += 1
+                        except Exception as e:
+                            logger.warning(
+                                "[EMAIL_PIPELINE] Stage: notification_failed | draft_id=%s | error=%s",
+                                draft.draft_id,
+                                e,
+                            )
+            except Exception as e:
+                logger.error(
+                    "[EMAIL_PIPELINE] Stage: notifications_failed | user_id=%s | error=%s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
+
+        # Trigger bootstrap enrichment in the background if drafts were generated
+        if run_result.emails_scanned > 0:
+            background_tasks.add_task(_run_email_bootstrap, user_id)
 
         return {
-            "total_emails": result.total_emails,
-            "needs_reply": len(result.needs_reply),
-            "urgent": len(result.urgent),
+            "total_emails": run_result.emails_scanned,
+            "needs_reply": run_result.emails_needing_reply,
+            "urgent": len([d for d in run_result.drafts if d.success]),
+            "drafts_generated": run_result.drafts_generated,
+            "drafts_failed": run_result.drafts_failed,
+            "run_id": run_result.run_id,
+            "run_status": run_result.status,
             "urgent_emails": urgent_emails,
             "scanned_at": scanned_at,
             "notifications_sent": notifications_sent,
@@ -174,7 +202,7 @@ async def scan_inbox_now(
 
     except Exception as e:
         logger.error(
-            "EMAIL_API: Inbox scan failed for user %s: %s",
+            "[EMAIL_PIPELINE] Stage: pipeline_failed | user_id=%s | error=%s",
             user_id,
             e,
             exc_info=True,
@@ -389,6 +417,108 @@ async def get_scan_decisions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve scan decisions. Please try again.",
+        ) from e
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap Trigger
+# ---------------------------------------------------------------------------
+
+
+async def _run_email_bootstrap(user_id: str) -> None:
+    """Run email bootstrap enrichment in the background.
+
+    Populates memory_semantic and digital_twin_profiles from email data.
+    Safe to call multiple times — bootstrap is idempotent.
+    """
+    try:
+        from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+        logger.info(
+            "[EMAIL_PIPELINE] Stage: bootstrap_started | user_id=%s",
+            user_id,
+        )
+        ingestion = PriorityEmailIngestion()
+        result = await ingestion.run_bootstrap(user_id)
+        logger.info(
+            "[EMAIL_PIPELINE] Stage: bootstrap_complete | user_id=%s | "
+            "contacts=%d | threads=%d | writing_samples=%d",
+            user_id,
+            result.contacts_discovered,
+            result.active_threads,
+            result.writing_samples_extracted,
+        )
+    except Exception as e:
+        logger.error(
+            "[EMAIL_PIPELINE] Stage: bootstrap_failed | user_id=%s | error=%s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+
+
+@router.post("/bootstrap", response_model=dict[str, Any])
+async def trigger_email_bootstrap(current_user: CurrentUser) -> dict[str, Any]:
+    """Trigger email bootstrap enrichment independently.
+
+    Processes the last 60 days of sent emails to populate:
+    - memory_semantic with contacts and deal threads
+    - digital_twin writing style fingerprint
+    - recipient_writing_profiles per-contact styles
+    - Communication patterns
+
+    This runs synchronously and returns results.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        Dict with bootstrap results.
+
+    Raises:
+        HTTPException: If bootstrap fails.
+    """
+    user_id = current_user.id
+
+    logger.info(
+        "[EMAIL_PIPELINE] Stage: bootstrap_manual_trigger | user_id=%s",
+        user_id,
+    )
+
+    try:
+        from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+        ingestion = PriorityEmailIngestion()
+        result = await ingestion.run_bootstrap(user_id)
+
+        logger.info(
+            "[EMAIL_PIPELINE] Stage: bootstrap_manual_complete | user_id=%s | "
+            "contacts=%d | threads=%d | writing_samples=%d",
+            user_id,
+            result.contacts_discovered,
+            result.active_threads,
+            result.writing_samples_extracted,
+        )
+
+        return {
+            "success": True,
+            "emails_processed": result.emails_processed,
+            "contacts_discovered": result.contacts_discovered,
+            "active_threads": result.active_threads,
+            "commitments_detected": result.commitments_detected,
+            "writing_samples_extracted": result.writing_samples_extracted,
+        }
+
+    except Exception as e:
+        logger.error(
+            "[EMAIL_PIPELINE] Stage: bootstrap_manual_failed | user_id=%s | error=%s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to run email bootstrap. Please try again.",
         ) from e
 
 

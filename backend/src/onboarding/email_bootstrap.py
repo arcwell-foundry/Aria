@@ -973,6 +973,9 @@ class PriorityEmailIngestion:
     async def _refine_writing_style(self, user_id: str, samples: list[str]) -> None:
         """Refine Digital Twin writing style with email data.
 
+        Stores fingerprint in both user_settings (for the writing analysis service)
+        and digital_twin_profiles table (for direct queries).
+
         Args:
             user_id: User whose style to refine.
             samples: Raw email body text samples.
@@ -987,12 +990,15 @@ class PriorityEmailIngestion:
             from src.onboarding.writing_analysis import WritingAnalysisService
 
             service = WritingAnalysisService()
-            await service.analyze_samples(user_id, samples)
+            fingerprint = await service.analyze_samples(user_id, samples)
             logger.info(
                 "EMAIL_BOOTSTRAP: Writing style refined for user %s with %d samples",
                 user_id,
                 len(samples),
             )
+
+            # Also populate digital_twin_profiles table
+            await self._upsert_digital_twin_profile(user_id, fingerprint, samples)
 
             # Verify writing style was stored
             stored = await self._verify_writing_style_stored(user_id)
@@ -1012,6 +1018,81 @@ class PriorityEmailIngestion:
                 user_id,
                 e,
                 exc_info=True,
+            )
+
+    async def _upsert_digital_twin_profile(
+        self,
+        user_id: str,
+        fingerprint: Any,
+        samples: list[str],
+    ) -> None:
+        """Upsert a row in digital_twin_profiles from analyzed writing data.
+
+        Args:
+            user_id: The user's ID.
+            fingerprint: WritingStyleFingerprint from analysis (or None).
+            samples: Raw writing samples used.
+        """
+        try:
+            # Determine formality level from fingerprint
+            formality_level = "business"
+            tone = "professional"
+            writing_style_summary = ""
+            vocabulary_patterns = ""
+
+            if fingerprint and hasattr(fingerprint, "formality_index"):
+                score = fingerprint.formality_index
+                if score < 0.3:
+                    formality_level = "casual"
+                elif score < 0.6:
+                    formality_level = "business"
+                elif score < 0.8:
+                    formality_level = "formal"
+                else:
+                    formality_level = "academic"
+
+                tone = getattr(fingerprint, "vocabulary_sophistication", "moderate")
+                writing_style_summary = (
+                    f"Avg sentence length: {getattr(fingerprint, 'avg_sentence_length', 0):.1f}, "
+                    f"Opening: {getattr(fingerprint, 'opening_style', 'N/A')}, "
+                    f"Closing: {getattr(fingerprint, 'closing_style', 'N/A')}, "
+                    f"Emoji: {getattr(fingerprint, 'emoji_usage', 'never')}, "
+                    f"Directness: {getattr(fingerprint, 'directness', 0.5):.1f}"
+                )
+                style_summary = getattr(fingerprint, "style_summary", "")
+                if style_summary:
+                    writing_style_summary = style_summary
+                vocabulary_patterns = (
+                    f"sophistication={tone}, "
+                    f"rhetorical={getattr(fingerprint, 'rhetorical_style', 'balanced')}, "
+                    f"hedging={getattr(fingerprint, 'hedging_frequency', 'moderate')}"
+                )
+
+            self._db.table("digital_twin_profiles").upsert(
+                {
+                    "user_id": user_id,
+                    "tone": tone,
+                    "writing_style": writing_style_summary,
+                    "vocabulary_patterns": vocabulary_patterns,
+                    "formality_level": formality_level,
+                    "metadata": {
+                        "source": "email_bootstrap",
+                        "samples_analyzed": len(samples),
+                    },
+                },
+                on_conflict="user_id",
+            ).execute()
+
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: digital_twin_profile_upserted | user_id=%s | formality=%s",
+                user_id,
+                formality_level,
+            )
+        except Exception as e:
+            logger.warning(
+                "EMAIL_BOOTSTRAP: Failed to upsert digital_twin_profiles for user %s: %s",
+                user_id,
+                e,
             )
 
     async def _verify_writing_style_stored(self, user_id: str) -> bool:

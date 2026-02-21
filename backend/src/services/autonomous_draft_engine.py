@@ -172,9 +172,10 @@ Do not include any text outside the JSON object."""
 
         try:
             logger.info(
-                "DRAFT_ENGINE: Starting inbox processing for user %s (since %d hours)",
+                "[EMAIL_PIPELINE] Stage: inbox_processing_started | user_id=%s | since_hours=%d | run_id=%s",
                 user_id,
                 since_hours,
+                run_id,
             )
 
             # 1. Scan inbox via EmailAnalyzer
@@ -183,9 +184,12 @@ Do not include any text outside the JSON object."""
             result.emails_needing_reply = len(scan_result.needs_reply)
 
             logger.info(
-                "DRAFT_ENGINE: Scanned %d emails, %d need replies",
+                "[EMAIL_PIPELINE] Stage: scan_complete | emails_scanned=%d | needs_reply=%d | fyi=%d | skipped=%d | run_id=%s",
                 result.emails_scanned,
                 result.emails_needing_reply,
+                len(scan_result.fyi),
+                len(scan_result.skipped),
+                run_id,
             )
 
             # Log inbox scan to activity feed (non-blocking)
@@ -291,19 +295,40 @@ Do not include any text outside the JSON object."""
 
                 emails_processed += 1
                 try:
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: processing_email | email_id=%s | sender=%s | subject=%s | run_id=%s",
+                        email.email_id,
+                        email.sender_email,
+                        email.subject,
+                        run_id,
+                    )
                     draft = await self._process_single_email(
                         user_id, user_name, email, is_learning_mode, run_id
                     )
                     result.drafts.append(draft)
                     if draft.success:
                         result.drafts_generated += 1
+                        logger.info(
+                            "[EMAIL_PIPELINE] Stage: draft_generated | draft_id=%s | email_id=%s | confidence=%.2f | run_id=%s",
+                            draft.draft_id,
+                            email.email_id,
+                            draft.confidence_level,
+                            run_id,
+                        )
                     else:
                         result.drafts_failed += 1
+                        logger.warning(
+                            "[EMAIL_PIPELINE] Stage: draft_failed | email_id=%s | error=%s | run_id=%s",
+                            email.email_id,
+                            draft.error,
+                            run_id,
+                        )
                 except Exception as e:
                     logger.error(
-                        "DRAFT_ENGINE: Failed for %s: %s",
+                        "[EMAIL_PIPELINE] Stage: draft_exception | email_id=%s | error=%s | run_id=%s",
                         email.email_id,
                         e,
+                        run_id,
                         exc_info=True,
                     )
                     result.drafts_failed += 1
@@ -314,31 +339,38 @@ Do not include any text outside the JSON object."""
             elif result.drafts_generated > 0:
                 result.status = "partial_failure"
             else:
-                result.status = "failed"
+                if result.emails_needing_reply == 0:
+                    result.status = "completed"
+                else:
+                    result.status = "failed"
 
             logger.info(
-                "DRAFT_ENGINE: Processing complete. %d drafts generated, %d failed, "
-                "%d skipped (existing draft), %d deferred (active conversation), "
-                "%d skipped (learning mode)",
+                "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
+                "drafts_generated=%d | drafts_failed=%d | "
+                "skipped_existing=%d | deferred_active=%d | skipped_learning=%d | status=%s",
+                run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
                 emails_deferred_active_conversation,
                 emails_skipped_learning_mode,
+                result.status,
             )
 
         except Exception as e:
             logger.error(
-                "DRAFT_ENGINE: Processing failed for %s: %s",
+                "[EMAIL_PIPELINE] Stage: run_failed | run_id=%s | user_id=%s | error=%s",
+                run_id,
                 user_id,
                 e,
                 exc_info=True,
             )
             result.status = "failed"
             result.error_message = str(e)
-
-        result.completed_at = datetime.now(UTC)
-        await self._update_processing_run(result)
+        finally:
+            # Always finalize the processing run, even on failure
+            result.completed_at = datetime.now(UTC)
+            await self._update_processing_run(result)
 
         return result
 
@@ -368,9 +400,10 @@ Do not include any text outside the JSON object."""
         """
         try:
             logger.info(
-                "DRAFT_ENGINE: Processing email %s from %s",
+                "[EMAIL_PIPELINE] Stage: gathering_context | email_id=%s | sender=%s | subject=%s",
                 email.email_id,
                 email.sender_email,
+                email.subject,
             )
 
             # a. Gather context (with fallback on error)
@@ -383,9 +416,15 @@ Do not include any text outside the JSON object."""
                     sender_name=email.sender_name,
                     subject=email.subject,
                 )
+                logger.info(
+                    "[EMAIL_PIPELINE] Stage: context_gathered | email_id=%s | context_id=%s | sources=%s",
+                    email.email_id,
+                    context.id,
+                    context.sources_used,
+                )
             except Exception as e:
                 logger.error(
-                    "DRAFT_ENGINE: Context gathering failed for email %s: %s",
+                    "[EMAIL_PIPELINE] Stage: context_gathering_failed | email_id=%s | error=%s",
                     email.email_id,
                     e,
                     exc_info=True,
@@ -412,6 +451,10 @@ Do not include any text outside the JSON object."""
             tone_guidance = calibration.tone_guidance if calibration else ""
 
             # d. Generate draft via LLM
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: generating_draft | email_id=%s",
+                email.email_id,
+            )
             draft_content = await self._generate_reply_draft(
                 user_id, user_name, email, context, style_guidelines, tone_guidance
             )
@@ -421,6 +464,13 @@ Do not include any text outside the JSON object."""
 
             # f. Calculate confidence
             confidence = self._calculate_confidence(context, style_score)
+
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f",
+                email.email_id,
+                style_score,
+                confidence,
+            )
 
             # g. Generate ARIA notes (add learning mode note if applicable)
             aria_notes = await self._generate_aria_notes(
@@ -445,6 +495,12 @@ Do not include any text outside the JSON object."""
                 processing_run_id=run_id,
             )
 
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s",
+                draft_id,
+                email.email_id,
+            )
+
             # i. Auto-save to email client (Gmail/Outlook)
             # Non-fatal: draft stays in ARIA database even if client save fails
             try:
@@ -454,19 +510,19 @@ Do not include any text outside the JSON object."""
                 )
                 if client_result.get("success") and not client_result.get("already_saved"):
                     logger.info(
-                        "DRAFT_ENGINE: Auto-saved draft %s to %s",
+                        "[EMAIL_PIPELINE] Stage: saving_to_client | draft_id=%s | provider=%s",
                         draft_id,
                         client_result.get("provider"),
                     )
             except DraftSaveError as e:
                 logger.warning(
-                    "DRAFT_ENGINE: Could not auto-save draft %s to client: %s",
+                    "[EMAIL_PIPELINE] Stage: client_save_failed | draft_id=%s | error=%s",
                     draft_id,
                     e,
                 )
 
             logger.info(
-                "DRAFT_ENGINE: Draft %s created (confidence: %.2f, style: %.2f)",
+                "[EMAIL_PIPELINE] Stage: email_processed | draft_id=%s | confidence=%.2f | style_score=%.2f",
                 draft_id,
                 confidence,
                 style_score,
@@ -869,12 +925,13 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             result = self._db.table("email_drafts").insert(insert_data).execute()
             if not result.data:
                 logger.error(
-                    "DRAFT_ENGINE: Insert returned no data for draft %s",
+                    "[EMAIL_PIPELINE] Stage: draft_insert_empty | draft_id=%s",
                     draft_id,
                 )
         except Exception as e:
             logger.error(
-                "DRAFT_ENGINE: Draft insert FAILED for user %s, recipient %s: %s",
+                "[EMAIL_PIPELINE] Stage: draft_insert_failed | draft_id=%s | user_id=%s | recipient=%s | error=%s",
+                draft_id,
                 user_id,
                 recipient_email,
                 e,
@@ -916,35 +973,71 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                     "user_id": user_id,
                     "started_at": started_at.isoformat(),
                     "status": "running",
+                    "emails_scanned": 0,
+                    "emails_needing_reply": 0,
+                    "drafts_generated": 0,
+                    "drafts_failed": 0,
                 }
             ).execute()
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: run_created | run_id=%s | user_id=%s",
+                run_id,
+                user_id,
+            )
         except Exception as e:
-            logger.error("DRAFT_ENGINE: Failed to create processing run: %s", e)
+            logger.error(
+                "[EMAIL_PIPELINE] Stage: run_create_failed | run_id=%s | error=%s",
+                run_id,
+                e,
+                exc_info=True,
+            )
 
     async def _update_processing_run(self, result: ProcessingRunResult) -> None:
-        """Update processing run with final status."""
+        """Update processing run with final status.
+
+        This is called from a finally block, so it always executes
+        even when draft generation fails partway through.
+        """
         try:
             processing_time_ms = None
             if result.completed_at and result.started_at:
                 delta = result.completed_at - result.started_at
                 processing_time_ms = int(delta.total_seconds() * 1000)
 
+            update_data = {
+                "completed_at": (
+                    result.completed_at.isoformat() if result.completed_at else datetime.now(UTC).isoformat()
+                ),
+                "emails_scanned": result.emails_scanned,
+                "emails_needing_reply": result.emails_needing_reply,
+                "drafts_generated": result.drafts_generated,
+                "drafts_failed": result.drafts_failed,
+                "status": result.status,
+                "error_message": result.error_message,
+                "processing_time_ms": processing_time_ms,
+            }
+
             self._db.table("email_processing_runs").update(
-                {
-                    "completed_at": (
-                        result.completed_at.isoformat() if result.completed_at else None
-                    ),
-                    "emails_scanned": result.emails_scanned,
-                    "emails_needing_reply": result.emails_needing_reply,
-                    "drafts_generated": result.drafts_generated,
-                    "drafts_failed": result.drafts_failed,
-                    "status": result.status,
-                    "error_message": result.error_message,
-                    "processing_time_ms": processing_time_ms,
-                }
+                update_data
             ).eq("id", result.run_id).execute()
+
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: run_finalized | run_id=%s | status=%s | "
+                "emails_scanned=%d | drafts_generated=%d | drafts_failed=%d | time_ms=%s",
+                result.run_id,
+                result.status,
+                result.emails_scanned,
+                result.drafts_generated,
+                result.drafts_failed,
+                processing_time_ms,
+            )
         except Exception as e:
-            logger.error("DRAFT_ENGINE: Failed to update processing run: %s", e)
+            logger.error(
+                "[EMAIL_PIPELINE] Stage: run_finalize_failed | run_id=%s | error=%s",
+                result.run_id,
+                e,
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Deduplication Methods
