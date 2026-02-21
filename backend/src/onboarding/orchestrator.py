@@ -185,6 +185,10 @@ class OnboardingOrchestrator:
         if not current:
             raise ValueError("No onboarding state found")
 
+        # Idempotency: if the step was already completed, return current state
+        if step.value in current.completed_steps:
+            return self._build_response(current)
+
         if step.value != current.current_step.value:
             raise ValueError(
                 f"Cannot complete step '{step.value}' — "

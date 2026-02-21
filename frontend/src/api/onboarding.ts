@@ -1,3 +1,4 @@
+import axios from "axios";
 import { apiClient } from "./client";
 
 // Types matching backend Pydantic models
@@ -65,11 +66,19 @@ export async function completeStep(
   step: OnboardingStep,
   stepData: Record<string, unknown> = {}
 ): Promise<OnboardingStateResponse> {
-  const response = await apiClient.post<OnboardingStateResponse>(
-    `/onboarding/steps/${step}/complete`,
-    { step_data: stepData }
-  );
-  return response.data;
+  try {
+    const response = await apiClient.post<OnboardingStateResponse>(
+      `/onboarding/steps/${step}/complete`,
+      { step_data: stepData }
+    );
+    return response.data;
+  } catch (error: unknown) {
+    // Step already completed — return current state instead of throwing
+    if (axios.isAxiosError(error) && error.response?.status === 400) {
+      return getOnboardingState();
+    }
+    throw error;
+  }
 }
 
 export async function skipStep(

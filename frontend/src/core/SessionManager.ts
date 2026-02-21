@@ -28,24 +28,8 @@ export class SessionManager {
    * unreachable, returns a local-only session.
    */
   async initialize(): Promise<UnifiedSession> {
-    try {
-      const response = await apiClient.get<UnifiedSession>("/sessions/current");
-      const session = response.data;
-
-      if (session && this.isSameDay(session.started_at)) {
-        return session;
-      }
-
-      // Session exists but is from a previous day — archive and create new
-      if (session?.id) {
-        await this.archiveSession(session.id);
-      }
-
-      return await this.createSession();
-    } catch {
-      // Backend unreachable or endpoint doesn't exist — fall back to local
-      return this.createLocalSession();
-    }
+    // TODO: Re-enable API call when backend /sessions endpoints exist
+    return this.createLocalSession();
   }
 
   /**
