@@ -767,6 +767,24 @@ async def _run_conversion_score_batch() -> None:
         logger.exception("Conversion score batch scheduler run failed")
 
 
+async def _run_draft_staleness_check() -> None:
+    """Check for stale drafts where thread has evolved since draft creation."""
+    try:
+        from src.jobs.draft_staleness_check_job import run_draft_staleness_check
+
+        result = await run_draft_staleness_check()
+
+        if result["drafts_marked_stale"] > 0:
+            logger.info(
+                "Draft staleness check: %d users, %d drafts checked, %d marked stale",
+                result["users_checked"],
+                result["drafts_checked"],
+                result["drafts_marked_stale"],
+            )
+    except Exception:
+        logger.exception("Draft staleness check scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -943,6 +961,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(day_of_week="mon", hour=8, minute=0),  # Monday 8 AM
             id="conversion_score_batch",
             name="Weekly conversion score batch recalculation",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_draft_staleness_check,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="draft_staleness_check",
+            name="Draft staleness detection for evolved threads",
             replace_existing=True,
         )
 

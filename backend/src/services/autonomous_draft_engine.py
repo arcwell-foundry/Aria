@@ -2609,6 +2609,144 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
                 e,
             )
 
+    # ------------------------------------------------------------------
+    # Draft Staleness Detection
+    # ------------------------------------------------------------------
+
+    async def check_draft_staleness(self, user_id: str) -> dict[str, int]:
+        """Check existing drafts for staleness — thread may have evolved.
+
+        A draft is considered stale if:
+        1. It's older than 6 hours
+        2. It's still in 'pending' user_action state
+        3. The thread has new messages since the draft was created
+
+        When stale, marks the draft with is_stale=True and adds a warning
+        to aria_notes so the user knows to review before sending.
+
+        Args:
+            user_id: The user whose drafts to check.
+
+        Returns:
+            Dict with stats: {'checked': N, 'stale': M}
+        """
+        stats = {"checked": 0, "stale": 0}
+
+        try:
+            # Get all pending drafts older than 6 hours
+            cutoff = (datetime.now(UTC) - timedelta(hours=6)).isoformat()
+
+            result = (
+                self._db.table("email_drafts")
+                .select("id, thread_id, created_at, aria_notes")
+                .eq("user_id", user_id)
+                .eq("status", "draft")
+                .eq("user_action", "pending")
+                .lt("created_at", cutoff)
+                .execute()
+            )
+
+            drafts = result.data or []
+            stats["checked"] = len(drafts)
+
+            if not drafts:
+                logger.debug(
+                    "STALE_CHECK: No pending drafts older than 6 hours for user %s",
+                    user_id,
+                )
+                return stats
+
+            logger.info(
+                "STALE_CHECK: Checking %d drafts for staleness (user %s)",
+                len(drafts),
+                user_id,
+            )
+
+            for draft in drafts:
+                draft_id = draft["id"]
+                thread_id = draft.get("thread_id")
+                created_at = draft.get("created_at", "")
+                existing_notes = draft.get("aria_notes", "") or ""
+
+                if not thread_id:
+                    # Can't check staleness without thread_id
+                    continue
+
+                # Check if new emails arrived in this thread since draft was created
+                try:
+                    new_in_thread = (
+                        self._db.table("email_scan_log")
+                        .select("id, sender_email, subject, scanned_at")
+                        .eq("user_id", user_id)
+                        .eq("thread_id", thread_id)
+                        .gt("scanned_at", created_at)
+                        .order("scanned_at", desc=True)
+                        .limit(10)
+                        .execute()
+                    )
+
+                    if new_in_thread.data:
+                        new_count = len(new_in_thread.data)
+                        latest_sender = new_in_thread.data[0].get("sender_email", "unknown")
+                        latest_subject = new_in_thread.data[0].get("subject", "")[:50]
+
+                        # Build stale reason with details
+                        stale_reason = (
+                            f"{new_count} new message(s) in thread since draft was created. "
+                            f"Latest from {latest_sender}: '{latest_subject}...'"
+                        )
+
+                        # Append staleness warning to aria_notes
+                        staleness_warning = (
+                            f"\n\n⚠️ STALE DRAFT: {new_count} new message(s) arrived after "
+                            f"I drafted this. Review the latest thread messages before sending."
+                        )
+                        updated_notes = existing_notes + staleness_warning
+
+                        # Mark as stale
+                        self._db.table("email_drafts").update(
+                            {
+                                "is_stale": True,
+                                "stale_reason": stale_reason,
+                                "aria_notes": updated_notes,
+                            }
+                        ).eq("id", draft_id).execute()
+
+                        stats["stale"] += 1
+                        logger.info(
+                            "STALE_DRAFT: Marked draft %s as stale — %d new messages in thread %s",
+                            draft_id,
+                            new_count,
+                            thread_id[:16] if thread_id else "?",
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "STALE_CHECK: Failed to check thread %s for draft %s: %s",
+                        thread_id,
+                        draft_id,
+                        e,
+                    )
+                    continue
+
+            if stats["stale"] > 0:
+                logger.info(
+                    "STALE_CHECK: Complete for user %s — checked %d, marked %d as stale",
+                    user_id,
+                    stats["checked"],
+                    stats["stale"],
+                )
+
+        except Exception as e:
+            logger.error(
+                "STALE_CHECK: Failed to check draft staleness for user %s: %s",
+                user_id,
+                e,
+                exc_info=True,
+            )
+
+        return stats
+
 
 # ---------------------------------------------------------------------------
 # Singleton Access

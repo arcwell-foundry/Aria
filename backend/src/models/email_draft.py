@@ -124,6 +124,13 @@ class EmailDraftResponse(BaseModel):
     confidence_tier: str | None = Field(
         None, description="Confidence tier: HIGH, MEDIUM, LOW, or MINIMAL"
     )
+    # Fields for staleness detection
+    is_stale: bool | None = Field(
+        None, description="Whether the draft is stale (thread evolved after creation)"
+    )
+    stale_reason: str | None = Field(
+        None, description="Human-readable explanation of why the draft is stale"
+    )
 
 
 class EmailDraftListResponse(BaseModel):
