@@ -182,11 +182,47 @@ class EmailContextGatherer:
     - CRM: Deal/account status
     """
 
+    # Personal/consumer email domains that should NOT trigger company research
+    _PERSONAL_DOMAINS = {
+        # Google
+        "gmail.com", "googlemail.com",
+        # Microsoft
+        "outlook.com", "outlook.co.uk", "hotmail.com", "hotmail.co.uk",
+        "live.com", "live.co.uk", "live.co", "live.ie", "live.ca", "live.au",
+        "msn.com",
+        # Yahoo
+        "yahoo.com", "yahoo.co.uk", "yahoo.ca", "yahoo.au", "yahoo.ie",
+        # Apple
+        "icloud.com", "me.com", "mac.com",
+        # AOL/Verizon
+        "aol.com", "comcast.net", "verizon.net", "att.net", "cox.net",
+        "sbcglobal.net", "bellsouth.net", "charter.net",
+        # Privacy-focused
+        "protonmail.com", "proton.me", "tutanota.com", "hey.com",
+        # Other common providers
+        "zoho.com", "mail.com", "gmx.com", "gmx.net", "yandex.com",
+        "fastmail.com",
+    }
+
     def __init__(self) -> None:
         """Initialize with required clients."""
         from src.db.supabase import SupabaseClient
 
         self._db = SupabaseClient.get_client()
+
+    def _is_personal_email(self, email_address: str) -> bool:
+        """Check if email is from a personal/consumer domain.
+
+        Args:
+            email_address: The email address to check.
+
+        Returns:
+            True if the email domain is a known personal provider.
+        """
+        if not email_address or "@" not in email_address:
+            return False
+        domain = email_address.lower().split("@")[-1]
+        return domain in self._PERSONAL_DOMAINS
 
     async def gather_context(
         self,
@@ -679,7 +715,7 @@ Summary:"""
 
         Performs:
         1. People search for LinkedIn profile and bio
-        2. Company search if company can be inferred
+        2. Company search ONLY if email is from a business domain (not personal)
 
         Args:
             sender_email: The sender's email address.
@@ -690,6 +726,9 @@ Summary:"""
         """
         research = RecipientResearch(sender_email=sender_email, sender_name=sender_name)
 
+        # Check if this is a personal email domain - skip company research if so
+        is_personal = self._is_personal_email(sender_email)
+
         try:
             from src.agents.capabilities.enrichment_providers.exa_provider import (
                 ExaEnrichmentProvider,
@@ -697,17 +736,16 @@ Summary:"""
 
             exa = ExaEnrichmentProvider()
 
-            # Extract company from email domain
+            # Extract company from email domain (only for business domains)
             domain = sender_email.split("@")[-1] if "@" in sender_email else ""
-            # Skip common email providers
-            common_providers = {"gmail.com", "outlook.com", "yahoo.com", "hotmail.com"}
-            company_from_email = "" if domain in common_providers else domain.split(".")[0]
+            company_from_email = "" if is_personal else domain.split(".")[0]
 
             # Search for person
             if sender_name:
                 logger.info(
-                    "CONTEXT_GATHERER: Searching Exa for person: %s",
+                    "CONTEXT_GATHERER: Searching Exa for person: %s%s",
                     sender_name,
+                    " (personal email, skipping company hint)" if is_personal else "",
                 )
 
                 person_result = await exa.search_person(
@@ -730,9 +768,17 @@ Summary:"""
                     })
                     research.exa_sources_used.append(mention.get("url", ""))
 
-            # Search for company if we have one
+            # Search for company ONLY if:
+            # 1. This is NOT a personal email domain
+            # 2. We have a company name to search for
+            if is_personal:
+                logger.info(
+                    "SKIP_COMPANY_RESEARCH: %s is a personal email domain",
+                    sender_email,
+                )
+
             company_name = research.sender_company or company_from_email
-            if company_name:
+            if company_name and not is_personal:
                 logger.info(
                     "CONTEXT_GATHERER: Searching Exa for company: %s",
                     company_name,
@@ -752,9 +798,10 @@ Summary:"""
                     research.exa_sources_used.append(news.get("url", ""))
 
             logger.info(
-                "CONTEXT_GATHERER: Recipient research complete for %s, %d sources",
+                "CONTEXT_GATHERER: Recipient research complete for %s, %d sources, company_research=%s",
                 sender_email,
                 len(research.exa_sources_used),
+                "skipped" if is_personal else "done",
             )
 
             return research
