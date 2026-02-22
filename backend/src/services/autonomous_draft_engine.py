@@ -40,6 +40,38 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Strategic Guardrails for Draft Generation
+# ---------------------------------------------------------------------------
+
+STRATEGIC_GUARDRAILS = """
+## Critical Guardrails — Do NOT include in the draft:
+1. PRICING: Never quote specific prices, discounts, or ranges unless the
+   thread shows pricing was already discussed and numbers were shared.
+   Instead: "I'd be happy to discuss pricing — let me put together some options."
+
+2. TIMELINES: Never commit to specific delivery dates or deadlines unless
+   confirmed in the context. Instead: "Let me check on the timeline and
+   get back to you."
+
+3. MEETINGS: Never accept or propose specific meeting times. Instead:
+   "I'd love to connect — I'll send some availability."
+
+4. PRODUCT CLAIMS: Only reference product capabilities that appear in the
+   corporate memory or prior thread. Don't invent features.
+
+5. CONFIDENTIAL: Never share internal pricing strategies, competitive
+   intelligence, or internal discussions in an external email.
+
+6. AUTHORITY: Don't make decisions above the user's role. If unsure,
+   suggest the user will "look into it" or "discuss with the team."
+
+If you're uncertain about ANY commitment, err on the warm-but-vague side:
+acknowledge the request, express interest, and defer specifics to a
+follow-up conversation.
+"""
+
+
+# ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------
 
@@ -491,18 +523,30 @@ Do not include any text outside the JSON object."""
                 special_instructions=special_instructions,
             )
 
+            # d2. Check guardrails for unauthorized commitments
+            guardrail_warnings = await self._check_guardrails(draft_content.body, context)
+            if guardrail_warnings:
+                for warning in guardrail_warnings:
+                    logger.warning(
+                        "GUARDRAIL_WARNING: %s in on-demand draft for %s",
+                        warning,
+                        email.sender_email,
+                    )
+
             # e. Score style match
             style_score = await self._digital_twin.score_style_match(
                 user_id, draft_content.body,
             )
 
-            # f. Calculate confidence
+            # f. Calculate confidence (reduced by guardrail warnings)
             confidence = self._calculate_confidence(context)
+            confidence = max(0.1, confidence - (len(guardrail_warnings) * 0.1))
 
-            # g. Generate ARIA notes
+            # g. Generate ARIA notes (with guardrail warnings)
             aria_notes = await self._generate_aria_notes(
                 email, context, style_score, confidence,
                 lead_updates=lead_updates,
+                guardrail_warnings=guardrail_warnings,
             )
 
             # h. Save draft with metadata
@@ -702,23 +746,36 @@ Do not include any text outside the JSON object."""
                 user_id, user_name, email, context, style_guidelines, tone_guidance
             )
 
+            # d2. Check guardrails for unauthorized commitments
+            guardrail_warnings = await self._check_guardrails(draft_content.body, context)
+            if guardrail_warnings:
+                for warning in guardrail_warnings:
+                    logger.warning(
+                        "GUARDRAIL_WARNING: %s in draft for email_id=%s",
+                        warning,
+                        email.email_id,
+                    )
+
             # e. Score style match
             style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
-            # f. Calculate confidence
+            # f. Calculate confidence (reduced by guardrail warnings)
             confidence = self._calculate_confidence(context)
+            confidence = max(0.1, confidence - (len(guardrail_warnings) * 0.1))
 
             logger.info(
-                "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f",
+                "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f | guardrail_warnings=%d",
                 email.email_id,
                 style_score,
                 confidence,
+                len(guardrail_warnings),
             )
 
-            # g. Generate ARIA notes (add learning mode note if applicable)
+            # g. Generate ARIA notes (add learning mode note and guardrail warnings if applicable)
             aria_notes = await self._generate_aria_notes(
                 email, context, style_score, confidence, is_learning_mode,
                 lead_updates=lead_updates,
+                guardrail_warnings=guardrail_warnings,
             )
 
             # h. Save draft with all metadata
@@ -1165,13 +1222,8 @@ Recent messages:
                 f"## Special Instructions from User\n{special_instructions}"
             )
 
-        # Strategic guardrails
-        sections.append("""## Strategic guardrails
-- Do NOT commit to specific pricing unless pricing was already discussed
-- Do NOT make promises about timelines without checking context
-- Do NOT agree to meetings without checking calendar
-- If unsure about something, be warm but non-committal and suggest a call
-- Keep the response proportional to the incoming email length""")
+        # Strategic guardrails (expanded version)
+        sections.append(STRATEGIC_GUARDRAILS)
 
         # Final instructions
         sections.append(f"""## Instructions
@@ -1187,6 +1239,95 @@ Write ONLY the email body (no metadata).
 Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
 
         return "\n\n".join(sections)
+
+    async def _check_guardrails(
+        self,
+        draft_body: str,
+        context: "DraftContext",
+    ) -> list[str]:
+        """Check draft for potential unauthorized commitments.
+
+        Scans the generated draft body for indicators of pricing, timeline,
+        meeting, or other commitments that may not have been authorized.
+
+        Args:
+            draft_body: The generated email body text.
+            context: The draft context containing thread summary and other info.
+
+        Returns:
+            List of warning strings for any detected issues.
+        """
+        warnings: list[str] = []
+        body_lower = draft_body.lower()
+
+        # Check for pricing language
+        price_indicators = [
+            "$", "€", "£", "price", "pricing", "discount",
+            "% off", "per unit", "per seat", "cost", "annual fee",
+            "subscription", "license fee",
+        ]
+        if any(p in body_lower for p in price_indicators):
+            # Check if pricing was in the thread context
+            thread_summary = ""
+            if context.thread_context and context.thread_context.summary:
+                thread_summary = context.thread_context.summary.lower()
+
+            # Also check thread messages for pricing context
+            has_pricing_context = "price" in thread_summary or "cost" in thread_summary
+            if not has_pricing_context and context.thread_context and context.thread_context.messages:
+                for msg in context.thread_context.messages:
+                    if msg.body and ("price" in msg.body.lower() or "cost" in msg.body.lower()):
+                        has_pricing_context = True
+                        break
+
+            if not has_pricing_context:
+                warnings.append(
+                    "PRICING_COMMITMENT: Draft mentions pricing but no pricing context in thread"
+                )
+
+        # Check for timeline commitments
+        timeline_indicators = [
+            "by friday", "by monday", "next week", "by end of",
+            "within 24 hours", "by tomorrow", "i'll have it",
+            "will have it by", "delivered by", "complete by",
+            "finish by", "ready by",
+        ]
+        if any(t in body_lower for t in timeline_indicators):
+            warnings.append(
+                "TIMELINE_COMMITMENT: Draft includes specific timeline promise"
+            )
+
+        # Check for meeting acceptance
+        meeting_indicators = [
+            "see you at", "confirmed for", "i'll be there",
+            "meeting is set", "booked for", "accepted the meeting",
+            "looking forward to meeting on", "see you on",
+        ]
+        if any(m in body_lower for m in meeting_indicators):
+            warnings.append(
+                "MEETING_COMMITMENT: Draft appears to confirm a meeting"
+            )
+
+        # Check for product claims that aren't backed by context
+        capability_indicators = [
+            "our platform can", "we support", "our system provides",
+            "arria can", "the software includes",
+        ]
+        if any(c in body_lower for c in capability_indicators):
+            # Check if corporate memory has product info
+            has_product_context = False
+            if context.corporate_memory and context.corporate_memory.facts:
+                for fact in context.corporate_memory.facts:
+                    fact_str = str(fact.get("fact", "")).lower()
+                    if any(kw in fact_str for kw in ["product", "feature", "capability", "platform"]):
+                        has_product_context = True
+                        break
+            if not has_product_context:
+                warnings.append(
+                    "PRODUCT_CLAIM: Draft makes product capability claims without context verification"
+                )
+
+        return warnings
 
     # ------------------------------------------------------------------
     # Confidence Calculation
@@ -1240,6 +1381,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         confidence: float,
         is_learning_mode: bool = False,
         lead_updates: list[dict] | None = None,
+        guardrail_warnings: list[str] | None = None,
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
@@ -1251,6 +1393,14 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         # Add learning mode note first if applicable
         if is_learning_mode:
             notes.append(self._learning_mode.get_learning_mode_note())
+
+        # Add guardrail warnings prominently at the top if present
+        if guardrail_warnings:
+            warning_prefix = "⚠️ GUARDRAIL ALERT"
+            for warning in guardrail_warnings:
+                # Extract the warning type for cleaner display
+                warning_type = warning.split(":")[0] if ":" in warning else warning
+                notes.append(f"{warning_prefix}: {warning_type}")
 
         # Context sources available vs missing
         available: list[str] = []

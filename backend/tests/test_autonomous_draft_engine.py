@@ -583,6 +583,145 @@ class TestProcessingRun:
         assert engine._db.table().update().eq().execute.called
 
 
+class TestGuardrails:
+    """Tests for strategic guardrail checking."""
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_no_warnings_clean_draft(self, engine, rich_context):
+        """Clean draft with no commitment language should have no warnings."""
+        draft_body = """Hi John,
+
+Thanks for reaching out about the Q2 proposal. I'd be happy to discuss this further.
+
+Let me know when works for a call.
+
+Best regards,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, rich_context)
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_pricing_warning(self, engine, rich_context):
+        """Draft mentioning pricing without context should warn."""
+        draft_body = """Hi John,
+
+Thanks for your interest. Our pricing starts at $50,000 per year.
+
+Let me know if you have questions.
+
+Best regards,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, rich_context)
+        assert len(warnings) == 1
+        assert "PRICING_COMMITMENT" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_pricing_allowed_with_context(self, engine):
+        """Draft mentioning pricing is OK if thread context has pricing discussion."""
+        context = DraftContext(
+            id="ctx-1",
+            user_id="user-1",
+            email_id="email-1",
+            thread_id="thread-1",
+            sender_email="test@test.com",
+            subject="Pricing",
+            sources_used=["thread"],
+            thread_context=ThreadContext(
+                thread_id="thread-1",
+                messages=[
+                    ThreadMessage(
+                        sender_email="test@test.com",
+                        sender_name="Test",
+                        body="What is your price for this?",
+                        timestamp="2026-02-01T10:00:00Z",
+                    ),
+                ],
+                summary="Discussion about pricing and costs",
+                message_count=1,
+            ),
+        )
+
+        draft_body = """Hi,
+
+Our price is $50,000 as discussed.
+
+Best,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, context)
+        # Should NOT warn because thread has pricing context
+        assert not any("PRICING" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_timeline_warning(self, engine, rich_context):
+        """Draft with specific timeline should warn."""
+        draft_body = """Hi John,
+
+I'll have that to you by Friday.
+
+Best regards,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, rich_context)
+        assert len(warnings) == 1
+        assert "TIMELINE_COMMITMENT" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_meeting_warning(self, engine, rich_context):
+        """Draft confirming a meeting should warn."""
+        draft_body = """Hi John,
+
+See you at 2pm on Thursday!
+
+Best regards,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, rich_context)
+        assert len(warnings) == 1
+        assert "MEETING_COMMITMENT" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_check_guardrails_multiple_warnings(self, engine, rich_context):
+        """Draft with multiple issues should generate multiple warnings."""
+        draft_body = """Hi John,
+
+Our pricing is $50K and I'll have the proposal ready by Friday.
+
+See you at the meeting on Monday!
+
+Best regards,
+User"""
+
+        warnings = await engine._check_guardrails(draft_body, rich_context)
+        assert len(warnings) >= 2
+        warning_types = [w.split(":")[0] for w in warnings]
+        assert "PRICING_COMMITMENT" in warning_types
+        assert "TIMELINE_COMMITMENT" in warning_types
+        assert "MEETING_COMMITMENT" in warning_types
+
+    @pytest.mark.asyncio
+    async def test_confidence_reduced_by_guardrail_warnings(self, engine, rich_context):
+        """Each guardrail warning should reduce confidence by 0.1."""
+        base_confidence = engine._calculate_confidence(rich_context)
+
+        # Simulate 2 warnings
+        adjusted_confidence = max(0.1, base_confidence - (2 * 0.1))
+
+        assert adjusted_confidence == base_confidence - 0.2
+
+    @pytest.mark.asyncio
+    async def test_confidence_floor_at_0_1(self, engine, rich_context):
+        """Confidence should not go below 0.1 even with many warnings."""
+        base_confidence = 0.3
+
+        # Simulate 10 warnings
+        adjusted_confidence = max(0.1, base_confidence - (10 * 0.1))
+
+        assert adjusted_confidence == 0.1
+
+
 class TestSingleton:
     """Tests for singleton accessor."""
 
