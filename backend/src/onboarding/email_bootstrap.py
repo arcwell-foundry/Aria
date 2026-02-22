@@ -373,15 +373,19 @@ class PriorityEmailIngestion:
     # Email fetching
     # ------------------------------------------------------------------
 
-    async def _fetch_sent_emails(self, user_id: str, days: int = 60) -> list[dict[str, Any]]:
-        """Fetch sent emails via Composio.
+    async def _fetch_sent_emails(
+        self, user_id: str, days: int = 60, max_emails: int = 5000
+    ) -> list[dict[str, Any]]:
+        """Fetch sent emails via Composio with full pagination.
 
         Detects the user's email provider (Gmail or Outlook) from user_integrations
-        and uses the appropriate Composio action.
+        and uses the appropriate Composio action. Paginates through ALL results
+        up to max_emails limit.
 
         Args:
             user_id: The user whose emails to fetch.
             days: How many days of history to fetch.
+            max_emails: Maximum total emails to fetch (safety limit).
 
         Returns:
             List of email dicts with: to, cc, subject, body, date, thread_id.
@@ -430,98 +434,52 @@ class PriorityEmailIngestion:
                 return []
 
             logger.info(
-                "EMAIL_BOOTSTRAP: Detected email provider '%s' for user %s",
+                "EMAIL_BOOTSTRAP: Detected email provider '%s' for user %s, fetching %d days",
                 provider,
                 user_id,
+                days,
             )
 
             from src.integrations.oauth import get_oauth_client
 
             oauth_client = get_oauth_client()
-
             since_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
-            # Use appropriate Composio action based on provider
+            all_emails: list[dict[str, Any]] = []
+
+            # Use appropriate Composio action based on provider with pagination
             if provider == "outlook":
-                logger.info(
-                    "EMAIL_BOOTSTRAP: Using OUTLOOK_LIST_MAIL_FOLDER_MESSAGES for user %s",
-                    user_id,
-                )
-                response = oauth_client.execute_action_sync(
+                all_emails = await self._fetch_outlook_with_pagination(
+                    oauth_client=oauth_client,
                     connection_id=connection_id,
-                    action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
-                    params={
-                        "mail_folder_id": "sentitems",
-                        "$top": 500,
-                        "$filter": f"sentDateTime ge {since_date}",
-                    },
                     user_id=user_id,
+                    since_date=since_date,
+                    max_emails=max_emails,
                 )
-                # Log Composio response structure for debugging
-                logger.info(
-                    "EMAIL_BOOTSTRAP: Composio response - success=%s, data_keys=%s",
-                    response.get("successful"),
-                    list(response.get("data", {}).keys()) if response.get("data") else None,
-                )
-                # Outlook returns messages in 'data.value'
-                if response.get("successful") and response.get("data"):
-                    emails = response["data"].get("value", [])
-                else:
-                    logger.warning(
-                        "EMAIL_BOOTSTRAP: Outlook fetch failed: %s, response=%s",
-                        response.get("error"),
-                        response,
-                    )
-                    emails = []
             else:
                 # Default to Gmail
-                logger.info(
-                    "EMAIL_BOOTSTRAP: Using GMAIL_FETCH_EMAILS for user %s",
-                    user_id,
-                )
-                response = oauth_client.execute_action_sync(
+                all_emails = await self._fetch_gmail_with_pagination(
+                    oauth_client=oauth_client,
                     connection_id=connection_id,
-                    action="GMAIL_FETCH_EMAILS",
-                    params={
-                        "label": "SENT",
-                        "max_results": 500,
-                    },
                     user_id=user_id,
+                    max_emails=max_emails,
                 )
-                # Log Composio response structure for debugging
-                logger.info(
-                    "EMAIL_BOOTSTRAP: Composio response - success=%s, data_keys=%s",
-                    response.get("successful"),
-                    list(response.get("data", {}).keys()) if response.get("data") else None,
-                )
-                # Gmail returns emails in 'data.emails'
-                if response.get("successful") and response.get("data"):
-                    emails = response["data"].get("emails", [])
-                    # Try alternate key if 'emails' is empty
-                    if not emails:
-                        emails = response["data"].get("messages", [])
-                else:
-                    logger.warning(
-                        "EMAIL_BOOTSTRAP: Gmail fetch failed: %s, response=%s",
-                        response.get("error"),
-                        response,
-                    )
-                    emails = []
 
             logger.info(
-                "EMAIL_BOOTSTRAP: Composio returned %d emails for user %s",
-                len(emails),
+                "EMAIL_BOOTSTRAP: Fetched %d total emails from %d days for user %s",
+                len(all_emails),
+                days,
                 user_id,
             )
 
             # Normalize raw provider data to canonical keys expected by
             # _extract_contacts, _detect_commitments, _identify_active_threads, etc.
             if provider == "outlook":
-                emails = [self._normalize_outlook_email(e) for e in emails]
+                all_emails = [self._normalize_outlook_email(e) for e in all_emails]
             else:
-                emails = [self._normalize_gmail_email(e) for e in emails]
+                all_emails = [self._normalize_gmail_email(e) for e in all_emails]
 
-            return emails
+            return all_emails
 
         except Exception as e:
             logger.error(
@@ -531,6 +489,205 @@ class PriorityEmailIngestion:
                 exc_info=True,
             )
             return []
+
+    async def _fetch_outlook_with_pagination(
+        self,
+        oauth_client: Any,
+        connection_id: str,
+        user_id: str,
+        since_date: str,
+        max_emails: int,
+        page_size: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Fetch Outlook sent emails with OData pagination ($skip).
+
+        Args:
+            oauth_client: The OAuth client for Composio calls.
+            connection_id: Composio connection ID.
+            user_id: User ID for logging.
+            since_date: ISO date string for filtering.
+            max_emails: Maximum emails to fetch.
+            page_size: Number of emails per page.
+
+        Returns:
+            List of raw Outlook email dicts.
+        """
+        all_emails: list[dict[str, Any]] = []
+        skip = 0
+        page_num = 0
+
+        logger.info(
+            "EMAIL_BOOTSTRAP: Starting paginated Outlook fetch for user %s (since %s)",
+            user_id,
+            since_date,
+        )
+
+        while len(all_emails) < max_emails:
+            page_num += 1
+            logger.info(
+                "EMAIL_BOOTSTRAP: Outlook page %d, skip=%d, fetched so far=%d",
+                page_num,
+                skip,
+                len(all_emails),
+            )
+
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
+                params={
+                    "mail_folder_id": "sentitems",
+                    "$top": page_size,
+                    "$skip": skip,
+                    "$filter": f"sentDateTime ge {since_date}",
+                    "$orderby": "sentDateTime desc",
+                },
+                user_id=user_id,
+            )
+
+            if not response.get("successful"):
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Outlook fetch failed on page %d: %s",
+                    page_num,
+                    response.get("error"),
+                )
+                break
+
+            data = response.get("data", {})
+            page_emails = data.get("value", [])
+
+            if not page_emails:
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Outlook pagination complete - empty page %d",
+                    page_num,
+                )
+                break
+
+            all_emails.extend(page_emails)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Outlook page %d returned %d emails, total now %d",
+                page_num,
+                len(page_emails),
+                len(all_emails),
+            )
+
+            # Check if we got fewer than page_size (last page)
+            if len(page_emails) < page_size:
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Outlook pagination complete - partial page %d",
+                    page_num,
+                )
+                break
+
+            skip += page_size
+
+            # Safety limit
+            if skip > 10000:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Outlook pagination safety limit reached at skip=%d",
+                    skip,
+                )
+                break
+
+        return all_emails[:max_emails]
+
+    async def _fetch_gmail_with_pagination(
+        self,
+        oauth_client: Any,
+        connection_id: str,
+        user_id: str,
+        max_emails: int,
+        page_size: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Fetch Gmail sent emails with pageToken pagination.
+
+        Args:
+            oauth_client: The OAuth client for Composio calls.
+            connection_id: Composio connection ID.
+            user_id: User ID for logging.
+            max_emails: Maximum emails to fetch.
+            page_size: Number of emails per page.
+
+        Returns:
+            List of raw Gmail email dicts.
+        """
+        all_emails: list[dict[str, Any]] = []
+        page_token: str | None = None
+        page_num = 0
+
+        logger.info(
+            "EMAIL_BOOTSTRAP: Starting paginated Gmail fetch for user %s",
+            user_id,
+        )
+
+        while len(all_emails) < max_emails:
+            page_num += 1
+            logger.info(
+                "EMAIL_BOOTSTRAP: Gmail page %d, fetched so far=%d",
+                page_num,
+                len(all_emails),
+            )
+
+            params: dict[str, Any] = {
+                "label": "SENT",
+                "max_results": page_size,
+            }
+            if page_token:
+                params["page_token"] = page_token
+
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="GMAIL_FETCH_EMAILS",
+                params=params,
+                user_id=user_id,
+            )
+
+            if not response.get("successful"):
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Gmail fetch failed on page %d: %s",
+                    page_num,
+                    response.get("error"),
+                )
+                break
+
+            data = response.get("data", {})
+            # Try multiple key patterns for emails
+            page_emails = data.get("emails", [])
+            if not page_emails:
+                page_emails = data.get("messages", [])
+
+            if not page_emails:
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Gmail pagination complete - empty page %d",
+                    page_num,
+                )
+                break
+
+            all_emails.extend(page_emails)
+            logger.info(
+                "EMAIL_BOOTSTRAP: Gmail page %d returned %d emails, total now %d",
+                page_num,
+                len(page_emails),
+                len(all_emails),
+            )
+
+            # Get next page token
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                logger.info(
+                    "EMAIL_BOOTSTRAP: Gmail pagination complete - no more pages after %d",
+                    page_num,
+                )
+                break
+
+            # Safety limit
+            if page_num > 50:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Gmail pagination safety limit reached at page %d",
+                    page_num,
+                )
+                break
+
+        return all_emails[:max_emails]
 
     # ------------------------------------------------------------------
     # Provider-specific email normalization
@@ -657,14 +814,17 @@ class PriorityEmailIngestion:
     # Contact extraction
     # ------------------------------------------------------------------
 
-    async def _extract_contacts(self, emails: list[dict[str, Any]]) -> list[EmailContact]:
+    async def _extract_contacts(
+        self, emails: list[dict[str, Any]], max_contacts: int = 100
+    ) -> list[EmailContact]:
         """Extract and deduplicate contacts from email recipients.
 
         Args:
             emails: Email dicts to scan.
+            max_contacts: Maximum contacts to return.
 
         Returns:
-            Up to 50 contacts sorted by interaction count (descending).
+            Up to max_contacts contacts sorted by interaction count (descending).
         """
         contact_map: dict[str, EmailContact] = {}
 
@@ -692,12 +852,12 @@ class PriorityEmailIngestion:
             reverse=True,
         )
 
-        # Classify top 20 contacts via LLM
-        top_contacts = contacts[:20]
+        # Classify top 30 contacts via LLM (increased for better coverage)
+        top_contacts = contacts[:30]
         if top_contacts:
             await self._classify_contacts(top_contacts, emails)
 
-        return contacts[:50]
+        return contacts[:max_contacts]
 
     async def _classify_contacts(
         self,
@@ -889,20 +1049,28 @@ class PriorityEmailIngestion:
     # Writing sample extraction
     # ------------------------------------------------------------------
 
-    def _extract_writing_samples(self, emails: list[dict[str, Any]]) -> list[str]:
+    def _extract_writing_samples(
+        self, emails: list[dict[str, Any]], max_samples: int = 50
+    ) -> list[str]:
         """Extract clean writing samples from sent emails for style refinement.
 
         Only emails between 100 and 3000 characters are suitable.
         Handles both Gmail (body is a string) and Outlook (body is
         ``{"contentType": "...", "content": "..."}``).
 
+        Diversifies samples by selecting from different recipients and subjects
+        to capture varied writing contexts.
+
         Args:
             emails: Email dicts to extract from.
+            max_samples: Maximum number of samples to return.
 
         Returns:
-            Up to 20 writing samples.
+            Up to max_samples diverse writing samples.
         """
-        samples: list[str] = []
+        samples_by_recipient: dict[str, list[str]] = {}
+        seen_subjects: set[str] = set()
+
         for email in emails:
             body = email.get("body", "")
             # Outlook Graph API returns body as {"contentType": "...", "content": "..."}
@@ -910,9 +1078,46 @@ class PriorityEmailIngestion:
                 body = body.get("content", "")
             if not isinstance(body, str):
                 continue
-            if 100 < len(body) < 3000:
-                samples.append(body)
-        return samples[:20]
+            if not (100 < len(body) < 3000):
+                continue
+
+            # Get primary recipient for diversification
+            to_list = email.get("to", [])
+            primary_recipient = to_list[0] if to_list else "unknown"
+            if isinstance(primary_recipient, dict):
+                primary_recipient = primary_recipient.get("email", "unknown")
+
+            # Dedupe by subject to avoid same thread emails
+            subject = email.get("subject", "")[:50]
+            if subject in seen_subjects:
+                continue
+            seen_subjects.add(subject)
+
+            if primary_recipient not in samples_by_recipient:
+                samples_by_recipient[primary_recipient] = []
+            samples_by_recipient[primary_recipient].append(body)
+
+        # Round-robin selection to ensure diversity across recipients
+        final_samples: list[str] = []
+        recipient_queues = list(samples_by_recipient.values())
+        idx = 0
+        while len(final_samples) < max_samples and recipient_queues:
+            queue = recipient_queues[idx % len(recipient_queues)]
+            if queue:
+                final_samples.append(queue.pop(0))
+            if not queue:
+                recipient_queues.pop(idx % len(recipient_queues))
+                if not recipient_queues:
+                    break
+                continue
+            idx += 1
+
+        logger.info(
+            "EMAIL_BOOTSTRAP: Extracted %d diverse writing samples from %d recipients",
+            len(final_samples),
+            len(samples_by_recipient),
+        )
+        return final_samples
 
     # ------------------------------------------------------------------
     # Pattern analysis
@@ -961,14 +1166,17 @@ class PriorityEmailIngestion:
     # Storage helpers
     # ------------------------------------------------------------------
 
-    async def _store_contacts(self, user_id: str, contacts: list[EmailContact]) -> None:
+    async def _store_contacts(
+        self, user_id: str, contacts: list[EmailContact], max_contacts: int = 100
+    ) -> None:
         """Store discovered contacts in Corporate Memory / relationship graph.
 
         Args:
             user_id: Owner of the contacts.
-            contacts: Up to 50 contacts to store.
+            contacts: Contacts to store.
+            max_contacts: Maximum contacts to store.
         """
-        contacts_to_store = contacts[:50]
+        contacts_to_store = contacts[:max_contacts]
         stored_count = 0
         failed_count = 0
 
@@ -1401,7 +1609,7 @@ class PriorityEmailIngestion:
     async def _trigger_retroactive_enrichment(
         self,
         user_id: str,
-        contacts: list[dict[str, Any]],
+        contacts: list[EmailContact],
     ) -> None:
         """Trigger retroactive enrichment after email processing (US-923).
 
@@ -1411,27 +1619,28 @@ class PriorityEmailIngestion:
 
         Args:
             user_id: User whose memory to enrich.
-            contacts: Contacts extracted from email processing.
+            contacts: EmailContact objects extracted from email processing.
         """
         try:
             from src.memory.retroactive_enrichment import (
                 RetroactiveEnrichmentService,
             )
 
+            # Convert EmailContact Pydantic models to dicts
             entities = [
                 {
-                    "name": c.get("name", c.get("email", "")),
-                    "type": c.get("relationship", "contact"),
+                    "name": c.name or c.email,
+                    "type": c.relationship_type,
                     "confidence": 0.75,
                     "source": "email_archive",
                     "facts": [
-                        f"{c.get('name', 'Unknown')} contacted via email "
-                        f"({c.get('email_count', 0)} messages)"
+                        f"{c.name or 'Unknown'} contacted via email "
+                        f"({c.interaction_count} messages)"
                     ],
                     "relationships": [],
                 }
                 for c in contacts
-                if c.get("name") or c.get("email")
+                if c.name or c.email
             ]
 
             if entities:
