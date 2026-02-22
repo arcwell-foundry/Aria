@@ -31,6 +31,11 @@ from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
+from src.services.email_tools import (
+    EMAIL_TOOL_DEFINITIONS,
+    execute_email_tool,
+    get_email_integration,
+)
 from src.services.extraction import ExtractionService
 
 from src.core.cognitive_friction import (
@@ -753,9 +758,6 @@ class ChatService:
         # Web grounding — lazily initialized on first use
         self._web_grounding: WebGroundingService | None = None
 
-        # Email check — lazily initialized on first use
-        self._email_check: EmailCheckService | None = None
-
         # Companion orchestrator — lazily initialized on first use
         self._companion_orchestrator: Any = None
 
@@ -1327,62 +1329,13 @@ class ChatService:
             logger.warning("Web grounding failed: %s", e)
         web_grounding_ms = (time.perf_counter() - web_grounding_start) * 1000
 
-        # Email check: Detect and handle email check requests
+        # Check if user has email integration (for tool-based email access)
         email_check_start = time.perf_counter()
-        email_check_result: dict[str, Any] | None = None
+        email_integration: dict[str, Any] | None = None
         try:
-            if self._email_check is None:
-                self._email_check = EmailCheckService()
-            if self._email_check.detect_email_check_request(message):
-                email_check_result = await self._email_check.check_email(user_id, message)
-                # If email check was successful, return early with the response
-                if email_check_result and email_check_result.get("response_text"):
-                    email_check_ms = (time.perf_counter() - email_check_start) * 1000
-                    # Build early response for email check
-                    working_memory.add_message("assistant", email_check_result["response_text"])
-                    await self.persist_turn(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        user_message=message,
-                        assistant_message=email_check_result["response_text"],
-                        assistant_metadata={"email_check": True},
-                        conversation_context=conversation_messages[-2:],
-                    )
-                    return {
-                        "message": email_check_result["response_text"],
-                        "citations": [],
-                        "conversation_id": conversation_id,
-                        "rich_content": [
-                            {
-                                "type": "email_check_result",
-                                "data": {
-                                    "total_emails": email_check_result.get("total_emails", 0),
-                                    "needs_reply": email_check_result.get("needs_reply", 0),
-                                    "urgent_count": email_check_result.get("urgent_count", 0),
-                                    "urgent_details": email_check_result.get("urgent_details", []),
-                                },
-                            }
-                        ],
-                        "ui_commands": [],
-                        "suggestions": ["Review drafts", "Reply to urgent", "Check specific sender"],
-                        "timing": {
-                            "memory_query_ms": 0,
-                            "proactive_query_ms": 0,
-                            "web_grounding_ms": 0,
-                            "email_check_ms": round(email_check_ms, 2),
-                            "skill_detection_ms": 0,
-                            "llm_response_ms": 0,
-                            "total_ms": round((time.perf_counter() - total_start) * 1000, 2),
-                        },
-                        "cognitive_load": {
-                            "level": load_state.level.value,
-                            "score": round(load_state.score, 3),
-                            "recommendation": load_state.recommendation,
-                        },
-                        "proactive_insights": [],
-                    }
+            email_integration = await get_email_integration(user_id)
         except Exception as e:
-            logger.warning("Email check failed: %s", e)
+            logger.warning("Email integration check failed: %s", e)
         email_check_ms = (time.perf_counter() - email_check_start) * 1000
 
         # Get proactive insights to volunteer
@@ -1719,12 +1672,32 @@ class ChatService:
             )
             system_prompt = system_prompt + whatif_context
 
-        # Generate response from LLM with timing
+        # Generate response from LLM with timing (with optional email tools)
         llm_start = time.perf_counter()
-        response_text = await self._llm_client.generate_response(
-            messages=conversation_messages,
-            system_prompt=system_prompt,
-        )
+
+        if email_integration:
+            # Add email capability context to system prompt
+            provider_name = email_integration.get("integration_type", "email").title()
+            system_prompt += (
+                f"\n\n## Email Access\n"
+                f"You have access to the user's {provider_name} email via tools. "
+                f"When they ask about emails, inbox, messages, or anything email-related, "
+                f"use the email tools to fetch real data. Do NOT say you can't access emails."
+            )
+
+            response_text = await self._run_tool_loop(
+                messages=conversation_messages,
+                system_prompt=system_prompt,
+                tools=EMAIL_TOOL_DEFINITIONS,
+                user_id=user_id,
+                email_integration=email_integration,
+            )
+        else:
+            response_text = await self._llm_client.generate_response(
+                messages=conversation_messages,
+                system_prompt=system_prompt,
+            )
+
         llm_ms = (time.perf_counter() - llm_start) * 1000
 
         # Add assistant response to working memory with skill metadata
@@ -1890,6 +1863,89 @@ class ChatService:
                 logger.warning("Autonomy upgrade check failed: %s", e)
 
         return result
+
+    async def _run_tool_loop(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        user_id: str,
+        email_integration: dict[str, Any],
+        max_rounds: int = 3,
+    ) -> str:
+        """Run the LLM with tools, executing tool calls in a loop.
+
+        If the LLM requests a tool call, execute it, feed the result back,
+        and let the LLM generate a final text response. Limits to max_rounds
+        to prevent runaway loops.
+
+        Args:
+            messages: Conversation messages for the LLM.
+            system_prompt: The system prompt.
+            tools: Tool definitions (Anthropic format).
+            user_id: The user's ID.
+            email_integration: The user's email integration record.
+            max_rounds: Max tool-call round-trips.
+
+        Returns:
+            Final text response from the LLM.
+        """
+        current_messages = list(messages)
+
+        for _round in range(max_rounds):
+            response = await self._llm_client.generate_response_with_tools(
+                messages=current_messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                user_id=user_id,
+            )
+
+            # If no tool calls, return the text response
+            if not response.tool_calls:
+                return response.text or "I wasn't able to process that request."
+
+            # Build the assistant message with all content blocks
+            assistant_content: list[dict[str, Any]] = []
+            if response.text:
+                assistant_content.append({"type": "text", "text": response.text})
+            for tc in response.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.input,
+                })
+
+            current_messages.append({"role": "assistant", "content": assistant_content})
+
+            # Execute each tool call and build tool_result messages
+            tool_results: list[dict[str, Any]] = []
+            for tc in response.tool_calls:
+                logger.info(
+                    "Executing email tool %s for user %s",
+                    tc.name,
+                    user_id,
+                )
+                result = await execute_email_tool(
+                    tool_name=tc.name,
+                    params=tc.input,
+                    user_id=user_id,
+                    integration=email_integration,
+                )
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tc.id,
+                    "content": json.dumps(result, default=str),
+                })
+
+            current_messages.append({"role": "user", "content": tool_results})
+
+        # If we exhausted rounds, do one final call without tools
+        final_response = await self._llm_client.generate_response(
+            messages=current_messages,
+            system_prompt=system_prompt,
+        )
+        return final_response
 
     async def _query_relevant_memories(
         self,

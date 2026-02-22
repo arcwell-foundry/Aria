@@ -26,6 +26,26 @@ DEFAULT_MAX_TOKENS = 4096
 _llm_circuit_breaker = claude_api_circuit_breaker
 
 @dataclass
+class ToolUseRequest:
+    """Represents a tool use request from the LLM."""
+
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass
+class LLMToolResponse:
+    """Response from an LLM call that may include tool use requests."""
+
+    text: str
+    tool_calls: list[ToolUseRequest] = field(default_factory=list)
+    stop_reason: str = "end_turn"
+    usage: LLMUsage | None = field(default=None, repr=False)
+    _raw_response: Any = field(default=None, repr=False)
+
+
+@dataclass
 class LLMResponse:
     """Structured response from an LLM call with optional thinking trace."""
 
@@ -144,6 +164,101 @@ class LLMClient:
                 logger.exception("Failed to record LLM usage for user %s", user_id)
 
         return text_content
+
+    async def generate_response_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        system_prompt: str | None = None,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.7,
+        user_id: str | None = None,
+    ) -> LLMToolResponse:
+        """Generate a response from Claude with tool use support.
+
+        When the model decides to use a tool, it returns tool_calls in the
+        response. The caller is responsible for executing the tools and
+        feeding results back via a follow-up call.
+
+        Args:
+            messages: List of message dicts (supports 'content' as str or list).
+            tools: List of Anthropic-format tool definitions.
+            system_prompt: Optional system prompt for context.
+            max_tokens: Maximum tokens in response.
+            temperature: Sampling temperature (0-1).
+            user_id: Optional user ID for cost governance.
+
+        Returns:
+            LLMToolResponse with text, tool_calls, and stop_reason.
+        """
+        # Budget check
+        if user_id:
+            from src.core.cost_governor import LLMUsage
+            from src.core.exceptions import BudgetExceededError
+
+            governor = get_cost_governor()
+            budget = await governor.check_budget(user_id)
+            if not budget.can_proceed:
+                raise BudgetExceededError(
+                    user_id=user_id,
+                    tokens_used=budget.tokens_used_today,
+                    daily_budget=budget.daily_budget,
+                )
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "temperature": temperature,
+            "tools": tools,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+
+        logger.debug(
+            "Calling Claude API with tools",
+            extra={
+                "model": self._model,
+                "message_count": len(messages),
+                "tool_count": len(tools),
+            },
+        )
+
+        response = await _llm_circuit_breaker.call(self._client.messages.create, **kwargs)
+
+        # Extract text and tool_use blocks
+        text_parts: list[str] = []
+        tool_calls: list[ToolUseRequest] = []
+        for block in response.content:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                text_parts.append(getattr(block, "text", ""))
+            elif block_type == "tool_use":
+                tool_calls.append(
+                    ToolUseRequest(
+                        id=block.id,
+                        name=block.name,
+                        input=block.input,
+                    )
+                )
+
+        # Record usage (fail-open)
+        if user_id:
+            try:
+                from src.core.cost_governor import LLMUsage
+
+                usage = LLMUsage.from_anthropic_response(response)
+                governor = get_cost_governor()
+                await governor.record_usage(user_id, usage)
+            except Exception:
+                logger.exception("Failed to record tool-use LLM usage for user %s", user_id)
+
+        return LLMToolResponse(
+            text="\n".join(text_parts),
+            tool_calls=tool_calls,
+            stop_reason=response.stop_reason or "end_turn",
+            _raw_response=response,
+        )
 
     async def generate_response_with_thinking(
         self,
