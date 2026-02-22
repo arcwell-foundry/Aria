@@ -25,13 +25,13 @@ from src.core.llm import LLMClient
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
+from src.services.activity_service import ActivityService
 from src.services.email_analyzer import EmailAnalyzer
 from src.services.email_client_writer import DraftSaveError, EmailClientWriter
 from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
-from src.services.activity_service import ActivityService
 from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,11 @@ class AutonomousDraftEngine:
     8. Tracks processing run in email_processing_runs table
     """
 
-    _FALLBACK_REPLY_PROMPT = """You are ARIA, an AI assistant drafting an email reply."""
+    _FALLBACK_REPLY_PROMPT = (
+        "You are drafting an email reply on behalf of the user. "
+        "You must match their exact writing style — they should not be able "
+        "to tell this wasn't written by them. Write naturally, not like an AI."
+    )
 
     _REPLY_TASK_INSTRUCTIONS = """
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
@@ -117,14 +121,6 @@ IMPORTANT: Your response MUST be valid JSON with exactly these fields:
   "subject": "The reply subject line (usually Re: original subject)",
   "body": "The full email body with greeting and signature"
 }
-
-Guidelines:
-1. Start with an appropriate greeting based on the relationship
-2. Acknowledge the sender's message specifically
-3. Address any questions or requests directly
-4. Be concise but thorough - match the sender's detail level
-5. End with an appropriate sign-off
-6. Sign as the user (use their provided name)
 
 Do not include any text outside the JSON object."""
 
@@ -709,7 +705,9 @@ Do not include any text outside the JSON object."""
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=system_prompt,
-            temperature=0.7,
+            temperature=0.4,
+            max_tokens=1200,
+            user_id=user_id,
         )
 
         # Parse JSON response
@@ -740,97 +738,208 @@ Do not include any text outside the JSON object."""
     ) -> str:
         """Build comprehensive reply generation prompt.
 
-        Assembles all context sections into a structured prompt.
+        Assembles all context sections into a structured prompt
+        with full voice matching, strategic guardrails, and all
+        available context sources.
         """
         sections: list[str] = []
 
-        # Original email
-        sections.append(f"""=== ORIGINAL EMAIL ===
-From: {email.sender_name} <{email.sender_email}>
+        # Identity and voice matching (top of prompt for emphasis)
+        sections.append(f"""You are drafting an email reply AS {user_name}.
+You must match their exact writing style — they should not be able to tell
+this wasn't written by them. Do NOT sound like an AI assistant.""")
+
+        # User's writing style guide
+        sections.append(f"""## Writing Style Guide
+{style_guidelines}""")
+
+        # Recipient-specific writing style
+        if context.recipient_style and context.recipient_style.exists:
+            rs = context.recipient_style
+            recipient_label = email.sender_name or email.sender_email
+            style_lines = [
+                f"## How {user_name} writes to {recipient_label}",
+                f"- Greeting style: {rs.greeting_style or 'Use global style above'}",
+                f"- Signoff style: {rs.signoff_style or 'Use global style above'}",
+                f"- Formality: {rs.formality_level:.1f}/1.0",
+                f"- Tone: {rs.tone}",
+                f"- Uses emoji: {'Yes' if rs.uses_emoji else 'No'}",
+                f"- Emails exchanged: {rs.email_count}",
+            ]
+            sections.append("\n".join(style_lines))
+
+        # Tone guidance from personality calibrator
+        if tone_guidance:
+            sections.append(f"""## Tone Guidance
+{tone_guidance}""")
+
+        # The original email being replied to
+        email_body = getattr(email, "body", None) or email.snippet
+        sections.append(f"""## The email you're replying to
+From: {email.sender_name or 'Unknown'} <{email.sender_email}>
 Subject: {email.subject}
 Urgency: {email.urgency}
-Body: {email.snippet}""")
 
-        # Thread context
+{email_body}""")
+
+        # Full conversation thread
         if context.thread_context and context.thread_context.messages:
             thread_summary = (
-                context.thread_context.summary or f"{context.thread_context.message_count} messages"
+                context.thread_context.summary
+                or f"{context.thread_context.message_count} messages in thread"
             )
-            recent_messages = context.thread_context.messages[-3:]
+            recent_messages = context.thread_context.messages[-5:]
             recent = "\n".join(
-                f"- {m.sender_name}: {m.body[:200]}{'...' if len(m.body) > 200 else ''}"
+                f"- {m.sender_name or m.sender_email}: "
+                f"{m.body[:300]}{'...' if len(m.body) > 300 else ''}"
                 for m in recent_messages
             )
-            sections.append(f"""=== CONVERSATION THREAD ===
+            sections.append(f"""## Full conversation thread (chronological)
 Summary: {thread_summary}
 Recent messages:
 {recent}""")
+        else:
+            sections.append(
+                "## Full conversation thread\nNo prior thread — this is a first reply."
+            )
 
         # Recipient research
         if context.recipient_research:
             r = context.recipient_research
             info = []
+            if r.sender_name:
+                info.append(f"Name: {r.sender_name}")
             if r.sender_title:
                 info.append(f"Title: {r.sender_title}")
             if r.sender_company:
                 info.append(f"Company: {r.sender_company}")
+            if r.company_description:
+                desc = r.company_description[:300]
+                info.append(f"Company info: {desc}")
             if r.bio:
-                info.append(f"Bio: {r.bio[:300]}{'...' if len(r.bio) > 300 else ''}")
+                bio = r.bio[:400] + ("..." if len(r.bio) > 400 else "")
+                info.append(f"Bio: {bio}")
             if info:
-                sections.append("=== ABOUT THE RECIPIENT ===\n" + "\n".join(info))
+                sections.append("## Context about the recipient\n" + "\n".join(info))
+            else:
+                sections.append("## Context about the recipient\nNo research available.")
+        else:
+            sections.append("## Context about the recipient\nNo research available.")
 
         # Relationship history
-        if context.relationship_history and context.relationship_history.memory_facts:
-            facts = context.relationship_history.memory_facts[:3]
-            fact_lines = "\n".join(f"- {f.get('fact', str(f))}" for f in facts)
-            sections.append(f"""=== RELATIONSHIP HISTORY ===
-Total interactions: {context.relationship_history.total_emails}
-Key facts:
-{fact_lines}""")
-
-        # Recipient style
-        if context.recipient_style and context.recipient_style.exists:
-            sections.append(f"""=== RECIPIENT'S COMMUNICATION STYLE ===
-Formality: {context.recipient_style.formality_level:.1f}/1.0
-Tone: {context.recipient_style.tone}
-Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
-
-        # User's style
-        sections.append(f"""=== YOUR WRITING STYLE (MATCH THIS) ===
-{style_guidelines}""")
-
-        # Tone guidance
-        if tone_guidance:
-            sections.append(f"""=== TONE GUIDANCE ===
-{tone_guidance}""")
+        if context.relationship_history and context.relationship_history.total_emails > 0:
+            rh = context.relationship_history
+            lines = [f"Total emails: {rh.total_emails}"]
+            if rh.relationship_type and rh.relationship_type != "unknown":
+                lines.append(f"Relationship: {rh.relationship_type}")
+            if rh.last_interaction:
+                lines.append(f"Last interaction: {rh.last_interaction}")
+            if rh.recent_topics:
+                lines.append(f"Recent topics: {', '.join(rh.recent_topics[:5])}")
+            if rh.commitments:
+                lines.append(
+                    "Open commitments:\n"
+                    + "\n".join(f"- {c}" for c in rh.commitments[:3])
+                )
+            if rh.memory_facts:
+                facts = rh.memory_facts[:5]
+                fact_lines = "\n".join(
+                    f"- {f.get('fact', str(f))}" for f in facts
+                )
+                lines.append(f"Key facts:\n{fact_lines}")
+            sections.append(
+                "## Your relationship with this person\n" + "\n".join(lines)
+            )
+        else:
+            sections.append(
+                "## Your relationship with this person\n"
+                "New contact — no prior interaction history."
+            )
 
         # Calendar context
-        if context.calendar_context and context.calendar_context.upcoming_meetings:
-            meetings = context.calendar_context.upcoming_meetings[:2]
-            meeting_lines = "\n".join(
-                f"- {m.get('summary', 'Meeting')} on {m.get('start', 'TBD')}" for m in meetings
+        if context.calendar_context and (
+            context.calendar_context.upcoming_meetings
+            or context.calendar_context.recent_meetings
+        ):
+            cal_lines = []
+            if context.calendar_context.upcoming_meetings:
+                for m in context.calendar_context.upcoming_meetings[:3]:
+                    cal_lines.append(
+                        f"- UPCOMING: {m.get('summary', 'Meeting')} "
+                        f"on {m.get('start', 'TBD')}"
+                    )
+            if context.calendar_context.recent_meetings:
+                for m in context.calendar_context.recent_meetings[:2]:
+                    cal_lines.append(
+                        f"- RECENT: {m.get('summary', 'Meeting')} "
+                        f"on {m.get('start', 'TBD')}"
+                    )
+            sections.append(
+                "## Upcoming/recent meetings with this person\n"
+                + "\n".join(cal_lines)
             )
-            sections.append(f"""=== UPCOMING MEETINGS ===
-{meeting_lines}""")
+        else:
+            sections.append(
+                "## Upcoming/recent meetings with this person\n"
+                "No calendar data available."
+            )
 
         # CRM context
         if context.crm_context and context.crm_context.connected:
-            crm_info = []
+            crm_lines = []
             if context.crm_context.lead_stage:
-                crm_info.append(f"Lead stage: {context.crm_context.lead_stage}")
+                crm_lines.append(f"Lead stage: {context.crm_context.lead_stage}")
+            if context.crm_context.account_status:
+                crm_lines.append(f"Account status: {context.crm_context.account_status}")
             if context.crm_context.deal_value:
-                crm_info.append(f"Deal value: ${context.crm_context.deal_value:,.0f}")
-            if crm_info:
-                sections.append("=== CRM STATUS ===\n" + "\n".join(crm_info))
+                crm_lines.append(
+                    f"Deal value: ${context.crm_context.deal_value:,.0f}"
+                )
+            if context.crm_context.recent_activities:
+                for act in context.crm_context.recent_activities[:2]:
+                    crm_lines.append(f"- {act.get('description', str(act))}")
+            if crm_lines:
+                sections.append(
+                    "## Deal/pipeline context\n" + "\n".join(crm_lines)
+                )
+            else:
+                sections.append("## Deal/pipeline context\nNo CRM data.")
+        else:
+            sections.append("## Deal/pipeline context\nNo CRM data.")
 
-        # User info and task
-        sections.append(f"""=== YOUR INFO ===
-Your name: {user_name}
+        # Corporate memory
+        if context.corporate_memory and context.corporate_memory.facts:
+            fact_lines = "\n".join(
+                f"- {f.get('fact', str(f))}"
+                for f in context.corporate_memory.facts[:5]
+            )
+            sections.append(f"## Relevant company knowledge\n{fact_lines}")
+        else:
+            sections.append(
+                "## Relevant company knowledge\n"
+                "No corporate memory for this company."
+            )
 
-=== TASK ===
-Write a reply to this email. Match the writing style exactly.
+        # Strategic guardrails
+        sections.append("""## Strategic guardrails
+- Do NOT commit to specific pricing unless pricing was already discussed
+- Do NOT make promises about timelines without checking context
+- Do NOT agree to meetings without checking calendar
+- If unsure about something, be warm but non-committal and suggest a call
+- Keep the response proportional to the incoming email length""")
 
-Respond with JSON: {{"subject": "...", "body": "..."}}""")
+        # Final instructions
+        sections.append(f"""## Instructions
+Write a reply that:
+1. Addresses everything the sender raised
+2. Sounds EXACTLY like {user_name} — same greeting, tone, length, signoff
+3. References relevant context naturally (don't dump everything you know)
+4. Is ready to send with minimal editing
+
+Sign off as {user_name}.
+Write ONLY the email body (no metadata).
+
+Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
 
         return "\n\n".join(sections)
 
@@ -888,7 +997,8 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
-        These notes help the user understand why ARIA drafted what it did.
+        These notes help the user understand why ARIA drafted what it did,
+        which context sources were used, and what was missing.
         """
         notes: list[str] = []
 
@@ -896,23 +1006,67 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         if is_learning_mode:
             notes.append(self._learning_mode.get_learning_mode_note())
 
-        # Context sources used
-        if context.sources_used:
-            notes.append(f"Context sources: {', '.join(context.sources_used)}")
+        # Context sources available vs missing
+        available: list[str] = []
+        missing: list[str] = []
 
-        # Relationship context
-        if context.relationship_history and context.relationship_history.total_emails > 0:
-            notes.append(f"Prior relationship: {context.relationship_history.total_emails} emails")
+        if context.thread_context and context.thread_context.summary:
+            msg_count = context.thread_context.message_count
+            available.append(f"thread ({msg_count} msgs)")
         else:
-            notes.append("New contact - no prior relationship data")
+            missing.append("thread history")
 
-        # Style warning
-        if style_score < 0.7:
-            notes.append(f"WARNING: Style match is low ({style_score:.2f}). Review recommended.")
+        if context.recipient_research and (
+            context.recipient_research.sender_title
+            or context.recipient_research.bio
+        ):
+            available.append("recipient research")
+        else:
+            missing.append("recipient research")
+
+        if context.relationship_history and context.relationship_history.total_emails > 0:
+            available.append(
+                f"relationship ({context.relationship_history.total_emails} emails)"
+            )
+        else:
+            missing.append("relationship history")
+
+        if context.recipient_style and context.recipient_style.exists:
+            available.append("per-recipient style")
+        else:
+            missing.append("per-recipient style")
+
+        if context.calendar_context and context.calendar_context.connected:
+            available.append("calendar")
+        else:
+            missing.append("calendar")
+
+        if context.crm_context and context.crm_context.connected:
+            available.append("CRM")
+        else:
+            missing.append("CRM")
+
+        if context.corporate_memory and context.corporate_memory.facts:
+            available.append(f"corporate memory ({len(context.corporate_memory.facts)} facts)")
+        else:
+            missing.append("corporate memory")
+
+        if available:
+            notes.append(f"Used: {', '.join(available)}")
+        if missing:
+            notes.append(f"Missing: {', '.join(missing)}")
+
+        # Style match quality
+        if style_score >= 0.8:
+            notes.append(f"Style match: strong ({style_score:.0%})")
+        elif style_score >= 0.7:
+            notes.append(f"Style match: good ({style_score:.0%})")
+        else:
+            notes.append(f"Style match: LOW ({style_score:.0%}) — review recommended")
 
         # Urgency flag
         if email.urgency == "URGENT":
-            notes.append("URGENT: User should review carefully before sending.")
+            notes.append("URGENT — review carefully before sending")
 
         # Confidence level
         confidence_label = (
