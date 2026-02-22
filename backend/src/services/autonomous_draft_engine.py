@@ -251,26 +251,14 @@ Do not include any text outside the JSON object."""
             # Get user info for signature
             user_name = await self._get_user_name(user_id)
 
-            # 2. Check learning mode status
+            # 2. Check learning mode status (informational only — no gating)
             is_learning_mode = await self._learning_mode.is_learning_mode_active(user_id)
-            top_contacts: list[str] = []
 
             if is_learning_mode:
-                top_contacts = await self._learning_mode.get_top_contacts(user_id)
                 logger.info(
-                    "DRAFT_ENGINE: Learning mode ACTIVE for user %s. "
-                    "Limiting to %d top contacts.",
+                    "DRAFT_ENGINE: Learning mode ACTIVE for user %s (informational only — drafting all contacts).",
                     user_id,
-                    len(top_contacts),
                 )
-
-                if not top_contacts:
-                    logger.warning(
-                        "DRAFT_ENGINE: No top contacts in learning mode for user %s. "
-                        "This is expected for new users - will populate after first email interactions. "
-                        "Processing first 3 emails anyway to bootstrap.",
-                        user_id,
-                    )
 
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
@@ -279,7 +267,6 @@ Do not include any text outside the JSON object."""
             sent_thread_ids = await self._fetch_sent_thread_ids(user_id, since_hours)
 
             emails_processed = 0
-            emails_skipped_learning_mode = 0
             emails_skipped_existing_draft = 0
             emails_skipped_already_replied = 0
             emails_deferred_active_conversation = 0
@@ -331,23 +318,12 @@ Do not include any text outside the JSON object."""
                     emails_deferred_active_conversation += 1
                     continue
 
-                # Apply learning mode filter
-                # If no top contacts yet, process first 3 emails to bootstrap
-                if is_learning_mode and top_contacts:
-                    sender_email = email.sender_email.lower().strip()
-                    is_top_contact = any(
-                        c.lower().strip() == sender_email for c in top_contacts
-                    )
+                # Assign confidence tier (no gating — all emails get drafted)
+                confidence_tier = await self._assign_draft_confidence_tier(
+                    user_id, email.sender_email,
+                )
 
-                    if not is_top_contact:
-                        logger.debug(
-                            "DRAFT_ENGINE: Skipping email from %s - not in top contacts (learning mode)",
-                            email.sender_email,
-                        )
-                        emails_skipped_learning_mode += 1
-                        continue
-
-                # Increment interaction count for learning mode
+                # Increment interaction count for learning mode tracking
                 if is_learning_mode:
                     await self._learning_mode.increment_draft_interaction(user_id)
 
@@ -361,7 +337,8 @@ Do not include any text outside the JSON object."""
                         run_id,
                     )
                     draft = await self._process_single_email(
-                        user_id, user_name, email, is_learning_mode, run_id
+                        user_id, user_name, email, is_learning_mode, run_id,
+                        confidence_tier=confidence_tier,
                     )
                     result.drafts.append(draft)
                     if draft.success:
@@ -406,14 +383,13 @@ Do not include any text outside the JSON object."""
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
                 "skipped_existing=%d | skipped_already_replied=%d | "
-                "deferred_active=%d | skipped_learning=%d | status=%s",
+                "deferred_active=%d | status=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
                 emails_skipped_already_replied,
                 emails_deferred_active_conversation,
-                emails_skipped_learning_mode,
                 result.status,
             )
 
@@ -636,6 +612,107 @@ Do not include any text outside the JSON object."""
             }
 
     # ------------------------------------------------------------------
+    # Confidence Tier Assignment
+    # ------------------------------------------------------------------
+
+    async def _assign_draft_confidence_tier(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> dict[str, Any]:
+        """Assign confidence tier based on data richness, not a gate.
+
+        Tiers:
+        - HIGH: Top contact with 5+ emails — strong style match likely.
+        - MEDIUM: Has recipient profile with 2+ emails.
+        - LOW: Has digital twin but new contact.
+        - MINIMAL: Very little data to work with.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The email sender to evaluate.
+
+        Returns:
+            Dict with tier, note, is_top_contact, and email_count.
+        """
+        has_recipient_profile = False
+        email_count = 0
+
+        try:
+            profile = (
+                self._db.table("recipient_writing_profiles")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("recipient_email", sender_email)
+                .maybe_single()
+                .execute()
+            )
+            has_recipient_profile = bool(profile.data)
+            email_count = profile.data.get("email_count", 0) if profile.data else 0
+        except Exception as e:
+            logger.debug("Confidence tier: recipient profile lookup failed: %s", e)
+
+        has_twin = False
+        try:
+            twin = (
+                self._db.table("digital_twin_profiles")
+                .select("id")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            has_twin = bool(twin.data)
+        except Exception as e:
+            logger.debug("Confidence tier: digital twin lookup failed: %s", e)
+
+        top_contacts = await self._get_top_contacts(user_id)
+        is_top_contact = sender_email.lower() in {c.lower() for c in top_contacts}
+
+        if is_top_contact and email_count >= 5:
+            tier = "HIGH"
+            sender_label = sender_email.split("@")[0]
+            note = (
+                f"I have {email_count} of your past emails to "
+                f"{sender_label} to match your style."
+            )
+        elif has_recipient_profile and email_count >= 2:
+            tier = "MEDIUM"
+            note = (
+                f"I have {email_count} emails as style reference. "
+                f"My confidence will improve as we interact more."
+            )
+        elif has_twin:
+            tier = "LOW"
+            note = (
+                "This is a new contact — I used your general writing style. "
+                "Review this draft more carefully."
+            )
+        else:
+            tier = "MINIMAL"
+            note = (
+                "Limited style data available. I wrote a professional reply "
+                "but it may not match your voice perfectly."
+            )
+
+        return {
+            "tier": tier,
+            "note": note,
+            "is_top_contact": is_top_contact,
+            "email_count": email_count,
+        }
+
+    async def _get_top_contacts(self, user_id: str) -> list[str]:
+        """Get the top contacts for a user via LearningModeService.
+
+        Args:
+            user_id: The user whose top contacts to retrieve.
+
+        Returns:
+            List of top contact email addresses.
+        """
+        return await self._learning_mode.get_top_contacts(user_id)
+
+    # ------------------------------------------------------------------
     # Single Email Processing
     # ------------------------------------------------------------------
 
@@ -646,6 +723,7 @@ Do not include any text outside the JSON object."""
         email: Any,  # EmailCategory from email_analyzer
         is_learning_mode: bool = False,
         run_id: str | None = None,
+        confidence_tier: dict[str, Any] | None = None,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -771,14 +849,16 @@ Do not include any text outside the JSON object."""
                 len(guardrail_warnings),
             )
 
-            # g. Generate ARIA notes (add learning mode note and guardrail warnings if applicable)
+            # g. Generate ARIA notes (with confidence tier, learning mode, and guardrail warnings)
             aria_notes = await self._generate_aria_notes(
                 email, context, style_score, confidence, is_learning_mode,
                 lead_updates=lead_updates,
                 guardrail_warnings=guardrail_warnings,
+                confidence_tier=confidence_tier,
             )
 
-            # h. Save draft with all metadata
+            # h. Save draft with all metadata (including confidence tier)
+            tier_label = confidence_tier.get("tier", "LOW") if confidence_tier else "LOW"
             draft_id = await self._save_draft_with_metadata(
                 user_id=user_id,
                 recipient_email=email.sender_email,
@@ -794,6 +874,7 @@ Do not include any text outside the JSON object."""
                 urgency=email.urgency,
                 learning_mode_draft=is_learning_mode,
                 processing_run_id=run_id,
+                confidence_tier=tier_label,
             )
 
             # h2. Update draft_context.draft_id FK now that draft exists
@@ -913,8 +994,9 @@ Do not include any text outside the JSON object."""
                 exc_info=True,
             )
             error_notes = f"Failed: {e}"
-            if is_learning_mode:
-                error_notes = f"{self._learning_mode.get_learning_mode_note()} | {error_notes}"
+            if confidence_tier:
+                tier = confidence_tier.get("tier", "UNKNOWN")
+                error_notes = f"[Confidence: {tier}] | {error_notes}"
             return DraftResult(
                 draft_id="",
                 recipient_email=email.sender_email,
@@ -1382,6 +1464,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         is_learning_mode: bool = False,
         lead_updates: list[dict] | None = None,
         guardrail_warnings: list[str] | None = None,
+        confidence_tier: dict[str, Any] | None = None,
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
@@ -1390,8 +1473,12 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         """
         notes: list[str] = []
 
-        # Add learning mode note first if applicable
-        if is_learning_mode:
+        # Add confidence tier note first (replaces the old learning mode note)
+        if confidence_tier:
+            tier = confidence_tier.get("tier", "UNKNOWN")
+            tier_note = confidence_tier.get("note", "")
+            notes.append(f"[Confidence: {tier}] {tier_note}")
+        elif is_learning_mode:
             notes.append(self._learning_mode.get_learning_mode_note())
 
         # Add guardrail warnings prominently at the top if present
@@ -1511,6 +1598,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         urgency: str,
         learning_mode_draft: bool = False,
         processing_run_id: str | None = None,
+        confidence_tier: str | None = None,
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
@@ -1518,7 +1606,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         # Safety: only reference draft_context_id if the context was actually saved
         safe_context_id = context_id if context_id else None
 
-        insert_data = {
+        insert_data: dict[str, Any] = {
             "id": draft_id,
             "user_id": user_id,
             "recipient_email": recipient_email,
@@ -1536,6 +1624,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
             "status": "draft",
             "learning_mode_draft": learning_mode_draft,
             "processing_run_id": processing_run_id,
+            "confidence_tier": confidence_tier or "LOW",
         }
 
         try:

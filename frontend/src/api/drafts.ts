@@ -14,6 +14,8 @@ export type EmailDraftTone = "formal" | "friendly" | "urgent";
 export type EmailDraftStatus = "draft" | "sent" | "failed";
 
 // Response types
+export type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW" | "MINIMAL";
+
 export interface EmailDraft {
   id: string;
   user_id: string;
@@ -29,6 +31,7 @@ export interface EmailDraft {
   };
   lead_memory_id?: string;
   style_match_score?: number;
+  confidence_tier?: ConfidenceTier;
   status: EmailDraftStatus;
   sent_at?: string;
   error_message?: string;
@@ -48,6 +51,7 @@ export interface EmailDraftListItem {
   tone: EmailDraftTone;
   status: EmailDraftStatus;
   style_match_score?: number;
+  confidence_tier?: ConfidenceTier;
   created_at: string;
 }
 

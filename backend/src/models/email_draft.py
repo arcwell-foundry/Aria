@@ -121,6 +121,9 @@ class EmailDraftResponse(BaseModel):
     learning_mode_draft: bool | None = Field(
         None, description="Whether this draft was created during learning mode period"
     )
+    confidence_tier: str | None = Field(
+        None, description="Confidence tier: HIGH, MEDIUM, LOW, or MINIMAL"
+    )
 
 
 class EmailDraftListResponse(BaseModel):
@@ -134,6 +137,7 @@ class EmailDraftListResponse(BaseModel):
     tone: EmailDraftTone
     status: EmailDraftStatus
     style_match_score: float | None
+    confidence_tier: str | None = None
     created_at: datetime
 
 

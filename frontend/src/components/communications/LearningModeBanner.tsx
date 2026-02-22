@@ -44,7 +44,7 @@ export function LearningModeBanner() {
           ARIA is learning your writing style (Day {day} of 7)
         </p>
         <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-          Currently drafting for your top contacts only. Full inbox drafting begins {formattedDate}.
+          Drafting for all contacts. Confidence will improve as ARIA learns your style through {formattedDate}.
         </p>
       </div>
     </div>

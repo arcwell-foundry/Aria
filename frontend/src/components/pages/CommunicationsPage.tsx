@@ -23,7 +23,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
 import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
-import type { EmailDraftStatus, EmailDraftPurpose } from '@/api/drafts';
+import type { EmailDraftStatus, EmailDraftPurpose, ConfidenceTier } from '@/api/drafts';
 
 type CommunicationsView = 'drafts' | 'decisions';
 
@@ -55,6 +55,14 @@ const STATUS_STYLES: Record<EmailDraftStatus, { label: string; bg: string; text:
   draft: { label: 'DRAFTING', bg: 'var(--accent)', text: 'white' },
   sent: { label: 'SENT', bg: 'var(--success)', text: 'white' },
   failed: { label: 'FAILED', bg: 'var(--critical)', text: 'white' },
+};
+
+// Confidence tier badge styles
+const TIER_STYLES: Record<ConfidenceTier, { label: string; bg: string; text: string }> = {
+  HIGH: { label: 'High Confidence', bg: 'var(--success)', text: 'white' },
+  MEDIUM: { label: 'Medium', bg: 'var(--accent)', text: 'white' },
+  LOW: { label: 'Learning', bg: '#d97706', text: 'white' },
+  MINIMAL: { label: 'New Contact', bg: 'var(--text-secondary)', text: 'white' },
 };
 
 // Format relative time
@@ -291,6 +299,19 @@ function DraftsList() {
                         {formatRelativeTime(draft.created_at)}
                       </span>
                     </div>
+
+                    {/* Confidence tier badge */}
+                    {draft.confidence_tier && TIER_STYLES[draft.confidence_tier] && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{
+                          backgroundColor: TIER_STYLES[draft.confidence_tier].bg,
+                          color: TIER_STYLES[draft.confidence_tier].text,
+                        }}
+                      >
+                        {TIER_STYLES[draft.confidence_tier].label}
+                      </span>
+                    )}
 
                     {/* Status badge */}
                     <span

@@ -347,16 +347,36 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
           </div>
         </div>
 
-        {/* Refinement highlights indicator */}
-        {draft.style_match_score !== undefined && (
-          <div
-            className="mt-4 flex items-center gap-2 text-sm"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            <CheckCircle className="w-4 h-4" style={{ color: 'var(--success)' }} />
-            Style match score: {Math.round(draft.style_match_score * 100)}%
-          </div>
-        )}
+        {/* Confidence and style indicators */}
+        <div className="mt-4 flex items-center gap-4 flex-wrap">
+          {draft.confidence_tier && (
+            <span
+              className="px-2.5 py-1 rounded-full text-xs font-medium"
+              style={{
+                backgroundColor:
+                  draft.confidence_tier === 'HIGH' ? 'var(--success)' :
+                  draft.confidence_tier === 'MEDIUM' ? 'var(--accent)' :
+                  draft.confidence_tier === 'LOW' ? '#d97706' :
+                  'var(--text-secondary)',
+                color: 'white',
+              }}
+            >
+              {draft.confidence_tier === 'HIGH' ? 'High Confidence' :
+               draft.confidence_tier === 'MEDIUM' ? 'Medium' :
+               draft.confidence_tier === 'LOW' ? 'Learning' :
+               'New Contact'}
+            </span>
+          )}
+          {draft.style_match_score !== undefined && (
+            <div
+              className="flex items-center gap-2 text-sm"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              <CheckCircle className="w-4 h-4" style={{ color: 'var(--success)' }} />
+              Style match score: {Math.round(draft.style_match_score * 100)}%
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bottom Actions Bar */}
