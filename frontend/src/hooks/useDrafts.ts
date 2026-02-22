@@ -7,6 +7,7 @@ import {
   deleteDraft,
   regenerateDraft,
   sendDraft,
+  saveDraftToClient,
   type CreateEmailDraftRequest,
   type UpdateEmailDraftRequest,
   type RegenerateDraftRequest,
@@ -100,6 +101,18 @@ export function useSendDraft() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
       queryClient.invalidateQueries({ queryKey: draftKeys.detail(result.id) });
+    },
+  });
+}
+
+// Save draft to email client (Gmail/Outlook) mutation
+export function useSaveDraftToClient() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (draftId: string) => saveDraftToClient(draftId),
+    onSuccess: (_result, draftId) => {
+      queryClient.invalidateQueries({ queryKey: draftKeys.detail(draftId) });
     },
   });
 }

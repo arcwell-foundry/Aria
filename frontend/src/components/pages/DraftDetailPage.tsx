@@ -19,9 +19,10 @@ import {
   Eye,
   CheckCircle,
   Loader2,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft } from '@/hooks/useDrafts';
+import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft, useSaveDraftToClient } from '@/hooks/useDrafts';
 import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
 import type { EmailDraftTone } from '@/api/drafts';
@@ -49,17 +50,20 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedRecipient, setEditedRecipient] = useState('');
   const [editedSubject, setEditedSubject] = useState('');
+  const [saveToClientError, setSaveToClientError] = useState('');
 
   // Queries and mutations
   const { data: draft, isLoading, error } = useDraft(draftId);
   const updateDraft = useUpdateDraft();
   const sendDraft = useSendDraft();
   const regenerateDraft = useRegenerateDraft();
+  const saveDraftToClient = useSaveDraftToClient();
 
   const isSaving = updateDraft.isPending;
   const isSending = sendDraft.isPending;
   const isRegenerating = regenerateDraft.isPending;
-  const isBusy = isSaving || isSending || isRegenerating;
+  const isSavingToClient = saveDraftToClient.isPending;
+  const isBusy = isSaving || isSending || isRegenerating || isSavingToClient;
 
   // Initialize edited values when draft loads
   if (draft && !editedRecipient && !editedSubject) {
@@ -91,6 +95,15 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
       draftId,
       data: tone ? { tone } : undefined,
     });
+  };
+
+  const handleSaveToClient = async () => {
+    setSaveToClientError('');
+    try {
+      await saveDraftToClient.mutateAsync(draftId);
+    } catch {
+      setSaveToClientError('Failed to save — try again');
+    }
   };
 
   // Loading state
@@ -373,7 +386,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
               Regenerate
             </button>
 
-            {/* Right: Save and Send */}
+            {/* Right: Save, Save to Client, and Send */}
             <div className="flex items-center gap-3">
               {isEditing && (
                 <button
@@ -396,18 +409,68 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                 </button>
               )}
 
+              {/* Save to Email Client (Gmail/Outlook) */}
+              {draft.saved_to_client_at ? (
+                <button
+                  onClick={() => {
+                    // No deeplink available — just inform user
+                  }}
+                  disabled
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                  style={{
+                    borderColor: 'var(--success)',
+                    color: 'var(--success)',
+                    backgroundColor: 'var(--bg-subtle)',
+                    opacity: 0.85,
+                  }}
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  {draft.client_provider === 'outlook'
+                    ? 'Saved to Outlook'
+                    : draft.client_provider === 'gmail'
+                      ? 'Saved to Gmail'
+                      : 'Saved to Drafts'}
+                </button>
+              ) : (
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    onClick={handleSaveToClient}
+                    disabled={isBusy}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
+                      'transition-colors',
+                      isBusy && 'opacity-50 cursor-not-allowed'
+                    )}
+                    style={{
+                      backgroundColor: 'var(--accent)',
+                      color: 'white',
+                    }}
+                  >
+                    {isSavingToClient ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4" />
+                    )}
+                    Save to {draft.client_provider === 'outlook' ? 'Outlook' : draft.client_provider === 'gmail' ? 'Gmail' : 'Email Client'}
+                  </button>
+                  {saveToClientError && (
+                    <span className="text-xs" style={{ color: 'var(--critical)' }}>
+                      {saveToClientError}
+                    </span>
+                  )}
+                </div>
+              )}
+
               <button
                 onClick={handleSend}
                 disabled={isBusy}
                 className={cn(
                   'flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium',
-                  'transition-colors',
+                  'border border-[var(--border)] transition-colors',
+                  'hover:bg-[var(--bg-subtle)]',
                   isBusy && 'opacity-50 cursor-not-allowed'
                 )}
-                style={{
-                  backgroundColor: 'var(--accent)',
-                  color: 'white',
-                }}
+                style={{ color: 'var(--text-primary)' }}
               >
                 {isSending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

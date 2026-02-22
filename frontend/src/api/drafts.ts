@@ -32,6 +32,9 @@ export interface EmailDraft {
   status: EmailDraftStatus;
   sent_at?: string;
   error_message?: string;
+  client_draft_id?: string;
+  client_provider?: "gmail" | "outlook";
+  saved_to_client_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -134,6 +137,23 @@ export async function regenerateDraft(
 export async function sendDraft(draftId: string): Promise<SendDraftResponse> {
   const response = await apiClient.post<SendDraftResponse>(
     `/drafts/${draftId}/send`
+  );
+  return response.data;
+}
+
+export interface SaveToClientResponse {
+  success: boolean;
+  saved_at: string;
+  client_draft_id?: string;
+  provider?: "gmail" | "outlook";
+  already_saved: boolean;
+}
+
+export async function saveDraftToClient(
+  draftId: string
+): Promise<SaveToClientResponse> {
+  const response = await apiClient.post<SaveToClientResponse>(
+    `/drafts/${draftId}/save-to-client`
   );
   return response.data;
 }
