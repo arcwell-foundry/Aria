@@ -267,8 +267,8 @@ class TestProcessInbox:
         engine._llm.generate_response.side_effect = Exception("LLM error")
         engine._digital_twin.get_style_guidelines.side_effect = Exception("Twin error")
 
-        # Mock _check_existing_draft to return False (no existing draft)
-        engine._check_existing_draft = AsyncMock(return_value=False)
+        # Mock _check_existing_draft to return None (no existing draft)
+        engine._check_existing_draft = AsyncMock(return_value=None)
         # Mock _is_active_conversation to return False
         engine._is_active_conversation = AsyncMock(return_value=False)
         # Mock _get_user_name to return a name

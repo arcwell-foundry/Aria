@@ -156,91 +156,123 @@ class TestGetLatestEmailInThread:
 class TestCheckExistingDraft:
     """Tests for _check_existing_draft method."""
 
+    def _build_mock_chain(self, execute_result):
+        """Build a fluent Supabase mock chain returning execute_result."""
+        mock = MagicMock()
+        # Every chained method returns the same mock, ending with .execute()
+        mock.select.return_value = mock
+        mock.eq.return_value = mock
+        mock.in_.return_value = mock
+        mock.is_.return_value = mock
+        mock.or_.return_value = mock
+        mock.limit.return_value = mock
+        mock.execute.return_value = execute_result
+        return mock
+
     @pytest.mark.asyncio
-    async def test_returns_true_when_draft_exists(self):
-        """Returns True when a draft exists for the thread."""
+    async def test_returns_draft_id_when_draft_exists(self):
+        """Returns the existing draft ID when a draft exists for the thread."""
         engine = AutonomousDraftEngine()
 
-        # Create a sync mock response (supabase client is synchronous)
-        mock_execute_result = MagicMock(data={"id": "draft-123"})
-
-        # Build the mock chain
-        mock_maybe_single = MagicMock()
-        mock_maybe_single.execute = MagicMock(return_value=mock_execute_result)
-
-        mock_in = MagicMock()
-        mock_in.maybe_single = MagicMock(return_value=mock_maybe_single)
-
-        mock_eq2 = MagicMock()
-        mock_eq2.in_ = MagicMock(return_value=mock_in)
-
-        mock_eq1 = MagicMock()
-        mock_eq1.eq = MagicMock(return_value=mock_eq2)
-
-        mock_select = MagicMock()
-        mock_select.eq = MagicMock(return_value=mock_eq1)
-
-        mock_table = MagicMock()
-        mock_table.select = MagicMock(return_value=mock_select)
-
-        # Replace the _db.table method
+        mock_table = self._build_mock_chain(
+            MagicMock(data=[{"id": "draft-123"}])
+        )
         original_table = engine._db.table
         engine._db.table = MagicMock(return_value=mock_table)
 
         try:
-            result = await engine._check_existing_draft("user-123", "thread-123")
-            assert result is True
+            result = await engine._check_existing_draft(
+                "user-123", "thread-123", ["email-1"]
+            )
+            assert result == "draft-123"
         finally:
             engine._db.table = original_table
 
     @pytest.mark.asyncio
-    async def test_returns_false_when_no_draft(self):
-        """Returns False when no draft exists for the thread."""
+    async def test_returns_none_when_no_draft(self):
+        """Returns None when no draft exists for the thread."""
         engine = AutonomousDraftEngine()
 
-        # Create a proper async mock response
-        async def mock_execute():
-            return MagicMock(data=None)
-
-        # Build the mock chain
-        mock_maybe_single = MagicMock()
-        mock_maybe_single.execute = mock_execute
-
-        mock_in = MagicMock()
-        mock_in.maybe_single = MagicMock(return_value=mock_maybe_single)
-
-        mock_eq2 = MagicMock()
-        mock_eq2.in_ = MagicMock(return_value=mock_in)
-
-        mock_eq1 = MagicMock()
-        mock_eq1.eq = MagicMock(return_value=mock_eq2)
-
-        mock_select = MagicMock()
-        mock_select.eq = MagicMock(return_value=mock_eq1)
-
-        mock_table = MagicMock()
-        mock_table.select = MagicMock(return_value=mock_select)
-
+        mock_table = self._build_mock_chain(MagicMock(data=[]))
         original_table = engine._db.table
         engine._db.table = MagicMock(return_value=mock_table)
 
         try:
-            result = await engine._check_existing_draft("user-123", "thread-123")
-            assert result is False
+            result = await engine._check_existing_draft(
+                "user-123", "thread-123", ["email-1"]
+            )
+            assert result is None
         finally:
             engine._db.table = original_table
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_error(self):
-        """Returns False on database error (safe default)."""
+    async def test_returns_none_on_error(self):
+        """Returns None on database error (safe default)."""
         engine = AutonomousDraftEngine()
 
         original_table = engine._db.table
         engine._db.table = MagicMock(side_effect=Exception("Database error"))
 
         try:
-            result = await engine._check_existing_draft("user-123", "thread-123")
-            assert result is False
+            result = await engine._check_existing_draft(
+                "user-123", "thread-123", ["email-1"]
+            )
+            assert result is None
+        finally:
+            engine._db.table = original_table
+
+    @pytest.mark.asyncio
+    async def test_handles_multiple_existing_drafts_without_error(self):
+        """Multiple pre-existing duplicates don't cause exceptions (limit(1) fix)."""
+        engine = AutonomousDraftEngine()
+
+        # Simulate multiple drafts already existing — limit(1) returns first
+        mock_table = self._build_mock_chain(
+            MagicMock(data=[{"id": "draft-oldest"}])
+        )
+        original_table = engine._db.table
+        engine._db.table = MagicMock(return_value=mock_table)
+
+        try:
+            result = await engine._check_existing_draft(
+                "user-123", "thread-123", ["email-1", "email-2"]
+            )
+            assert result == "draft-oldest"
+        finally:
+            engine._db.table = original_table
+
+    @pytest.mark.asyncio
+    async def test_passes_or_filter_with_email_ids(self):
+        """Builds correct OR filter for thread_id and email_ids."""
+        engine = AutonomousDraftEngine()
+
+        mock_table = self._build_mock_chain(MagicMock(data=[]))
+        original_table = engine._db.table
+        engine._db.table = MagicMock(return_value=mock_table)
+
+        try:
+            await engine._check_existing_draft(
+                "user-123", "thread-ABC", ["email-1", "email-2"]
+            )
+            # Verify or_ was called with the combined filter
+            mock_table.or_.assert_called_once_with(
+                "thread_id.eq.thread-ABC,original_email_id.in.(email-1,email-2)"
+            )
+        finally:
+            engine._db.table = original_table
+
+    @pytest.mark.asyncio
+    async def test_thread_id_only_when_no_email_ids(self):
+        """Falls back to thread_id-only OR filter when email_ids not provided."""
+        engine = AutonomousDraftEngine()
+
+        mock_table = self._build_mock_chain(MagicMock(data=[]))
+        original_table = engine._db.table
+        engine._db.table = MagicMock(return_value=mock_table)
+
+        try:
+            await engine._check_existing_draft("user-123", "thread-ABC")
+            mock_table.or_.assert_called_once_with("thread_id.eq.thread-ABC")
         finally:
             engine._db.table = original_table
 

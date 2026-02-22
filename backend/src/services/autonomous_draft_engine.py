@@ -250,11 +250,18 @@ Do not include any text outside the JSON object."""
             emails_deferred_active_conversation = 0
 
             for thread_id, thread_emails in grouped_emails.items():
-                # Check for existing draft first
-                if await self._check_existing_draft(user_id, thread_id):
+                # Collect email_ids for cross-run dedup check
+                thread_email_ids = [e.email_id for e in thread_emails]
+
+                # Check for existing draft first (across ALL processing runs)
+                existing_draft_id = await self._check_existing_draft(
+                    user_id, thread_id, thread_email_ids
+                )
+                if existing_draft_id:
                     logger.info(
-                        "DRAFT_ENGINE: Skipped: existing draft already generated for thread %s",
+                        "SKIP_DUPLICATE: Draft already exists for thread_id=%s, draft_id=%s",
                         thread_id,
+                        existing_draft_id,
                     )
                     await self._log_skip_decision(user_id, thread_id, "existing_draft")
                     emails_skipped_existing_draft += 1
@@ -1067,34 +1074,56 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     # Deduplication Methods
     # ------------------------------------------------------------------
 
-    async def _check_existing_draft(self, user_id: str, thread_id: str) -> bool:
-        """Check if a draft already exists for this thread.
+    async def _check_existing_draft(
+        self,
+        user_id: str,
+        thread_id: str,
+        email_ids: list[str] | None = None,
+    ) -> str | None:
+        """Check if a non-rejected draft already exists for this thread or emails.
+
+        Checks across ALL processing runs (not just the current one) by matching
+        on thread_id OR original_email_id.  Uses limit(1) instead of
+        maybe_single() so that pre-existing duplicates don't throw and
+        snowball into more duplicates.
 
         Args:
             user_id: The user's ID.
             thread_id: The email thread/conversation ID.
+            email_ids: Optional list of email IDs in this thread to also match
+                       against original_email_id.
 
         Returns:
-            True if a draft exists, False otherwise.
+            The existing draft ID if one exists, None otherwise.
         """
         try:
+            # Build OR condition: thread_id matches OR original_email_id matches
+            or_parts = [f"thread_id.eq.{thread_id}"]
+            if email_ids:
+                escaped = ",".join(email_ids)
+                or_parts.append(f"original_email_id.in.({escaped})")
+            or_filter = ",".join(or_parts)
+
             result = (
                 self._db.table("email_drafts")
                 .select("id")
                 .eq("user_id", user_id)
-                .eq("thread_id", thread_id)
                 .in_("status", ["draft", "saved_to_client"])
-                .maybe_single()
+                .is_("user_action", "null")
+                .or_(or_filter)
+                .limit(1)
                 .execute()
             )
-            return result.data is not None
+            if result.data:
+                return result.data[0]["id"]
+            return None
         except Exception as e:
             logger.warning(
                 "DRAFT_ENGINE: Failed to check existing draft for thread %s: %s",
                 thread_id,
                 e,
             )
-            return False
+            return None
 
     async def _group_emails_by_thread(self, emails: list[Any]) -> dict[str, list[Any]]:
         """Group emails by thread_id for deduplication.
