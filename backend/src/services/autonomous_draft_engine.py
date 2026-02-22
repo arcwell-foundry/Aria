@@ -1005,11 +1005,6 @@ Recent messages:
                 lines.append(f"Last interaction: {rh.last_interaction}")
             if rh.recent_topics:
                 lines.append(f"Recent topics: {', '.join(rh.recent_topics[:5])}")
-            if rh.commitments:
-                lines.append(
-                    "Open commitments:\n"
-                    + "\n".join(f"- {c}" for c in rh.commitments[:3])
-                )
             if rh.memory_facts:
                 facts = rh.memory_facts[:5]
                 fact_lines = "\n".join(
@@ -1023,6 +1018,27 @@ Recent messages:
             sections.append(
                 "## Your relationship with this person\n"
                 "New contact — no prior interaction history."
+            )
+
+        # Outstanding commitments in this thread
+        if (
+            context.relationship_history
+            and context.relationship_history.commitments
+        ):
+            commitment_lines = "\n".join(
+                f"- {c}" for c in context.relationship_history.commitments[:5]
+            )
+            sections.append(
+                f"## Outstanding commitments in this thread\n"
+                f"{commitment_lines}\n\n"
+                f"Reference these naturally if relevant to the reply — "
+                f"e.g. acknowledge a promise you made or remind about "
+                f"something the sender committed to."
+            )
+        else:
+            sections.append(
+                "## Outstanding commitments in this thread\n"
+                "No commitments detected."
             )
 
         # Calendar context

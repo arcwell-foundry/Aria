@@ -12,8 +12,10 @@ needed to draft a contextually-aware email reply:
 All context is persisted to draft_context table for audit and reuse.
 """
 
+import json
 import logging
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -253,6 +255,27 @@ class EmailContextGatherer:
         if context.thread_context:
             context.sources_used.append("composio_thread")
 
+        # 1b. Extract commitments from thread (needs thread messages)
+        commitments: list[dict[str, Any]] = []
+        if context.thread_context and context.thread_context.messages:
+            commitments = await self._extract_commitments(
+                user_id=user_id,
+                thread_messages=context.thread_context.messages,
+                sender_name=sender_name,
+                sender_email=sender_email,
+            )
+            if commitments:
+                # Store in prospective memory
+                await self._store_commitments(
+                    user_id=user_id,
+                    commitments=commitments,
+                    sender_name=sender_name,
+                    sender_email=sender_email,
+                    email_id=email_id,
+                    thread_id=thread_id,
+                )
+                context.sources_used.append("commitment_extraction")
+
         # 2. Research recipient via memory + Exa
         context.recipient_research = await self._research_recipient(
             sender_email, sender_name, user_id=user_id
@@ -269,10 +292,22 @@ class EmailContextGatherer:
         context.relationship_history = await self._get_relationship_history(
             user_id, sender_email
         )
+        # 4b. Populate commitments into relationship history
+        if context.relationship_history and commitments:
+            context.relationship_history.commitments = [
+                (
+                    f"{'You' if c.get('who_committed') == 'user' else (sender_name or sender_email)}"
+                    f" committed: {c.get('what', '')}"
+                    + (f" (due: {c.get('due_date')})" if c.get("due_date") else "")
+                )
+                for c in commitments
+            ]
+
         if context.relationship_history and (
             context.relationship_history.memory_facts
             or context.relationship_history.total_emails > 0
             or context.relationship_history.recent_topics
+            or context.relationship_history.commitments
         ):
             context.sources_used.append("memory_semantic")
 
@@ -1744,6 +1779,286 @@ Summary:"""
             )
 
         return context
+
+    # ------------------------------------------------------------------
+    # Commitment Extraction
+    # ------------------------------------------------------------------
+
+    async def _extract_commitments(
+        self,
+        user_id: str,
+        thread_messages: list[ThreadMessage],
+        sender_name: str | None,
+        sender_email: str,
+    ) -> list[dict[str, Any]]:
+        """Extract commitments and follow-ups from an email thread.
+
+        Uses LLM to analyze thread messages for promises, action items,
+        and follow-up needs from both the user and the sender.
+
+        Args:
+            user_id: The user's ID (the email account owner).
+            thread_messages: List of ThreadMessage objects from the thread.
+            sender_name: The sender's display name.
+            sender_email: The sender's email address.
+
+        Returns:
+            List of commitment dicts with keys: who_committed, what,
+            due_date, status, urgency.
+        """
+        if not thread_messages:
+            return []
+
+        try:
+            from src.core.llm import LLMClient
+
+            llm = LLMClient()
+
+            # Build thread text from last 10 messages (recent context)
+            recent = thread_messages[-10:]
+            thread_text = "\n\n".join(
+                f"From: {m.sender_name or m.sender_email} ({m.timestamp})\n"
+                f"{m.body[:800]}"
+                for m in recent
+            )
+
+            contact = sender_name or sender_email
+            prompt = f"""Analyze this email thread and extract ALL commitments, \
+promises, action items, and follow-up needs.
+
+For each commitment found, provide:
+- who_committed: "user" (the email account owner) or "sender" ({contact})
+- what: specific action promised
+- due_date: if mentioned (exact date or relative like "next week", "by Friday")
+- status: "pending" (not yet done) or "completed" (if thread shows it was done)
+- urgency: "high" (explicit deadline) or "normal" (implied follow-up)
+
+EMAIL THREAD:
+{thread_text}
+
+Return as JSON array. If no commitments found, return [].
+Example:
+[
+  {{"who_committed": "user", "what": "Send pricing proposal", "due_date": "2026-02-28", "status": "pending", "urgency": "high"}},
+  {{"who_committed": "sender", "what": "Get internal budget approval", "due_date": "next week", "status": "pending", "urgency": "normal"}}
+]
+
+Return ONLY the JSON array, nothing else."""
+
+            result = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0.0,
+            )
+
+            try:
+                commitments = json.loads(result.strip())
+            except json.JSONDecodeError:
+                match = re.search(r"\[.*\]", result, re.DOTALL)
+                if match:
+                    commitments = json.loads(match.group())
+                else:
+                    commitments = []
+
+            if not isinstance(commitments, list):
+                commitments = []
+
+            # Filter to pending commitments only
+            commitments = [
+                c for c in commitments
+                if isinstance(c, dict) and c.get("status") != "completed"
+            ]
+
+            logger.info(
+                "COMMITMENT_EXTRACT: Found %d pending commitments in thread "
+                "for user=%s sender=%s",
+                len(commitments),
+                user_id,
+                sender_email,
+            )
+
+            return commitments
+
+        except Exception as e:
+            logger.warning(
+                "COMMITMENT_EXTRACT: Failed for user=%s sender=%s error=%s",
+                user_id,
+                sender_email,
+                str(e),
+            )
+            return []
+
+    def _parse_due_date(self, due_date_str: str | None) -> str | None:
+        """Parse a due date string into an ISO timestamp.
+
+        Handles both absolute dates (2026-02-28) and relative dates
+        (next week, by Friday, end of month).
+
+        Args:
+            due_date_str: The due date string from LLM extraction.
+
+        Returns:
+            ISO format datetime string, or None if unparseable.
+        """
+        if not due_date_str:
+            return None
+
+        due_date_str = due_date_str.strip().lower()
+
+        # Try parsing as ISO date directly
+        try:
+            dt = datetime.fromisoformat(due_date_str)
+            return dt.replace(tzinfo=UTC).isoformat()
+        except (ValueError, TypeError):
+            pass
+
+        now = datetime.now(UTC)
+
+        # Relative date patterns
+        if "tomorrow" in due_date_str:
+            return (now + timedelta(days=1)).isoformat()
+        if "next week" in due_date_str:
+            return (now + timedelta(weeks=1)).isoformat()
+        if "next month" in due_date_str:
+            return (now + timedelta(days=30)).isoformat()
+        if "end of week" in due_date_str:
+            days_until_friday = (4 - now.weekday()) % 7 or 7
+            return (now + timedelta(days=days_until_friday)).isoformat()
+        if "end of month" in due_date_str:
+            if now.month == 12:
+                eom = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                eom = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+            return eom.isoformat()
+
+        # "by Friday", "by Monday", etc.
+        day_names = {
+            "monday": 0, "tuesday": 1, "wednesday": 2,
+            "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        for day_name, day_num in day_names.items():
+            if day_name in due_date_str:
+                days_ahead = (day_num - now.weekday()) % 7 or 7
+                return (now + timedelta(days=days_ahead)).isoformat()
+
+        # Try a lenient parse for "March 1", "Feb 28", etc.
+        for fmt in ("%B %d", "%b %d", "%B %d, %Y", "%b %d, %Y"):
+            try:
+                dt = datetime.strptime(due_date_str, fmt)
+                dt = dt.replace(year=now.year, tzinfo=UTC)
+                if dt < now:
+                    dt = dt.replace(year=now.year + 1)
+                return dt.isoformat()
+            except ValueError:
+                continue
+
+        # If nothing matched, default to 1 week from now
+        logger.debug(
+            "COMMITMENT_EXTRACT: Could not parse due date '%s', "
+            "defaulting to 1 week",
+            due_date_str,
+        )
+        return (now + timedelta(weeks=1)).isoformat()
+
+    async def _store_commitments(
+        self,
+        user_id: str,
+        commitments: list[dict[str, Any]],
+        sender_name: str | None,
+        sender_email: str,
+        email_id: str,
+        thread_id: str,
+    ) -> int:
+        """Store extracted commitments as prospective memory tasks.
+
+        Args:
+            user_id: The user's ID.
+            commitments: List of commitment dicts from _extract_commitments().
+            sender_name: The sender's display name.
+            sender_email: The sender's email address.
+            email_id: The source email ID.
+            thread_id: The source thread ID.
+
+        Returns:
+            Number of commitments successfully stored.
+        """
+        if not commitments:
+            return 0
+
+        from src.memory.prospective import (
+            ProspectiveMemory,
+            ProspectiveTask,
+            TaskPriority,
+            TaskStatus,
+            TriggerType,
+        )
+
+        memory = ProspectiveMemory()
+        stored = 0
+        contact = sender_name or sender_email
+
+        for commitment in commitments:
+            try:
+                who = commitment.get("who_committed", "unknown")
+                what = commitment.get("what", "")
+                if not what:
+                    continue
+
+                # Build description
+                if who == "user":
+                    description = f"You committed: {what}"
+                    task_label = f"Follow up: {what}"
+                else:
+                    description = f"{contact} committed: {what}"
+                    task_label = f"Track: {contact} — {what}"
+
+                # Parse priority
+                urgency = commitment.get("urgency", "normal")
+                priority = (
+                    TaskPriority.HIGH if urgency == "high" else TaskPriority.MEDIUM
+                )
+
+                # Parse due date into trigger config
+                due_date_iso = self._parse_due_date(commitment.get("due_date"))
+                trigger_config: dict[str, Any] = {}
+                if due_date_iso:
+                    trigger_config["due_at"] = due_date_iso
+
+                task = ProspectiveTask(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    task=task_label[:500],
+                    description=description[:2000],
+                    trigger_type=TriggerType.TIME,
+                    trigger_config=trigger_config,
+                    status=TaskStatus.PENDING,
+                    priority=priority,
+                    related_goal_id=None,
+                    related_lead_id=None,
+                    completed_at=None,
+                    created_at=datetime.now(UTC),
+                )
+
+                await memory.create_task(task)
+                stored += 1
+
+            except Exception as e:
+                logger.warning(
+                    "COMMITMENT_STORE: Failed to store commitment '%s': %s",
+                    commitment.get("what", "?")[:80],
+                    str(e),
+                )
+                continue
+
+        logger.info(
+            "COMMITMENT_STORE: Stored %d/%d commitments for user=%s thread=%s",
+            stored,
+            len(commitments),
+            user_id,
+            thread_id[:40] if thread_id else "NONE",
+        )
+
+        return stored
 
     # ------------------------------------------------------------------
     # Persistence
