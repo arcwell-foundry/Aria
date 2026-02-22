@@ -1,5 +1,6 @@
 """Integrations API routes."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -237,6 +238,25 @@ async def connect_integration(
             },
         )
 
+        # Trigger email bootstrap for email integrations (Gmail/Outlook)
+        if integration_type in ("gmail", "outlook"):
+            try:
+                from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+                bootstrap = PriorityEmailIngestion()
+                asyncio.create_task(bootstrap.run_bootstrap(str(current_user.id)))
+                logger.info(
+                    "Email bootstrap triggered for user %s after %s connection",
+                    current_user.id,
+                    integration_type,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to trigger email bootstrap for user %s: %s",
+                    current_user.id,
+                    e,
+                )
+
         return integration
 
     except HTTPException:
@@ -331,4 +351,60 @@ async def sync_integration(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to sync integration",
+        ) from e
+
+
+@router.post("/debug/trigger-email-bootstrap", response_model=MessageResponse)
+async def trigger_email_bootstrap(
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """Manually trigger email bootstrap for the current user.
+
+    Launches PriorityEmailIngestion.run_bootstrap() as a background task.
+    Requires an active email integration (Gmail or Outlook).
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        Status message.
+
+    Raises:
+        HTTPException: If no email integration found.
+    """
+    try:
+        from src.services.email_tools import get_email_integration
+
+        integration = await get_email_integration(str(current_user.id))
+        if not integration:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active email integration found. Connect Gmail or Outlook first.",
+            )
+
+        from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+        bootstrap = PriorityEmailIngestion()
+        asyncio.create_task(bootstrap.run_bootstrap(str(current_user.id)))
+
+        logger.info(
+            "Email bootstrap manually triggered for user %s (provider: %s)",
+            current_user.id,
+            integration.get("integration_type"),
+        )
+
+        return {
+            "message": (
+                f"Email bootstrap started for {integration.get('integration_type', 'email')}. "
+                "Processing runs in the background. Check logs for EMAIL_BOOTSTRAP messages."
+            )
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error triggering email bootstrap")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to trigger email bootstrap: {str(e)}",
         ) from e
