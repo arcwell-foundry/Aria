@@ -977,21 +977,25 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
 
         return "there"
 
-    async def _cleanup_stale_runs(self, user_id: str) -> None:
-        """Mark runs stuck in 'running' for >10min as failed."""
+    async def _cleanup_stale_runs(self, user_id: str, timeout_minutes: int = 30) -> None:
+        """Mark zombie processing runs stuck in 'running' as failed."""
         try:
-            from datetime import timedelta
-
-            cutoff = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
-            self._db.table("email_processing_runs").update(
+            cutoff = (datetime.now(UTC) - timedelta(minutes=timeout_minutes)).isoformat()
+            result = self._db.table("email_processing_runs").update(
                 {
                     "status": "failed",
                     "completed_at": datetime.now(UTC).isoformat(),
-                    "error_message": "Orphaned: server restart or timeout",
+                    "error_message": f"Timed out after {timeout_minutes} minutes",
                 }
             ).eq("user_id", user_id).eq("status", "running").lt(
                 "started_at", cutoff
             ).execute()
+            if result.data:
+                logger.warning(
+                    "ZOMBIE_CLEANUP: Marked %d stale runs as failed for user %s",
+                    len(result.data),
+                    user_id,
+                )
         except Exception as e:
             logger.warning("DRAFT_ENGINE: Failed to cleanup stale runs: %s", e)
 
