@@ -230,6 +230,9 @@ class PriorityEmailIngestion:
                 user_id,
             )
 
+            # 7b. Extract formatting patterns from sent emails
+            formatting_patterns = self._extract_formatting_patterns(emails)
+
             # 8. Analyze communication patterns
             result.communication_patterns = self._analyze_patterns(emails)
             logger.info(
@@ -243,6 +246,7 @@ class PriorityEmailIngestion:
             await self._store_threads(user_id, threads)
             await self._store_commitments(user_id, commitments)
             await self._refine_writing_style(user_id, writing_samples)
+            await self._store_formatting_patterns(user_id, formatting_patterns)
             await self._store_patterns(user_id, result.communication_patterns)
             await self._build_recipient_profiles(user_id, emails)
             logger.info("EMAIL_BOOTSTRAP: All results stored for user %s", user_id)
@@ -1050,6 +1054,113 @@ class PriorityEmailIngestion:
             return []
 
     # ------------------------------------------------------------------
+    # Formatting pattern extraction
+    # ------------------------------------------------------------------
+
+    def _extract_formatting_patterns(self, emails: list[dict[str, Any]]) -> dict[str, Any]:
+        """Analyze formatting structure from user's sent emails.
+
+        Examines paragraph breaks, bullet usage, signature blocks, and other
+        structural patterns so drafts can mirror the user's formatting style.
+
+        Args:
+            emails: Sent email dicts with 'body' field.
+
+        Returns:
+            Dict of formatting pattern metrics.
+        """
+        import re
+
+        patterns: dict[str, Any] = {
+            "avg_paragraph_count": 0,
+            "uses_bullet_points": False,
+            "bullet_frequency": 0.0,
+            "avg_paragraph_length_sentences": 0,
+            "greeting_on_own_line": True,
+            "signoff_on_own_line": True,
+            "uses_signature_block": False,
+            "signature_block": "",
+            "blank_line_before_signoff": True,
+            "uses_bold_or_formatting": False,
+            "typical_structure": "",
+        }
+
+        bullet_count = 0
+        para_counts: list[int] = []
+        para_lengths: list[int] = []
+        sig_blocks: list[str] = []
+        analyzed = 0
+
+        for email in emails:
+            body = email.get("body", "")
+            if isinstance(body, dict):
+                body = body.get("content", "")
+            if not isinstance(body, str) or len(body) < 50:
+                continue
+
+            analyzed += 1
+
+            # Check for formatting clues in raw body (may be HTML)
+            has_bullets = any(tag in body for tag in ["<ul>", "<li>", "\u2022", "- ", "* "])
+            has_bold = any(tag in body for tag in ["<b>", "<strong>", "**"])
+
+            if has_bullets:
+                bullet_count += 1
+            if has_bold:
+                patterns["uses_bold_or_formatting"] = True
+
+            # Strip HTML to analyze structure
+            text = re.sub(r"<[^>]+>", "\n", body)
+            paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+            para_counts.append(len(paragraphs))
+
+            for p in paragraphs:
+                sentences = [s.strip() for s in re.split(r"[.!?]+", p) if s.strip()]
+                if sentences:
+                    para_lengths.append(len(sentences))
+
+            # Collect last 4 lines for signature detection
+            lines = text.strip().split("\n")
+            if len(lines) >= 3:
+                last_lines = "\n".join(lines[-4:])
+                sig_blocks.append(last_lines)
+
+        if not analyzed:
+            patterns["typical_structure"] = "greeting, 2-3 paragraphs, signoff"
+            return patterns
+
+        patterns["avg_paragraph_count"] = round(sum(para_counts) / len(para_counts), 1)
+        patterns["bullet_frequency"] = round(bullet_count / analyzed, 2)
+        patterns["uses_bullet_points"] = patterns["bullet_frequency"] > 0.15
+        if para_lengths:
+            patterns["avg_paragraph_length_sentences"] = round(
+                sum(para_lengths) / len(para_lengths), 1,
+            )
+
+        # Detect common signature block
+        if sig_blocks:
+            common = Counter(sig_blocks).most_common(1)
+            if common and common[0][1] >= analyzed * 0.3:
+                patterns["uses_signature_block"] = True
+                patterns["signature_block"] = common[0][0]
+
+        # Summarize typical structure
+        avg_paras = patterns["avg_paragraph_count"]
+        bullets = "with occasional bullet points" if patterns["uses_bullet_points"] else "no bullet points"
+        patterns["typical_structure"] = (
+            f"greeting, {int(avg_paras)}-{int(avg_paras) + 1} short paragraphs, "
+            f"{bullets}, signoff on own line"
+        )
+
+        logger.info(
+            "EMAIL_BOOTSTRAP: Extracted formatting patterns from %d emails: avg_paras=%.1f, bullets=%.2f",
+            analyzed,
+            patterns["avg_paragraph_count"],
+            patterns["bullet_frequency"],
+        )
+        return patterns
+
+    # ------------------------------------------------------------------
     # Writing sample extraction
     # ------------------------------------------------------------------
 
@@ -1411,6 +1522,31 @@ class PriorityEmailIngestion:
         except Exception as e:
             logger.warning(
                 "EMAIL_BOOTSTRAP: Failed to upsert digital_twin_profiles for user %s: %s",
+                user_id,
+                e,
+            )
+
+    async def _store_formatting_patterns(
+        self, user_id: str, patterns: dict[str, Any],
+    ) -> None:
+        """Store formatting patterns in digital_twin_profiles.
+
+        Args:
+            user_id: The user's ID.
+            patterns: Formatting pattern dict from _extract_formatting_patterns.
+        """
+        try:
+            self._db.table("digital_twin_profiles").update(
+                {"formatting_patterns": json.dumps(patterns)},
+            ).eq("user_id", user_id).execute()
+            logger.info(
+                "EMAIL_BOOTSTRAP: Stored formatting patterns for user %s: %s",
+                user_id,
+                patterns.get("typical_structure", ""),
+            )
+        except Exception as e:
+            logger.warning(
+                "EMAIL_BOOTSTRAP: Failed to store formatting patterns for user %s: %s",
                 user_id,
                 e,
             )

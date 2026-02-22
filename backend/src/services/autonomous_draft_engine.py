@@ -153,8 +153,15 @@ class AutonomousDraftEngine:
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
 {
   "subject": "The reply subject line (usually Re: original subject)",
-  "body": "The full email body with greeting and signature"
+  "body": "The full email body as clean HTML (see formatting instructions)"
 }
+
+The "body" value MUST be clean HTML suitable for email clients:
+- Wrap each paragraph in <p> tags
+- Use <ul>/<li> for bullet points if appropriate
+- Use <br> for line breaks within a signoff block
+- Do NOT include <html>, <head>, <body>, or <style> tags
+- Do NOT include a signature block (the email client adds it)
 
 Do not include any text outside the JSON object."""
 
@@ -1043,6 +1050,88 @@ Do not include any text outside the JSON object."""
             )
 
     # ------------------------------------------------------------------
+    # Formatting Patterns
+    # ------------------------------------------------------------------
+
+    async def _get_formatting_patterns(self, user_id: str) -> dict[str, Any] | None:
+        """Fetch stored formatting patterns from digital_twin_profiles.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Formatting patterns dict, or None if not available.
+        """
+        try:
+            result = (
+                self._db.table("digital_twin_profiles")
+                .select("formatting_patterns")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                raw = result.data.get("formatting_patterns")
+                if isinstance(raw, str):
+                    return json.loads(raw)
+                if isinstance(raw, dict):
+                    return raw
+        except Exception as e:
+            logger.debug("DRAFT_ENGINE: Could not fetch formatting patterns: %s", e)
+        return None
+
+    def _build_formatting_instructions(
+        self, formatting: dict[str, Any] | None,
+    ) -> str:
+        """Build HTML formatting instructions for the draft generation prompt.
+
+        Args:
+            formatting: Formatting patterns from digital_twin_profiles, or None.
+
+        Returns:
+            Prompt section with formatting rules.
+        """
+        if formatting and formatting.get("typical_structure"):
+            user_style = (
+                f"\nThe user's typical email format:\n"
+                f"- Structure: {formatting.get('typical_structure', 'greeting, 2-3 paragraphs, signoff')}\n"
+                f"- Average paragraphs per email: {formatting.get('avg_paragraph_count', 3)}\n"
+                f"- Uses bullet points: {'yes, occasionally' if formatting.get('uses_bullet_points') else 'rarely/never'}\n"
+                f"- Average paragraph length: {formatting.get('avg_paragraph_length_sentences', 2)} sentences\n"
+                f"- Match this formatting structure exactly."
+            )
+        else:
+            user_style = (
+                "Use standard professional email formatting: "
+                "greeting, 2-3 concise paragraphs, signoff."
+            )
+
+        return f"""## Email Formatting
+Output the reply as clean HTML for rendering in an email client.
+
+Structure rules:
+- Greeting on its own line: <p>{{greeting}}</p>
+- Each paragraph in <p> tags: <p>paragraph text</p>
+- If using bullet points: <ul><li>item</li></ul>
+- Signoff on its own line: <p>{{signoff}}<br>{{name}}</p>
+- Do NOT include <html>, <head>, <body>, or <style> tags
+- Do NOT include a signature block (the email client adds it)
+- Keep paragraphs short (2-3 sentences max unless the user writes longer)
+
+{user_style}
+
+Example of well-formatted output:
+<p>Hi Rob,</p>
+<p>Thanks for sending over the partnership overview. I've had a chance to review it and have a few thoughts.</p>
+<p>The proposed timeline works well on our end. A couple of things I'd like to discuss:</p>
+<ul>
+<li>The data migration scope in Section 3</li>
+<li>Integration testing windows for Q2</li>
+</ul>
+<p>Would Thursday afternoon work for a quick call to walk through these?</p>
+<p>Best,<br>Dhruv</p>"""
+
+    # ------------------------------------------------------------------
     # LLM Draft Generation
     # ------------------------------------------------------------------
 
@@ -1070,9 +1159,13 @@ Do not include any text outside the JSON object."""
         Returns:
             ReplyDraftContent with subject and body.
         """
+        # Fetch formatting patterns for HTML output
+        formatting_patterns = await self._get_formatting_patterns(user_id)
+
         prompt = self._build_reply_prompt(
             user_name, email, context, style_guidelines, tone_guidance,
             special_instructions=special_instructions,
+            formatting_patterns=formatting_patterns,
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -1126,12 +1219,13 @@ Do not include any text outside the JSON object."""
         style_guidelines: str,
         tone_guidance: str,
         special_instructions: str | None = None,
+        formatting_patterns: dict[str, Any] | None = None,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
         Assembles all context sections into a structured prompt
-        with full voice matching, strategic guardrails, and all
-        available context sources.
+        with full voice matching, strategic guardrails, HTML formatting
+        instructions, and all available context sources.
         """
         sections: list[str] = []
 
@@ -1163,6 +1257,9 @@ this wasn't written by them. Do NOT sound like an AI assistant.""")
         if tone_guidance:
             sections.append(f"""## Tone Guidance
 {tone_guidance}""")
+
+        # HTML formatting instructions
+        sections.append(self._build_formatting_instructions(formatting_patterns))
 
         # The original email being replied to
         email_body = getattr(email, "body", None) or email.snippet
@@ -1343,11 +1440,12 @@ Write a reply that:
 2. Sounds EXACTLY like {user_name} — same greeting, tone, length, signoff
 3. References relevant context naturally (don't dump everything you know)
 4. Is ready to send with minimal editing
+5. Uses clean HTML formatting as described in the Email Formatting section
 
 Sign off as {user_name}.
-Write ONLY the email body (no metadata).
+Write ONLY the email body as HTML (no metadata, no <html>/<body> wrapper).
 
-Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
+Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Best,<br>{user_name}</p>"}}""")
 
         return "\n\n".join(sections)
 
