@@ -8,6 +8,7 @@ This service generates daily briefings containing:
 - LLM-generated executive summary
 """
 
+import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -48,6 +49,7 @@ class EmailSummary(BaseModel):
     drafts_waiting: int = 0
     drafts_high_confidence: int = 0
     drafts_need_review: int = 0
+    strategic_patterns: list[dict[str, Any]] = []
 
 
 logger = logging.getLogger(__name__)
@@ -133,6 +135,7 @@ class BriefingService:
             "drafts_waiting": 0,
             "drafts_high_confidence": 0,
             "drafts_need_review": 0,
+            "strategic_patterns": [],
         }
 
         try:
@@ -1000,6 +1003,19 @@ class BriefingService:
                 items = [qi.get("title", qi.get("message", "")) for qi in queued_insights[:5]]
                 queued_note = f"\nOvernight insights queued: {', '.join(items)}"
 
+            # Format strategic email patterns for the LLM
+            email_patterns = email_data.get("strategic_patterns", [])
+            patterns_note = ""
+            if email_patterns:
+                pattern_lines = []
+                for p in email_patterns[:5]:
+                    pattern_lines.append(f"- [{p.get('type', 'pattern')}] {p.get('insight', '')}")
+                patterns_note = (
+                    "\n\nEmail intelligence patterns detected:\n"
+                    + "\n".join(pattern_lines)
+                    + "\nHighlight the most strategically important pattern in the summary."
+                )
+
             prompt = f"""Generate a brief, professional briefing summary (2-3 sentences) based on:
 
 Calendar: {meeting_count} meetings today
@@ -1007,7 +1023,7 @@ Leads needing attention: {attention_count}
 New signals: {signal_count}
 Overdue tasks: {overdue_count}
 Emails received: {email_count}
-Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}
+Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_note}
 
 Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
 """
@@ -1043,6 +1059,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
             "drafts_waiting": 0,
             "drafts_high_confidence": 0,
             "drafts_need_review": 0,
+            "strategic_patterns": [],
         }
 
         try:
@@ -1128,6 +1145,9 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
 
             filtered_reason = ", ".join(filtered_reasons[:3]) if filtered_reasons else None
 
+            # Cross-email pattern synthesis
+            email_patterns = await self._synthesize_email_patterns(user_id, scan_result)
+
             return {
                 "total_received": scan_result.total_emails,
                 "needs_attention": needs_attention,
@@ -1138,6 +1158,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 "drafts_waiting": processing_result.drafts_generated,
                 "drafts_high_confidence": drafts_high_confidence,
                 "drafts_need_review": drafts_need_review,
+                "strategic_patterns": email_patterns,
             }
 
         except Exception:
@@ -1190,6 +1211,136 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
             subject = subject[3:].strip()
 
         return subject[:100] if subject else "Email reply draft"
+
+    # Personal email domains excluded from company clustering
+    _PERSONAL_DOMAINS = {
+        "gmail.com", "googlemail.com",
+        "outlook.com", "outlook.co.uk", "hotmail.com", "hotmail.co.uk",
+        "live.com", "live.co.uk", "msn.com",
+        "yahoo.com", "yahoo.co.uk", "yahoo.ca",
+        "icloud.com", "me.com", "mac.com",
+        "aol.com", "comcast.net", "verizon.net", "att.net",
+        "protonmail.com", "proton.me", "tutanota.com", "hey.com",
+        "zoho.com", "mail.com", "gmx.com", "gmx.net",
+        "fastmail.com",
+    }
+
+    async def _synthesize_email_patterns(
+        self, user_id: str, scan_result: Any
+    ) -> list[dict[str, Any]]:
+        """Detect strategic patterns across multiple emails.
+
+        Looks for company clustering (multiple emails from the same org),
+        topic clustering (converging themes across senders), and volume
+        anomalies compared to the user's historical average.
+
+        Args:
+            user_id: The user's ID.
+            scan_result: EmailScanResult from the analyzer.
+
+        Returns:
+            List of pattern dicts, each with a ``type`` and ``insight`` key.
+        """
+        patterns: list[dict[str, Any]] = []
+        all_emails = list(scan_result.needs_reply) + list(scan_result.fyi)
+
+        # ------------------------------------------------------------------
+        # 1. Company clustering — multiple emails from the same organisation
+        # ------------------------------------------------------------------
+        company_emails: dict[str, list[Any]] = {}
+        for email in all_emails:
+            domain = email.sender_email.split("@")[-1].lower()
+            if domain not in self._PERSONAL_DOMAINS:
+                company_emails.setdefault(domain, []).append(email)
+
+        for domain, emails in company_emails.items():
+            if len(emails) >= 2:
+                senders = list({e.sender_name for e in emails})
+                subjects = [e.subject for e in emails]
+                patterns.append({
+                    "type": "company_cluster",
+                    "company_domain": domain,
+                    "email_count": len(emails),
+                    "senders": senders,
+                    "subjects": subjects,
+                    "insight": (
+                        f"{len(emails)} emails from {domain} "
+                        f"({', '.join(senders)}). "
+                        f"Topics: {'; '.join(subjects)}"
+                    ),
+                })
+
+        # ------------------------------------------------------------------
+        # 2. Topic clustering — converging themes across different senders
+        # ------------------------------------------------------------------
+        if len(scan_result.needs_reply) >= 3:
+            email_lines = "\n".join(
+                f"- From {e.sender_name}: {e.subject}"
+                for e in scan_result.needs_reply
+            )
+            topics_prompt = (
+                "Analyze these email subjects and identify any thematic "
+                "patterns (e.g., multiple people asking about the same topic, "
+                "converging deal activity, industry trend signals):\n\n"
+                f"{email_lines}\n\n"
+                "Return 0-3 patterns as a JSON array. Each element:\n"
+                '{"pattern": "description", "emails_involved": ["sender1", '
+                '"sender2"], "strategic_implication": "what this means"}\n\n'
+                "If no meaningful patterns, return []."
+            )
+            try:
+                topic_response = await self._llm.generate_response(
+                    messages=[{"role": "user", "content": topics_prompt}],
+                    max_tokens=400,
+                    temperature=0.0,
+                )
+                parsed = json.loads(topic_response)
+                if isinstance(parsed, list):
+                    for p in parsed:
+                        patterns.append({"type": "topic_cluster", **p})
+            except (json.JSONDecodeError, Exception):
+                logger.debug(
+                    "Topic clustering LLM parse failed, skipping",
+                    extra={"user_id": user_id},
+                )
+
+        # ------------------------------------------------------------------
+        # 3. Activity anomaly — unusual volume vs historical average
+        # ------------------------------------------------------------------
+        total_today = len(scan_result.needs_reply) + len(scan_result.fyi)
+        try:
+            recent_runs = (
+                self._db.table("email_processing_runs")
+                .select("emails_scanned")
+                .eq("user_id", user_id)
+                .order("started_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            if recent_runs and recent_runs.data and len(recent_runs.data) >= 3:
+                avg_volume = sum(
+                    r["emails_scanned"] for r in recent_runs.data
+                ) / len(recent_runs.data)
+                if avg_volume > 0 and total_today > avg_volume * 1.5:
+                    pct_above = int((total_today / avg_volume - 1) * 100)
+                    patterns.append({
+                        "type": "volume_anomaly",
+                        "today_count": total_today,
+                        "average_count": int(avg_volume),
+                        "insight": (
+                            f"Inbox volume is {total_today} emails — "
+                            f"{pct_above}% above your average of "
+                            f"{int(avg_volume)}"
+                        ),
+                    })
+        except Exception:
+            logger.debug(
+                "Volume anomaly check failed",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
+        return patterns
 
     async def generate_video_briefing_context(self, user_id: str) -> str:
         """Generate a conversational script for video briefing delivery.
