@@ -275,7 +275,6 @@ class ComposioOAuthClient:
                 connected_account_id=connection_id,
                 user_id=user_id,
                 arguments=params,
-                dangerously_skip_version_check=True,
             )
 
         try:
@@ -314,7 +313,6 @@ class ComposioOAuthClient:
             connected_account_id=connection_id,
             user_id=user_id,
             arguments=params,
-            dangerously_skip_version_check=True,
         )
         # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):

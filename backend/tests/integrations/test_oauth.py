@@ -229,7 +229,6 @@ async def test_execute_action(mock_composio):
         connected_account_id="conn-1",
         user_id=None,
         arguments={"to": "test@example.com", "body": "Hello"},
-        dangerously_skip_version_check=True,
     )
 
 
