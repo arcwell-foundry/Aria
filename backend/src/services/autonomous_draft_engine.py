@@ -492,7 +492,7 @@ Do not include any text outside the JSON object."""
             style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
             # f. Calculate confidence
-            confidence = self._calculate_confidence(context, style_score, is_learning_mode)
+            confidence = self._calculate_confidence(context)
 
             logger.info(
                 "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f",
@@ -811,55 +811,38 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     def _calculate_confidence(
         self,
         context: DraftContext,
-        style_score: float,
-        is_learning_mode: bool = False,
     ) -> float:
-        """Calculate confidence level (0.0-1.0).
+        """Calculate confidence level (0.0-1.0) from context richness.
 
         Confidence varies per-draft based on:
-        - Context richness (continuous: available context sections / 7)
+        - Context richness (how many of 7 context sources are available)
         - Known contact (has per-recipient writing profile)
-        - Thread depth (continuous: message count)
-        - Learning mode penalty
-        - Style match score
+        - Thread depth (message count in conversation)
         """
-        base = 0.5
-
-        # Context richness — continuous scale based on 7 possible context sections
-        available_count = 0
-        if context.thread_context and context.thread_context.message_count > 0:
-            available_count += 1
+        available_sources = 0
+        if context.thread_context and context.thread_context.summary:
+            available_sources += 1
         if context.recipient_research:
-            available_count += 1
+            available_sources += 1
         if context.relationship_history and context.relationship_history.total_emails > 0:
-            available_count += 1
+            available_sources += 1
         if context.calendar_context and context.calendar_context.connected:
-            available_count += 1
+            available_sources += 1
         if context.crm_context and context.crm_context.connected:
-            available_count += 1
+            available_sources += 1
         if context.corporate_memory and context.corporate_memory.facts:
-            available_count += 1
+            available_sources += 1
         if context.recipient_style and context.recipient_style.exists:
-            available_count += 1
+            available_sources += 1
 
-        context_bonus = available_count / 7.0 * 0.3  # 0.0–0.3
+        # Base 0.4 + up to 0.42 from context + up to 0.1 from known contact + 0.08 thread depth
+        base = 0.4
+        context_score = (available_sources / 7) * 0.42
+        known_contact = 0.1 if (context.recipient_style and context.recipient_style.exists) else 0.0
+        msg_count = context.thread_context.message_count if context.thread_context else 1
+        thread_depth = min(msg_count * 0.02, 0.08)
 
-        # Known contact bonus (has per-recipient writing profile)
-        known_contact_bonus = 0.1 if (context.recipient_style and context.recipient_style.exists) else 0.0
-
-        # Thread depth bonus — continuous, capped at 0.1
-        thread_bonus = 0.0
-        if context.thread_context and context.thread_context.message_count > 0:
-            thread_bonus = min(context.thread_context.message_count * 0.02, 0.1)
-
-        # Learning mode penalty (first week = less confident)
-        learning_penalty = -0.1 if is_learning_mode else 0.0
-
-        # Style match contribution
-        style_bonus = 0.1 * style_score
-
-        confidence = base + context_bonus + known_contact_bonus + thread_bonus + learning_penalty + style_bonus
-        return max(0.0, min(1.0, confidence))
+        return round(min(base + context_score + known_contact + thread_depth, 1.0), 3)
 
     # ------------------------------------------------------------------
     # ARIA Notes Generation

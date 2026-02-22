@@ -944,8 +944,9 @@ class DigitalTwin:
     ) -> float | None:
         """Score style match using DB-backed profile when Graphiti is unavailable.
 
-        Queries digital_twin_profiles for stored style data and compares
-        the generated text against it using TextStyleAnalyzer.
+        Compares measurable text attributes (sentence length, formality
+        indicators, message length) against the stored user profile to
+        produce a continuous score that varies per draft.
 
         Args:
             user_id: The user ID.
@@ -970,67 +971,60 @@ class DigitalTwin:
                 return None
 
             row = result.data
+            writing_style = row.get("writing_style", "")
+            if not writing_style and not row.get("formality_level") and not row.get("tone"):
+                return None
+
             scores: list[float] = []
 
-            # Compare formality against stored formality_level
-            formality_map = {
-                "casual": 0.2,
-                "informal": 0.3,
-                "business_casual": 0.45,
-                "business": 0.6,
-                "formal": 0.8,
-                "very_formal": 0.95,
-            }
-            stored_formality = row.get("formality_level", "")
-            if stored_formality:
-                target_formality = formality_map.get(stored_formality, 0.5)
-                gen_formality = self._analyzer.extract_formality_score(generated_text)
-                formality_diff = abs(gen_formality - target_formality)
-                scores.append(max(0.0, 1.0 - formality_diff * 1.5))
-
-            # Compare vocabulary level
-            vocab_map = {
-                "simple": "simple",
-                "moderate": "moderate",
-                "advanced": "advanced",
-                "technical": "advanced",
-            }
-            stored_vocab = row.get("vocabulary_patterns", "")
-            if stored_vocab:
-                target_vocab = vocab_map.get(stored_vocab, "moderate")
-                gen_vocab = self._analyzer.extract_vocabulary_level(generated_text)
-                scores.append(1.0 if gen_vocab == target_vocab else 0.4)
-
-            # Compare tone (map to formality-adjacent metric)
-            tone_formality = {
-                "casual": 0.2,
-                "friendly": 0.35,
-                "balanced": 0.5,
-                "professional": 0.65,
-                "authoritative": 0.8,
-                "formal": 0.85,
-            }
-            stored_tone = row.get("tone", "")
-            if stored_tone and stored_tone in tone_formality:
-                target = tone_formality[stored_tone]
-                gen_formality = self._analyzer.extract_formality_score(generated_text)
-                tone_diff = abs(gen_formality - target)
-                scores.append(max(0.0, 1.0 - tone_diff * 1.5))
-
-            # Sentence length heuristic from writing_style description
-            writing_style = row.get("writing_style", "")
+            # 1. Sentence length comparison (continuous)
+            draft_sentences = [s.strip() for s in generated_text.split(".") if s.strip()]
+            avg_draft_len = (
+                sum(len(s.split()) for s in draft_sentences) / max(len(draft_sentences), 1)
+            )
+            expected_len = 15  # default
             if writing_style:
-                gen_length = self._analyzer.extract_sentence_length(generated_text)
-                # Shorter style descriptions suggest concise writing
-                if "concise" in writing_style.lower() or "brief" in writing_style.lower():
-                    scores.append(max(0.0, 1.0 - max(0, gen_length - 12) * 0.05))
-                elif "detailed" in writing_style.lower() or "thorough" in writing_style.lower():
-                    scores.append(max(0.0, 1.0 - max(0, 15 - gen_length) * 0.05))
+                low = writing_style.lower()
+                if "concise" in low or "brief" in low or "short" in low:
+                    expected_len = 10
+                elif "detailed" in low or "thorough" in low or "long" in low:
+                    expected_len = 22
+            if expected_len > 0:
+                len_score = 1.0 - min(abs(avg_draft_len - expected_len) / expected_len, 1.0)
+                scores.append(len_score)
+
+            # 2. Formality match via indicator words (continuous)
+            formality = row.get("formality_level", "moderate") or "moderate"
+            formal_indicators = ["regards", "sincerely", "dear", "pleased", "kindly"]
+            casual_indicators = ["hey", "thanks!", "cheers", "!", "lol"]
+            draft_lower = generated_text.lower()
+            formal_count = sum(1 for w in formal_indicators if w in draft_lower)
+            casual_count = sum(1 for w in casual_indicators if w in draft_lower)
+            if formality in ("formal", "very_formal"):
+                form_score = min(formal_count * 0.3, 1.0) if formal_count > casual_count else 0.3
+            elif formality in ("casual", "informal"):
+                form_score = min(casual_count * 0.3, 1.0) if casual_count > formal_count else 0.3
+            else:
+                form_score = 0.7  # moderate/business matches most things
+            scores.append(form_score)
+
+            # 3. Message length similarity (continuous ratio)
+            draft_words = len(generated_text.split())
+            expected_words = 80  # default
+            if writing_style:
+                low = writing_style.lower()
+                if "concise" in low or "brief" in low:
+                    expected_words = 50
+                elif "detailed" in low or "thorough" in low:
+                    expected_words = 150
+            if expected_words > 0 and draft_words > 0:
+                length_ratio = min(draft_words, expected_words) / max(draft_words, expected_words)
+                scores.append(length_ratio)
 
             if not scores:
                 return None
 
-            return sum(scores) / len(scores)
+            return round(sum(scores) / len(scores), 3)
 
         except Exception as e:
             logger.warning(
