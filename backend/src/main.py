@@ -36,6 +36,7 @@ from src.api.routes import (
     deep_sync,  # US-942: Deep sync API routes
     drafts,
     email,  # Real-time email urgency detection
+    email_intelligence_settings,
     email_preferences,
     feedback,
     friction,  # Wave 2: Cognitive friction decisions
@@ -277,6 +278,7 @@ app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
 app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(email.router, prefix="/api/v1")
+app.include_router(email_intelligence_settings.router, prefix="/api/v1")
 app.include_router(email_preferences.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(friction.router, prefix="/api/v1")  # Wave 2: Cognitive friction

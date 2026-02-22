@@ -8,3 +8,4 @@ export { TrustDashboard } from './TrustDashboard';
 export { PerceptionSection } from './PerceptionSection';
 export { BillingSection } from './BillingSection';
 export { PrivacySection } from './PrivacySection';
+export { EmailSettingsSection } from './EmailSettingsSection';

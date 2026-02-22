@@ -6,6 +6,7 @@ from src.api.routes import communication as communication
 from src.api.routes import compliance as compliance
 from src.api.routes import drafts as drafts
 from src.api.routes import email as email
+from src.api.routes import email_intelligence_settings as email_intelligence_settings
 from src.api.routes import email_preferences as email_preferences
 from src.api.routes import feedback as feedback
 from src.api.routes import friction as friction

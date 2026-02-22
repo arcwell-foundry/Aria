@@ -18,14 +18,16 @@ import {
   PerceptionSection,
   BillingSection,
   PrivacySection,
+  EmailSettingsSection,
 } from '@/components/settings';
 
-type SettingsSection = 'profile' | 'integrations' | 'aria' | 'autonomy' | 'perception' | 'privacy' | 'billing';
+type SettingsSection = 'profile' | 'integrations' | 'aria' | 'email' | 'autonomy' | 'perception' | 'privacy' | 'billing';
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'profile', label: 'Profile' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'aria', label: 'ARIA Persona' },
+  { id: 'email', label: 'Email Intelligence' },
   { id: 'autonomy', label: 'Autonomy' },
   { id: 'perception', label: 'Perception' },
   { id: 'privacy', label: 'Privacy' },
@@ -40,6 +42,8 @@ function SectionContent({ section }: { section: SettingsSection }) {
       return <IntegrationsSection />;
     case 'aria':
       return <AriaPersonaSection />;
+    case 'email':
+      return <EmailSettingsSection />;
     case 'autonomy':
       return <AutonomySettings />;
     case 'perception':
