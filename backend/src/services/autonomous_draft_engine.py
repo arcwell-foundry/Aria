@@ -533,21 +533,47 @@ Do not include any text outside the JSON object."""
             # i. Auto-save to email client (Gmail/Outlook)
             # Non-fatal: draft stays in ARIA database even if client save fails
             try:
+                logger.info(
+                    "[EMAIL_PIPELINE] Stage: saving_to_client_attempt | draft_id=%s | user_id=%s",
+                    draft_id,
+                    user_id,
+                )
                 client_result = await self._client_writer.save_draft_to_client(
                     user_id=user_id,
                     draft_id=draft_id,
                 )
                 if client_result.get("success") and not client_result.get("already_saved"):
                     logger.info(
-                        "[EMAIL_PIPELINE] Stage: saving_to_client | draft_id=%s | provider=%s",
+                        "[EMAIL_PIPELINE] Stage: saved_to_client_success | draft_id=%s | provider=%s | client_draft_id=%s",
                         draft_id,
                         client_result.get("provider"),
+                        client_result.get("client_draft_id"),
+                    )
+                elif client_result.get("already_saved"):
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: client_save_skipped_already_saved | draft_id=%s",
+                        draft_id,
+                    )
+                else:
+                    logger.warning(
+                        "[EMAIL_PIPELINE] Stage: client_save_returned_failure | draft_id=%s | result=%s",
+                        draft_id,
+                        client_result,
                     )
             except DraftSaveError as e:
-                logger.warning(
-                    "[EMAIL_PIPELINE] Stage: client_save_failed | draft_id=%s | error=%s",
+                logger.error(
+                    "[EMAIL_PIPELINE] Stage: client_save_failed | draft_id=%s | error=%s | provider=%s",
                     draft_id,
                     e,
+                    getattr(e, "provider", "unknown"),
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.error(
+                    "[EMAIL_PIPELINE] Stage: client_save_unexpected_error | draft_id=%s | error=%s",
+                    draft_id,
+                    e,
+                    exc_info=True,
                 )
 
             logger.info(

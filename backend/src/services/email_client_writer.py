@@ -78,12 +78,24 @@ class EmailClientWriter:
         # 2. Get user's email integration
         integration = await self._get_email_integration(user_id)
         if not integration:
+            logger.warning(
+                "EMAIL_CLIENT: No email integration found for user %s",
+                user_id,
+            )
             raise DraftSaveError(
                 "No email integration found. Connect Gmail or Outlook in Settings."
             )
 
         provider = integration.get("integration_type", "")
         connection_id = integration.get("composio_connection_id", "")
+
+        logger.info(
+            "EMAIL_CLIENT: SAVE_TO_CLIENT_ATTEMPT: draft_id=%s, user_id=%s, provider=%s, connection_id=%s",
+            draft_id,
+            user_id,
+            provider,
+            connection_id[:8] + "..." if connection_id else "NONE",
+        )
 
         # Normalize provider name
         if provider == IntegrationType.GMAIL.value:
@@ -179,9 +191,10 @@ class EmailClientWriter:
             Result from Composio with draft ID
         """
         params: dict[str, Any] = {
-            "to": draft.get("recipient_email"),
+            "recipient_email": draft.get("recipient_email", ""),
             "subject": draft.get("subject", ""),
             "body": draft.get("body", ""),
+            "is_html": True,
         }
 
         # Add threading if replying to existing email
@@ -189,20 +202,31 @@ class EmailClientWriter:
         if thread_id:
             params["thread_id"] = thread_id
 
-        in_reply_to = draft.get("in_reply_to")
-        if in_reply_to:
-            # Gmail uses References and In-Reply-To headers
-            params["in_reply_to"] = in_reply_to
+        logger.info(
+            "EMAIL_CLIENT: Gmail create draft params: recipient=%s, subject=%s, thread_id=%s",
+            params.get("recipient_email"),
+            params.get("subject"),
+            thread_id,
+        )
 
         try:
             result = await self._oauth_client.execute_action(
                 connection_id=connection_id,
-                action="GMAIL_CREATE_DRAFT",
+                action="GMAIL_CREATE_EMAIL_DRAFT",
                 params=params,
+            )
+            logger.info(
+                "EMAIL_CLIENT: Gmail create draft result: successful=%s, data_keys=%s",
+                result.get("successful"),
+                list(result.get("data", {}).keys()) if isinstance(result.get("data"), dict) else str(result.get("data"))[:100],
             )
             return result
         except Exception as e:
-            logger.error("EMAIL_CLIENT: Gmail create draft failed: %s", e)
+            logger.error(
+                "EMAIL_CLIENT: Gmail create draft failed: %s",
+                e,
+                exc_info=True,
+            )
             raise
 
     async def _save_to_outlook(
@@ -212,6 +236,12 @@ class EmailClientWriter:
     ) -> dict[str, Any]:
         """Save draft to Outlook via Composio.
 
+        Uses OUTLOOK_CREATE_DRAFT action which expects:
+        - subject (str, required)
+        - body (str, required) - plain text or HTML content
+        - is_html (bool) - True if body is HTML
+        - to_recipients (list[str]) - email addresses
+
         Args:
             connection_id: Composio connection ID
             draft: Draft data from email_drafts table
@@ -219,27 +249,19 @@ class EmailClientWriter:
         Returns:
             Result from Composio with draft ID
         """
-        recipient_name = draft.get("recipient_name") or ""
+        recipient_email = draft.get("recipient_email", "")
         params: dict[str, Any] = {
-            "to": [
-                {
-                    "emailAddress": {
-                        "address": draft.get("recipient_email"),
-                        "name": recipient_name,
-                    }
-                }
-            ],
             "subject": draft.get("subject", ""),
-            "body": {
-                "contentType": "HTML",
-                "content": draft.get("body", ""),
-            },
+            "body": draft.get("body", ""),
+            "is_html": True,
+            "to_recipients": [recipient_email] if recipient_email else [],
         }
 
-        # Add conversation threading
-        thread_id = draft.get("thread_id")
-        if thread_id:
-            params["conversation_id"] = thread_id
+        logger.info(
+            "EMAIL_CLIENT: Outlook create draft params: to_recipients=%s, subject=%s",
+            params.get("to_recipients"),
+            params.get("subject"),
+        )
 
         try:
             result = await self._oauth_client.execute_action(
@@ -247,9 +269,18 @@ class EmailClientWriter:
                 action="OUTLOOK_CREATE_DRAFT",
                 params=params,
             )
+            logger.info(
+                "EMAIL_CLIENT: Outlook create draft result: successful=%s, data_keys=%s",
+                result.get("successful"),
+                list(result.get("data", {}).keys()) if isinstance(result.get("data"), dict) else str(result.get("data"))[:100],
+            )
             return result
         except Exception as e:
-            logger.error("EMAIL_CLIENT: Outlook create draft failed: %s", e)
+            logger.error(
+                "EMAIL_CLIENT: Outlook create draft failed: %s",
+                e,
+                exc_info=True,
+            )
             raise
 
     async def _get_draft(self, draft_id: str) -> dict[str, Any] | None:
