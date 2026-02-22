@@ -787,16 +787,14 @@ class EmailAnalyzer:
 
             if provider == "outlook":
                 logger.info(
-                    "EMAIL_ANALYZER: Using OUTLOOK_LIST_MESSAGES for user %s",
+                    "EMAIL_ANALYZER: Using OUTLOOK_GET_MAIL_DELTA for user %s",
                     user_id,
                 )
                 response = oauth_client.execute_action_sync(
                     connection_id=connection_id,
-                    action="OUTLOOK_LIST_MESSAGES",
+                    action="OUTLOOK_GET_MAIL_DELTA",
                     params={
                         "$top": 200,
-                        "$orderby": "receivedDateTime desc",
-                        "$filter": f"receivedDateTime ge {since_date}",
                     },
                     user_id=user_id,
                 )
