@@ -1,15 +1,16 @@
 /**
- * CommunicationsPage - Email drafts list view
+ * CommunicationsPage - Email drafts list + decisions log
  *
  * Follows ARIA Design System v1.0:
  * - LIGHT THEME (content pages use light background)
- * - Header: "Email Drafts" with status dot
+ * - View toggle: "Drafts" / "Email Log"
  * - Search bar + status filter chips
  * - DraftsTable with sorting
+ * - Email decisions transparency log
  * - Empty state drives to ARIA conversation
  *
  * Routes:
- * - /communications -> DraftsList
+ * - /communications -> DraftsList (default) or EmailDecisionsLog
  * - /communications/drafts/:draftId -> DraftDetailPage
  */
 
@@ -20,7 +21,15 @@ import { cn } from '@/utils/cn';
 import { useDrafts } from '@/hooks/useDrafts';
 import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
+import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
 import type { EmailDraftStatus, EmailDraftPurpose } from '@/api/drafts';
+
+type CommunicationsView = 'drafts' | 'decisions';
+
+const VIEW_OPTIONS: { label: string; value: CommunicationsView }[] = [
+  { label: 'Drafts', value: 'drafts' },
+  { label: 'Email Log', value: 'decisions' },
+];
 
 // Filter chip options
 const STATUS_FILTERS: { label: string; value: EmailDraftStatus | 'all' }[] = [
@@ -308,19 +317,43 @@ function DraftsList() {
 // Main CommunicationsPage component
 export function CommunicationsPage() {
   const { draftId } = useParams<{ draftId: string }>();
+  const [activeView, setActiveView] = useState<CommunicationsView>('drafts');
 
   // Show detail view if draftId is present
   if (draftId) {
     return <DraftDetailPage draftId={draftId} />;
   }
 
-  // Show list view
+  // Show list view with toggle
   return (
     <div
       className="flex-1 flex flex-col h-full"
       style={{ backgroundColor: 'var(--bg-primary)' }}
     >
-      <DraftsList />
+      {/* View toggle */}
+      <div className="px-8 pt-6 pb-0">
+        <nav className="flex gap-2">
+          {VIEW_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setActiveView(opt.value)}
+              className={cn(
+                'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                activeView === opt.value
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'border border-[var(--border)] hover:bg-[var(--bg-subtle)]'
+              )}
+              style={{
+                color: activeView === opt.value ? 'white' : 'var(--text-secondary)',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {activeView === 'drafts' ? <DraftsList /> : <EmailDecisionsLog />}
     </div>
   );
 }
