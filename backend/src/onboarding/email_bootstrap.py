@@ -513,6 +513,14 @@ class PriorityEmailIngestion:
                 len(emails),
                 user_id,
             )
+
+            # Normalize raw provider data to canonical keys expected by
+            # _extract_contacts, _detect_commitments, _identify_active_threads, etc.
+            if provider == "outlook":
+                emails = [self._normalize_outlook_email(e) for e in emails]
+            else:
+                emails = [self._normalize_gmail_email(e) for e in emails]
+
             return emails
 
         except Exception as e:
@@ -523,6 +531,85 @@ class PriorityEmailIngestion:
                 exc_info=True,
             )
             return []
+
+    # ------------------------------------------------------------------
+    # Provider-specific email normalization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_outlook_email(raw: dict[str, Any]) -> dict[str, Any]:
+        """Normalize Outlook Graph API email to canonical format.
+
+        Outlook returns fields like ``toRecipients``, ``ccRecipients``,
+        ``sentDateTime``, ``conversationId``, and ``body`` as an object.
+        The rest of the bootstrap pipeline expects ``to``, ``cc``,
+        ``date``, ``thread_id``, and ``body`` as a plain string.
+        """
+        to_addrs: list[str] = []
+        for r in raw.get("toRecipients", []):
+            addr = r.get("emailAddress", {}).get("address", "")
+            if addr:
+                to_addrs.append(addr)
+
+        cc_addrs: list[str] = []
+        for r in raw.get("ccRecipients", []):
+            addr = r.get("emailAddress", {}).get("address", "")
+            if addr:
+                cc_addrs.append(addr)
+
+        body = raw.get("body", "")
+        if isinstance(body, dict):
+            body = body.get("content", "")
+
+        from_addr = ""
+        from_raw = raw.get("from") or raw.get("sender")
+        if isinstance(from_raw, dict):
+            from_addr = from_raw.get("emailAddress", {}).get("address", "")
+
+        return {
+            "to": to_addrs,
+            "cc": cc_addrs,
+            "from": from_addr,
+            "subject": raw.get("subject", ""),
+            "body": body if isinstance(body, str) else "",
+            "date": raw.get("sentDateTime", ""),
+            "thread_id": raw.get("conversationId", ""),
+            "id": raw.get("id", ""),
+            "has_attachments": raw.get("hasAttachments", False),
+        }
+
+    @staticmethod
+    def _normalize_gmail_email(raw: dict[str, Any]) -> dict[str, Any]:
+        """Normalize Gmail email to canonical format.
+
+        Gmail data from Composio may already be relatively flat, but
+        ensure consistent keys exist.
+        """
+        # Gmail emails from Composio are typically already flat,
+        # but ensure all expected keys are present.
+        to = raw.get("to", [])
+        if isinstance(to, str):
+            to = [to]
+
+        cc = raw.get("cc", [])
+        if isinstance(cc, str):
+            cc = [cc]
+
+        body = raw.get("body", "")
+        if isinstance(body, dict):
+            body = body.get("content", body.get("text", ""))
+
+        return {
+            "to": to,
+            "cc": cc,
+            "from": raw.get("from", ""),
+            "subject": raw.get("subject", ""),
+            "body": body if isinstance(body, str) else "",
+            "date": raw.get("date", raw.get("internalDate", "")),
+            "thread_id": raw.get("thread_id", raw.get("threadId", "")),
+            "id": raw.get("id", ""),
+            "has_attachments": raw.get("has_attachments", raw.get("hasAttachments", False)),
+        }
 
     # ------------------------------------------------------------------
     # Exclusion filtering

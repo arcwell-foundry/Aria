@@ -87,7 +87,7 @@ async def get_email_integration(user_id: str) -> dict[str, Any] | None:
     """
     try:
         client = SupabaseClient.get_client()
-        for provider in ("gmail", "outlook"):
+        for provider in ("outlook", "gmail"):
             result = (
                 client.table("user_integrations")
                 .select("*")
