@@ -136,6 +136,11 @@ class DraftContext(BaseModel):
 
     def to_db_dict(self) -> dict[str, Any]:
         """Serialize to database-compatible dictionary."""
+        # Extract thread_summary for the separate TEXT column
+        thread_summary: str | None = None
+        if self.thread_context and self.thread_context.summary:
+            thread_summary = self.thread_context.summary
+
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -143,6 +148,7 @@ class DraftContext(BaseModel):
             "thread_id": self.thread_id,
             "sender_email": self.sender_email,
             "subject": self.subject,
+            "thread_summary": thread_summary,
             "thread_context": self.thread_context.model_dump() if self.thread_context else None,
             "recipient_research": self.recipient_research.model_dump() if self.recipient_research else None,
             "recipient_style": self.recipient_style.model_dump() if self.recipient_style else None,
@@ -269,10 +275,16 @@ class EmailContextGatherer:
     ) -> ThreadContext | None:
         """Fetch full email thread via Composio."""
         try:
+            logger.info(
+                "THREAD_FETCH: Starting for user=%s thread_id=%s",
+                user_id,
+                thread_id[:80] if thread_id else "NONE",
+            )
+
             integration = await self._get_email_integration(user_id)
             if not integration:
                 logger.warning(
-                    "CONTEXT_GATHERER: No email integration for user %s",
+                    "THREAD_FETCH: No email integration found for user %s",
                     user_id,
                 )
                 return None
@@ -280,10 +292,18 @@ class EmailContextGatherer:
             provider = integration.get("integration_type", "").lower()
             connection_id = integration.get("composio_connection_id")
 
+            logger.info(
+                "THREAD_FETCH: provider=%s connection_id=%s user_email=%s",
+                provider,
+                connection_id[:20] if connection_id else "NONE",
+                getattr(self, "_cached_user_email", "NOT_SET"),
+            )
+
             if not connection_id:
                 logger.warning(
-                    "CONTEXT_GATHERER: No connection_id for user %s",
+                    "THREAD_FETCH: No connection_id for user %s (provider=%s)",
                     user_id,
+                    provider,
                 )
                 return None
 
@@ -300,12 +320,25 @@ class EmailContextGatherer:
 
             if not messages:
                 logger.warning(
-                    "CONTEXT_GATHERER: No messages found for thread %s",
-                    thread_id,
+                    "THREAD_FETCH: No messages returned for thread %s (provider=%s)",
+                    thread_id[:80] if thread_id else "NONE",
+                    provider,
                 )
                 return None
 
+            logger.info(
+                "THREAD_FETCH: Got %d messages, summarizing thread %s",
+                len(messages),
+                thread_id[:40] if thread_id else "NONE",
+            )
+
             summary = await self._summarize_thread(messages)
+
+            logger.info(
+                "THREAD_FETCH: Summary generated (%d chars) for thread %s",
+                len(summary),
+                thread_id[:40] if thread_id else "NONE",
+            )
 
             return ThreadContext(
                 thread_id=thread_id,
@@ -316,7 +349,9 @@ class EmailContextGatherer:
 
         except Exception as e:
             logger.error(
-                "CONTEXT_GATHERER: Thread fetch failed: %s",
+                "THREAD_FETCH: FAILED for user=%s thread=%s error=%s",
+                user_id,
+                thread_id[:80] if thread_id else "NONE",
                 str(e),
                 exc_info=True,
             )
@@ -335,22 +370,48 @@ class EmailContextGatherer:
 
         try:
             oauth_client = get_oauth_client()
+            action = "GMAIL_FETCH_MESSAGE_BY_THREAD_ID"
+            params = {"thread_id": thread_id}
+
+            logger.info(
+                "THREAD_FETCH_GMAIL: Calling action=%s params=%s connection=%s",
+                action,
+                params,
+                connection_id[:20] if connection_id else "NONE",
+            )
+
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
-                action="GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
-                params={"thread_id": thread_id},
+                action=action,
+                params=params,
                 user_id=user_id,
+            )
+
+            logger.info(
+                "THREAD_FETCH_GMAIL: Response successful=%s data_keys=%s error=%s raw_preview=%s",
+                response.get("successful"),
+                list(response.get("data", {}).keys()) if response.get("data") else "NO_DATA",
+                response.get("error"),
+                str(response)[:500],
             )
 
             if not response.get("successful"):
                 logger.error(
-                    "CONTEXT_GATHERER: GMAIL_FETCH_MESSAGE_BY_THREAD_ID failed: %s",
+                    "THREAD_FETCH_GMAIL: Action failed: %s | full_response=%s",
                     response.get("error"),
+                    str(response)[:1000],
                 )
                 return messages
 
             thread_data = response.get("data", {})
             thread_messages = thread_data.get("messages", [])
+
+            logger.info(
+                "THREAD_FETCH_GMAIL: Found %d messages in thread data",
+                len(thread_messages),
+            )
+
+            user_email = await self._get_user_email_from_integration()
 
             for msg in thread_messages:
                 headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -358,25 +419,25 @@ class EmailContextGatherer:
                 sender_email = self._extract_email_address(sender)
                 sender_name = self._extract_name(sender)
                 body = self._extract_gmail_body(msg.get("payload", {}))
-                user_email = await self._get_user_email_from_integration()
 
                 messages.append(ThreadMessage(
                     sender_email=sender_email,
                     sender_name=sender_name,
                     body=body,
                     timestamp=msg.get("internalDate", ""),
-                    is_from_user=user_email.lower() in sender_email.lower(),
+                    is_from_user=bool(user_email and user_email.lower() in sender_email.lower()),
                 ))
 
             logger.info(
-                "CONTEXT_GATHERER: Fetched %d messages from Gmail thread %s",
+                "THREAD_FETCH_GMAIL: Parsed %d messages from Gmail thread %s",
                 len(messages),
                 thread_id,
             )
 
         except Exception as e:
             logger.error(
-                "CONTEXT_GATHERER: Gmail thread fetch error: %s",
+                "THREAD_FETCH_GMAIL: EXCEPTION for thread=%s error=%s",
+                thread_id,
                 str(e),
                 exc_info=True,
             )
@@ -389,33 +450,59 @@ class EmailContextGatherer:
         connection_id: str,
         thread_id: str,
     ) -> list[ThreadMessage]:
-        """Fetch Outlook conversation thread."""
+        """Fetch Outlook conversation thread by conversationId."""
         from src.integrations.oauth import get_oauth_client
 
         messages: list[ThreadMessage] = []
 
         try:
             oauth_client = get_oauth_client()
+            action = "OUTLOOK_LIST_MESSAGES"
+            # Escape single quotes in conversationId for OData filter
+            safe_thread_id = thread_id.replace("'", "''") if thread_id else ""
+            params = {
+                "$filter": f"conversationId eq '{safe_thread_id}'",
+                "$orderby": "receivedDateTime asc",
+                "$top": 50,
+            }
+
+            logger.info(
+                "THREAD_FETCH_OUTLOOK: Calling action=%s filter=%s connection=%s",
+                action,
+                params["$filter"][:120],
+                connection_id[:20] if connection_id else "NONE",
+            )
+
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
-                action="OUTLOOK_LIST_MESSAGES",
-                params={
-                    "$filter": f"conversationId eq '{thread_id}'",
-                    "$orderby": "receivedDateTime asc",
-                    "$top": 50,
-                },
+                action=action,
+                params=params,
                 user_id=user_id,
+            )
+
+            logger.info(
+                "THREAD_FETCH_OUTLOOK: Response successful=%s data_keys=%s error=%s raw_preview=%s",
+                response.get("successful"),
+                list(response.get("data", {}).keys()) if response.get("data") else "NO_DATA",
+                response.get("error"),
+                str(response)[:500],
             )
 
             if not response.get("successful"):
                 logger.error(
-                    "CONTEXT_GATHERER: OUTLOOK_LIST_MESSAGES failed: %s",
+                    "THREAD_FETCH_OUTLOOK: Action failed: %s | full_response=%s",
                     response.get("error"),
+                    str(response)[:1000],
                 )
                 return messages
 
             messages_data = response.get("data", {}).get("value", [])
             user_email = await self._get_user_email_from_integration()
+
+            logger.info(
+                "THREAD_FETCH_OUTLOOK: Found %d messages in response",
+                len(messages_data),
+            )
 
             for msg in messages_data:
                 sender = msg.get("from", {}).get("emailAddress", {})
@@ -428,18 +515,19 @@ class EmailContextGatherer:
                     sender_name=sender_name,
                     body=body_content,
                     timestamp=msg.get("receivedDateTime", ""),
-                    is_from_user=user_email.lower() in sender_email.lower(),
+                    is_from_user=bool(user_email and user_email.lower() in sender_email.lower()),
                 ))
 
             logger.info(
-                "CONTEXT_GATHERER: Fetched %d messages from Outlook thread %s",
+                "THREAD_FETCH_OUTLOOK: Parsed %d messages from Outlook thread %s",
                 len(messages),
-                thread_id,
+                thread_id[:40] if thread_id else "NONE",
             )
 
         except Exception as e:
             logger.error(
-                "CONTEXT_GATHERER: Outlook thread fetch error: %s",
+                "THREAD_FETCH_OUTLOOK: EXCEPTION for thread=%s error=%s",
+                thread_id[:80] if thread_id else "NONE",
                 str(e),
                 exc_info=True,
             )
@@ -490,11 +578,19 @@ class EmailContextGatherer:
         return ""
 
     async def _get_user_email_from_integration(self) -> str:
-        """Get user's email from their integration record."""
-        return getattr(self, "_cached_user_email", "")
+        """Get user's email from their integration record.
+
+        Returns the email cached during _get_email_integration(),
+        or empty string if no integration was found.
+        """
+        return getattr(self, "_cached_user_email", "") or ""
 
     async def _get_email_integration(self, user_id: str) -> dict[str, Any] | None:
-        """Get user's email integration (Outlook or Gmail)."""
+        """Get user's email integration (Outlook or Gmail).
+
+        Also caches the user's email address from the integration
+        metadata for use in is_from_user determination.
+        """
         try:
             # Check Outlook first as it's more commonly working in enterprise
             result = (
@@ -506,6 +602,7 @@ class EmailContextGatherer:
                 .execute()
             )
             if result.data:
+                self._cached_user_email = result.data.get("account_email", "") or ""
                 return result.data
 
             result = (
@@ -516,7 +613,11 @@ class EmailContextGatherer:
                 .maybe_single()
                 .execute()
             )
-            return result.data if result.data else None
+            if result.data:
+                self._cached_user_email = result.data.get("account_email", "") or ""
+                return result.data
+
+            return None
 
         except Exception as e:
             logger.warning(
