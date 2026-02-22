@@ -14,7 +14,7 @@ integration with the rest of the application state.
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -70,6 +70,7 @@ class ProspectiveTask:
     related_lead_id: str | None  # Optional link to a lead
     completed_at: datetime | None
     created_at: datetime
+    metadata: dict[str, Any] = field(default_factory=dict)  # Extensible metadata (e.g. email context)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize task to a dictionary.
@@ -90,6 +91,7 @@ class ProspectiveTask:
             "related_lead_id": self.related_lead_id,
             "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
             "created_at": self.created_at.isoformat(),
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -125,6 +127,7 @@ class ProspectiveTask:
             related_lead_id=data.get("related_lead_id"),
             completed_at=completed_at,
             created_at=created_at,
+            metadata=data.get("metadata") or {},
         )
 
 
@@ -186,6 +189,7 @@ class ProspectiveMemory:
                 "related_lead_id": task.related_lead_id,
                 "completed_at": task.completed_at.isoformat() if task.completed_at else None,
                 "created_at": now.isoformat(),
+                "metadata": task.metadata or {},
             }
 
             response = client.table("prospective_memories").insert(data).execute()

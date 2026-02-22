@@ -2120,6 +2120,16 @@ Return ONLY the JSON array, nothing else."""
                 if due_date_iso:
                     trigger_config["due_at"] = due_date_iso
 
+                # Build metadata for proactive follow-up engine
+                commitment_metadata: dict[str, Any] = {
+                    "source": "email_commitment",
+                    "sender_email": sender_email,
+                    "sender_name": sender_name or "",
+                    "who": who,  # "user" or "sender"
+                    "thread_id": thread_id,
+                    "email_id": email_id,
+                }
+
                 task = ProspectiveTask(
                     id=str(uuid4()),
                     user_id=user_id,
@@ -2133,6 +2143,7 @@ Return ONLY the JSON array, nothing else."""
                     related_lead_id=None,
                     completed_at=None,
                     created_at=datetime.now(UTC),
+                    metadata=commitment_metadata,
                 )
 
                 await memory.create_task(task)

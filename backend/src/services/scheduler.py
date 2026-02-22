@@ -498,6 +498,30 @@ async def _run_deferred_draft_retry() -> None:
         logger.exception("Deferred draft retry scheduler run failed")
 
 
+async def _run_proactive_followup_check() -> None:
+    """Check for overdue email commitments and draft follow-up emails.
+
+    For each user with email integration:
+    1. Query prospective_memories for overdue email commitments
+    2. Generate contextual follow-up drafts via LLM
+    3. Save drafts to email_drafts and push to email client
+    """
+    try:
+        from src.jobs.proactive_followup_job import run_proactive_followup_check
+
+        result = await run_proactive_followup_check()
+
+        if result["users_checked"] > 0 or result["total_followups_drafted"] > 0:
+            logger.info(
+                "Proactive followup check: %d users checked, %d drafts generated, %d errors",
+                result["users_checked"],
+                result["total_followups_drafted"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Proactive followup check scheduler run failed")
+
+
 async def _run_style_recalibration() -> None:
     """Run weekly style recalibration for email writing.
 
@@ -827,6 +851,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="deferred_draft_retry",
             name="Retry deferred email drafts for deduplication",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_proactive_followup_check,
+            trigger=CronTrigger(hour="*/4"),  # Every 4 hours
+            id="proactive_followup_check",
+            name="Proactive follow-up drafts for overdue commitments",
             replace_existing=True,
         )
         _scheduler.add_job(
