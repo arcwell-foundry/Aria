@@ -270,6 +270,20 @@ Do not include any text outside the JSON object."""
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
 
+            multi_msg_threads = sum(1 for emails in grouped_emails.values() if len(emails) > 1)
+            if multi_msg_threads > 0:
+                consolidated_count = len(scan_result.needs_reply) - len(grouped_emails)
+                logger.info(
+                    "[EMAIL_PIPELINE] Stage: thread_consolidation | "
+                    "needs_reply=%d | threads=%d | multi_msg_threads=%d | "
+                    "consolidated=%d | run_id=%s",
+                    len(scan_result.needs_reply),
+                    len(grouped_emails),
+                    multi_msg_threads,
+                    consolidated_count,
+                    run_id,
+                )
+
             # 3b. Pre-fetch sent thread IDs (one API call for dedup)
             sent_thread_ids = await self._fetch_sent_thread_ids(user_id, since_hours)
 
@@ -312,6 +326,31 @@ Do not include any text outside the JSON object."""
                 # Get only the latest email in thread
                 email = await self._get_latest_email_in_thread(thread_emails)
 
+                # Build consolidation info for multi-message threads
+                consolidated_from: list[dict[str, Any]] | None = None
+                if len(thread_emails) > 1:
+                    earlier = [e for e in thread_emails if e.email_id != email.email_id]
+                    if earlier:
+                        earlier_sorted = sorted(
+                            earlier,
+                            key=lambda e: getattr(e, "scanned_at", "") or "",
+                        )
+                        consolidated_from = [
+                            {
+                                "sender": e.sender_name or e.sender_email,
+                                "subject": e.subject,
+                                "date": str(getattr(e, "scanned_at", "")),
+                                "snippet": (e.snippet or "")[:200],
+                            }
+                            for e in earlier_sorted
+                        ]
+                        logger.info(
+                            "THREAD_CONSOLIDATED: %d messages in thread %s → single reply to %s",
+                            len(thread_emails),
+                            thread_id[:8] if len(thread_id) > 8 else thread_id,
+                            email.sender_name or email.sender_email,
+                        )
+
                 # Check for active conversation (rapid-fire)
                 if await self._is_active_conversation(user_id, thread_id):
                     logger.info(
@@ -346,6 +385,7 @@ Do not include any text outside the JSON object."""
                     draft = await self._process_single_email(
                         user_id, user_name, email, is_learning_mode, run_id,
                         confidence_tier=confidence_tier,
+                        consolidated_from=consolidated_from,
                     )
                     result.drafts.append(draft)
                     if draft.success:
@@ -731,6 +771,7 @@ Do not include any text outside the JSON object."""
         is_learning_mode: bool = False,
         run_id: str | None = None,
         confidence_tier: dict[str, Any] | None = None,
+        consolidated_from: list[dict[str, Any]] | None = None,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -857,7 +898,8 @@ Do not include any text outside the JSON object."""
                 email.email_id,
             )
             draft_content = await self._generate_reply_draft(
-                user_id, user_name, email, context, style_guidelines, tone_guidance
+                user_id, user_name, email, context, style_guidelines, tone_guidance,
+                consolidated_from=consolidated_from,
             )
 
             # d2. Check guardrails for unauthorized commitments
@@ -891,6 +933,7 @@ Do not include any text outside the JSON object."""
                 lead_updates=lead_updates,
                 guardrail_warnings=guardrail_warnings,
                 confidence_tier=confidence_tier,
+                consolidated_from=consolidated_from,
             )
 
             # h. Save draft with all metadata (including confidence tier)
@@ -1206,6 +1249,7 @@ Example of well-formatted output:
         style_guidelines: str,
         tone_guidance: str,
         special_instructions: str | None = None,
+        consolidated_from: list[dict[str, Any]] | None = None,
     ) -> ReplyDraftContent:
         """Generate reply draft via LLM with full context.
 
@@ -1228,6 +1272,7 @@ Example of well-formatted output:
             user_name, email, context, style_guidelines, tone_guidance,
             special_instructions=special_instructions,
             formatting_patterns=formatting_patterns,
+            consolidated_from=consolidated_from,
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -1282,6 +1327,7 @@ Example of well-formatted output:
         tone_guidance: str,
         special_instructions: str | None = None,
         formatting_patterns: dict[str, Any] | None = None,
+        consolidated_from: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
@@ -1331,6 +1377,20 @@ Subject: {email.subject}
 Urgency: {email.urgency}
 
 {email_body}""")
+
+        # Earlier messages in thread that also need addressing (consolidation)
+        if consolidated_from:
+            earlier_lines = "\n".join(
+                f"- {m['sender']} ({m['date']}): {m['snippet']}"
+                for m in consolidated_from
+            )
+            sections.append(
+                f"## Earlier messages in this thread that also need addressing\n"
+                f"{earlier_lines}\n\n"
+                f"Address ALL of these messages in your single reply, in addition to the "
+                f"latest message above. Reference earlier points naturally — don't "
+                f"reply to each one separately like a checklist."
+            )
 
         # Extract thread summary for attachment context
         thread_summary = None
@@ -1506,13 +1566,20 @@ Recent messages:
         sections.append(STRATEGIC_GUARDRAILS)
 
         # Final instructions
+        consolidation_instruction = ""
+        if consolidated_from:
+            consolidation_instruction = (
+                f"\n6. Addresses ALL {len(consolidated_from) + 1} messages in this "
+                f"thread in a single cohesive reply — don't reply to each separately"
+            )
+
         sections.append(f"""## Instructions
 Write a reply that:
 1. Addresses everything the sender raised
 2. Sounds EXACTLY like {user_name} — same greeting, tone, length, signoff
 3. References relevant context naturally (don't dump everything you know)
 4. Is ready to send with minimal editing
-5. Uses clean HTML formatting as described in the Email Formatting section
+5. Uses clean HTML formatting as described in the Email Formatting section{consolidation_instruction}
 
 Sign off as {user_name}.
 Write ONLY the email body as HTML (no metadata, no <html>/<body> wrapper).
@@ -1664,6 +1731,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         lead_updates: list[dict] | None = None,
         guardrail_warnings: list[str] | None = None,
         confidence_tier: dict[str, Any] | None = None,
+        consolidated_from: list[dict[str, Any]] | None = None,
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
@@ -1679,6 +1747,16 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
             notes.append(f"[Confidence: {tier}] {tier_note}")
         elif is_learning_mode:
             notes.append(self._learning_mode.get_learning_mode_note())
+
+        # Add thread consolidation note
+        if consolidated_from:
+            total_msgs = len(consolidated_from) + 1
+            senders = {m["sender"] for m in consolidated_from}
+            sender_label = ", ".join(senders)
+            notes.append(
+                f"This reply addresses {total_msgs} messages from {sender_label} "
+                f"in the same thread"
+            )
 
         # Add guardrail warnings prominently at the top if present
         if guardrail_warnings:
