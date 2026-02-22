@@ -319,6 +319,20 @@ class PriorityEmailIngestion:
             # Store final complete status
             await self._store_bootstrap_status(user_id, "complete", result)
 
+            # Update last_sync_at on user's email integration
+            try:
+                self._db.table("user_integrations").update(
+                    {"last_sync_at": datetime.now(UTC).isoformat()}
+                ).eq("user_id", user_id).in_(
+                    "integration_type", ["gmail", "outlook"]
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "EMAIL_BOOTSTRAP: Failed to update last_sync_at for user %s: %s",
+                    user_id,
+                    e,
+                )
+
             return result
 
         except Exception as e:
@@ -792,6 +806,8 @@ class PriorityEmailIngestion:
         """Extract clean writing samples from sent emails for style refinement.
 
         Only emails between 100 and 3000 characters are suitable.
+        Handles both Gmail (body is a string) and Outlook (body is
+        ``{"contentType": "...", "content": "..."}``).
 
         Args:
             emails: Email dicts to extract from.
@@ -802,6 +818,11 @@ class PriorityEmailIngestion:
         samples: list[str] = []
         for email in emails:
             body = email.get("body", "")
+            # Outlook Graph API returns body as {"contentType": "...", "content": "..."}
+            if isinstance(body, dict):
+                body = body.get("content", "")
+            if not isinstance(body, str):
+                continue
             if 100 < len(body) < 3000:
                 samples.append(body)
         return samples[:20]
