@@ -275,7 +275,6 @@ class ComposioOAuthClient:
                 connected_account_id=connection_id,
                 user_id=user_id,
                 arguments=params,
-                dangerously_skip_version_check=True,
             )
 
         try:
@@ -302,19 +301,28 @@ class ComposioOAuthClient:
 
         Args:
             connection_id: The Composio connection nanoid.
-            action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_LIST_MESSAGES').
+            action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_OUTLOOK_LIST_MESSAGES').
             params: Parameters for the action.
             user_id: Optional user/entity ID for the action.
 
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
         """
+        # Pre-load tool schema to avoid KeyError in Composio SDK
+        # The SDK's execute() tries _custom_tools[slug].info which fails
+        # if the tool isn't in the registry. We preload via retrieve().
+        if action not in self._client.tools._tool_schemas:
+            try:
+                tool = self._client.client.tools.retrieve(tool_slug=action)
+                self._client.tools._tool_schemas[action] = tool
+            except Exception as e:
+                logger.debug("Could not preload tool schema for %s: %s", action, e)
+
         result = self._client.tools.execute(
             slug=action,
             connected_account_id=connection_id,
             user_id=user_id,
             arguments=params,
-            dangerously_skip_version_check=True,
         )
         # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):

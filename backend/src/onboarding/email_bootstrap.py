@@ -533,13 +533,13 @@ class PriorityEmailIngestion:
 
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
-                action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
+                action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
                 params={
-                    "mail_folder_id": "sentitems",
-                    "$top": page_size,
-                    "$skip": skip,
-                    "$filter": f"sentDateTime ge {since_date}",
-                    "$orderby": "sentDateTime desc",
+                    "folder": "SentItems",
+                    "top": page_size,
+                    "skip": skip,
+                    "sent_date_time_gt": since_date,
+                    "orderby": ["sentDateTime desc"],
                 },
                 user_id=user_id,
             )
@@ -553,7 +553,11 @@ class PriorityEmailIngestion:
                 break
 
             data = response.get("data", {})
-            page_emails = data.get("value", [])
+            # Handle both old format (data.value) and new format (data.response_data.value)
+            if isinstance(data, dict):
+                page_emails = data.get("value", []) or data.get("response_data", {}).get("value", [])
+            else:
+                page_emails = []
 
             if not page_emails:
                 logger.info(
