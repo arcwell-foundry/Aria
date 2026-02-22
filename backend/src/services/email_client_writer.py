@@ -75,9 +75,9 @@ class EmailClientWriter:
                 "already_saved": True,
             }
 
-        # 2. Get user's email integration
-        integration = await self._get_email_integration(user_id)
-        if not integration:
+        # 2. Get user's email integrations (try both providers)
+        integrations = await self._get_email_integrations_ranked(user_id)
+        if not integrations:
             logger.warning(
                 "EMAIL_CLIENT: No email integration found for user %s",
                 user_id,
@@ -86,106 +86,115 @@ class EmailClientWriter:
                 "No email integration found. Connect Gmail or Outlook in Settings."
             )
 
-        provider = integration.get("integration_type", "")
-        connection_id = integration.get("composio_connection_id", "")
+        # 3. Try each provider in order, fall back if auth fails
+        last_error: Exception | None = None
+        for integration in integrations:
+            provider = integration.get("integration_type", "")
+            connection_id = integration.get("composio_connection_id", "")
 
-        logger.info(
-            "EMAIL_CLIENT: SAVE_TO_CLIENT_ATTEMPT: draft_id=%s, user_id=%s, provider=%s, connection_id=%s",
-            draft_id,
-            user_id,
-            provider,
-            connection_id[:8] + "..." if connection_id else "NONE",
-        )
+            logger.info(
+                "EMAIL_CLIENT: SAVE_TO_CLIENT_ATTEMPT: draft_id=%s, user_id=%s, provider=%s, connection_id=%s",
+                draft_id,
+                user_id,
+                provider,
+                connection_id[:8] + "..." if connection_id else "NONE",
+            )
 
-        # Normalize provider name
-        if provider == IntegrationType.GMAIL.value:
-            provider = "gmail"
-        elif provider == IntegrationType.OUTLOOK.value:
-            provider = "outlook"
+            # Normalize provider name
+            if provider == IntegrationType.GMAIL.value:
+                provider = "gmail"
+            elif provider == IntegrationType.OUTLOOK.value:
+                provider = "outlook"
 
-        # 3. Save to email client via Composio
-        try:
-            if provider == "gmail":
-                result = await self._save_to_gmail(
-                    connection_id=connection_id,
-                    draft=draft,
+            try:
+                if provider == "gmail":
+                    result = await self._save_to_gmail(
+                        connection_id=connection_id,
+                        draft=draft,
+                        user_id=user_id,
+                    )
+                elif provider == "outlook":
+                    result = await self._save_to_outlook(
+                        connection_id=connection_id,
+                        draft=draft,
+                        user_id=user_id,
+                    )
+                else:
+                    continue
+
+                # Composio returns {"successful": bool, "data": {...}, "error": ...}
+                if not result.get("successful", False):
+                    error_msg = result.get("error") or "Unknown Composio error"
+                    raise DraftSaveError(
+                        f"Composio {provider} create draft failed: {error_msg}",
+                        provider=provider,
+                    )
+
+                # Extract client draft ID from nested data
+                data = result.get("data") or result
+                client_draft_id = (
+                    data.get("id") or data.get("draft_id") or data.get("Id")
                 )
-            elif provider == "outlook":
-                result = await self._save_to_outlook(
-                    connection_id=connection_id,
-                    draft=draft,
-                )
-            else:
-                raise DraftSaveError(f"Unsupported provider: {provider}", provider=provider)
 
-            # Composio returns {"successful": bool, "data": {...}, "error": ...}
-            if not result.get("successful", False):
-                error_msg = result.get("error") or "Unknown Composio error"
-                raise DraftSaveError(
-                    f"Composio {provider} create draft failed: {error_msg}",
+                # 4. Update email_drafts record
+                await self._update_draft_sync_status(
+                    draft_id=str(draft_id),
+                    client_draft_id=client_draft_id,
                     provider=provider,
                 )
 
-            # Extract client draft ID from nested data
-            data = result.get("data") or result
-            client_draft_id = (
-                data.get("id") or data.get("draft_id") or data.get("Id")
-            )
+                # 5. Log activity
+                await self._activity_service.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="draft_saved_to_client",
+                    title=f"Draft saved to {provider.title()}",
+                    description=f"Reply to {draft.get('recipient_email')}: {draft.get('subject')}",
+                    confidence=draft.get("style_match_score") or 0.8,
+                    related_entity_type="email_draft",
+                    related_entity_id=str(draft_id),
+                )
 
-            # 4. Update email_drafts record
-            await self._update_draft_sync_status(
-                draft_id=str(draft_id),
-                client_draft_id=client_draft_id,
-                provider=provider,
-            )
+                logger.info(
+                    "EMAIL_CLIENT: Draft %s saved to %s as %s",
+                    draft_id,
+                    provider,
+                    client_draft_id,
+                )
+                return {
+                    "success": True,
+                    "client_draft_id": client_draft_id,
+                    "provider": provider,
+                    "already_saved": False,
+                }
 
-            # 5. Log activity
-            await self._activity_service.record(
-                user_id=user_id,
-                agent="scribe",
-                activity_type="draft_saved_to_client",
-                title=f"Draft saved to {provider.title()}",
-                description=f"Reply to {draft.get('recipient_email')}: {draft.get('subject')}",
-                confidence=draft.get("style_match_score") or 0.8,
-                related_entity_type="email_draft",
-                related_entity_id=str(draft_id),
-            )
+            except Exception as e:
+                logger.warning(
+                    "EMAIL_CLIENT: Failed to save draft %s via %s, trying next provider: %s",
+                    draft_id,
+                    provider,
+                    e,
+                )
+                last_error = e
 
-            logger.info(
-                "EMAIL_CLIENT: Draft %s saved to %s as %s",
-                draft_id,
-                provider,
-                client_draft_id,
-            )
-            return {
-                "success": True,
-                "client_draft_id": client_draft_id,
-                "provider": provider,
-                "already_saved": False,
-            }
-
-        except DraftSaveError:
-            raise
-        except Exception as e:
-            logger.error(
-                "EMAIL_CLIENT: Failed to save draft %s to client: %s",
-                draft_id,
-                e,
-                exc_info=True,
-            )
-            # Draft stays in ARIA database even if client save fails
-            raise DraftSaveError(f"Failed to save to {provider}: {e}", provider=provider) from e
+        # All providers failed
+        raise DraftSaveError(
+            f"Failed to save draft to any provider: {last_error}",
+            provider="none",
+        )
 
     async def _save_to_gmail(
         self,
         connection_id: str,
         draft: dict[str, Any],
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Save draft to Gmail via Composio.
 
         Args:
             connection_id: Composio connection ID
             draft: Draft data from email_drafts table
+            user_id: User ID for Composio entity resolution
 
         Returns:
             Result from Composio with draft ID
@@ -214,6 +223,7 @@ class EmailClientWriter:
                 connection_id=connection_id,
                 action="GMAIL_CREATE_EMAIL_DRAFT",
                 params=params,
+                user_id=user_id,
             )
             logger.info(
                 "EMAIL_CLIENT: Gmail create draft result: successful=%s, data_keys=%s",
@@ -233,6 +243,7 @@ class EmailClientWriter:
         self,
         connection_id: str,
         draft: dict[str, Any],
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Save draft to Outlook via Composio.
 
@@ -245,6 +256,7 @@ class EmailClientWriter:
         Args:
             connection_id: Composio connection ID
             draft: Draft data from email_drafts table
+            user_id: User ID for Composio entity resolution
 
         Returns:
             Result from Composio with draft ID
@@ -268,6 +280,7 @@ class EmailClientWriter:
                 connection_id=connection_id,
                 action="OUTLOOK_CREATE_DRAFT",
                 params=params,
+                user_id=user_id,
             )
             logger.info(
                 "EMAIL_CLIENT: Outlook create draft result: successful=%s, data_keys=%s",
@@ -305,34 +318,37 @@ class EmailClientWriter:
             logger.error("EMAIL_CLIENT: Failed to get draft %s: %s", draft_id, e)
             return None
 
-    async def _get_email_integration(self, user_id: str) -> dict[str, Any] | None:
-        """Get user's email integration (Gmail or Outlook).
+    async def _get_email_integrations_ranked(self, user_id: str) -> list[dict[str, Any]]:
+        """Get user's active email integrations, ranked by preference.
 
-        Prefers Gmail if both are connected.
+        Returns all active email integrations so the caller can fall back
+        if the preferred provider has an expired OAuth token.
 
         Args:
             user_id: User's UUID
 
         Returns:
-            Integration dict or None
+            List of active integration dicts (may be empty)
         """
+        result: list[dict[str, Any]] = []
+
         # Try Gmail first
         gmail = await self._integration_service.get_integration(
             user_id=user_id,
             integration_type=IntegrationType.GMAIL,
         )
         if gmail and gmail.get("status") == "active":
-            return gmail
+            result.append(gmail)
 
-        # Try Outlook
+        # Then Outlook
         outlook = await self._integration_service.get_integration(
             user_id=user_id,
             integration_type=IntegrationType.OUTLOOK,
         )
         if outlook and outlook.get("status") == "active":
-            return outlook
+            result.append(outlook)
 
-        return None
+        return result
 
     async def _update_draft_sync_status(
         self,
@@ -351,8 +367,7 @@ class EmailClientWriter:
             self._db.table("email_drafts").update(
                 {
                     "saved_to_client": True,
-                    "client_draft_id": client_draft_id,
-                    "client_provider": provider,
+                    "email_client": provider,
                     "saved_to_client_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", draft_id).execute()
