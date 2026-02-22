@@ -253,9 +253,9 @@ class EmailContextGatherer:
         if context.thread_context:
             context.sources_used.append("composio_thread")
 
-        # 2. Research recipient via Exa
+        # 2. Research recipient via memory + Exa
         context.recipient_research = await self._research_recipient(
-            sender_email, sender_name
+            sender_email, sender_name, user_id=user_id
         )
         if context.recipient_research and context.recipient_research.exa_sources_used:
             context.sources_used.append("exa_research")
@@ -265,16 +265,20 @@ class EmailContextGatherer:
         if context.recipient_style and context.recipient_style.exists:
             context.sources_used.append("recipient_style_profile")
 
-        # 4. Get relationship history from memory
+        # 4. Get relationship history from memory + profiles + scan log
         context.relationship_history = await self._get_relationship_history(
             user_id, sender_email
         )
-        if context.relationship_history and context.relationship_history.memory_facts:
+        if context.relationship_history and (
+            context.relationship_history.memory_facts
+            or context.relationship_history.total_emails > 0
+            or context.relationship_history.recent_topics
+        ):
             context.sources_used.append("memory_semantic")
 
-        # 5. Get corporate memory
+        # 5. Get corporate memory (search by topic AND sender's company domain)
         context.corporate_memory = await self._get_corporate_memory(
-            user_id, subject
+            user_id, subject, sender_email
         )
         if context.corporate_memory and context.corporate_memory.facts:
             context.sources_used.append("corporate_memory")
@@ -284,9 +288,11 @@ class EmailContextGatherer:
         if context.calendar_context and context.calendar_context.connected:
             context.sources_used.append("calendar")
 
-        # 7. Get CRM context
+        # 7. Get CRM context (with memory fallback if no CRM connected)
         context.crm_context = await self._get_crm_context(user_id, sender_email)
-        if context.crm_context and context.crm_context.connected:
+        if context.crm_context and (
+            context.crm_context.connected or context.crm_context.recent_activities
+        ):
             context.sources_used.append("crm")
 
         # 8. Persist to database
@@ -295,10 +301,41 @@ class EmailContextGatherer:
             # Clear the ID so callers know the context row doesn't exist in DB
             context.id = ""
 
+        # 9. Context completeness log — feeds confidence scoring
+        sources_populated = []
+        sources_empty = []
+        for source_name, source_value in [
+            ("thread_summary", context.thread_context),
+            ("recipient_research", context.recipient_research and context.recipient_research.exa_sources_used),
+            ("relationship_history", context.relationship_history and (
+                context.relationship_history.memory_facts
+                or context.relationship_history.total_emails > 0
+            )),
+            ("calendar_context", context.calendar_context and context.calendar_context.connected),
+            ("crm_context", context.crm_context and (
+                context.crm_context.connected or context.crm_context.recent_activities
+            )),
+            ("corporate_memory", context.corporate_memory and context.corporate_memory.facts),
+            ("recipient_style", context.recipient_style and context.recipient_style.exists),
+        ]:
+            if source_value:
+                sources_populated.append(source_name)
+            else:
+                sources_empty.append(source_name)
+
         logger.info(
-            "[EMAIL_PIPELINE] Stage: context_complete | email_id=%s | saved=%s | sources=%s",
+            "CONTEXT_COMPLETENESS: %d/7 sources populated: %s. Empty: %s",
+            len(sources_populated),
+            sources_populated,
+            sources_empty,
+        )
+
+        logger.info(
+            "[EMAIL_PIPELINE] Stage: context_complete | email_id=%s | saved=%s | "
+            "completeness=%d/7 | sources=%s",
             email_id,
             saved,
+            len(sources_populated),
             context.sources_used,
         )
 
@@ -710,16 +747,19 @@ Summary:"""
         self,
         sender_email: str,
         sender_name: str | None,
+        user_id: str | None = None,
     ) -> RecipientResearch | None:
-        """Research the email sender via Exa API.
+        """Research the email sender via memory + Exa API.
 
         Performs:
-        1. People search for LinkedIn profile and bio
-        2. Company search ONLY if email is from a business domain (not personal)
+        1. Check memory_semantic for existing facts about sender (fast, free)
+        2. People search via Exa for LinkedIn profile and bio
+        3. Company search ONLY if email is from a business domain (not personal)
 
         Args:
             sender_email: The sender's email address.
             sender_name: The sender's display name.
+            user_id: The user's ID for memory lookups.
 
         Returns:
             RecipientResearch with gathered intelligence, or None.
@@ -729,6 +769,63 @@ Summary:"""
         # Check if this is a personal email domain - skip company research if so
         is_personal = self._is_personal_email(sender_email)
 
+        # --- Step 1: Check memory_semantic FIRST (fast, free) ---
+        memory_has_data = False
+        if user_id:
+            try:
+                mem_result = (
+                    self._db.table("memory_semantic")
+                    .select("fact, confidence, source, metadata")
+                    .eq("user_id", user_id)
+                    .ilike("fact", f"%{sender_email}%")
+                    .order("confidence", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+
+                if mem_result.data:
+                    memory_has_data = True
+                    for row in mem_result.data:
+                        metadata = row.get("metadata") or {}
+                        # Extract structured fields from memory facts
+                        if not research.sender_title and metadata.get("title"):
+                            research.sender_title = metadata["title"]
+                        if not research.sender_company and metadata.get("company"):
+                            research.sender_company = metadata["company"]
+                        if not research.bio and metadata.get("bio"):
+                            research.bio = metadata["bio"]
+                        if not research.linkedin_url and metadata.get("linkedin_url"):
+                            research.linkedin_url = metadata["linkedin_url"]
+
+                    # Also search by name if provided
+                    if sender_name and not memory_has_data:
+                        name_result = (
+                            self._db.table("memory_semantic")
+                            .select("fact, confidence, source, metadata")
+                            .eq("user_id", user_id)
+                            .ilike("fact", f"%{sender_name}%")
+                            .order("confidence", desc=True)
+                            .limit(5)
+                            .execute()
+                        )
+                        if name_result.data:
+                            memory_has_data = True
+
+                    if memory_has_data:
+                        research.exa_sources_used.append("memory_semantic")
+                        logger.info(
+                            "CONTEXT_GATHERER: Found %d memory facts for recipient %s",
+                            len(mem_result.data),
+                            sender_email,
+                        )
+
+            except Exception as e:
+                logger.warning(
+                    "CONTEXT_GATHERER: Memory lookup for recipient failed: %s",
+                    str(e),
+                )
+
+        # --- Step 2: Exa research (only if memory didn't provide enough) ---
         try:
             from src.agents.capabilities.enrichment_providers.exa_provider import (
                 ExaEnrichmentProvider,
@@ -740,8 +837,11 @@ Summary:"""
             domain = sender_email.split("@")[-1] if "@" in sender_email else ""
             company_from_email = "" if is_personal else domain.split(".")[0]
 
-            # Search for person
-            if sender_name:
+            # Search for person (skip if memory already found rich profile data)
+            has_rich_profile = bool(
+                research.sender_title and research.sender_company and research.bio
+            )
+            if sender_name and not has_rich_profile:
                 logger.info(
                     "CONTEXT_GATHERER: Searching Exa for person: %s%s",
                     sender_name,
@@ -797,10 +897,17 @@ Summary:"""
                     })
                     research.exa_sources_used.append(news.get("url", ""))
 
+            data_sources = []
+            if memory_has_data:
+                data_sources.append("memory_semantic")
+            if any(s for s in research.exa_sources_used if s != "memory_semantic"):
+                data_sources.append("exa_api")
             logger.info(
-                "CONTEXT_GATHERER: Recipient research complete for %s, %d sources, company_research=%s",
+                "CONTEXT_GATHERER: Recipient research complete for %s | "
+                "sources=%s | exa_urls=%d | company_research=%s",
                 sender_email,
-                len(research.exa_sources_used),
+                data_sources,
+                len([s for s in research.exa_sources_used if s != "memory_semantic"]),
                 "skipped" if is_personal else "done",
             )
 
@@ -825,15 +932,19 @@ Summary:"""
     ) -> RecipientWritingStyle:
         """Get user's writing style profile for this recipient.
 
+        Falls back to global digital_twin_profiles style if no
+        per-recipient profile exists.
+
         Args:
             user_id: The user's ID.
             sender_email: The recipient's email.
 
         Returns:
-            RecipientWritingStyle profile or default.
+            RecipientWritingStyle profile, global fallback, or default.
         """
         style = RecipientWritingStyle()
 
+        # --- Try per-recipient profile first ---
         try:
             result = (
                 self._db.table("recipient_writing_profiles")
@@ -855,14 +966,60 @@ Summary:"""
                 style.email_count = data.get("email_count", 0)
 
                 logger.info(
-                    "CONTEXT_GATHERER: Found style profile for %s (%d prior emails)",
+                    "CONTEXT_GATHERER: Found per-recipient style for %s (%d emails)",
                     sender_email,
                     style.email_count,
                 )
+                return style
 
         except Exception as e:
             logger.warning(
                 "CONTEXT_GATHERER: Failed to get recipient style: %s",
+                str(e),
+            )
+
+        # --- Fall back to global digital_twin_profiles style ---
+        try:
+            twin_result = (
+                self._db.table("digital_twin_profiles")
+                .select("tone, formality_level, writing_style, metadata")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if twin_result.data:
+                twin = twin_result.data
+                style.exists = True
+                style.tone = twin.get("tone", "balanced")
+
+                # Map digital_twin formality (text) to numeric level
+                formality_map = {
+                    "casual": 0.2,
+                    "business": 0.5,
+                    "formal": 0.8,
+                    "academic": 0.9,
+                }
+                style.formality_level = formality_map.get(
+                    twin.get("formality_level", "business"), 0.5
+                )
+
+                # Extract greeting/signoff from metadata if available
+                metadata = twin.get("metadata") or {}
+                style.greeting_style = metadata.get("default_greeting", "")
+                style.signoff_style = metadata.get("default_signoff", "")
+
+                logger.info(
+                    "CONTEXT_GATHERER: Using global digital twin style for %s "
+                    "(tone=%s, formality=%s)",
+                    sender_email,
+                    style.tone,
+                    style.formality_level,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Failed to get digital twin fallback style: %s",
                 str(e),
             )
 
@@ -877,22 +1034,25 @@ Summary:"""
         user_id: str,
         sender_email: str,
     ) -> RelationshipHistory:
-        """Get relationship history from semantic memory.
+        """Get relationship history from multiple sources.
 
-        Queries memory_semantic for facts mentioning this contact,
-        including interaction count, relationship type, and topics.
+        Queries:
+        1. memory_semantic for facts mentioning this contact
+        2. recipient_writing_profiles for email frequency, tone, formality
+        3. email_scan_log for past categorized interactions
 
         Args:
             user_id: The user's ID.
             sender_email: The contact's email.
 
         Returns:
-            RelationshipHistory with memory facts.
+            RelationshipHistory with memory facts, or structured "new contact"
+            response if no prior history exists.
         """
         history = RelationshipHistory(sender_email=sender_email)
 
+        # --- Source 1: memory_semantic facts ---
         try:
-            # Query facts about this contact
             result = (
                 self._db.table("memory_semantic")
                 .select("*")
@@ -905,7 +1065,6 @@ Summary:"""
 
             if result.data:
                 for row in result.data:
-                    # Parse metadata for structured data
                     metadata = row.get("metadata") or {}
 
                     history.memory_facts.append({
@@ -922,26 +1081,87 @@ Summary:"""
                     if rel_type and history.relationship_type == "unknown":
                         history.relationship_type = rel_type
 
-                # Count interactions from email bootstrap data
-                history.total_emails = len([
-                    f for f in history.memory_facts
-                    if f.get("source") == "email_bootstrap"
-                ])
-
                 # Get last interaction date
                 if history.memory_facts:
                     history.last_interaction = history.memory_facts[0].get("created_at")
 
-                logger.info(
-                    "CONTEXT_GATHERER: Found %d memory facts for %s",
-                    len(history.memory_facts),
-                    sender_email,
-                )
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: memory_semantic query failed for relationship: %s",
+                str(e),
+            )
+
+        # --- Source 2: recipient_writing_profiles for frequency/tone ---
+        try:
+            profile_result = (
+                self._db.table("recipient_writing_profiles")
+                .select("email_count, last_email_date, relationship_type, tone")
+                .eq("user_id", user_id)
+                .eq("recipient_email", sender_email.lower())
+                .maybe_single()
+                .execute()
+            )
+
+            if profile_result.data:
+                profile = profile_result.data
+                history.total_emails = profile.get("email_count", 0)
+                if profile.get("last_email_date"):
+                    history.last_interaction = profile["last_email_date"]
+                if profile.get("relationship_type") and profile["relationship_type"] != "unknown":
+                    history.relationship_type = profile["relationship_type"]
 
         except Exception as e:
             logger.warning(
-                "CONTEXT_GATHERER: Failed to get relationship history: %s",
+                "CONTEXT_GATHERER: recipient_writing_profiles query failed: %s",
                 str(e),
+            )
+
+        # --- Source 3: email_scan_log for past interactions ---
+        try:
+            scan_result = (
+                self._db.table("email_scan_log")
+                .select("subject, category, urgency, scanned_at")
+                .eq("user_id", user_id)
+                .eq("sender_email", sender_email.lower())
+                .order("scanned_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if scan_result.data:
+                # Count total emails from scan log if profiles didn't have count
+                if history.total_emails == 0:
+                    history.total_emails = len(scan_result.data)
+
+                # Extract recent topics from subject lines
+                history.recent_topics = [
+                    row["subject"]
+                    for row in scan_result.data
+                    if row.get("subject")
+                ][:5]
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: email_scan_log query failed: %s",
+                str(e),
+            )
+
+        # --- Log result ---
+        if history.memory_facts or history.total_emails > 0 or history.recent_topics:
+            logger.info(
+                "CONTEXT_GATHERER: Relationship history for %s — "
+                "%d memory facts, %d emails, %d topics, type=%s",
+                sender_email,
+                len(history.memory_facts),
+                history.total_emails,
+                len(history.recent_topics),
+                history.relationship_type,
+            )
+        else:
+            history.relationship_type = "new_contact"
+            logger.info(
+                "CONTEXT_GATHERER: No prior history with %s — new contact",
+                sender_email,
             )
 
         return history
@@ -954,31 +1174,80 @@ Summary:"""
         self,
         user_id: str,
         topic: str,
+        sender_email: str = "",
     ) -> CorporateMemoryContext:
-        """Get relevant facts about user's own company.
+        """Get relevant facts about sender's company and user's company.
 
-        Queries memory_semantic for corporate facts that might be
-        relevant to the email topic (products, partnerships, etc.).
+        Queries memory_semantic for corporate facts matching:
+        1. The sender's company domain (extracted from email)
+        2. The email subject/topic keywords
 
         Args:
             user_id: The user's ID.
             topic: The email subject/topic for relevance.
+            sender_email: The sender's email for company domain extraction.
 
         Returns:
             CorporateMemoryContext with relevant facts.
         """
         context = CorporateMemoryContext()
+        seen_ids: set[str] = set()
 
+        # Extract sender's company from email domain
+        sender_company = ""
+        if sender_email and "@" in sender_email and not self._is_personal_email(sender_email):
+            domain = sender_email.split("@")[-1]
+            sender_company = domain.split(".")[0]
+
+        # --- Search 1: By sender's company domain ---
+        if sender_company:
+            try:
+                company_result = (
+                    self._db.table("memory_semantic")
+                    .select("id, fact, confidence, source")
+                    .eq("user_id", user_id)
+                    .ilike("fact", f"%{sender_company}%")
+                    .order("confidence", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+
+                if company_result.data:
+                    for row in company_result.data:
+                        row_id = row.get("id")
+                        if row_id and row_id not in seen_ids:
+                            seen_ids.add(row_id)
+                            context.facts.append({
+                                "id": row_id,
+                                "fact": row.get("fact"),
+                                "confidence": row.get("confidence"),
+                                "source": row.get("source"),
+                            })
+                            context.fact_ids.append(row_id)
+
+                    logger.info(
+                        "CONTEXT_GATHERER: Found %d corporate facts for company '%s'",
+                        len(context.facts),
+                        sender_company,
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    "CONTEXT_GATHERER: Corporate memory company search failed: %s",
+                    str(e),
+                )
+
+        # --- Search 2: By email topic keywords (from corporate sources) ---
         try:
-            # Search for corporate facts with topic keywords
             keywords = topic.split()[:5] if topic else []
             search_terms = " | ".join(keywords) if keywords else ""
 
             result = (
                 self._db.table("memory_semantic")
-                .select("*")
+                .select("id, fact, confidence, source")
                 .eq("user_id", user_id)
-                .in_("source", ["company_facts", "corporate_memory", "onboarding"])
+                .in_("source", ["company_facts", "corporate_memory", "onboarding",
+                                "enrichment", "email_bootstrap"])
                 .or_(f"fact.ilike.%{search_terms}%" if search_terms else "fact.ilike.%")
                 .order("confidence", desc=True)
                 .limit(10)
@@ -987,24 +1256,30 @@ Summary:"""
 
             if result.data:
                 for row in result.data:
-                    context.facts.append({
-                        "id": row.get("id"),
-                        "fact": row.get("fact"),
-                        "confidence": row.get("confidence"),
-                        "source": row.get("source"),
-                    })
-                    context.fact_ids.append(row.get("id"))
-
-                logger.info(
-                    "CONTEXT_GATHERER: Found %d corporate memory facts for topic '%s'",
-                    len(context.facts),
-                    topic[:50],
-                )
+                    row_id = row.get("id")
+                    if row_id and row_id not in seen_ids:
+                        seen_ids.add(row_id)
+                        context.facts.append({
+                            "id": row_id,
+                            "fact": row.get("fact"),
+                            "confidence": row.get("confidence"),
+                            "source": row.get("source"),
+                        })
+                        context.fact_ids.append(row_id)
 
         except Exception as e:
             logger.warning(
-                "CONTEXT_GATHERER: Failed to get corporate memory: %s",
+                "CONTEXT_GATHERER: Corporate memory topic search failed: %s",
                 str(e),
+            )
+
+        if context.facts:
+            logger.info(
+                "CONTEXT_GATHERER: Total %d corporate memory facts "
+                "(company='%s', topic='%s')",
+                len(context.facts),
+                sender_company or "N/A",
+                topic[:50] if topic else "N/A",
             )
 
         return context
@@ -1225,7 +1500,8 @@ Summary:"""
         """Get CRM context for this contact.
 
         Checks for Salesforce or HubSpot integration and fetches
-        deal/account status and recent activities.
+        deal/account status. Falls back to memory_semantic for
+        deal/pipeline data when no CRM is connected.
 
         Args:
             user_id: The user's ID.
@@ -1239,6 +1515,13 @@ Summary:"""
         try:
             crm_integration = await self._get_crm_integration(user_id)
             if not crm_integration:
+                # No CRM connected — fall back to memory_semantic for deal context
+                logger.info(
+                    "CONTEXT_GATHERER: No CRM integration for user %s, "
+                    "checking memory_semantic for deal context",
+                    user_id,
+                )
+                context = await self._get_crm_from_memory(user_id, sender_email)
                 return context
 
             context.connected = True
@@ -1391,6 +1674,76 @@ Summary:"""
                 "CONTEXT_GATHERER: HubSpot context failed: %s",
                 str(e),
             )
+
+    async def _get_crm_from_memory(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> CRMContext:
+        """Fall back to memory_semantic for deal/pipeline data when no CRM.
+
+        Searches for facts about deals, pipelines, or opportunities
+        related to the sender's company domain.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The contact's email.
+
+        Returns:
+            CRMContext with memory-derived deal context.
+        """
+        context = CRMContext()
+
+        try:
+            # Extract company name from email domain
+            domain = sender_email.split("@")[-1] if "@" in sender_email else ""
+            company_hint = domain.split(".")[0] if domain else ""
+
+            if not company_hint or self._is_personal_email(sender_email):
+                return context
+
+            # Search memory for deal/pipeline/opportunity facts
+            result = (
+                self._db.table("memory_semantic")
+                .select("fact, confidence, source, metadata")
+                .eq("user_id", user_id)
+                .ilike("fact", f"%{company_hint}%")
+                .order("confidence", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if result.data:
+                deal_keywords = {"deal", "pipeline", "opportunity", "stage",
+                                 "prospect", "revenue", "contract", "proposal"}
+                for row in result.data:
+                    fact_lower = (row.get("fact") or "").lower()
+                    if any(kw in fact_lower for kw in deal_keywords):
+                        context.recent_activities.append({
+                            "source": "memory_semantic",
+                            "fact": row.get("fact"),
+                            "confidence": row.get("confidence"),
+                        })
+
+                        # Try to extract stage from metadata
+                        metadata = row.get("metadata") or {}
+                        if not context.lead_stage and metadata.get("stage"):
+                            context.lead_stage = metadata["stage"]
+
+                if context.recent_activities:
+                    logger.info(
+                        "CONTEXT_GATHERER: Found %d deal-related memory facts for %s",
+                        len(context.recent_activities),
+                        company_hint,
+                    )
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Memory CRM fallback failed: %s",
+                str(e),
+            )
+
+        return context
 
     # ------------------------------------------------------------------
     # Persistence
