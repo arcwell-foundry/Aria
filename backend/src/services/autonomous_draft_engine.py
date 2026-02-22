@@ -1080,6 +1080,68 @@ Do not include any text outside the JSON object."""
             logger.debug("DRAFT_ENGINE: Could not fetch formatting patterns: %s", e)
         return None
 
+    def _detect_attachment_context(
+        self,
+        email: Any,
+        thread_summary: str | None = None,
+    ) -> str:
+        """Detect attachment references in email and thread.
+
+        Analyzes the incoming email for attachments and checks if the user
+        may have promised to send a document based on thread history.
+
+        Args:
+            email: The email object with body and attachment data.
+            thread_summary: Optional thread summary for context.
+
+        Returns:
+            A context string for the LLM prompt about attachments.
+        """
+        body = getattr(email, "body", "") or ""
+        if isinstance(body, dict):
+            body = body.get("content", "")
+
+        has_attachments = bool(
+            getattr(email, "hasAttachments", False)
+            or getattr(email, "attachments", None)
+        )
+
+        attachment_words = [
+            "attached", "attachment", "attaching", "enclosed",
+            "see attached", "find attached", "PFA", "please find",
+        ]
+        sender_mentioned = any(w in body.lower() for w in attachment_words)
+
+        parts: list[str] = []
+
+        if has_attachments:
+            attachments = getattr(email, "attachments", None) or []
+            names = [a.get("name", "file") if isinstance(a, dict) else str(a) for a in attachments]
+            parts.append(
+                f"Sender attached: {', '.join(names)}. "
+                f"Acknowledge the attachment in your reply."
+            )
+        elif sender_mentioned:
+            parts.append(
+                "Sender referenced an attachment but none was found. "
+                "Consider asking them to resend."
+            )
+
+        # Check if user promised to send something
+        thread = (thread_summary or "").lower()
+        promise_phrases = [
+            "i'll send", "i will send", "i'll attach",
+            "will share the", "send you the", "i'll get you",
+            "i'll forward", "let me send you",
+        ]
+        if any(p in thread for p in promise_phrases):
+            parts.append(
+                "⚠️ NOTE: Based on the thread, you may have promised to send "
+                "a document. Remember to attach it before sending this reply."
+            )
+
+        return "\n".join(parts) if parts else "No attachment context."
+
     def _build_formatting_instructions(
         self, formatting: dict[str, Any] | None,
     ) -> str:
@@ -1270,9 +1332,19 @@ Urgency: {email.urgency}
 
 {email_body}""")
 
+        # Extract thread summary for attachment context
+        thread_summary = None
+        if context.thread_context and context.thread_context.summary:
+            thread_summary = context.thread_context.summary
+
+        # Attachment context
+        attachment_context = self._detect_attachment_context(email, thread_summary)
+        sections.append(f"""## Attachments
+{attachment_context}""")
+
         # Full conversation thread
         if context.thread_context and context.thread_context.messages:
-            thread_summary = (
+            thread_summary_text = (
                 context.thread_context.summary
                 or f"{context.thread_context.message_count} messages in thread"
             )
@@ -1283,7 +1355,7 @@ Urgency: {email.urgency}
                 for m in recent_messages
             )
             sections.append(f"""## Full conversation thread (chronological)
-Summary: {thread_summary}
+Summary: {thread_summary_text}
 Recent messages:
 {recent}""")
         else:
@@ -1677,6 +1749,37 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         # Urgency flag
         if email.urgency == "URGENT":
             notes.append("URGENT — review carefully before sending")
+
+        # Attachment notes
+        body = getattr(email, "body", "") or ""
+        if isinstance(body, dict):
+            body = body.get("content", "")
+        has_attachments = bool(
+            getattr(email, "hasAttachments", False)
+            or getattr(email, "attachments", None)
+        )
+        if has_attachments:
+            attachments = getattr(email, "attachments", None) or []
+            names = [a.get("name", "file") if isinstance(a, dict) else str(a) for a in attachments]
+            sender_name = email.sender_name or email.sender_email
+            notes.append(
+                f"{sender_name} attached '{names[0]}' — I acknowledged it in the reply"
+            )
+
+        # Check if user should attach something
+        thread = ""
+        if context.thread_context and context.thread_context.summary:
+            thread = context.thread_context.summary.lower()
+        promise_phrases = [
+            "i'll send", "i will send", "i'll attach",
+            "will share the", "send you the", "i'll get you",
+            "i'll forward", "let me send you",
+        ]
+        if any(p in thread for p in promise_phrases):
+            notes.append(
+                "⚠️ You may need to attach a document before sending — "
+                "the thread suggests you promised to send something"
+            )
 
         # Confidence level
         confidence_label = (
