@@ -62,7 +62,7 @@ class EmailClientWriter:
             raise DraftSaveError(f"Draft {draft_id} not found")
 
         # Check if already saved
-        if draft.get("saved_to_client_at"):
+        if draft.get("saved_to_client") or draft.get("saved_to_client_at"):
             logger.info(
                 "EMAIL_CLIENT: Draft %s already saved to %s",
                 draft_id,
@@ -106,7 +106,19 @@ class EmailClientWriter:
             else:
                 raise DraftSaveError(f"Unsupported provider: {provider}", provider=provider)
 
-            client_draft_id = result.get("id") or result.get("draft_id")
+            # Composio returns {"successful": bool, "data": {...}, "error": ...}
+            if not result.get("successful", False):
+                error_msg = result.get("error") or "Unknown Composio error"
+                raise DraftSaveError(
+                    f"Composio {provider} create draft failed: {error_msg}",
+                    provider=provider,
+                )
+
+            # Extract client draft ID from nested data
+            data = result.get("data") or result
+            client_draft_id = (
+                data.get("id") or data.get("draft_id") or data.get("Id")
+            )
 
             # 4. Update email_drafts record
             await self._update_draft_sync_status(
@@ -185,7 +197,7 @@ class EmailClientWriter:
         try:
             result = await self._oauth_client.execute_action(
                 connection_id=connection_id,
-                action="gmail_create_draft",
+                action="GMAIL_CREATE_DRAFT",
                 params=params,
             )
             return result
@@ -232,7 +244,7 @@ class EmailClientWriter:
         try:
             result = await self._oauth_client.execute_action(
                 connection_id=connection_id,
-                action="outlook_create_draft",
+                action="OUTLOOK_CREATE_DRAFT",
                 params=params,
             )
             return result
@@ -307,6 +319,7 @@ class EmailClientWriter:
         try:
             self._db.table("email_drafts").update(
                 {
+                    "saved_to_client": True,
                     "client_draft_id": client_draft_id,
                     "client_provider": provider,
                     "saved_to_client_at": datetime.now(UTC).isoformat(),
