@@ -15,7 +15,7 @@ It does NOT extend DraftService - it uses composition, not inheritance.
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -244,9 +244,13 @@ Do not include any text outside the JSON object."""
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
 
+            # 3b. Pre-fetch sent thread IDs (one API call for dedup)
+            sent_thread_ids = await self._fetch_sent_thread_ids(user_id, since_hours)
+
             emails_processed = 0
             emails_skipped_learning_mode = 0
             emails_skipped_existing_draft = 0
+            emails_skipped_already_replied = 0
             emails_deferred_active_conversation = 0
 
             for thread_id, thread_emails in grouped_emails.items():
@@ -265,6 +269,19 @@ Do not include any text outside the JSON object."""
                     )
                     await self._log_skip_decision(user_id, thread_id, "existing_draft")
                     emails_skipped_existing_draft += 1
+                    continue
+
+                # Check if user already replied to this thread
+                if await self._user_already_replied(user_id, thread_id, sent_thread_ids):
+                    logger.info(
+                        "SKIP_ALREADY_REPLIED: User already replied in thread_id=%s",
+                        thread_id,
+                    )
+                    await self._log_skip_decision(
+                        user_id, thread_id, "already_replied",
+                        thread_emails[0].email_id if thread_emails else None,
+                    )
+                    emails_skipped_already_replied += 1
                     continue
 
                 # Get only the latest email in thread
@@ -357,11 +374,13 @@ Do not include any text outside the JSON object."""
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
-                "skipped_existing=%d | deferred_active=%d | skipped_learning=%d | status=%s",
+                "skipped_existing=%d | skipped_already_replied=%d | "
+                "deferred_active=%d | skipped_learning=%d | status=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
+                emails_skipped_already_replied,
                 emails_deferred_active_conversation,
                 emails_skipped_learning_mode,
                 result.status,
@@ -1076,6 +1095,175 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     # ------------------------------------------------------------------
     # Deduplication Methods
     # ------------------------------------------------------------------
+
+    async def _get_email_integration(
+        self, user_id: str
+    ) -> tuple[str | None, str | None]:
+        """Get the email provider and connection_id for a user.
+
+        Prefers Outlook, falls back to Gmail.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            Tuple of (provider, connection_id) or (None, None).
+        """
+        try:
+            result = (
+                self._db.table("user_integrations")
+                .select("integration_type, composio_connection_id")
+                .eq("user_id", user_id)
+                .eq("integration_type", "outlook")
+                .limit(1)
+                .execute()
+            )
+
+            if not result.data:
+                result = (
+                    self._db.table("user_integrations")
+                    .select("integration_type, composio_connection_id")
+                    .eq("user_id", user_id)
+                    .eq("integration_type", "gmail")
+                    .limit(1)
+                    .execute()
+                )
+
+            if result and result.data:
+                integration = result.data[0]
+                return (
+                    integration.get("integration_type"),
+                    integration.get("composio_connection_id"),
+                )
+
+            return None, None
+        except Exception:
+            return None, None
+
+    async def _fetch_sent_thread_ids(
+        self,
+        user_id: str,
+        since_hours: int = 24,
+    ) -> set[str]:
+        """Fetch thread IDs from the user's sent folder.
+
+        Makes a single Composio API call to list sent messages for the
+        time window, then extracts thread/conversation IDs into a set
+        for O(1) lookup during the main processing loop.
+
+        Args:
+            user_id: The user whose sent folder to check.
+            since_hours: How far back to look.
+
+        Returns:
+            Set of thread IDs found in the sent folder.
+        """
+        try:
+            provider, connection_id = await self._get_email_integration(user_id)
+            if not provider or not connection_id:
+                return set()
+
+            from src.integrations.oauth import get_oauth_client
+
+            oauth_client = get_oauth_client()
+            since_date = (datetime.now(UTC) - timedelta(hours=since_hours)).isoformat()
+
+            if provider == "outlook":
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
+                    params={
+                        "mail_folder_id": "sentitems",
+                        "$top": 200,
+                        "$orderby": "sentDateTime desc",
+                        "$filter": f"sentDateTime ge {since_date}",
+                        "$select": "conversationId",
+                    },
+                    user_id=user_id,
+                )
+                if response.get("successful") and response.get("data"):
+                    messages = response["data"].get("value", [])
+                    return {
+                        msg.get("conversationId")
+                        for msg in messages
+                        if msg.get("conversationId")
+                    }
+            else:
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="GMAIL_FETCH_EMAILS",
+                    params={
+                        "label": "SENT",
+                        "max_results": 200,
+                    },
+                    user_id=user_id,
+                )
+                if response.get("successful") and response.get("data"):
+                    messages = response["data"].get("emails", [])
+                    return {
+                        msg.get("thread_id")
+                        for msg in messages
+                        if msg.get("thread_id")
+                    }
+
+            return set()
+
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to fetch sent thread IDs for user %s: %s",
+                user_id,
+                e,
+            )
+            return set()
+
+    async def _user_already_replied(
+        self,
+        user_id: str,
+        thread_id: str,
+        sent_thread_ids: set[str],
+    ) -> bool:
+        """Check if the user already replied to this thread.
+
+        Two-tier check:
+        1. Fast: thread_id in pre-fetched sent folder thread IDs
+        2. Fallback: email_drafts has an approved/edited draft for this thread
+
+        Args:
+            user_id: The user's ID.
+            thread_id: The email thread/conversation ID.
+            sent_thread_ids: Pre-fetched set of thread IDs from sent folder.
+
+        Returns:
+            True if user already replied, False otherwise.
+        """
+        if not thread_id:
+            return False
+
+        # Tier 1: Check pre-fetched sent folder thread IDs
+        if thread_id in sent_thread_ids:
+            return True
+
+        # Tier 2: Check email_drafts for drafts the user sent via ARIA
+        try:
+            result = (
+                self._db.table("email_drafts")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .in_("user_action", ["approved", "edited"])
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return True
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: DB check for already-replied failed for thread %s: %s",
+                thread_id,
+                e,
+            )
+
+        return False
 
     async def _check_existing_draft(
         self,
