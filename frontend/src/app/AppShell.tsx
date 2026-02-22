@@ -21,6 +21,7 @@ import { useNavigationStore, type NavigationState } from '@/stores/navigationSto
 import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
 import { useWebSocketStatus } from '@/hooks/useWebSocketStatus';
+import { UrgentEmailNotification } from '@/components/notifications/UrgentEmailNotification';
 
 /**
  * Routes where the right IntelPanel should be hidden.
@@ -82,6 +83,9 @@ export function AppShell() {
         {/* Right: Intelligence Panel — conditional */}
         {showPanel && <IntelPanel />}
       </div>
+
+      {/* Urgent email notifications — top-right overlay */}
+      <UrgentEmailNotification />
 
       {/* Floating PiP avatar — portaled to document.body */}
       <CompactAvatar />
