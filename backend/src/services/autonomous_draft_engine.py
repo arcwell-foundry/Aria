@@ -33,6 +33,7 @@ from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
+from src.services.email_lead_intelligence import EmailLeadIntelligence
 from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ Do not include any text outside the JSON object."""
         self._client_writer = EmailClientWriter()
         self._learning_mode = get_learning_mode_service()
         self._activity_service = ActivityService()
+        self._lead_intelligence = EmailLeadIntelligence()
 
     # ------------------------------------------------------------------
     # Public API
@@ -451,6 +453,30 @@ Do not include any text outside the JSON object."""
                     sources_used=["fallback_minimal"],
                 )
 
+            # a2. Extract lead intelligence (non-blocking)
+            lead_updates: list[dict] = []
+            try:
+                thread_summary = ""
+                if context.thread_context and context.thread_context.summary:
+                    thread_summary = context.thread_context.summary
+                lead_updates = await self._lead_intelligence.process_email_for_leads(
+                    user_id=user_id,
+                    email={
+                        "sender_email": email.sender_email,
+                        "subject": getattr(email, "subject", email_data.get("subject", "")),
+                        "body": getattr(email, "body", email_data.get("body", "")),
+                    },
+                    thread_summary=thread_summary,
+                )
+                if lead_updates:
+                    logger.info(
+                        "ON_DEMAND_DRAFT: Lead intel: %d signals from %s",
+                        len(lead_updates),
+                        email.sender_email,
+                    )
+            except Exception as e:
+                logger.warning("ON_DEMAND_DRAFT: Lead intel failed (non-fatal): %s", e)
+
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
@@ -476,6 +502,7 @@ Do not include any text outside the JSON object."""
             # g. Generate ARIA notes
             aria_notes = await self._generate_aria_notes(
                 email, context, style_score, confidence,
+                lead_updates=lead_updates,
             )
 
             # h. Save draft with metadata
@@ -633,6 +660,32 @@ Do not include any text outside the JSON object."""
                     email.email_id,
                 )
 
+            # a2. Extract lead intelligence (non-blocking)
+            lead_updates: list[dict] = []
+            try:
+                thread_summary = ""
+                if context.thread_context and context.thread_context.summary:
+                    thread_summary = context.thread_context.summary
+                lead_updates = await self._lead_intelligence.process_email_for_leads(
+                    user_id=user_id,
+                    email={
+                        "sender_email": email.sender_email,
+                        "subject": email.subject,
+                        "body": getattr(email, "body", getattr(email, "snippet", "")),
+                    },
+                    thread_summary=thread_summary,
+                )
+                if lead_updates:
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: lead_intel | email_id=%s | signals=%d",
+                        email.email_id,
+                        len(lead_updates),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[EMAIL_PIPELINE] Lead intelligence extraction failed (non-fatal): %s", e,
+                )
+
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
@@ -664,7 +717,8 @@ Do not include any text outside the JSON object."""
 
             # g. Generate ARIA notes (add learning mode note if applicable)
             aria_notes = await self._generate_aria_notes(
-                email, context, style_score, confidence, is_learning_mode
+                email, context, style_score, confidence, is_learning_mode,
+                lead_updates=lead_updates,
             )
 
             # h. Save draft with all metadata
@@ -1185,6 +1239,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         style_score: float,
         confidence: float,
         is_learning_mode: bool = False,
+        lead_updates: list[dict] | None = None,
     ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
@@ -1264,6 +1319,25 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
             "HIGH" if confidence >= 0.75 else "MEDIUM" if confidence >= 0.5 else "LOW"
         )
         notes.append(f"Confidence: {confidence_label} ({confidence:.2f})")
+
+        # Lead intelligence signals
+        if lead_updates:
+            companies = set()
+            signal_summaries: list[str] = []
+            for update in lead_updates:
+                company = update.get("company", "unknown")
+                companies.add(company)
+                signal = update.get("signal", {})
+                category = signal.get("category", "")
+                detail = signal.get("detail", "")
+                if category and detail:
+                    signal_summaries.append(f"{company}: {detail}")
+
+            if signal_summaries:
+                notes.append(
+                    f"Lead intel ({len(signal_summaries)} signals): "
+                    + "; ".join(signal_summaries[:3])
+                )
 
         return " | ".join(notes)
 
