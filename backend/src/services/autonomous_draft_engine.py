@@ -473,7 +473,7 @@ Do not include any text outside the JSON object."""
             style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
             # f. Calculate confidence
-            confidence = self._calculate_confidence(context, style_score)
+            confidence = self._calculate_confidence(context, style_score, is_learning_mode)
 
             logger.info(
                 "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f",
@@ -793,51 +793,54 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         self,
         context: DraftContext,
         style_score: float,
+        is_learning_mode: bool = False,
     ) -> float:
         """Calculate confidence level (0.0-1.0).
 
-        Confidence is based on:
-        - Context richness (number of sources used)
-        - Thread history depth
-        - Recipient research availability
-        - Relationship history depth
+        Confidence varies per-draft based on:
+        - Context richness (continuous: available context sections / 7)
+        - Known contact (has per-recipient writing profile)
+        - Thread depth (continuous: message count)
+        - Learning mode penalty
         - Style match score
         """
-        score = 0.5  # Base confidence
+        base = 0.5
 
-        # Context richness
-        num_sources = len(context.sources_used)
-        if num_sources >= 5:
-            score += 0.15
-        elif num_sources >= 3:
-            score += 0.10
-        elif num_sources >= 1:
-            score += 0.05
-
-        # Thread history
+        # Context richness — continuous scale based on 7 possible context sections
+        available_count = 0
         if context.thread_context and context.thread_context.message_count > 0:
-            score += 0.10
-            if context.thread_context.message_count >= 3:
-                score += 0.05
-
-        # Recipient research
+            available_count += 1
         if context.recipient_research:
-            if context.recipient_research.bio:
-                score += 0.05
-            if context.recipient_research.company_description:
-                score += 0.05
+            available_count += 1
+        if context.relationship_history and context.relationship_history.total_emails > 0:
+            available_count += 1
+        if context.calendar_context and context.calendar_context.connected:
+            available_count += 1
+        if context.crm_context and context.crm_context.connected:
+            available_count += 1
+        if context.corporate_memory and context.corporate_memory.facts:
+            available_count += 1
+        if context.recipient_style and context.recipient_style.exists:
+            available_count += 1
 
-        # Relationship history
-        if context.relationship_history:
-            if context.relationship_history.total_emails >= 5:
-                score += 0.10
-            elif context.relationship_history.total_emails >= 2:
-                score += 0.05
+        context_bonus = available_count / 7.0 * 0.3  # 0.0–0.3
+
+        # Known contact bonus (has per-recipient writing profile)
+        known_contact_bonus = 0.1 if (context.recipient_style and context.recipient_style.exists) else 0.0
+
+        # Thread depth bonus — continuous, capped at 0.1
+        thread_bonus = 0.0
+        if context.thread_context and context.thread_context.message_count > 0:
+            thread_bonus = min(context.thread_context.message_count * 0.02, 0.1)
+
+        # Learning mode penalty (first week = less confident)
+        learning_penalty = -0.1 if is_learning_mode else 0.0
 
         # Style match contribution
-        score += 0.15 * style_score
+        style_bonus = 0.1 * style_score
 
-        return max(0.0, min(1.0, score))
+        confidence = base + context_bonus + known_contact_bonus + thread_bonus + learning_penalty + style_bonus
+        return max(0.0, min(1.0, confidence))
 
     # ------------------------------------------------------------------
     # ARIA Notes Generation

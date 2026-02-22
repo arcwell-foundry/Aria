@@ -939,12 +939,113 @@ class DigitalTwin:
 
         return "\n".join(lines)
 
+    async def _score_style_match_from_db(
+        self, user_id: str, generated_text: str
+    ) -> float | None:
+        """Score style match using DB-backed profile when Graphiti is unavailable.
+
+        Queries digital_twin_profiles for stored style data and compares
+        the generated text against it using TextStyleAnalyzer.
+
+        Args:
+            user_id: The user ID.
+            generated_text: The text to score.
+
+        Returns:
+            Similarity score from 0.0 to 1.0, or None if no DB data exists.
+        """
+        from src.db.supabase import SupabaseClient
+
+        try:
+            db = SupabaseClient.get_client()
+            result = (
+                db.table("digital_twin_profiles")
+                .select("tone, writing_style, vocabulary_patterns, formality_level")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if not result or not result.data:
+                return None
+
+            row = result.data
+            scores: list[float] = []
+
+            # Compare formality against stored formality_level
+            formality_map = {
+                "casual": 0.2,
+                "informal": 0.3,
+                "business_casual": 0.45,
+                "business": 0.6,
+                "formal": 0.8,
+                "very_formal": 0.95,
+            }
+            stored_formality = row.get("formality_level", "")
+            if stored_formality:
+                target_formality = formality_map.get(stored_formality, 0.5)
+                gen_formality = self._analyzer.extract_formality_score(generated_text)
+                formality_diff = abs(gen_formality - target_formality)
+                scores.append(max(0.0, 1.0 - formality_diff * 1.5))
+
+            # Compare vocabulary level
+            vocab_map = {
+                "simple": "simple",
+                "moderate": "moderate",
+                "advanced": "advanced",
+                "technical": "advanced",
+            }
+            stored_vocab = row.get("vocabulary_patterns", "")
+            if stored_vocab:
+                target_vocab = vocab_map.get(stored_vocab, "moderate")
+                gen_vocab = self._analyzer.extract_vocabulary_level(generated_text)
+                scores.append(1.0 if gen_vocab == target_vocab else 0.4)
+
+            # Compare tone (map to formality-adjacent metric)
+            tone_formality = {
+                "casual": 0.2,
+                "friendly": 0.35,
+                "balanced": 0.5,
+                "professional": 0.65,
+                "authoritative": 0.8,
+                "formal": 0.85,
+            }
+            stored_tone = row.get("tone", "")
+            if stored_tone and stored_tone in tone_formality:
+                target = tone_formality[stored_tone]
+                gen_formality = self._analyzer.extract_formality_score(generated_text)
+                tone_diff = abs(gen_formality - target)
+                scores.append(max(0.0, 1.0 - tone_diff * 1.5))
+
+            # Sentence length heuristic from writing_style description
+            writing_style = row.get("writing_style", "")
+            if writing_style:
+                gen_length = self._analyzer.extract_sentence_length(generated_text)
+                # Shorter style descriptions suggest concise writing
+                if "concise" in writing_style.lower() or "brief" in writing_style.lower():
+                    scores.append(max(0.0, 1.0 - max(0, gen_length - 12) * 0.05))
+                elif "detailed" in writing_style.lower() or "thorough" in writing_style.lower():
+                    scores.append(max(0.0, 1.0 - max(0, 15 - gen_length) * 0.05))
+
+            if not scores:
+                return None
+
+            return sum(scores) / len(scores)
+
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] DB fallback for style scoring failed for user %s: %s",
+                user_id,
+                e,
+            )
+            return None
+
     async def score_style_match(self, user_id: str, generated_text: str) -> float:
         """Score how well generated text matches the user's style.
 
         Compares the features of generated text against the user's
         fingerprint to produce a similarity score.
-        Falls back gracefully when Graphiti is unavailable.
+        Falls back to DB-based comparison when Graphiti is unavailable.
 
         Args:
             user_id: The user ID.
@@ -958,14 +1059,22 @@ class DigitalTwin:
         except Exception as e:
             logger.warning(
                 "[EMAIL_PIPELINE] Graphiti unavailable for style scoring, "
-                "returning default score for user %s: %s",
+                "trying DB fallback for user %s: %s",
                 user_id,
                 e,
             )
-            return 0.5  # Neutral default when scoring is unavailable
+            # Try DB fallback before returning default
+            db_score = await self._score_style_match_from_db(user_id, generated_text)
+            if db_score is not None:
+                return db_score
+            return 0.5
 
         if not fingerprint:
-            return 0.5  # Neutral default rather than 0.0 when no data exists
+            # No Graphiti data — try DB fallback before returning default
+            db_score = await self._score_style_match_from_db(user_id, generated_text)
+            if db_score is not None:
+                return db_score
+            return 0.5
 
         scores: list[float] = []
 

@@ -458,21 +458,25 @@ async def test_score_style_match_returns_score() -> None:
 
 
 @pytest.mark.asyncio
-async def test_score_style_match_returns_zero_when_no_fingerprint() -> None:
-    """Test score_style_match returns 0 when no fingerprint exists."""
+async def test_score_style_match_returns_default_when_no_data() -> None:
+    """Test score_style_match returns 0.5 default when no fingerprint or DB data exists."""
     from src.memory.digital_twin import DigitalTwin
 
     twin = DigitalTwin()
 
-    with patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get:
+    with (
+        patch.object(twin, "get_fingerprint", new_callable=AsyncMock) as mock_get,
+        patch.object(twin, "_score_style_match_from_db", new_callable=AsyncMock) as mock_db,
+    ):
         mock_get.return_value = None
+        mock_db.return_value = None
 
         score = await twin.score_style_match(
             user_id="user-123",
             generated_text="Some text here.",
         )
 
-        assert score == 0.0
+        assert score == 0.5
 
 
 @pytest.mark.asyncio
