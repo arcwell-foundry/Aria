@@ -523,6 +523,132 @@ async def trigger_email_bootstrap(current_user: CurrentUser) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Relationship Health
+# ---------------------------------------------------------------------------
+
+
+class ContactHealthInfo(BaseModel):
+    """Health metrics for a single contact relationship."""
+
+    contact_email: str = Field(..., description="Contact email address")
+    contact_name: str = Field("", description="Contact display name")
+    total_emails: int = Field(0, description="Total emails from this contact")
+    weekly_frequency: float = Field(0.0, description="Average emails per week")
+    trend: str = Field("stable", description="Trend: warming, stable, cooling, new")
+    trend_detail: str = Field("", description="Human-readable trend explanation")
+    days_since_last: int = Field(0, description="Days since last email")
+    health_score: int = Field(50, description="Health score 0-100")
+    needs_reply_count: int = Field(0, description="Emails needing reply")
+
+
+class RelationshipHealthResponse(BaseModel):
+    """Response from relationship health endpoint."""
+
+    contacts: list[ContactHealthInfo] = Field(
+        default_factory=list,
+        description="List of contact health metrics",
+    )
+    total_contacts: int = Field(..., description="Total number of contacts")
+    cooling_count: int = Field(0, description="Number of cooling relationships")
+    warming_count: int = Field(0, description="Number of warming relationships")
+
+
+@router.get("/relationship-health", response_model=RelationshipHealthResponse)
+async def get_relationship_health(
+    current_user: CurrentUser,
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Maximum contacts to return (1-200)",
+    ),
+    trend_filter: str | None = Query(
+        None,
+        description="Filter by trend: warming, stable, cooling, new",
+    ),
+) -> dict[str, Any]:
+    """Get relationship health metrics for all email contacts.
+
+    Analyzes email_scan_log patterns to detect relationship trends:
+    - Warming: Communication increased recently
+    - Stable: Consistent communication
+    - Cooling: No recent contact (needs attention)
+    - New: Just started communicating
+
+    Results are sorted by health score (lowest first) to highlight
+    relationships that need attention.
+
+    Args:
+        current_user: The authenticated user.
+        limit: Maximum number of contacts to return.
+        trend_filter: Optional filter by trend type.
+
+    Returns:
+        RelationshipHealthResponse with contact health metrics.
+
+    Raises:
+        HTTPException: If analysis fails.
+    """
+    user_id = current_user.id
+
+    try:
+        from src.services.email_relationship_health import get_email_relationship_health
+
+        service = get_email_relationship_health()
+        all_health = await service.get_all_contact_health(user_id, limit=limit)
+
+        # Apply trend filter if specified
+        if trend_filter:
+            all_health = [h for h in all_health if h.trend == trend_filter.lower()]
+
+        # Convert to response format
+        contacts = [
+            ContactHealthInfo(
+                contact_email=h.contact_email,
+                contact_name=h.contact_name,
+                total_emails=h.total_emails,
+                weekly_frequency=h.weekly_frequency,
+                trend=h.trend,
+                trend_detail=h.trend_detail,
+                days_since_last=h.days_since_last,
+                health_score=h.health_score,
+                needs_reply_count=h.needs_reply_count,
+            )
+            for h in all_health
+        ]
+
+        cooling_count = sum(1 for h in all_health if h.trend == "cooling")
+        warming_count = sum(1 for h in all_health if h.trend == "warming")
+
+        logger.info(
+            "EMAIL_API: Relationship health for user %s — %d contacts, %d cooling, %d warming",
+            user_id,
+            len(contacts),
+            cooling_count,
+            warming_count,
+        )
+
+        return {
+            "contacts": contacts,
+            "total_contacts": len(contacts),
+            "cooling_count": cooling_count,
+            "warming_count": warming_count,
+        }
+
+    except Exception as e:
+        logger.error(
+            "EMAIL_API: Failed to get relationship health for user %s: %s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze relationship health. Please try again.",
+        ) from e
+
+
+# ---------------------------------------------------------------------------
 # Router Registration Helper
 # ---------------------------------------------------------------------------
 

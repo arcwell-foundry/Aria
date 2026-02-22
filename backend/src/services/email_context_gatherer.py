@@ -113,6 +113,20 @@ class CorporateMemoryContext(BaseModel):
     fact_ids: list[str] = Field(default_factory=list)
 
 
+class RelationshipHealthContext(BaseModel):
+    """Relationship health metrics from email patterns."""
+
+    contact_email: str = ""
+    contact_name: str = ""
+    total_emails: int = 0
+    weekly_frequency: float = 0.0
+    trend: str = "stable"  # warming, stable, cooling, new
+    trend_detail: str = ""
+    days_since_last: int = 0
+    health_score: int = 50
+    aria_note: str | None = None  # Human-readable context for drafts
+
+
 class DraftContext(BaseModel):
     """Complete context package for drafting an email reply."""
 
@@ -131,6 +145,7 @@ class DraftContext(BaseModel):
     recipient_research: RecipientResearch | None = None
     recipient_style: RecipientWritingStyle | None = None
     relationship_history: RelationshipHistory | None = None
+    relationship_health: RelationshipHealthContext | None = None
     corporate_memory: CorporateMemoryContext | None = None
     calendar_context: CalendarContext | None = None
     crm_context: CRMContext | None = None
@@ -159,6 +174,7 @@ class DraftContext(BaseModel):
             "recipient_research": self.recipient_research.model_dump() if self.recipient_research else None,
             "recipient_style": self.recipient_style.model_dump() if self.recipient_style else None,
             "relationship_history": self.relationship_history.model_dump() if self.relationship_history else None,
+            "relationship_health": self.relationship_health.model_dump() if self.relationship_health else None,
             "corporate_memory": self.corporate_memory.model_dump() if self.corporate_memory else None,
             "calendar_context": self.calendar_context.model_dump() if self.calendar_context else None,
             "crm_context": self.crm_context.model_dump() if self.crm_context else None,
@@ -311,6 +327,13 @@ class EmailContextGatherer:
         ):
             context.sources_used.append("memory_semantic")
 
+        # 4c. Get relationship health from email patterns
+        context.relationship_health = await self._get_relationship_health(
+            user_id, sender_email
+        )
+        if context.relationship_health and context.relationship_health.trend != "new":
+            context.sources_used.append("relationship_health")
+
         # 5. Get corporate memory (search by topic AND sender's company domain)
         context.corporate_memory = await self._get_corporate_memory(
             user_id, subject, sender_email
@@ -346,6 +369,7 @@ class EmailContextGatherer:
                 context.relationship_history.memory_facts
                 or context.relationship_history.total_emails > 0
             )),
+            ("relationship_health", context.relationship_health and context.relationship_health.trend != "new"),
             ("calendar_context", context.calendar_context and context.calendar_context.connected),
             ("crm_context", context.crm_context and (
                 context.crm_context.connected or context.crm_context.recent_activities
@@ -359,7 +383,7 @@ class EmailContextGatherer:
                 sources_empty.append(source_name)
 
         logger.info(
-            "CONTEXT_COMPLETENESS: %d/7 sources populated: %s. Empty: %s",
+            "CONTEXT_COMPLETENESS: %d/8 sources populated: %s. Empty: %s",
             len(sources_populated),
             sources_populated,
             sources_empty,
@@ -367,7 +391,7 @@ class EmailContextGatherer:
 
         logger.info(
             "[EMAIL_PIPELINE] Stage: context_complete | email_id=%s | saved=%s | "
-            "completeness=%d/7 | sources=%s",
+            "completeness=%d/8 | sources=%s",
             email_id,
             saved,
             len(sources_populated),
@@ -1200,6 +1224,78 @@ Summary:"""
             )
 
         return history
+
+    # ------------------------------------------------------------------
+    # Relationship Health (from email patterns)
+    # ------------------------------------------------------------------
+
+    async def _get_relationship_health(
+        self,
+        user_id: str,
+        sender_email: str,
+    ) -> RelationshipHealthContext | None:
+        """Get relationship health metrics from email scan patterns.
+
+        Analyzes email frequency, recency, and trends to determine
+        relationship health. Generates an ARIA note for cooling relationships.
+
+        Args:
+            user_id: The user's ID.
+            sender_email: The contact's email.
+
+        Returns:
+            RelationshipHealthContext with trend and health score.
+        """
+        try:
+            from src.services.email_relationship_health import (
+                EmailRelationshipHealth,
+                get_email_relationship_health,
+            )
+
+            service = get_email_relationship_health()
+            health = await service.analyze_contact_health(user_id, sender_email)
+
+            # Get ARIA note for cooling relationships
+            aria_note = await service.get_aria_note(user_id, sender_email)
+
+            context = RelationshipHealthContext(
+                contact_email=health.contact_email,
+                contact_name=health.contact_name,
+                total_emails=health.total_emails,
+                weekly_frequency=health.weekly_frequency,
+                trend=health.trend,
+                trend_detail=health.trend_detail,
+                days_since_last=health.days_since_last,
+                health_score=health.health_score,
+                aria_note=aria_note,
+            )
+
+            if health.trend == "cooling":
+                logger.info(
+                    "CONTEXT_GATHERER: Relationship with %s is COOLING — "
+                    "%d days since last contact, score=%d",
+                    sender_email,
+                    health.days_since_last,
+                    health.health_score,
+                )
+            elif health.trend == "warming":
+                logger.info(
+                    "CONTEXT_GATHERER: Relationship with %s is WARMING — "
+                    "score=%d, trend_detail=%s",
+                    sender_email,
+                    health.health_score,
+                    health.trend_detail,
+                )
+
+            return context
+
+        except Exception as e:
+            logger.warning(
+                "CONTEXT_GATHERER: Relationship health analysis failed for %s: %s",
+                sender_email,
+                str(e),
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Corporate Memory
