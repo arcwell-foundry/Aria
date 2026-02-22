@@ -524,6 +524,10 @@ Do not include any text outside the JSON object."""
                 processing_run_id=run_id,
             )
 
+            # h2. Update draft_context.draft_id FK now that draft exists
+            if context.id:
+                await self._context_gatherer.update_draft_id(context.id, draft_id)
+
             logger.info(
                 "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s",
                 draft_id,

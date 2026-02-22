@@ -121,6 +121,9 @@ class DraftContext(BaseModel):
     sender_email: str
     subject: str
 
+    # FK to email_drafts (set after draft is saved)
+    draft_id: str | None = None
+
     # All context sections
     thread_context: ThreadContext | None = None
     recipient_research: RecipientResearch | None = None
@@ -144,6 +147,7 @@ class DraftContext(BaseModel):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "draft_id": self.draft_id,
             "email_id": self.email_id,
             "thread_id": self.thread_id,
             "sender_email": self.sender_email,
@@ -1376,6 +1380,41 @@ Summary:"""
             )
             return False
 
+    async def update_draft_id(self, context_id: str, draft_id: str) -> bool:
+        """Update the draft_id FK in draft_context after draft is saved.
+
+        This is called by AutonomousDraftEngine after the draft is created,
+        since the draft doesn't exist when context is initially gathered.
+
+        Args:
+            context_id: The ID of the draft_context row to update.
+            draft_id: The ID of the newly created email_draft.
+
+        Returns:
+            True if update succeeded, False otherwise.
+        """
+        try:
+            self._db.table("draft_context").update(
+                {"draft_id": draft_id}
+            ).eq("id", context_id).execute()
+
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: context_draft_id_set | context_id=%s | draft_id=%s",
+                context_id,
+                draft_id,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "[EMAIL_PIPELINE] Stage: context_draft_id_update_failed | context_id=%s | draft_id=%s | error=%s",
+                context_id,
+                draft_id,
+                str(e),
+                exc_info=True,
+            )
+            return False
+
     async def get_existing_context(
         self,
         user_id: str,
@@ -1426,6 +1465,7 @@ Summary:"""
         context = DraftContext(
             id=row.get("id"),
             user_id=row.get("user_id"),
+            draft_id=row.get("draft_id"),
             email_id=row.get("email_id"),
             thread_id=row.get("thread_id"),
             sender_email=row.get("sender_email"),
