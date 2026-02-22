@@ -16,6 +16,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -400,6 +401,170 @@ Do not include any text outside the JSON object."""
         return result
 
     # ------------------------------------------------------------------
+    # On-Demand Draft (from Chat)
+    # ------------------------------------------------------------------
+
+    async def draft_reply_on_demand(
+        self,
+        user_id: str,
+        email_data: dict[str, Any],
+        special_instructions: str | None = None,
+    ) -> dict[str, Any]:
+        """Draft a reply to a specific email on demand (triggered from chat).
+
+        Uses the full drafting pipeline: context gathering, style matching,
+        LLM generation, confidence scoring, and email client save.
+
+        Args:
+            user_id: The user's ID.
+            email_data: Dict with email_id, thread_id, sender_email,
+                        sender_name, subject, body, snippet, urgency.
+            special_instructions: Optional user instructions for the draft.
+
+        Returns:
+            Dict with draft details for chat display.
+        """
+        email = SimpleNamespace(**email_data)
+        user_name = await self._get_user_name(user_id)
+
+        try:
+            # a. Gather context (with fallback on error)
+            try:
+                context = await self._context_gatherer.gather_context(
+                    user_id=user_id,
+                    email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    sender_email=email.sender_email,
+                    sender_name=email.sender_name,
+                    subject=email.subject,
+                )
+            except Exception as e:
+                logger.error(
+                    "ON_DEMAND_DRAFT: Context gathering failed: %s", e, exc_info=True,
+                )
+                context = DraftContext(
+                    user_id=user_id,
+                    email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    sender_email=email.sender_email,
+                    subject=email.subject or "(no subject)",
+                    sources_used=["fallback_minimal"],
+                )
+
+            # b. Get style guidelines
+            style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
+
+            # c. Get personality calibration
+            calibration = await self._personality_calibrator.get_calibration(user_id)
+            tone_guidance = calibration.tone_guidance if calibration else ""
+
+            # d. Generate draft via LLM
+            draft_content = await self._generate_reply_draft(
+                user_id, user_name, email, context,
+                style_guidelines, tone_guidance,
+                special_instructions=special_instructions,
+            )
+
+            # e. Score style match
+            style_score = await self._digital_twin.score_style_match(
+                user_id, draft_content.body,
+            )
+
+            # f. Calculate confidence
+            confidence = self._calculate_confidence(context)
+
+            # g. Generate ARIA notes
+            aria_notes = await self._generate_aria_notes(
+                email, context, style_score, confidence,
+            )
+
+            # h. Save draft with metadata
+            draft_id = await self._save_draft_with_metadata(
+                user_id=user_id,
+                recipient_email=email.sender_email,
+                recipient_name=email.sender_name,
+                subject=draft_content.subject,
+                body=draft_content.body,
+                original_email_id=email.email_id,
+                thread_id=email.thread_id,
+                context_id=context.id,
+                style_match_score=style_score,
+                confidence_level=confidence,
+                aria_notes=aria_notes,
+                urgency=email.urgency,
+            )
+
+            # Update draft_context FK
+            if context.id:
+                await self._context_gatherer.update_draft_id(context.id, draft_id)
+
+            # i. Save to email client (non-fatal)
+            saved_to_client = False
+            try:
+                client_result = await self._client_writer.save_draft_to_client(
+                    user_id=user_id,
+                    draft_id=draft_id,
+                )
+                saved_to_client = bool(
+                    client_result.get("success") and not client_result.get("already_saved")
+                )
+            except Exception as e:
+                logger.warning("ON_DEMAND_DRAFT: Client save failed (non-fatal): %s", e)
+
+            # j. Log activity
+            try:
+                await self._activity_service.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="email_drafted",
+                    title=f"Drafted reply to {email.sender_name or email.sender_email}",
+                    description=f"Re: {draft_content.subject} (on-demand via chat)",
+                    reasoning=aria_notes,
+                    confidence=confidence,
+                    related_entity_type="email_draft",
+                    related_entity_id=draft_id,
+                    metadata={
+                        "recipient_email": email.sender_email,
+                        "style_match_score": style_score,
+                        "confidence_level": confidence,
+                        "original_email_id": email.email_id,
+                        "thread_id": email.thread_id,
+                        "trigger": "chat_request",
+                    },
+                )
+            except Exception as e:
+                logger.warning("ON_DEMAND_DRAFT: Activity log failed: %s", e)
+
+            sender_label = email.sender_name or email.sender_email
+            client_msg = (
+                "saved it to your drafts folder"
+                if saved_to_client
+                else "saved it in ARIA"
+            )
+            return {
+                "draft_id": draft_id,
+                "to": email.sender_email,
+                "to_name": email.sender_name,
+                "subject": draft_content.subject,
+                "body": draft_content.body,
+                "aria_notes": aria_notes,
+                "confidence": confidence,
+                "style_match": style_score,
+                "saved_to_client": saved_to_client,
+                "message": (
+                    f"I've drafted a reply to {sender_label}'s email "
+                    f'about "{email.subject}" and {client_msg}.'
+                ),
+            }
+
+        except Exception as e:
+            logger.error("ON_DEMAND_DRAFT: Failed: %s", e, exc_info=True)
+            return {
+                "error": f"Failed to generate draft: {e}",
+                "email_subject": email_data.get("subject", ""),
+            }
+
+    # ------------------------------------------------------------------
     # Single Email Processing
     # ------------------------------------------------------------------
 
@@ -667,6 +832,7 @@ Do not include any text outside the JSON object."""
         context: DraftContext,
         style_guidelines: str,
         tone_guidance: str,
+        special_instructions: str | None = None,
     ) -> ReplyDraftContent:
         """Generate reply draft via LLM with full context.
 
@@ -677,12 +843,14 @@ Do not include any text outside the JSON object."""
             context: Full context from EmailContextGatherer.
             style_guidelines: Style guidelines from DigitalTwin.
             tone_guidance: Tone guidance from PersonalityCalibrator.
+            special_instructions: Optional user instructions for the draft.
 
         Returns:
             ReplyDraftContent with subject and body.
         """
         prompt = self._build_reply_prompt(
-            user_name, email, context, style_guidelines, tone_guidance
+            user_name, email, context, style_guidelines, tone_guidance,
+            special_instructions=special_instructions,
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -735,6 +903,7 @@ Do not include any text outside the JSON object."""
         context: DraftContext,
         style_guidelines: str,
         tone_guidance: str,
+        special_instructions: str | None = None,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
@@ -918,6 +1087,12 @@ Recent messages:
             sections.append(
                 "## Relevant company knowledge\n"
                 "No corporate memory for this company."
+            )
+
+        # Special instructions from user (on-demand drafts)
+        if special_instructions:
+            sections.append(
+                f"## Special Instructions from User\n{special_instructions}"
             )
 
         # Strategic guardrails

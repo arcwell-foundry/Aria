@@ -73,6 +73,36 @@ EMAIL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["message_id"],
         },
     },
+    {
+        "name": "draft_email_reply",
+        "description": (
+            "Draft a reply to a specific email. Use when the user asks to "
+            "draft, write, or reply to an email. Searches for the email, "
+            "gathers full context (thread history, recipient research, "
+            "writing style, calendar, CRM), generates a style-matched draft, "
+            "and saves it to their email drafts folder."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_identifier": {
+                    "type": "string",
+                    "description": (
+                        "The email to reply to — a sender name, subject "
+                        "keyword, or email ID from a previous search"
+                    ),
+                },
+                "special_instructions": {
+                    "type": "string",
+                    "description": (
+                        "Optional user instructions for the draft, e.g. "
+                        "'mention the Q3 timeline' or 'keep it brief'"
+                    ),
+                },
+            },
+            "required": ["email_identifier"],
+        },
+    },
 ]
 
 
@@ -139,6 +169,10 @@ async def execute_email_tool(
             )
         elif tool_name == "read_email_detail":
             return await _read_email_detail(
+                oauth_client, connection_id, provider, user_id, params
+            )
+        elif tool_name == "draft_email_reply":
+            return await _handle_draft_email_reply(
                 oauth_client, connection_id, provider, user_id, params
             )
         else:
@@ -299,6 +333,7 @@ def _normalize_outlook_messages(messages: list[dict[str, Any]]) -> list[dict[str
             "preview": msg.get("bodyPreview", ""),
             "is_read": msg.get("isRead", False),
             "has_attachments": msg.get("hasAttachments", False),
+            "thread_id": msg.get("conversationId", ""),
         })
     return normalized
 
@@ -315,6 +350,7 @@ def _normalize_gmail_messages(messages: list[dict[str, Any]]) -> list[dict[str, 
             "preview": msg.get("snippet", msg.get("preview", "")),
             "is_read": "UNREAD" not in msg.get("labelIds", []),
             "has_attachments": bool(msg.get("attachments")),
+            "thread_id": msg.get("threadId", msg.get("thread_id", "")),
         })
     return normalized
 
@@ -342,4 +378,96 @@ def _extract_outlook_recipients(msg: dict[str, Any], field: str) -> list[str]:
             result.append(f"{name} <{email}>" if name else email)
         else:
             result.append(str(r))
+    return result
+
+
+def _parse_sender_email(from_field: str) -> str:
+    """Extract bare email address from 'Name <email>' format."""
+    if "<" in from_field and ">" in from_field:
+        return from_field.split("<")[1].split(">")[0].strip()
+    return from_field.strip()
+
+
+def _parse_sender_name(from_field: str) -> str:
+    """Extract display name from 'Name <email>' format."""
+    if "<" in from_field:
+        return from_field.split("<")[0].strip()
+    return ""
+
+
+async def _handle_draft_email_reply(
+    oauth_client: Any,
+    connection_id: str,
+    provider: str,
+    user_id: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle on-demand email draft reply triggered from chat.
+
+    Searches for the matching email, then runs the full drafting pipeline
+    (context gathering, style matching, LLM generation, confidence scoring)
+    and saves the draft to the user's email client.
+
+    Args:
+        oauth_client: Composio OAuth client.
+        connection_id: User's Composio connection ID.
+        provider: Email provider (outlook/gmail).
+        user_id: The user's ID.
+        params: Tool input with email_identifier and optional special_instructions.
+
+    Returns:
+        Dict with draft details or error.
+    """
+    email_identifier = params.get("email_identifier", "")
+    special_instructions = params.get("special_instructions")
+
+    if not email_identifier:
+        return {"error": "email_identifier is required"}
+
+    # 1. Search for the matching email
+    search_result = await _search_emails(
+        oauth_client, connection_id, provider, user_id,
+        {"query": email_identifier, "max_results": 5},
+    )
+
+    emails = search_result.get("emails", [])
+    if not emails:
+        return {"error": f"Couldn't find an email matching '{email_identifier}'"}
+
+    target = emails[0]  # Best match
+
+    # 2. Get full email detail for the body
+    detail_result = await _read_email_detail(
+        oauth_client, connection_id, provider, user_id,
+        {"message_id": target["id"]},
+    )
+
+    email_detail = detail_result.get("email", {})
+
+    # 3. Build email data dict for the draft engine
+    from_field = email_detail.get("from", target.get("from", ""))
+    sender_email = _parse_sender_email(from_field)
+    sender_name = _parse_sender_name(from_field)
+
+    email_data = {
+        "email_id": email_detail.get("id", target["id"]),
+        "thread_id": target.get("thread_id", ""),
+        "sender_email": sender_email,
+        "sender_name": sender_name or None,
+        "subject": email_detail.get("subject", target.get("subject", "")),
+        "body": email_detail.get("body", target.get("preview", "")),
+        "snippet": target.get("preview", ""),
+        "urgency": "NORMAL",
+    }
+
+    # 4. Run the full drafting pipeline
+    from src.services.autonomous_draft_engine import AutonomousDraftEngine
+
+    engine = AutonomousDraftEngine()
+    result = await engine.draft_reply_on_demand(
+        user_id=user_id,
+        email_data=email_data,
+        special_instructions=special_instructions,
+    )
+
     return result

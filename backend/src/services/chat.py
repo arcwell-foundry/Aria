@@ -1682,7 +1682,12 @@ class ChatService:
                 f"\n\n## Email Access\n"
                 f"You have access to the user's {provider_name} email via tools. "
                 f"When they ask about emails, inbox, messages, or anything email-related, "
-                f"use the email tools to fetch real data. Do NOT say you can't access emails."
+                f"use the email tools to fetch real data. Do NOT say you can't access emails.\n"
+                f"You can also DRAFT replies to emails. When the user asks to draft, write, "
+                f"or reply to an email, use the draft_email_reply tool. It will find the "
+                f"email, gather full context, generate a style-matched draft, and save it "
+                f"to their {provider_name} drafts folder. Include any special instructions "
+                f"the user mentions (e.g. 'keep it brief', 'mention the Q3 timeline')."
             )
 
             response_text = await self._run_tool_loop(
