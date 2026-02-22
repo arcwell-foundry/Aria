@@ -162,8 +162,7 @@ class TestCheckExistingDraft:
         # Every chained method returns the same mock, ending with .execute()
         mock.select.return_value = mock
         mock.eq.return_value = mock
-        mock.in_.return_value = mock
-        mock.is_.return_value = mock
+        mock.neq.return_value = mock
         mock.or_.return_value = mock
         mock.limit.return_value = mock
         mock.execute.return_value = execute_result

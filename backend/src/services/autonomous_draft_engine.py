@@ -1274,7 +1274,8 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         """Check if a non-rejected draft already exists for this thread or emails.
 
         Checks across ALL processing runs (not just the current one) by matching
-        on thread_id OR original_email_id.  Uses limit(1) instead of
+        on thread_id OR original_email_id.  Finds any draft regardless of status,
+        excluding only explicitly rejected drafts.  Uses limit(1) instead of
         maybe_single() so that pre-existing duplicates don't throw and
         snowball into more duplicates.
 
@@ -1299,8 +1300,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 self._db.table("email_drafts")
                 .select("id")
                 .eq("user_id", user_id)
-                .in_("status", ["draft", "saved_to_client"])
-                .is_("user_action", "null")
+                .neq("user_action", "rejected")
                 .or_(or_filter)
                 .limit(1)
                 .execute()
