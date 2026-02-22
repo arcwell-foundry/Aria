@@ -782,6 +782,35 @@ Do not include any text outside the JSON object."""
                     email.email_id,
                 )
 
+            # a1b. Thread-based already-replied check (Tier 3)
+            # Catches manual replies the sent-folder query missed
+            if (
+                context.thread_context
+                and context.thread_context.messages
+                and self._user_replied_in_thread(context.thread_context.messages)
+            ):
+                logger.info(
+                    "SKIP_ALREADY_REPLIED_VIA_THREAD: email_id=%s thread_id=%s subject=%s",
+                    email.email_id,
+                    email.thread_id,
+                    email.subject,
+                )
+                return DraftResult(
+                    draft_id="",
+                    recipient_email=email.sender_email,
+                    recipient_name=email.sender_name,
+                    subject=email.subject or "",
+                    body="",
+                    style_match_score=0.0,
+                    confidence_level=0.0,
+                    aria_notes="Skipped: user already replied in thread",
+                    original_email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    context_id=context.id,
+                    success=False,
+                    error="User already replied in thread",
+                )
+
             # a2. Extract lead intelligence (non-blocking)
             lead_updates: list[dict] = []
             try:
@@ -1820,18 +1849,21 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
         user_id: str,
         since_hours: int = 24,
     ) -> set[str]:
-        """Fetch thread IDs from the user's sent folder.
+        """Fetch thread IDs from the user's sent messages.
 
-        Makes a single Composio API call to list sent messages for the
-        time window, then extracts thread/conversation IDs into a set
+        Makes a single Composio API call to list messages sent by the user
+        in the time window, then extracts thread/conversation IDs into a set
         for O(1) lookup during the main processing loop.
 
+        For Outlook, uses OUTLOOK_LIST_MESSAGES with a from-address filter
+        (OUTLOOK_LIST_MAIL_FOLDER_MESSAGES does not exist in Composio).
+
         Args:
-            user_id: The user whose sent folder to check.
+            user_id: The user whose sent messages to check.
             since_hours: How far back to look.
 
         Returns:
-            Set of thread IDs found in the sent folder.
+            Set of thread IDs found in sent messages.
         """
         try:
             provider, connection_id = await self._get_email_integration(user_id)
@@ -1844,25 +1876,52 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
             since_date = (datetime.now(UTC) - timedelta(hours=since_hours)).isoformat()
 
             if provider == "outlook":
+                # Get user's email address for the from-address filter
+                user_email = await self._get_user_email_address(user_id, provider)
+                if not user_email:
+                    logger.warning(
+                        "DRAFT_ENGINE: No user email found for sent-folder query, "
+                        "Tier 1 already-replied check will be skipped for user %s",
+                        user_id,
+                    )
+                    return set()
+
+                # Use OUTLOOK_LIST_MESSAGES with from-address filter
+                # (replaces non-existent OUTLOOK_LIST_MAIL_FOLDER_MESSAGES)
+                safe_email = user_email.replace("'", "''")
                 response = oauth_client.execute_action_sync(
                     connection_id=connection_id,
-                    action="OUTLOOK_LIST_MAIL_FOLDER_MESSAGES",
+                    action="OUTLOOK_LIST_MESSAGES",
                     params={
-                        "mail_folder_id": "sentitems",
+                        "$filter": (
+                            f"from/emailAddress/address eq '{safe_email}' "
+                            f"and sentDateTime ge {since_date}"
+                        ),
                         "$top": 200,
                         "$orderby": "sentDateTime desc",
-                        "$filter": f"sentDateTime ge {since_date}",
                         "$select": "conversationId",
                     },
                     user_id=user_id,
                 )
                 if response.get("successful") and response.get("data"):
                     messages = response["data"].get("value", [])
-                    return {
+                    ids = {
                         msg.get("conversationId")
                         for msg in messages
                         if msg.get("conversationId")
                     }
+                    logger.info(
+                        "DRAFT_ENGINE: Fetched %d sent thread IDs for user %s (Outlook)",
+                        len(ids),
+                        user_id,
+                    )
+                    return ids
+                else:
+                    logger.warning(
+                        "DRAFT_ENGINE: Outlook sent-message query failed: successful=%s error=%s",
+                        response.get("successful"),
+                        response.get("error"),
+                    )
             else:
                 response = oauth_client.execute_action_sync(
                     connection_id=connection_id,
@@ -1875,11 +1934,17 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
                 )
                 if response.get("successful") and response.get("data"):
                     messages = response["data"].get("emails", [])
-                    return {
+                    ids = {
                         msg.get("thread_id")
                         for msg in messages
                         if msg.get("thread_id")
                     }
+                    logger.info(
+                        "DRAFT_ENGINE: Fetched %d sent thread IDs for user %s (Gmail)",
+                        len(ids),
+                        user_id,
+                    )
+                    return ids
 
             return set()
 
@@ -1916,6 +1981,10 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
 
         # Tier 1: Check pre-fetched sent folder thread IDs
         if thread_id in sent_thread_ids:
+            logger.info(
+                "ALREADY_REPLIED_TIER1_SENT_FOLDER: thread_id=%s",
+                thread_id,
+            )
             return True
 
         # Tier 2: Check email_drafts for drafts the user sent via ARIA
@@ -1930,6 +1999,11 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
                 .execute()
             )
             if result.data:
+                logger.info(
+                    "ALREADY_REPLIED_TIER2_DB_DRAFT: thread_id=%s draft_id=%s",
+                    thread_id,
+                    result.data[0].get("id"),
+                )
                 return True
         except Exception as e:
             logger.warning(
@@ -1937,6 +2011,85 @@ Respond with JSON: {{"subject": "Re: ...", "body": "..."}}""")
                 thread_id,
                 e,
             )
+
+        return False
+
+    async def _get_user_email_address(
+        self, user_id: str, provider: str,
+    ) -> str:
+        """Get the user's email address from their integration record.
+
+        Args:
+            user_id: The user ID.
+            provider: The email provider (outlook or gmail).
+
+        Returns:
+            The user's email address, or empty string if not found.
+        """
+        try:
+            result = (
+                self._db.table("user_integrations")
+                .select("account_email")
+                .eq("user_id", user_id)
+                .eq("integration_type", provider)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return result.data[0].get("account_email", "") or ""
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to get user email for %s: %s",
+                user_id,
+                e,
+            )
+        return ""
+
+    def _user_replied_in_thread(
+        self,
+        thread_messages: list,
+    ) -> bool:
+        """Check if the user already replied by examining thread messages.
+
+        Uses a simple heuristic: if the most recent message in the
+        chronologically-ordered thread is from the user, they have
+        already replied and no draft is needed.
+
+        Also checks if ANY user message appears among the last 3 messages
+        to catch cases where a quick automated notification arrived after
+        the user's reply.
+
+        Args:
+            thread_messages: List of ThreadMessage objects (chronological order).
+
+        Returns:
+            True if thread evidence shows the user already replied.
+        """
+        if not thread_messages:
+            return False
+
+        # Primary: last message is from user → they replied
+        if thread_messages[-1].is_from_user:
+            logger.info(
+                "ALREADY_REPLIED_TIER3_THREAD: Last message in thread is from user "
+                "(sender=%s, timestamp=%s)",
+                thread_messages[-1].sender_email,
+                thread_messages[-1].timestamp,
+            )
+            return True
+
+        # Secondary: check if user sent any of the last 3 messages
+        # (handles case where an auto-reply or notification landed after user's reply)
+        recent = thread_messages[-3:]
+        for msg in recent:
+            if msg.is_from_user:
+                logger.info(
+                    "ALREADY_REPLIED_TIER3_THREAD: User message found in recent "
+                    "thread messages (sender=%s, timestamp=%s)",
+                    msg.sender_email,
+                    msg.timestamp,
+                )
+                return True
 
         return False
 
