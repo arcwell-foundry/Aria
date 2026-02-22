@@ -72,6 +72,33 @@ _NOREPLY_PATTERNS: list[re.Pattern[str]] = [
 # Newsletter / mailing-list header indicators
 _LIST_HEADERS = {"list-unsubscribe", "list-id", "x-mailchimp-id", "x-campaign-id"}
 
+# Calendar response subject patterns
+_CALENDAR_SUBJECT_PATTERNS = [
+    "accepted:", "declined:", "tentative:", "canceled:", "cancelled:",
+    "updated invitation:", "invitation:", "reminder:",
+    "meeting request:", "meeting response:",
+]
+
+# Junk/spam notification patterns
+_JUNK_PATTERNS = [
+    "not junk:", "junk email:", "spam notification:",
+    "quarantine notification:", "message blocked:",
+    "delivery status notification", "undeliverable:",
+    "mail delivery failed", "failure notice",
+    "returned mail:", "mailer-daemon",
+]
+
+# Bounce/undeliverable indicators
+_BOUNCE_INDICATORS = [
+    "undeliverable", "delivery failed", "returned mail",
+    "failure notice", "delivery status", "mail delivery subsystem",
+]
+
+# Read/delivery receipt patterns
+_RECEIPT_PATTERNS = [
+    "read:", "read receipt:", "delivery receipt:", "disposition-notification",
+]
+
 
 # ---------------------------------------------------------------------------
 # Service
@@ -280,6 +307,104 @@ class EmailAnalyzer:
                 topic_summary="CC'd — not directly addressed",
                 needs_draft=False,
                 reason="User is only CC'd, not a direct recipient",
+            )
+
+        # ---- Additional rule-based filters (Filters 5-10) ----
+
+        # Filter 5: Self-sent detection
+        if await self._is_self_sent(email, user_id):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="Self-sent email",
+                needs_draft=False,
+                reason="Email sent by user to themselves",
+            )
+
+        # Filter 6: Calendar responses
+        if self._is_calendar_response(email):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="Calendar notification",
+                needs_draft=False,
+                reason="Automated calendar response/notification",
+            )
+
+        # Filter 7: Junk/spam notifications
+        if self._is_system_junk_notification(email):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="System junk notification",
+                needs_draft=False,
+                reason="System junk/spam notification",
+            )
+
+        # Filter 8: Bounce/undeliverable
+        if self._is_bounce(email):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="Bounce/delivery failure",
+                needs_draft=False,
+                reason="Delivery failure notification",
+            )
+
+        # Filter 9: Read receipts
+        if self._is_read_receipt(email):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="Read/delivery receipt",
+                needs_draft=False,
+                reason="Automated read/delivery receipt",
+            )
+
+        # Filter 10: Auto-generated messages
+        if self._is_auto_generated(email):
+            return EmailCategory(
+                email_id=email_id,
+                thread_id=thread_id,
+                sender_email=sender_email,
+                sender_name=sender_name,
+                subject=subject,
+                snippet=snippet,
+                category="SKIP",
+                urgency="LOW",
+                topic_summary="Auto-generated message",
+                needs_draft=False,
+                reason="Auto-generated message (rules, forwards, notifications)",
             )
 
         # ---- LLM classification for remaining emails ----
@@ -834,6 +959,267 @@ class EmailAnalyzer:
 
         return not in_to and in_cc
 
+    # ------------------------------------------------------------------
+    # Additional rule-based filters (Filters 5-10)
+    # ------------------------------------------------------------------
+
+    async def _is_self_sent(self, email: dict[str, Any], user_id: str) -> bool:
+        """Skip emails sent by the user themselves.
+
+        Args:
+            email: Raw email dict.
+            user_id: The user's ID.
+
+        Returns:
+            True if the email is from the user to themselves.
+        """
+        sender = self._extract_sender_email(email)
+        if not sender:
+            return False
+
+        # Get user's own email addresses from user_integrations
+        try:
+            integrations = (
+                self._db.table("user_integrations")
+                .select("account_email")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            user_emails = {
+                i["account_email"].lower()
+                for i in integrations.data
+                if i.get("account_email")
+            }
+
+            # Also check the user_profiles table for primary email
+            profile = (
+                self._db.table("user_profiles")
+                .select("email")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if profile.data and profile.data.get("email"):
+                user_emails.add(profile.data["email"].lower())
+
+            # Also check auth email
+            auth_email = await self._get_user_email(user_id)
+            if auth_email:
+                user_emails.add(auth_email.lower())
+
+            if sender in user_emails:
+                logger.info(
+                    "SKIP_SELF_SENT: %s from %s",
+                    email.get("id", "unknown"),
+                    sender,
+                )
+                return True
+
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Self-sent check failed for %s: %s",
+                sender,
+                e,
+            )
+
+        return False
+
+    def _is_calendar_response(self, email: dict[str, Any]) -> bool:
+        """Skip automated calendar notifications.
+
+        Args:
+            email: Raw email dict.
+
+        Returns:
+            True if the email is a calendar response/notification.
+        """
+        subject = (email.get("subject") or "").lower().strip()
+
+        # Check subject line patterns
+        for pattern in _CALENDAR_SUBJECT_PATTERNS:
+            if subject.startswith(pattern):
+                logger.info(
+                    "SKIP_CALENDAR: %s subject=%s",
+                    email.get("id", "unknown"),
+                    subject,
+                )
+                return True
+
+        # Check content-type for text/calendar
+        content_type = email.get("contentType", "") or email.get("content_type", "")
+        if "calendar" in content_type.lower():
+            logger.info(
+                "SKIP_CALENDAR: %s (calendar content-type)",
+                email.get("id", "unknown"),
+            )
+            return True
+
+        # Check for iCalendar attachment indicators in body
+        body = email.get("body", "")
+        if isinstance(body, dict):
+            body = body.get("content", "")
+        if "BEGIN:VCALENDAR" in body:
+            logger.info(
+                "SKIP_CALENDAR: %s (iCalendar content)",
+                email.get("id", "unknown"),
+            )
+            return True
+
+        return False
+
+    def _is_system_junk_notification(self, email: dict[str, Any]) -> bool:
+        """Skip Outlook/Gmail junk reclassification and spam notifications.
+
+        Args:
+            email: Raw email dict.
+
+        Returns:
+            True if the email is a junk/spam system notification.
+        """
+        subject = (email.get("subject") or "").lower()
+        sender = self._extract_sender_email(email)
+
+        for pattern in _JUNK_PATTERNS:
+            if pattern in subject:
+                logger.info(
+                    "SKIP_JUNK_NOTIFICATION: %s subject=%s",
+                    email.get("id", "unknown"),
+                    subject,
+                )
+                return True
+
+        # Common system senders
+        system_senders = [
+            "postmaster@",
+            "mailer-daemon@",
+            "no-reply@microsoft.com",
+            "noreply@google.com",
+            "outlook-noreply@",
+        ]
+        for sys_sender in system_senders:
+            if sender.startswith(sys_sender) or sys_sender in sender:
+                logger.info(
+                    "SKIP_JUNK_NOTIFICATION: %s from system sender %s",
+                    email.get("id", "unknown"),
+                    sender,
+                )
+                return True
+
+        return False
+
+    def _is_bounce(self, email: dict[str, Any]) -> bool:
+        """Skip delivery failure notifications.
+
+        Args:
+            email: Raw email dict.
+
+        Returns:
+            True if the email is a bounce/delivery failure.
+        """
+        subject = (email.get("subject") or "").lower()
+        sender = self._extract_sender_email(email)
+
+        is_bounce = (
+            any(b in subject for b in _BOUNCE_INDICATORS)
+            or "mailer-daemon" in sender
+            or "postmaster" in sender
+        )
+
+        if is_bounce:
+            logger.info(
+                "SKIP_BOUNCE: %s subject=%s sender=%s",
+                email.get("id", "unknown"),
+                subject,
+                sender,
+            )
+
+        return is_bounce
+
+    def _is_read_receipt(self, email: dict[str, Any]) -> bool:
+        """Skip read/delivery receipts.
+
+        Args:
+            email: Raw email dict.
+
+        Returns:
+            True if the email is a read/delivery receipt.
+        """
+        subject = (email.get("subject") or "").lower()
+
+        for pattern in _RECEIPT_PATTERNS:
+            if pattern in subject:
+                logger.info(
+                    "SKIP_READ_RECEIPT: %s subject=%s",
+                    email.get("id", "unknown"),
+                    subject,
+                )
+                return True
+
+        return False
+
+    def _is_auto_generated(self, email: dict[str, Any]) -> bool:
+        """Skip auto-generated emails (rules, forwards, notifications).
+
+        Args:
+            email: Raw email dict.
+
+        Returns:
+            True if the email is auto-generated.
+        """
+        # Check internetMessageHeaders (Outlook format)
+        headers = email.get("internetMessageHeaders", [])
+        if headers:
+            for header in headers:
+                name = (header.get("name") or "").lower()
+                value = (header.get("value") or "").lower()
+                if name == "auto-submitted" and value != "no":
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (auto-submitted header)",
+                        email.get("id", "unknown"),
+                    )
+                    return True
+                if name == "x-auto-response-suppress":
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (x-auto-response-suppress header)",
+                        email.get("id", "unknown"),
+                    )
+                    return True
+                if name == "precedence" and value in ("bulk", "junk", "list"):
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (precedence=%s)",
+                        email.get("id", "unknown"),
+                        value,
+                    )
+                    return True
+
+        # Also check standard headers dict (Gmail format)
+        headers_dict = email.get("headers", {})
+        if isinstance(headers_dict, dict):
+            for name, value in headers_dict.items():
+                name_lower = name.lower()
+                value_lower = (value or "").lower()
+                if name_lower == "auto-submitted" and value_lower != "no":
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (auto-submitted header)",
+                        email.get("id", "unknown"),
+                    )
+                    return True
+                if name_lower == "x-auto-response-suppress":
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (x-auto-response-suppress header)",
+                        email.get("id", "unknown"),
+                    )
+                    return True
+                if name_lower == "precedence" and value_lower in ("bulk", "junk", "list"):
+                    logger.info(
+                        "SKIP_AUTO_GENERATED: %s (precedence=%s)",
+                        email.get("id", "unknown"),
+                        value_lower,
+                    )
+                    return True
+
+        return False
+
     async def _get_user_email(self, user_id: str) -> str | None:
         """Get the user's email address from Supabase Auth.
 
@@ -1036,7 +1422,7 @@ class EmailAnalyzer:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
-                temperature=0.2,
+                temperature=0.0,
             )
 
             # Parse JSON from response (handle markdown code blocks)
