@@ -22,6 +22,7 @@ import { useDrafts } from '@/hooks/useDrafts';
 import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
 import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
+import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
 import type { EmailDraftStatus, EmailDraftPurpose } from '@/api/drafts';
 
 type CommunicationsView = 'drafts' | 'decisions';
@@ -124,6 +125,9 @@ function DraftsList() {
 
   return (
     <div className="flex-1 overflow-y-auto p-8">
+      {/* Learning mode indicator */}
+      <LearningModeBanner />
+
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">

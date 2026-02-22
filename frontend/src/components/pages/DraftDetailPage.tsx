@@ -23,6 +23,7 @@ import {
 import { cn } from '@/utils/cn';
 import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft } from '@/hooks/useDrafts';
 import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
+import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
 import type { EmailDraftTone } from '@/api/drafts';
 
 // Status badge styles
@@ -159,6 +160,9 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
           <ChevronLeft className="w-4 h-4" />
           Drafts
         </button>
+
+        {/* Learning mode indicator */}
+        <LearningModeBanner />
 
         {/* Intelligence Context */}
         <DraftIntelligenceContext
