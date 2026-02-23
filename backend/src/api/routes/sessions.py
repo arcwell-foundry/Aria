@@ -146,7 +146,8 @@ async def create_session(
         .execute()
     )
 
-    if existing.data:
+    # maybe_single() returns None directly (not APIResponse with data=None) when no match
+    if existing and existing.data:
         logger.info(
             "Returning existing session for user",
             extra={"user_id": current_user.id, "session_id": existing.data["id"]},
@@ -183,7 +184,7 @@ async def create_session(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=500, detail="Failed to create session")
 
     logger.info(
@@ -223,7 +224,8 @@ async def get_active_session(
             .execute()
         )
 
-        if result.data:
+        # maybe_single() returns None directly (not APIResponse with data=None) when no match
+        if result and result.data:
             return _row_to_response(result.data)
 
         # No active session - return None to signal frontend to create one
@@ -269,7 +271,8 @@ async def get_session(
         .execute()
     )
 
-    if not result.data:
+    # maybe_single() returns None directly when no match
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
     return _row_to_response(result.data)
@@ -309,7 +312,8 @@ async def update_session(
         .execute()
     )
 
-    if not current.data:
+    # maybe_single() returns None directly when no match
+    if not current or not current.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Build update payload
@@ -347,7 +351,7 @@ async def update_session(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=500, detail="Failed to update session")
 
     logger.debug(
@@ -392,7 +396,7 @@ async def archive_session(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
     logger.info(
