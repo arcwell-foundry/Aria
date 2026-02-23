@@ -338,21 +338,23 @@ class ImplicationAwareSkillTrigger:
             # Deduplicate lead companies
             context["lead_companies"] = list(set(context["lead_companies"]))
 
-            # User profile
+            # User profile from user_profiles with companies join
             profile_resp = (
-                client.table("profiles")
-                .select("company_name, metadata")
-                .eq("user_id", self._user_id)
-                .limit(1)
+                client.table("user_profiles")
+                .select("company_id, companies(name, settings)")
+                .eq("id", self._user_id)
+                .maybe_single()
                 .execute()
             )
-            if profile_resp.data:
-                profile = profile_resp.data[0]
-                context["company_name"] = profile.get("company_name", "")
-                metadata = profile.get("metadata") or {}
-                context["products"] = metadata.get("products", [])
-                if not context["therapeutic_areas"]:
-                    context["therapeutic_areas"] = metadata.get("therapeutic_areas", [])
+            if profile_resp and profile_resp.data:
+                company_data = profile_resp.data.get("companies")
+                if company_data and isinstance(company_data, dict):
+                    context["company_name"] = company_data.get("name", "")
+                    # Products and therapeutic areas from company settings
+                    company_settings = company_data.get("settings") or {}
+                    context["products"] = company_settings.get("products", [])
+                    if not context["therapeutic_areas"]:
+                        context["therapeutic_areas"] = company_settings.get("therapeutic_areas", [])
 
             # Recent high-relevance signals (last 7 days) for pattern detection
             recent_resp = (

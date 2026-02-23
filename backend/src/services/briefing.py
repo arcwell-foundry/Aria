@@ -1359,11 +1359,11 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
         # Get or generate the briefing
         briefing = await self.get_or_generate_briefing(user_id)
 
-        # Get user name for personalization
+        # Get user name for personalization from user_profiles
         user_name = "there"
         try:
             profile_result = (
-                self._db.table("profiles")
+                self._db.table("user_profiles")
                 .select("full_name")
                 .eq("id", user_id)
                 .maybe_single()

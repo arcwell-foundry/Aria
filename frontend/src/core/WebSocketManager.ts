@@ -123,10 +123,11 @@ class WebSocketManagerImpl {
 
       if (this.intentionalDisconnect) return;
 
-      // Auth failures (1008 policy violation) and custom app codes (4xxx)
-      // should immediately fall back to SSE — retrying won't help.
-      if (event.code === 1008 || (event.code >= 4000 && event.code < 5000)) {
-        console.debug(`[WebSocketManager] Auth/policy close (code=${event.code}), falling back to SSE`);
+      // Auth failures (1008 policy violation), abnormal closures (1006),
+      // and custom app codes (4xxx) should immediately fall back to SSE.
+      // Code 1006 = "closed before connection established" (no close frame received)
+      if (event.code === 1006 || event.code === 1008 || (event.code >= 4000 && event.code < 5000)) {
+        console.debug(`[WebSocketManager] Connection closed (code=${event.code}), falling back to SSE`);
         this.fallbackToSSE();
         return;
       }

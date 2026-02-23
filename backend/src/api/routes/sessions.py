@@ -89,8 +89,13 @@ def _row_to_response(row: dict[str, Any]) -> SessionResponse:
         import json
         session_data = json.loads(session_data)
 
+    # Support both 'id' and 'session_id' column names (schema uses session_id as PK)
+    session_id = row.get("session_id") or row.get("id")
+    if not session_id:
+        raise ValueError("Session row missing both session_id and id columns")
+
     return SessionResponse(
-        id=row["id"],
+        id=session_id,
         user_id=row["user_id"],
         session_data=SessionData(
             current_route=session_data.get("current_route", "/"),
@@ -204,28 +209,36 @@ async def get_active_session(
     Returns:
         The active session or None.
     """
-    db = get_supabase_client()
-    today = date.today().isoformat()
+    try:
+        db = get_supabase_client()
+        today = date.today().isoformat()
 
-    result = (
-        db.table("user_sessions")
-        .select("*")
-        .eq("user_id", current_user.id)
-        .eq("day_date", today)
-        .eq("is_active", True)
-        .maybe_single()
-        .execute()
-    )
+        result = (
+            db.table("user_sessions")
+            .select("*")
+            .eq("user_id", current_user.id)
+            .eq("day_date", today)
+            .eq("is_active", True)
+            .maybe_single()
+            .execute()
+        )
 
-    if result.data:
-        return _row_to_response(result.data)
+        if result.data:
+            return _row_to_response(result.data)
 
-    # No active session - return None to signal frontend to create one
-    logger.info(
-        "No active session found for user",
-        extra={"user_id": current_user.id},
-    )
-    return None
+        # No active session - return None to signal frontend to create one
+        logger.info(
+            "No active session found for user",
+            extra={"user_id": current_user.id},
+        )
+        return None
+    except Exception as e:
+        logger.exception(
+            "Error fetching active session for user %s: %s",
+            current_user.id,
+            e,
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch session") from e
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

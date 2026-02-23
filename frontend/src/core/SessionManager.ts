@@ -29,6 +29,9 @@ interface BackendSessionResponse {
 
 const SYNC_INTERVAL_MS = 30_000;
 
+// Track if we've already fallen back to local session to prevent retry loops
+let hasFallbackToSession = false;
+
 /**
  * Convert backend session response to frontend UnifiedSession format.
  */
@@ -60,6 +63,11 @@ export class SessionManager {
    * unreachable, returns a local-only session.
    */
   async initialize(): Promise<UnifiedSession> {
+    // If we've already fallen back to local session, don't retry
+    if (hasFallbackToSession) {
+      return this.createLocalSession();
+    }
+
     try {
       // First, try to get existing active session
       const activeResponse = await apiClient.get<BackendSessionResponse | null>("/sessions/active");
@@ -69,8 +77,10 @@ export class SessionManager {
 
       // No active session - create a new one
       return await this.createSession();
-    } catch {
-      // Backend unreachable or endpoint doesn't exist — fall back to local
+    } catch (error) {
+      // Backend unreachable or endpoint error — fall back to local and mark to prevent retries
+      hasFallbackToSession = true;
+      console.warn("[SessionManager] Backend session unavailable, using local session:", error);
       return this.createLocalSession();
     }
   }
@@ -142,6 +152,14 @@ export class SessionManager {
     return () => {
       clearInterval(intervalId);
     };
+  }
+
+  /**
+   * Reset the fallback flag to allow retrying backend connection.
+   * Call this after successful authentication or when the user explicitly retries.
+   */
+  static resetFallback(): void {
+    hasFallbackToSession = false;
   }
 
   /**

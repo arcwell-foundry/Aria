@@ -67,19 +67,22 @@ async def build_aria_context(user_id: str, session_type: str, lead_id: str | Non
     db = get_supabase_client()
     context_parts: list[str] = []
 
-    # Get user profile summary
+    # Get user profile summary from user_profiles with company join
     try:
         profile_result = (
-            db.table("profiles")
-            .select("first_name, last_name, role, company_name")
+            db.table("user_profiles")
+            .select("full_name, title, role, companies(name)")
             .eq("id", user_id)
+            .maybe_single()
             .execute()
         )
-        if profile_result.data:
-            profile = profile_result.data[0]
-            name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
-            role = profile.get("role", "")
-            company = profile.get("company_name", "")
+        if profile_result and profile_result.data:
+            profile = profile_result.data
+            name = profile.get("full_name", "")
+            role = profile.get("title") or profile.get("role", "")
+            # Company from joined companies table
+            company_data = profile.get("companies")
+            company = company_data.get("name", "") if company_data and isinstance(company_data, dict) else ""
             if name:
                 context_parts.append(f"User: {name}")
             if role:
