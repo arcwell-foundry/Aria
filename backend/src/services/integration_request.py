@@ -95,10 +95,23 @@ class IntegrationRequestService:
             "Tell me more",
         ]
 
+        rich_content = [{
+            "type": "integration_request",
+            "data": {
+                "integration": integration_category,
+                "display_name": display_name,
+                "providers": providers,
+                "benefit": benefit,
+                "route": route,
+                "agent": agent_name,
+            },
+        }]
+
         try:
             await ws_manager.send_aria_message(
                 user_id=user_id,
                 message=message,
+                rich_content=rich_content,
                 ui_commands=ui_commands,
                 suggestions=suggestions,
             )

@@ -165,6 +165,30 @@ class ActionQueueService:
                     exc_info=True,
                 )
 
+            # Also present the pending action in the chat thread
+            try:
+                from src.core.ws import ws_manager as _ws
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                msg, rich, sugg = presenter.present_action_pending({
+                    "action_id": action["id"],
+                    "title": data.title,
+                    "agent": data.agent.value,
+                    "risk_level": data.risk_level.value,
+                    "description": data.description,
+                    "payload": data.payload,
+                    "reasoning": data.reasoning if hasattr(data, "reasoning") else "",
+                })
+                await _ws.send_aria_message(
+                    user_id=user_id,
+                    message=msg,
+                    rich_content=rich,
+                    suggestions=sugg,
+                )
+            except Exception:
+                logger.debug("Action pending chat presentation failed", exc_info=True)
+
         return action
 
     async def approve_action(

@@ -220,11 +220,12 @@ async def _drain_login_queue(user_id: str) -> None:
 
 
 async def _send_return_greeting(user_id: str) -> None:
-    """Generate and send a personalized greeting if user was away > 1 hour.
+    """Generate and send a personalized greeting if user was away > 2 hours.
 
     Checks the ConnectionManager's last_disconnect timestamp and generates
     a personalized greeting via ReturnGreetingService if the absence is
-    significant enough.
+    significant enough. Returns rich content cards for agent results,
+    drafts, and signals.
     """
     try:
         from src.services.return_greeting import MIN_ABSENCE_SECONDS, ReturnGreetingService
@@ -234,12 +235,13 @@ async def _send_return_greeting(user_id: str) -> None:
             return
 
         service = ReturnGreetingService()
-        greeting = await service.generate_return_greeting(user_id, absence)
-        if greeting:
+        result = await service.generate_return_greeting(user_id, absence)
+        if result:
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=greeting,
-                suggestions=["Show me updates", "What needs my attention?"],
+                message=result["message"],
+                rich_content=result.get("rich_content", []),
+                suggestions=result.get("suggestions", ["Show me updates"]),
             )
             logger.info(
                 "Return greeting sent",

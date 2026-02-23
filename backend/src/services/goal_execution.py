@@ -231,6 +231,27 @@ class GoalExecutionService:
             )
             results.append(result)
 
+            # Present agent result conversationally in chat thread
+            try:
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                msg, rich, sugg = presenter.present_agent_result(
+                    user_id=user_id,
+                    agent_type=agent_type,
+                    result=result,
+                    goal_title=goal.get("title", ""),
+                )
+                if msg:
+                    await ws_manager.send_aria_message(
+                        user_id=user_id,
+                        message=msg,
+                        rich_content=rich,
+                        suggestions=sugg,
+                    )
+            except Exception:
+                logger.debug("Agent result presentation failed", exc_info=True)
+
             # Notify frontend of agent completion
             try:
                 await ws_manager.send_progress_update(
@@ -259,6 +280,27 @@ class GoalExecutionService:
                     goal_agent_id=agent.get("id"),
                 )
                 results.append(result)
+
+                # Present agent result conversationally in chat thread
+                try:
+                    from src.services.conversational_presenter import ConversationalPresenter
+
+                    presenter = ConversationalPresenter()
+                    msg, rich, sugg = presenter.present_agent_result(
+                        user_id=user_id,
+                        agent_type=a_type,
+                        result=result,
+                        goal_title=goal.get("title", ""),
+                    )
+                    if msg:
+                        await ws_manager.send_aria_message(
+                            user_id=user_id,
+                            message=msg,
+                            rich_content=rich,
+                            suggestions=sugg,
+                        )
+                except Exception:
+                    logger.debug("Agent result presentation failed", exc_info=True)
 
                 # Notify frontend of agent completion
                 try:
@@ -296,15 +338,25 @@ class GoalExecutionService:
             progress_delta=100,
         )
 
-        # Notify frontend that goal is complete
+        # Notify frontend that goal is complete — conversational presentation
         try:
+            from src.services.conversational_presenter import ConversationalPresenter
+
+            presenter = ConversationalPresenter()
+            msg, rich, sugg = await presenter.present_goal_completion(
+                user_id=user_id,
+                goal_id=goal_id,
+                goal_title=goal.get("title", ""),
+                results=results,
+            )
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=f'Goal "{goal.get("title", goal_id)}" complete — {success_count} of {len(results)} agents succeeded.',
+                message=msg,
+                rich_content=rich,
                 ui_commands=[
                     {"action": "navigate", "route": f"/goals/{goal_id}"},
                 ],
-                suggestions=["Show me the results", "What should I focus on next?"],
+                suggestions=sugg,
             )
         except Exception:
             logger.warning(
@@ -3018,21 +3070,64 @@ class GoalExecutionService:
                 else f"Goal completed. {summary}"
             )
 
+            # Build rich_content with retrospective and goal completion card
+            rich_content_items: list[dict[str, Any]] = []
+            if retro:
+                rich_content_items.append({
+                    "type": "goal_retrospective",
+                    "data": {
+                        "goal_id": goal_id,
+                        "retrospective": retro,
+                    },
+                })
+
+            # Add goal_completion card with per-agent summaries
+            try:
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                # Fetch agent execution results for this goal
+                exec_result = (
+                    self._db.table("agent_executions")
+                    .select("goal_agent_id, status, result_summary")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                agent_results = []
+                for ex in (exec_result.data or []):
+                    agent_results.append({
+                        "agent_type": ex.get("goal_agent_id", ""),
+                        "success": ex.get("status") == "completed",
+                        "summary": ex.get("result_summary", ""),
+                    })
+                if agent_results:
+                    rich_content_items.append({
+                        "type": "goal_completion",
+                        "data": {
+                            "goal_id": goal_id,
+                            "goal_title": goal_title,
+                            "success_count": sum(1 for a in agent_results if a["success"]),
+                            "total_agents": len(agent_results),
+                            "agent_results": agent_results,
+                        },
+                    })
+            except Exception:
+                logger.debug("Failed to build goal_completion card", exc_info=True)
+
+            # Enhanced suggestions based on retrospective content
+            retro_suggestions = ["Show details", "What's next?"]
+            if retro and retro.get("next_steps"):
+                retro_suggestions = [
+                    "Show details",
+                    "Start a follow-up goal",
+                    "What's next?",
+                ]
+
             await ws_manager.send_aria_message(
                 user_id=user_id,
                 message=message,
-                rich_content=[
-                    {
-                        "type": "goal_retrospective",
-                        "data": {
-                            "goal_id": goal_id,
-                            "retrospective": retro,
-                        },
-                    }
-                ]
-                if retro
-                else [],
-                suggestions=["Show details", "What's next?"],
+                rich_content=rich_content_items,
+                suggestions=retro_suggestions,
             )
 
             await ws_manager.send_execution_complete(

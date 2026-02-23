@@ -85,7 +85,7 @@ export function useDashboardEvents(): void {
         type: 'info',
         title: 'Action Pending Approval',
         message: `${data.agent}: ${data.title}`,
-        duration: 8000,
+        duration: 4000,
       });
 
       queryClient.invalidateQueries({ queryKey: actionKeys.all });

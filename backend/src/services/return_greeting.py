@@ -1,8 +1,9 @@
 """Return Greeting Service — generates personalized greetings when users return.
 
-When a user opens ARIA after being away for more than 1 hour, this service
+When a user opens ARIA after being away for more than 2 hours, this service
 gathers what happened while they were away and generates a personalized
-greeting via Claude API. The greeting is sent as the first WebSocket message.
+greeting via Claude API with rich content cards. The greeting is sent as
+the first WebSocket message.
 """
 
 import logging
@@ -12,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Minimum absence to trigger a return greeting (seconds)
-MIN_ABSENCE_SECONDS = 3600  # 1 hour
+MIN_ABSENCE_SECONDS = 7200  # 2 hours
 
 
 class ReturnGreetingService:
@@ -40,18 +41,18 @@ class ReturnGreetingService:
         self,
         user_id: str,
         absence_seconds: float,
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         """Generate a personalized greeting for a returning user.
 
         Queries what happened while the user was away and generates a
-        conversational greeting via Claude API.
+        conversational greeting via Claude API with rich content cards.
 
         Args:
             user_id: The returning user's ID.
             absence_seconds: How long the user was disconnected.
 
         Returns:
-            Greeting message string, or None if nothing notable happened.
+            Dict with message, rich_content, and suggestions, or None.
         """
         if absence_seconds < MIN_ABSENCE_SECONDS:
             return None
@@ -69,9 +70,20 @@ class ReturnGreetingService:
         # Get user name for greeting
         user_name = await self._get_user_name(db, user_id)
 
+        # Build rich_content cards from gathered context
+        rich_content = self._build_rich_content(context)
+
+        # Build contextual suggestions based on what happened
+        suggestions = self._build_suggestions(context)
+
         # Generate greeting via Claude API
-        greeting = await self._generate_greeting_llm(user_name, absence_seconds, context)
-        return greeting
+        greeting_text = await self._generate_greeting_llm(user_name, absence_seconds, context)
+
+        return {
+            "message": greeting_text,
+            "rich_content": rich_content,
+            "suggestions": suggestions,
+        }
 
     async def _gather_away_context(
         self,
@@ -81,13 +93,15 @@ class ReturnGreetingService:
     ) -> dict[str, Any]:
         """Gather all background activity that happened while user was away.
 
+        Fetches both counts and top items for rich content cards.
+
         Args:
             db: Supabase client.
             user_id: The user's ID.
             since_iso: ISO timestamp of when the user went offline.
 
         Returns:
-            Dict with activity summaries and has_activity flag.
+            Dict with activity summaries, top items, and has_activity flag.
         """
         context: dict[str, Any] = {
             "has_activity": False,
@@ -97,13 +111,17 @@ class ReturnGreetingService:
             "pending_actions": 0,
             "new_signals": 0,
             "briefing_ready": False,
+            # Top items for rich content cards
+            "top_execution": None,
+            "top_draft": None,
+            "top_signal": None,
         }
 
-        # 1. Agent executions completed since absence
+        # 1. Agent executions completed since absence (with full details for top result)
         try:
             exec_result = (
                 db.table("agent_executions")
-                .select("id, goal_agent_id, status, result_summary, completed_at")
+                .select("id, goal_agent_id, status, result_summary, result_data, completed_at")
                 .eq("user_id", user_id)
                 .eq("status", "completed")
                 .gte("completed_at", since_iso)
@@ -115,6 +133,8 @@ class ReturnGreetingService:
             if execs:
                 context["completed_executions"] = execs
                 context["has_activity"] = True
+                # Top execution for rich content card
+                context["top_execution"] = execs[0]
         except Exception:
             logger.debug("Failed to query agent_executions for return greeting", exc_info=True)
 
@@ -147,20 +167,23 @@ class ReturnGreetingService:
         except Exception:
             logger.debug("Failed to query goal_updates for return greeting", exc_info=True)
 
-        # 3. Pending email drafts ready for review
+        # 3. Pending email drafts ready for review (with top draft details)
         try:
             draft_result = (
                 db.table("email_drafts")
-                .select("id", count="exact")
+                .select("id, subject, recipient_email, recipient_name, created_at")
                 .eq("user_id", user_id)
                 .eq("status", "ready")
                 .gte("created_at", since_iso)
+                .order("created_at", desc=True)
+                .limit(5)
                 .execute()
             )
-            draft_count = draft_result.count or 0
-            if draft_count > 0:
-                context["pending_drafts"] = draft_count
+            drafts = draft_result.data or []
+            if drafts:
+                context["pending_drafts"] = len(drafts)
                 context["has_activity"] = True
+                context["top_draft"] = drafts[0]
         except Exception:
             logger.debug("Failed to query email_drafts for return greeting", exc_info=True)
 
@@ -180,19 +203,22 @@ class ReturnGreetingService:
         except Exception:
             logger.debug("Failed to query action_queue for return greeting", exc_info=True)
 
-        # 5. New market signals
+        # 5. New market signals (with top signal details)
         try:
             signal_result = (
                 db.table("market_signals")
-                .select("id", count="exact")
+                .select("id, title, signal_type, severity, source, created_at")
                 .eq("user_id", user_id)
                 .gte("created_at", since_iso)
+                .order("created_at", desc=True)
+                .limit(5)
                 .execute()
             )
-            signal_count = signal_result.count or 0
-            if signal_count > 0:
-                context["new_signals"] = signal_count
+            signals = signal_result.data or []
+            if signals:
+                context["new_signals"] = len(signals)
                 context["has_activity"] = True
+                context["top_signal"] = signals[0]
         except Exception:
             logger.debug("Failed to query market_signals for return greeting", exc_info=True)
 
@@ -213,6 +239,112 @@ class ReturnGreetingService:
             logger.debug("Failed to query daily_briefings for return greeting", exc_info=True)
 
         return context
+
+    def _build_rich_content(self, context: dict[str, Any]) -> list[dict[str, Any]]:
+        """Build rich_content cards from gathered context.
+
+        Args:
+            context: Activity context from _gather_away_context.
+
+        Returns:
+            List of rich_content card dicts.
+        """
+        cards: list[dict[str, Any]] = []
+
+        # Top agent execution result card
+        top_exec = context.get("top_execution")
+        if top_exec:
+            result_data = top_exec.get("result_data")
+            if isinstance(result_data, dict):
+                # Determine card type from agent type
+                agent_id = top_exec.get("goal_agent_id", "")
+                card_type = self._agent_to_card_type(agent_id)
+                if card_type:
+                    cards.append({
+                        "type": card_type,
+                        "data": result_data,
+                    })
+
+        # Top email draft card
+        top_draft = context.get("top_draft")
+        if top_draft:
+            cards.append({
+                "type": "email_draft",
+                "data": {
+                    "draft_id": top_draft.get("id", ""),
+                    "subject": top_draft.get("subject", ""),
+                    "recipient": top_draft.get("recipient_name", top_draft.get("recipient_email", "")),
+                },
+            })
+
+        # Top signal card
+        top_signal = context.get("top_signal")
+        if top_signal:
+            cards.append({
+                "type": "signal_card",
+                "data": {
+                    "id": top_signal.get("id", ""),
+                    "title": top_signal.get("title", ""),
+                    "signal_type": top_signal.get("signal_type", ""),
+                    "severity": top_signal.get("severity", ""),
+                    "source": top_signal.get("source", ""),
+                },
+            })
+
+        return cards
+
+    def _build_suggestions(self, context: dict[str, Any]) -> list[str]:
+        """Build contextual suggestion chips based on what happened.
+
+        Args:
+            context: Activity context from _gather_away_context.
+
+        Returns:
+            List of suggestion strings.
+        """
+        suggestions: list[str] = []
+
+        if context.get("pending_drafts", 0) > 0:
+            suggestions.append("Review my drafts")
+        if context.get("pending_actions", 0) > 0:
+            suggestions.append("Show pending actions")
+        if context.get("new_signals", 0) > 0:
+            suggestions.append("Show market signals")
+        if context.get("briefing_ready"):
+            suggestions.append("Play my briefing")
+        if len(context.get("completed_executions", [])) > 0:
+            suggestions.append("Show what you did")
+
+        # Always include a fallback
+        if not suggestions:
+            suggestions = ["Show me updates", "What needs my attention?"]
+        elif len(suggestions) < 3:
+            suggestions.append("What should I focus on?")
+
+        return suggestions[:4]  # Max 4 suggestions
+
+    def _agent_to_card_type(self, agent_id: str) -> str | None:
+        """Map agent type identifier to rich content card type.
+
+        Args:
+            agent_id: The agent identifier (may be a UUID or agent type name).
+
+        Returns:
+            Card type string or None.
+        """
+        # agent_id might be the agent type directly or a goal_agent row ID
+        agent_lower = agent_id.lower() if agent_id else ""
+        mapping = {
+            "hunter": "lead_card",
+            "analyst": "research_results",
+            "scribe": "email_draft",
+            "scout": "signal_card",
+            "strategist": "battle_card",
+        }
+        for key, card_type in mapping.items():
+            if key in agent_lower:
+                return card_type
+        return None
 
     async def _get_user_name(self, db: Any, user_id: str) -> str:
         """Get user's first name for greeting.
@@ -262,11 +394,19 @@ class ReturnGreetingService:
             else f"{int(hours_away / 24)} days"
         )
 
-        # Build activity summary for prompt
+        # Build detailed activity summary for prompt
         activity_lines: list[str] = []
         exec_count = len(context.get("completed_executions", []))
         if exec_count > 0:
-            activity_lines.append(f"- {exec_count} agent executions completed")
+            # Include top execution detail
+            top_exec = context.get("top_execution")
+            summary = ""
+            if top_exec:
+                summary = top_exec.get("result_summary", "")
+            if summary:
+                activity_lines.append(f"- {exec_count} agent executions completed (latest: {summary})")
+            else:
+                activity_lines.append(f"- {exec_count} agent executions completed")
 
         progress_count = len(context.get("goal_progress", []))
         if progress_count > 0:
@@ -274,7 +414,14 @@ class ReturnGreetingService:
 
         drafts = context.get("pending_drafts", 0)
         if drafts > 0:
-            activity_lines.append(f"- {drafts} email draft(s) ready for review")
+            top_draft = context.get("top_draft")
+            if top_draft and top_draft.get("recipient_name"):
+                activity_lines.append(
+                    f"- {drafts} email draft(s) ready for review "
+                    f"(first: to {top_draft['recipient_name']})"
+                )
+            else:
+                activity_lines.append(f"- {drafts} email draft(s) ready for review")
 
         actions = context.get("pending_actions", 0)
         if actions > 0:
@@ -282,7 +429,13 @@ class ReturnGreetingService:
 
         signals = context.get("new_signals", 0)
         if signals > 0:
-            activity_lines.append(f"- {signals} new market signal(s) detected")
+            top_signal = context.get("top_signal")
+            if top_signal and top_signal.get("title"):
+                activity_lines.append(
+                    f"- {signals} new market signal(s) (top: {top_signal['title']})"
+                )
+            else:
+                activity_lines.append(f"- {signals} new market signal(s) detected")
 
         if context.get("briefing_ready"):
             activity_lines.append("- Your daily briefing is ready")
@@ -299,7 +452,7 @@ class ReturnGreetingService:
             f"What happened while they were away:\n{activity_summary}\n\n"
             "Rules:\n"
             "- 2-4 sentences max\n"
-            "- Reference specific numbers from the activity\n"
+            "- Reference specific numbers and details from the activity\n"
             "- Use appropriate time-of-day greeting (morning/afternoon/evening)\n"
             "- If there are pending actions or drafts, mention them\n"
             "- Do NOT use emojis\n"
