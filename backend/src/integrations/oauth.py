@@ -324,6 +324,27 @@ class ComposioOAuthClient:
         result = await asyncio.to_thread(_retrieve)
         return str(result.status).upper() == "ACTIVE"
 
+    def _resolve_tool_version(self, action: str) -> str | None:
+        """Resolve the latest available version for a Composio tool.
+
+        The SDK requires an explicit version for manual execution.
+        We retrieve the tool schema and pick the newest available version.
+
+        Args:
+            action: The tool slug (e.g., 'OUTLOOK_GET_MAIL_DELTA').
+
+        Returns:
+            The latest version string, or None if unavailable.
+        """
+        try:
+            tool = self._client.client.tools.retrieve(tool_slug=action)
+            versions = getattr(tool, "available_versions", None)
+            if versions:
+                return versions[0]  # newest first
+        except Exception as e:
+            logger.debug("Could not resolve version for %s: %s", action, e)
+        return None
+
     async def execute_action(
         self,
         connection_id: str,
@@ -344,6 +365,9 @@ class ComposioOAuthClient:
         """
         composio_circuit_breaker.check()
 
+        # Resolve the tool version required by the SDK
+        version = await asyncio.to_thread(self._resolve_tool_version, action)
+
         # Execute Composio action via SDK
         def _execute() -> Any:
             return self._client.tools.execute(
@@ -351,6 +375,7 @@ class ComposioOAuthClient:
                 connected_account_id=connection_id,
                 user_id=user_id,
                 arguments=params,
+                version=version,
             )
 
         try:
@@ -387,12 +412,20 @@ class ComposioOAuthClient:
         # Pre-load tool schema to avoid KeyError in Composio SDK
         # The SDK's execute() tries _custom_tools[slug].info which fails
         # if the tool isn't in the registry. We preload via retrieve().
+        version: str | None = None
         if action not in self._client.tools._tool_schemas:
             try:
                 tool = self._client.client.tools.retrieve(tool_slug=action)
                 self._client.tools._tool_schemas[action] = tool
+                versions = getattr(tool, "available_versions", None)
+                if versions:
+                    version = versions[0]
             except Exception as e:
                 logger.debug("Could not preload tool schema for %s: %s", action, e)
+
+        # If we didn't get a version from preload, resolve it now
+        if version is None:
+            version = self._resolve_tool_version(action)
 
         # Execute Composio action via SDK
         result = self._client.tools.execute(
@@ -400,8 +433,9 @@ class ComposioOAuthClient:
             connected_account_id=connection_id,
             user_id=user_id,
             arguments=params,
+            version=version,
         )
-        # The SDK returns a dict with 'successful', 'data', 'error' keys
+        # The SDK returns a dict with 'successful', 'data', and 'error' keys
         if isinstance(result, dict):
             return result
         if hasattr(result, "model_dump"):

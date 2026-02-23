@@ -402,7 +402,7 @@ class DraftFeedbackTracker:
             if provider == "outlook":
                 response = oauth_client.execute_action_sync(
                     connection_id=connection_id,
-                    action="OUTLOOK_GET_MESSAGE",
+                    action="OUTLOOK_OUTLOOK_GET_MESSAGE",
                     params={"message_id": client_draft_id},
                     user_id=user_id,
                 )

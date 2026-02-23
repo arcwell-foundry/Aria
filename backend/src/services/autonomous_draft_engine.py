@@ -1330,12 +1330,21 @@ Example of well-formatted output:
             user_id=user_id,
         )
 
-        # Parse JSON response
+        # Parse JSON response (strip markdown code fences if present)
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            # Remove opening fence (```json or ```)
+            first_newline = cleaned.index("\n") if "\n" in cleaned else len(cleaned)
+            cleaned = cleaned[first_newline + 1:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
         try:
-            data = json.loads(response.strip())
+            data = json.loads(cleaned)
             return ReplyDraftContent(
                 subject=data.get("subject", f"Re: {email.subject}"),
-                body=data.get("body", response),
+                body=data.get("body", cleaned),
             )
         except json.JSONDecodeError:
             # Fallback: use raw response as body
@@ -2253,7 +2262,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
                 safe_email = user_email.replace("'", "''")
                 response = oauth_client.execute_action_sync(
                     connection_id=connection_id,
-                    action="OUTLOOK_LIST_MESSAGES",
+                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
                     params={
                         "$filter": (
                             f"from/emailAddress/address eq '{safe_email}' "

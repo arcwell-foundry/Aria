@@ -605,19 +605,17 @@ class EmailContextGatherer:
 
         try:
             oauth_client = get_oauth_client()
-            action = "OUTLOOK_LIST_MESSAGES"
-            # Escape single quotes in conversationId for OData filter
-            safe_thread_id = thread_id.replace("'", "''") if thread_id else ""
-            params = {
-                "$filter": f"conversationId eq '{safe_thread_id}'",
-                "$orderby": "receivedDateTime asc",
-                "$top": 50,
+            action = "OUTLOOK_OUTLOOK_LIST_MESSAGES"
+            params: dict[str, Any] = {
+                "conversationId": thread_id,
+                "orderby": ["receivedDateTime asc"],
+                "top": 50,
             }
 
             logger.info(
-                "THREAD_FETCH_OUTLOOK: Calling action=%s filter=%s connection=%s",
+                "THREAD_FETCH_OUTLOOK: Calling action=%s conversationId=%s connection=%s",
                 action,
-                params["$filter"][:120],
+                thread_id[:60] if thread_id else "NONE",
                 connection_id[:20] if connection_id else "NONE",
             )
 
@@ -644,7 +642,12 @@ class EmailContextGatherer:
                 )
                 return messages
 
-            messages_data = response.get("data", {}).get("value", [])
+            # New Composio API wraps data in response_data
+            data = response.get("data", {})
+            if "response_data" in data:
+                messages_data = data["response_data"].get("value", [])
+            else:
+                messages_data = data.get("value", [])
             user_email = await self._get_user_email_from_integration()
 
             logger.info(

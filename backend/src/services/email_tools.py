@@ -201,7 +201,7 @@ async def _read_recent_emails(
     if provider == "outlook":
         result = await oauth_client.execute_action(
             connection_id=connection_id,
-            action="OUTLOOK_LIST_MESSAGES",
+            action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
             params={"$top": count, "$orderby": "receivedDateTime desc"},
             user_id=user_id,
         )
@@ -238,7 +238,7 @@ async def _search_emails(
     if provider == "outlook":
         result = await oauth_client.execute_action(
             connection_id=connection_id,
-            action="OUTLOOK_LIST_MESSAGES",
+            action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
             params={
                 "$top": max_results,
                 "$search": f'"{query}"',
@@ -280,7 +280,7 @@ async def _read_email_detail(
     if provider == "outlook":
         result = await oauth_client.execute_action(
             connection_id=connection_id,
-            action="OUTLOOK_GET_MESSAGE",
+            action="OUTLOOK_OUTLOOK_GET_MESSAGE",
             params={"message_id": message_id},
             user_id=user_id,
         )

@@ -278,7 +278,7 @@ class EmailClientWriter:
         try:
             result = await self._oauth_client.execute_action(
                 connection_id=connection_id,
-                action="OUTLOOK_CREATE_DRAFT",
+                action="OUTLOOK_OUTLOOK_CREATE_DRAFT",
                 params=params,
                 user_id=user_id,
             )
