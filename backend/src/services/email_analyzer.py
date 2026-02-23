@@ -39,6 +39,7 @@ class EmailCategory(BaseModel):
     sender_name: str
     subject: str
     snippet: str  # first 200 chars of body
+    body: str | None = None  # full cleaned body text (HTML stripped)
     category: str  # NEEDS_REPLY, FYI, SKIP
     urgency: str  # URGENT, NORMAL, LOW
     topic_summary: str
@@ -56,6 +57,40 @@ class EmailScanResult(BaseModel):
     fyi: list[EmailCategory] = Field(default_factory=list)
     skipped: list[EmailCategory] = Field(default_factory=list)
     urgent: list[EmailCategory] = Field(default_factory=list)  # subset of needs_reply
+
+
+def _strip_html(raw: str) -> str:
+    """Strip HTML tags and collapse whitespace to produce clean readable text."""
+    text = re.sub(r"<style[^>]*>.*?</style>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&#\d+;", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _clean_email_body(raw_body: Any) -> str | None:
+    """Extract and clean the email body from various formats.
+
+    Args:
+        raw_body: Body value from the email dict — may be a string, dict, or None.
+
+    Returns:
+        Cleaned plain-text body, or None if unavailable.
+    """
+    if not raw_body:
+        return None
+    if isinstance(raw_body, dict):
+        raw_body = raw_body.get("content", "")
+    if not isinstance(raw_body, str) or not raw_body.strip():
+        return None
+    return _strip_html(raw_body)
 
 
 # Automated / no-reply sender patterns
@@ -230,7 +265,9 @@ class EmailAnalyzer:
         sender_email = self._extract_sender_email(email)
         sender_name = self._extract_sender_name(email)
         subject = email.get("subject", "(no subject)")
-        body = email.get("body", email.get("snippet", ""))
+        raw_body = email.get("body", email.get("snippet", ""))
+        cleaned_body = _clean_email_body(raw_body)
+        body = cleaned_body or (raw_body if isinstance(raw_body, str) else "")
         snippet = body[:200] if body else ""
         email_id = email.get("id", email.get("message_id", str(uuid.uuid4())))
         thread_id = email.get("thread_id", email.get("conversationId", email_id))
@@ -250,6 +287,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Privacy-excluded sender",
@@ -266,6 +304,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Automated / no-reply sender",
@@ -285,6 +324,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="FYI",
                 urgency="LOW",
                 topic_summary="Newsletter / mailing list",
@@ -302,6 +342,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="FYI",
                 urgency="LOW",
                 topic_summary="CC'd — not directly addressed",
@@ -320,6 +361,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Self-sent email",
@@ -336,6 +378,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Calendar notification",
@@ -352,6 +395,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="System junk notification",
@@ -368,6 +412,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Bounce/delivery failure",
@@ -384,6 +429,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Read/delivery receipt",
@@ -400,6 +446,7 @@ class EmailAnalyzer:
                 sender_name=sender_name,
                 subject=subject,
                 snippet=snippet,
+                body=cleaned_body,
                 category="SKIP",
                 urgency="LOW",
                 topic_summary="Auto-generated message",

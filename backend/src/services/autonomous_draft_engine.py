@@ -1370,7 +1370,13 @@ this wasn't written by them. Do NOT sound like an AI assistant.""")
         sections.append(self._build_formatting_instructions(formatting_patterns))
 
         # The original email being replied to
-        email_body = getattr(email, "body", None) or email.snippet
+        email_body = getattr(email, "body", None)
+        if not email_body:
+            logger.warning(
+                "BL-1: No body for email %s, falling back to snippet",
+                email.subject,
+            )
+            email_body = email.snippet
         sections.append(f"""## The email you're replying to
 From: {email.sender_name or 'Unknown'} <{email.sender_email}>
 Subject: {email.subject}
