@@ -1,5 +1,6 @@
 """WebSocket event models for ARIA real-time communication."""
 
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -169,3 +170,4 @@ class PongEvent(WSEvent):
     """Heartbeat pong response."""
 
     type: WSEventType = WSEventType.PONG
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())

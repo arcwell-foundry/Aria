@@ -1,4 +1,7 @@
-"""WebSocket ConnectionManager for ARIA real-time communication."""
+"""WebSocket ConnectionManager for ARIA real-time communication.
+
+Per-user connection tracking. No global broadcast — multi-tenant isolation.
+"""
 
 import logging
 from typing import Any
@@ -26,14 +29,14 @@ logger = logging.getLogger(__name__)
 class ConnectionManager:
     """Manages active WebSocket connections per user.
 
-    Tracks connections by user_id, supports broadcasting typed events
-    to all of a user's active connections (multiple tabs/devices).
-    Automatically removes dead connections on send failure.
+    Tracks connections by user_id → set[WebSocket]. One user can have
+    multiple connections (tabs/devices). Events are always scoped to a
+    single user or an explicit company member list — never broadcast globally.
     """
 
     def __init__(self) -> None:
         """Initialize with empty connection registry."""
-        self._connections: dict[str, list[WebSocket]] = {}
+        self._connections: dict[str, set[WebSocket]] = {}
 
     async def connect(
         self,
@@ -49,8 +52,8 @@ class ConnectionManager:
             session_id: Optional session ID for session binding.
         """
         if user_id not in self._connections:
-            self._connections[user_id] = []
-        self._connections[user_id].append(websocket)
+            self._connections[user_id] = set()
+        self._connections[user_id].add(websocket)
         logger.info(
             "WebSocket connected",
             extra={
@@ -67,16 +70,15 @@ class ConnectionManager:
             user_id: The user's ID.
             websocket: The WebSocket connection to remove.
         """
-        connections = self._connections.get(user_id, [])
-        if websocket in connections:
-            connections.remove(websocket)
+        connections = self._connections.get(user_id, set())
+        connections.discard(websocket)
         if not connections and user_id in self._connections:
             del self._connections[user_id]
         logger.info(
             "WebSocket disconnected",
             extra={
                 "user_id": user_id,
-                "remaining": len(self._connections.get(user_id, [])),
+                "remaining": len(self._connections.get(user_id, set())),
             },
         )
 
@@ -89,7 +91,7 @@ class ConnectionManager:
         Returns:
             True if user has at least one active connection.
         """
-        return len(self._connections.get(user_id, [])) > 0
+        return len(self._connections.get(user_id, set())) > 0
 
     async def send_to_user(self, user_id: str, event: WSEvent) -> None:
         """Send an event to all of a user's active connections.
@@ -101,7 +103,7 @@ class ConnectionManager:
             user_id: The user to send to.
             event: The WSEvent to serialize and send.
         """
-        connections = self._connections.get(user_id, [])
+        connections = self._connections.get(user_id, set())
         if not connections:
             return
 
@@ -120,6 +122,54 @@ class ConnectionManager:
 
         for ws in dead:
             self.disconnect(user_id, ws)
+
+    async def broadcast_to_company(
+        self,
+        company_id: str,
+        event: WSEvent,
+        db: Any,
+    ) -> None:
+        """Send an event to all connected users in a company.
+
+        Queries user_profiles to find company members, then sends to each
+        connected member. Does NOT broadcast globally.
+
+        Args:
+            company_id: The company ID to broadcast to.
+            event: The WSEvent to serialize and send.
+            db: Supabase client for querying company membership.
+        """
+        try:
+            result = (
+                db.table("user_profiles")
+                .select("user_id")
+                .eq("company_id", company_id)
+                .execute()
+            )
+            member_ids = [row["user_id"] for row in (result.data or [])]
+        except Exception:
+            logger.warning(
+                "Failed to query company members for broadcast",
+                extra={"company_id": company_id},
+            )
+            return
+
+        for member_id in member_ids:
+            if self.is_connected(member_id):
+                await self.send_to_user(member_id, event)
+
+    def get_connection_stats(self) -> dict[str, Any]:
+        """Return connection statistics for health checks.
+
+        Returns:
+            Dict with total_users, total_connections, and per-user counts.
+        """
+        per_user = {uid: len(conns) for uid, conns in self._connections.items()}
+        return {
+            "total_users": len(self._connections),
+            "total_connections": sum(per_user.values()),
+            "per_user": per_user,
+        }
 
     # --- Typed send helpers ---
 

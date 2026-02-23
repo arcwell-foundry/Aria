@@ -17,12 +17,63 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
-from src.core.exceptions import NotFoundError, sanitize_error
 from src.db.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+# =============================================================================
+# PK column detection — handles both 'id' and 'session_id' schemas
+# =============================================================================
+
+_SESSION_PK_COL: str | None = None
+
+
+def _detect_pk_col(db: Any) -> str:
+    """Auto-detect whether user_sessions PK column is 'id' or 'session_id'.
+
+    Caches after first successful detection to avoid repeated probing.
+    """
+    global _SESSION_PK_COL
+    if _SESSION_PK_COL is not None:
+        return _SESSION_PK_COL
+
+    # Probe: try selecting 'id' column
+    try:
+        db.table("user_sessions").select("id").limit(1).execute()
+        _SESSION_PK_COL = "id"
+    except Exception:
+        _SESSION_PK_COL = "session_id"
+
+    logger.info("Detected user_sessions PK column: %s", _SESSION_PK_COL)
+    return _SESSION_PK_COL
+
+
+def _select_by_pk(db: Any, session_id: str, user_id: str) -> Any:
+    """Select a session by PK + user_id guard. Returns execute() result."""
+    pk = _detect_pk_col(db)
+    return (
+        db.table("user_sessions")
+        .select("*")
+        .eq(pk, session_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+
+
+def _update_by_pk(db: Any, session_id: str, user_id: str, payload: dict) -> Any:
+    """Update a session by PK + user_id guard. Returns execute() result."""
+    pk = _detect_pk_col(db)
+    return (
+        db.table("user_sessions")
+        .update(payload)
+        .eq(pk, session_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
 
 
 # =============================================================================
@@ -89,7 +140,7 @@ def _row_to_response(row: dict[str, Any]) -> SessionResponse:
         import json
         session_data = json.loads(session_data)
 
-    # Support both 'id' and 'session_id' column names (schema uses session_id as PK)
+    # Support both 'id' and 'session_id' column names
     session_id = row.get("session_id") or row.get("id")
     if not session_id:
         raise ValueError("Session row missing both session_id and id columns")
@@ -124,13 +175,6 @@ async def create_session(
 
     If an active session already exists for today, returns that session.
     Otherwise, archives any previous active sessions and creates a new one.
-
-    Args:
-        current_user: The authenticated user.
-        request: Session creation parameters.
-
-    Returns:
-        The created or existing session.
     """
     db = get_supabase_client()
     today = date.today().isoformat()
@@ -146,12 +190,7 @@ async def create_session(
         .execute()
     )
 
-    # maybe_single() returns None directly (not APIResponse with data=None) when no match
     if existing and existing.data:
-        logger.info(
-            "Returning existing session for user",
-            extra={"user_id": current_user.id, "session_id": existing.data["id"]},
-        )
         return _row_to_response(existing.data)
 
     # Archive previous active sessions
@@ -189,7 +228,7 @@ async def create_session(
 
     logger.info(
         "Created new session for user",
-        extra={"user_id": current_user.id, "session_id": result.data[0]["id"]},
+        extra={"user_id": current_user.id},
     )
 
     return _row_to_response(result.data[0])
@@ -201,14 +240,7 @@ async def get_active_session(
 ) -> SessionResponse | None:
     """Get the active session for the current user.
 
-    Returns the active session for today if it exists.
-    Creates a new session if none exists.
-
-    Args:
-        current_user: The authenticated user.
-
-    Returns:
-        The active session or None.
+    Returns the active session for today if it exists, or None.
     """
     try:
         db = get_supabase_client()
@@ -224,11 +256,9 @@ async def get_active_session(
             .execute()
         )
 
-        # maybe_single() returns None directly (not APIResponse with data=None) when no match
         if result and result.data:
             return _row_to_response(result.data)
 
-        # No active session - return None to signal frontend to create one
         logger.info(
             "No active session found for user",
             extra={"user_id": current_user.id},
@@ -250,28 +280,12 @@ async def get_session(
 ) -> SessionResponse:
     """Get a specific session by ID.
 
-    Args:
-        current_user: The authenticated user.
-        session_id: The session ID.
-
-    Returns:
-        The session data.
-
-    Raises:
-        HTTPException: If session not found or doesn't belong to user.
+    Always enforces user_id ownership guard.
     """
     db = get_supabase_client()
 
-    result = (
-        db.table("user_sessions")
-        .select("*")
-        .eq("id", session_id)
-        .eq("user_id", current_user.id)
-        .maybe_single()
-        .execute()
-    )
+    result = _select_by_pk(db, session_id, current_user.id)
 
-    # maybe_single() returns None directly when no match
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -286,33 +300,13 @@ async def update_session(
 ) -> SessionResponse:
     """Update session state.
 
-    Only provided fields are updated. This is called periodically by the
-    frontend to sync session state.
-
-    Args:
-        current_user: The authenticated user.
-        session_id: The session ID.
-        request: Fields to update.
-
-    Returns:
-        The updated session.
-
-    Raises:
-        HTTPException: If session not found or doesn't belong to user.
+    Only provided fields are updated. Always enforces user_id ownership guard.
     """
     db = get_supabase_client()
 
-    # First verify ownership and get current session
-    current = (
-        db.table("user_sessions")
-        .select("*")
-        .eq("id", session_id)
-        .eq("user_id", current_user.id)
-        .maybe_single()
-        .execute()
-    )
+    # Verify ownership and get current session
+    current = _select_by_pk(db, session_id, current_user.id)
 
-    # maybe_single() returns None directly when no match
     if not current or not current.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -331,7 +325,6 @@ async def update_session(
     if request.conversation_thread is not None:
         new_session_data["conversation_thread"] = request.conversation_thread
     if request.metadata is not None:
-        # Merge metadata
         new_session_data["metadata"] = {**current_data.get("metadata", {}), **request.metadata}
 
     update_payload: dict[str, Any] = {
@@ -342,14 +335,8 @@ async def update_session(
     if request.is_active is not None:
         update_payload["is_active"] = request.is_active
 
-    # Perform update
-    result = (
-        db.table("user_sessions")
-        .update(update_payload)
-        .eq("id", session_id)
-        .eq("user_id", current_user.id)
-        .execute()
-    )
+    # Perform update with user_id guard
+    result = _update_by_pk(db, session_id, current_user.id, update_payload)
 
     if not result or not result.data:
         raise HTTPException(status_code=500, detail="Failed to update session")
@@ -369,31 +356,18 @@ async def archive_session(
 ) -> SessionResponse:
     """Archive a session by setting is_active to false.
 
-    Called when a new session is started or when user explicitly starts fresh.
-
-    Args:
-        current_user: The authenticated user.
-        session_id: The session ID.
-
-    Returns:
-        The archived session.
-
-    Raises:
-        HTTPException: If session not found.
+    Always enforces user_id ownership guard.
     """
     db = get_supabase_client()
 
-    result = (
-        db.table("user_sessions")
-        .update(
-            {
-                "is_active": False,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
-        )
-        .eq("id", session_id)
-        .eq("user_id", current_user.id)
-        .execute()
+    result = _update_by_pk(
+        db,
+        session_id,
+        current_user.id,
+        {
+            "is_active": False,
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
     )
 
     if not result or not result.data:
@@ -414,17 +388,7 @@ async def list_sessions(
     offset: int = 0,
     include_archived: bool = False,
 ) -> SessionListResponse:
-    """List sessions for the current user.
-
-    Args:
-        current_user: The authenticated user.
-        limit: Maximum number of sessions to return.
-        offset: Number of sessions to skip.
-        include_archived: Whether to include archived sessions.
-
-    Returns:
-        List of sessions.
-    """
+    """List sessions for the current user."""
     db = get_supabase_client()
 
     query = db.table("user_sessions").select("*").eq("user_id", current_user.id)
@@ -434,15 +398,15 @@ async def list_sessions(
 
     result = query.order("created_at", desc=True).limit(limit).offset(offset).execute()
 
-    # Get total count
-    count_query = db.table("user_sessions").select("id", count="exact").eq("user_id", current_user.id)
+    # Get total count — use '*' which always works regardless of PK column name
+    count_query = db.table("user_sessions").select("*", count="exact").eq("user_id", current_user.id)
     if not include_archived:
         count_query = count_query.eq("is_active", True)
     count_result = count_query.execute()
 
-    total = count_result.count if hasattr(count_result, "count") and count_result.count else len(result.data)
+    total = count_result.count if hasattr(count_result, "count") and count_result.count else len(result.data or [])
 
     return SessionListResponse(
-        sessions=[_row_to_response(row) for row in result.data],
+        sessions=[_row_to_response(row) for row in (result.data or [])],
         total=total,
     )

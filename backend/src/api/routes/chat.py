@@ -366,6 +366,28 @@ async def chat_stream(
     )
 
 
+# --- Route aliases for frontend compatibility ---
+# Frontend may call /chat/message and /chat/message/stream instead of /chat and /chat/stream.
+
+
+@router.post("/message", response_model=ChatResponse)
+async def chat_message_alias(
+    current_user: CurrentUser,
+    request: ChatRequest,
+) -> ChatResponse:
+    """Alias for POST /chat — frontend compat route."""
+    return await chat(current_user=current_user, request=request)
+
+
+@router.post("/message/stream")
+async def chat_message_stream_alias(
+    current_user: CurrentUser,
+    request: ChatRequest,
+) -> StreamingResponse:
+    """Alias for POST /chat/stream — frontend compat route."""
+    return await chat_stream(current_user=current_user, request=request)
+
+
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
     current_user: CurrentUser,

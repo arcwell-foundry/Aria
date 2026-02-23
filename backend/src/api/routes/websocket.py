@@ -43,6 +43,7 @@ async def websocket_endpoint(
     user_id: str,
     token: str | None = None,
     session_id: str | None = None,
+    session: str | None = None,
 ) -> None:
     """WebSocket endpoint for real-time ARIA communication.
 
@@ -51,19 +52,23 @@ async def websocket_endpoint(
         user_id: User ID from URL path.
         token: JWT token for authentication (query param).
         session_id: Optional session ID for session binding (query param).
+        session: Alias for session_id (frontend compat).
     """
+    # Accept both ?session_id=X and ?session=X
+    resolved_session_id = session_id or session
+
     # Require token
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Authenticate
+    # Authenticate — user_id comes from JWT, not from client params
     user = await _authenticate_ws_token(token)
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Verify user_id matches token
+    # Verify user_id matches token (prevents impersonation)
     if user.id != user_id:
         logger.warning(
             "WebSocket user_id mismatch",
@@ -74,10 +79,11 @@ async def websocket_endpoint(
 
     # Accept connection
     await websocket.accept()
-    await ws_manager.connect(user_id, websocket, session_id=session_id)
+    await ws_manager.connect(user_id, websocket, session_id=resolved_session_id)
+    logger.info("WS connected: user=%s session=%s", user_id, resolved_session_id)
 
     # Send connected confirmation
-    connected_event = ConnectedEvent(user_id=user_id, session_id=session_id)
+    connected_event = ConnectedEvent(user_id=user_id, session_id=resolved_session_id)
     try:
         await websocket.send_json(connected_event.to_ws_dict())
     except Exception:
@@ -91,6 +97,13 @@ async def websocket_endpoint(
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # Handle raw "ping" string (not JSON-wrapped)
+            if raw.strip() == "ping":
+                pong = PongEvent()
+                await websocket.send_json(pong.to_ws_dict())
+                continue
+
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -98,7 +111,7 @@ async def websocket_endpoint(
 
             msg_type = data.get("type")
 
-            if msg_type == "ping" or msg_type == "heartbeat":
+            if msg_type in ("ping", "heartbeat"):
                 pong = PongEvent()
                 await websocket.send_json(pong.to_ws_dict())
 
@@ -129,7 +142,7 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         logger.info(
             "WebSocket client disconnected",
-            extra={"user_id": user_id, "session_id": session_id},
+            extra={"user_id": user_id, "session_id": resolved_session_id},
         )
     except Exception as e:
         logger.error(
@@ -490,3 +503,20 @@ async def _handle_undo_request(
         )
     except Exception as e:
         logger.warning("Undo request failed: %s", e)
+
+
+@router.get("/ws/health", tags=["system"])
+async def ws_health() -> dict[str, Any]:
+    """WebSocket subsystem health check.
+
+    Returns connection statistics scoped by user count (not user IDs,
+    to avoid leaking tenant information to unauthenticated callers).
+    """
+    stats = ws_manager.get_connection_stats()
+    return {
+        "websocket": "available",
+        "active_connections": {
+            "total_users": stats["total_users"],
+            "total_sockets": stats["total_connections"],
+        },
+    }
