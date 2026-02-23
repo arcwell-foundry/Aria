@@ -2525,7 +2525,8 @@ class GoalExecutionService:
         """Process an agent's execution result.
 
         Stores the execution, submits actions to the queue with
-        appropriate risk levels, and publishes completion events.
+        appropriate risk levels, publishes completion events, and sends
+        integration requests if the agent detected a missing connection.
 
         Args:
             user_id: The user ID.
@@ -2536,6 +2537,25 @@ class GoalExecutionService:
         """
         event_bus = EventBus.get_instance()
         content = result.get("content", {})
+
+        # Check for missing integration and send conversational request
+        try:
+            from src.services.integration_request import (
+                IntegrationRequestService,
+                check_agent_result_for_missing_integration,
+            )
+
+            missing = check_agent_result_for_missing_integration(result)
+            if missing:
+                svc = IntegrationRequestService()
+                await svc.send_integration_request(
+                    user_id=user_id,
+                    integration_category=missing,
+                    agent_name=agent_type,
+                    task_description=task.get("title", "complete this task"),
+                )
+        except Exception:
+            logger.debug("Integration request check failed", exc_info=True)
 
         # Publish agent completion event
         await event_bus.publish(
@@ -2959,6 +2979,64 @@ class GoalExecutionService:
                 data={"retrospective": retro},
             )
         )
+
+        # Send WebSocket completion notification to user
+        try:
+            goal_title = ""
+            try:
+                goal_result = (
+                    self._db.table("goals")
+                    .select("title")
+                    .eq("id", goal_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if goal_result and goal_result.data:
+                    goal_title = goal_result.data.get("title", "")
+            except Exception:
+                pass
+
+            summary = (
+                retro.get("summary", "") if retro else f"Goal '{goal_title}' completed."
+            )
+            message = (
+                f"Your goal is complete: {goal_title}. {summary}"
+                if goal_title
+                else f"Goal completed. {summary}"
+            )
+
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=message,
+                rich_content=[
+                    {
+                        "type": "goal_retrospective",
+                        "data": {
+                            "goal_id": goal_id,
+                            "retrospective": retro,
+                        },
+                    }
+                ]
+                if retro
+                else [],
+                suggestions=["Show details", "What's next?"],
+            )
+
+            await ws_manager.send_execution_complete(
+                user_id=user_id,
+                goal_id=goal_id,
+                title=goal_title,
+                success=True,
+                steps_completed=1,
+                steps_total=1,
+                summary=summary,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to send goal completion WS notification",
+                extra={"goal_id": goal_id},
+                exc_info=True,
+            )
 
         logger.info(
             "Goal completed with retrospective",

@@ -303,6 +303,41 @@ class BaseAgent(ABC):
             )
         return await self._call_tool(tool_name, **kwargs)
 
+    async def tracked_api_call(
+        self,
+        api_type: str,
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute an external API call with per-user usage tracking.
+
+        Wraps Exa searches, Composio actions, PubMed queries, etc. with
+        rate limiting and usage recording. Use this instead of calling
+        external APIs directly.
+
+        Args:
+            api_type: The API type (exa, composio, pubmed, fda, etc.).
+            func: The async function to execute.
+            *args: Positional arguments for func.
+            **kwargs: Keyword arguments for func.
+
+        Returns:
+            The result of func(*args, **kwargs).
+
+        Raises:
+            RateLimitExceeded: If the user has exceeded their daily limit.
+        """
+        try:
+            from src.services.usage_tracker import track_and_execute
+
+            return await track_and_execute(
+                self.user_id, api_type, func, *args, **kwargs
+            )
+        except ImportError:
+            # Fallback: execute without tracking if module unavailable
+            return await func(*args, **kwargs)
+
     @abstractmethod
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the agent's primary task.

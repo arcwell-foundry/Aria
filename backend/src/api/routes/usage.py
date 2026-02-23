@@ -1,9 +1,11 @@
 """Usage tracking API routes for Cost Governor.
 
-Provides user-facing endpoints to check budget status and usage history.
+Provides user-facing endpoints to check budget status and usage history,
+including both LLM token usage and external API usage.
 """
 
 import logging
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Query, status
@@ -64,3 +66,27 @@ async def get_my_budget(
     """
     governor = _get_governor()
     return await governor.check_budget(current_user.id)
+
+
+@router.get("/me/api", status_code=status.HTTP_200_OK)
+async def get_my_api_usage(
+    current_user: CurrentUser,
+    target_date: str | None = Query(None, description="Date in YYYY-MM-DD format (defaults to today)"),
+) -> dict[str, Any]:
+    """Get current user's external API usage (Exa, Composio, etc.).
+
+    Args:
+        current_user: The authenticated user.
+        target_date: Optional date to query.
+
+    Returns:
+        List of API usage records by type for the given date.
+    """
+    from src.services.usage_tracker import get_user_api_usage
+
+    query_date = date.fromisoformat(target_date) if target_date else None
+    usage = await get_user_api_usage(current_user.id, target_date=query_date)
+    return {
+        "date": (query_date or date.today()).isoformat(),
+        "api_usage": usage,
+    }

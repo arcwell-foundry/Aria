@@ -93,6 +93,9 @@ async def websocket_endpoint(
     # Drain login message queue (deliver HIGH-priority insights queued while offline)
     await _drain_login_queue(user_id)
 
+    # Generate proactive return greeting if user was away > 1 hour
+    await _send_return_greeting(user_id)
+
     # Message loop
     try:
         while True:
@@ -214,6 +217,37 @@ async def _drain_login_queue(user_id: str) -> None:
             user_id,
             exc_info=True,
         )
+
+
+async def _send_return_greeting(user_id: str) -> None:
+    """Generate and send a personalized greeting if user was away > 1 hour.
+
+    Checks the ConnectionManager's last_disconnect timestamp and generates
+    a personalized greeting via ReturnGreetingService if the absence is
+    significant enough.
+    """
+    try:
+        from src.services.return_greeting import MIN_ABSENCE_SECONDS, ReturnGreetingService
+
+        absence = ws_manager.get_absence_duration_seconds(user_id)
+        if absence is None or absence < MIN_ABSENCE_SECONDS:
+            return
+
+        service = ReturnGreetingService()
+        greeting = await service.generate_return_greeting(user_id, absence)
+        if greeting:
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=greeting,
+                suggestions=["Show me updates", "What needs my attention?"],
+            )
+            logger.info(
+                "Return greeting sent",
+                extra={"user_id": user_id, "absence_hours": round(absence / 3600, 1)},
+            )
+    except Exception:
+        # Return greeting is best-effort — don't break the WebSocket connection
+        logger.debug("Return greeting failed for user %s", user_id, exc_info=True)
 
 
 async def _handle_user_message(

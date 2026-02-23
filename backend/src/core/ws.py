@@ -4,6 +4,7 @@ Per-user connection tracking. No global broadcast — multi-tenant isolation.
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import WebSocket
@@ -37,6 +38,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         """Initialize with empty connection registry."""
         self._connections: dict[str, set[WebSocket]] = {}
+        self._last_disconnect: dict[str, datetime] = {}
 
     async def connect(
         self,
@@ -51,6 +53,7 @@ class ConnectionManager:
             websocket: The WebSocket connection to track.
             session_id: Optional session ID for session binding.
         """
+        was_offline = not self.is_connected(user_id)
         if user_id not in self._connections:
             self._connections[user_id] = set()
         self._connections[user_id].add(websocket)
@@ -60,11 +63,14 @@ class ConnectionManager:
                 "user_id": user_id,
                 "session_id": session_id,
                 "total_connections": len(self._connections[user_id]),
+                "was_offline": was_offline,
             },
         )
 
     def disconnect(self, user_id: str, websocket: WebSocket) -> None:
         """Remove a WebSocket connection for a user.
+
+        Tracks disconnect time when the last connection for a user closes.
 
         Args:
             user_id: The user's ID.
@@ -74,6 +80,7 @@ class ConnectionManager:
         connections.discard(websocket)
         if not connections and user_id in self._connections:
             del self._connections[user_id]
+            self._last_disconnect[user_id] = datetime.now(UTC)
         logger.info(
             "WebSocket disconnected",
             extra={
@@ -92,6 +99,20 @@ class ConnectionManager:
             True if user has at least one active connection.
         """
         return len(self._connections.get(user_id, set())) > 0
+
+    def get_absence_duration_seconds(self, user_id: str) -> float | None:
+        """Get how long a user has been disconnected, in seconds.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Seconds since last disconnect, or None if no disconnect recorded.
+        """
+        last_dc = self._last_disconnect.get(user_id)
+        if last_dc is None:
+            return None
+        return (datetime.now(UTC) - last_dc).total_seconds()
 
     async def send_to_user(self, user_id: str, event: WSEvent) -> None:
         """Send an event to all of a user's active connections.
