@@ -33,6 +33,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '@/components/primitives/Avatar';
 import { wsManager } from '@/core/WebSocketManager';
 import { useAutonomyStore } from '@/stores/autonomyStore';
+import { useActionQueueStore } from '@/stores/actionQueueStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -228,10 +229,18 @@ export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
     };
   }, []);
 
-  // Merge prop badges with event-driven badges (event badges take precedence)
+  // Read WS-pushed pending action count for immediate badge updates
+  const wsPendingCount = useActionQueueStore((s) => s.pendingActions.length);
+
+  // Merge prop badges with event-driven badges and WS pending count
   const mergedBadges = useMemo<Partial<Record<SidebarItem, number>>>(
-    () => ({ ...badges, ...eventBadges }),
-    [badges, eventBadges],
+    () => ({
+      ...badges,
+      ...eventBadges,
+      // WS pending count overrides polling-based count when > 0
+      ...(wsPendingCount > 0 ? { actions: wsPendingCount } : {}),
+    }),
+    [badges, eventBadges, wsPendingCount],
   );
 
   // ---------------------------------------------------------------------------

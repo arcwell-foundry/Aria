@@ -22,6 +22,12 @@ import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
 import { useWebSocketStatus } from '@/hooks/useWebSocketStatus';
 import { UrgentEmailNotification } from '@/components/notifications/UrgentEmailNotification';
+import { useDashboardEvents } from '@/hooks/useDashboardEvents';
+import { useExecutionProgress } from '@/hooks/useExecutionProgress';
+import { UndoToastContainer } from '@/components/execution/UndoToast';
+import { wsManager } from '@/core/WebSocketManager';
+import { useSession } from '@/contexts/SessionContext';
+import { useAuth } from '@/hooks/useAuth';
 
 /**
  * Routes where the right IntelPanel should be hidden.
@@ -40,9 +46,27 @@ export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { isConnected } = useWebSocketStatus();
+  const { session } = useSession();
+  const { user } = useAuth();
   const setIntelPanelVisible = useNavigationStore(
     (s: NavigationState) => s.setIntelPanelVisible,
   );
+
+  // Lift WebSocket connection to AppShell so it persists across all routes
+  useEffect(() => {
+    if (!user?.id || !session?.id) return;
+
+    wsManager.connect(user.id, session.id);
+
+    return () => {
+      wsManager.disconnect();
+    };
+  }, [user?.id, session?.id]);
+
+  // Wire dashboard WebSocket events to stores and React Query caches
+  useDashboardEvents();
+  // Wire execution step events to executionStore
+  useExecutionProgress();
 
   useEffect(() => {
     modalityController.setNavigate(navigate);
@@ -86,6 +110,9 @@ export function AppShell() {
 
       {/* Urgent email notifications — top-right overlay */}
       <UrgentEmailNotification />
+
+      {/* Undo toast — persists across all routes */}
+      <UndoToastContainer />
 
       {/* Floating PiP avatar — portaled to document.body */}
       <CompactAvatar />

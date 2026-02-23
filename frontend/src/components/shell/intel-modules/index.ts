@@ -17,3 +17,4 @@ export { JarvisInsightsModule } from './JarvisInsightsModule';
 export { TerritoryForecastModule } from './TerritoryForecastModule';
 export { StakeholderMapModule } from './StakeholderMapModule';
 export { DocumentIntelModule } from './DocumentIntelModule';
+export { PendingApprovalsModule } from './PendingApprovalsModule';

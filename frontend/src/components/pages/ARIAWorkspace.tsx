@@ -9,11 +9,8 @@ import { wsManager } from '@/core/WebSocketManager';
 import { modalityController } from '@/core/ModalityController';
 import { WS_EVENTS } from '@/types/chat';
 import type { AriaMessagePayload, AriaThinkingPayload, StreamErrorPayload, RichContent, UICommand } from '@/types/chat';
-import { useSession } from '@/contexts/SessionContext';
-import { useAuth } from '@/hooks/useAuth';
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
-import { useExecutionProgress } from '@/hooks/useExecutionProgress';
 import { useBriefingStatus } from '@/hooks/useBriefingStatus';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
@@ -34,11 +31,8 @@ export function ARIAWorkspace() {
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const setActiveConversation = useConversationStore((s) => s.setActiveConversation);
 
-  const { session } = useSession();
-  const { user } = useAuth();
   useUICommands();
   useEmotionDetection();
-  useExecutionProgress();
 
   const streamingIdRef = useRef<string | null>(null);
   const conversationLoadedRef = useRef(false);
@@ -60,17 +54,6 @@ export function ARIAWorkspace() {
     summaryData,
     clearSummaryData,
   } = useBriefingStatus();
-
-  // Connect WebSocket on mount
-  useEffect(() => {
-    if (!user?.id || !session?.id) return;
-
-    wsManager.connect(user.id, session.id);
-
-    return () => {
-      wsManager.disconnect();
-    };
-  }, [user?.id, session?.id]);
 
   // Load most recent conversation on mount (hydrates first conversation after onboarding)
   // IMPORTANT: Load BEFORE briefing injection to avoid race condition

@@ -38,6 +38,7 @@ import {
   TerritoryForecastModule,
   StakeholderMapModule,
   DocumentIntelModule,
+  PendingApprovalsModule,
 } from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
@@ -126,6 +127,7 @@ function getPanelConfig(pathname: string): PanelConfig {
     return {
       title: 'Agent Status',
       modules: [
+        <PendingApprovalsModule key="pending" />,
         <AgentStatusModule key="agents" />,
         <NextBestActionModule key="action" />,
       ],
@@ -137,6 +139,7 @@ function getPanelConfig(pathname: string): PanelConfig {
     return {
       title: 'Agent Status',
       modules: [
+        <PendingApprovalsModule key="pending" />,
         <AgentStatusModule key="agents" />,
         <NextBestActionModule key="action" />,
       ],
@@ -159,6 +162,7 @@ function getPanelConfig(pathname: string): PanelConfig {
   return {
     title: 'ARIA Intelligence',
     modules: [
+      <PendingApprovalsModule key="pending" />,
       <JarvisInsightsModule key="jarvis" />,
       <AlertsModule key="alerts" />,
       <DocumentIntelModule key="documents" />,

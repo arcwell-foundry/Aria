@@ -65,3 +65,29 @@ export interface ExecutionCompletePayload {
   steps_total: number;
   summary?: string;
 }
+
+// --- Additional WebSocket Payloads ---
+
+export interface ProgressUpdatePayload {
+  goal_id: string;
+  progress: number;       // 0-100
+  status: string;
+  agent_name: string | null;
+  message: string | null;
+}
+
+export interface ActionPendingPayload {
+  action_id: string;
+  title: string;
+  agent: string;
+  risk_level: string;
+  description: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface SignalPayload {
+  signal_type: string;
+  title: string;
+  severity: string;
+  data: Record<string, unknown>;
+}

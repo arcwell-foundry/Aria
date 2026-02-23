@@ -9,6 +9,7 @@ import {
   undoAction,
   type ActionStatus,
 } from "@/api/actionQueue";
+import { useActionQueueStore } from "@/stores/actionQueueStore";
 
 // Query keys
 export const actionKeys = {
@@ -56,6 +57,7 @@ export function useApproveAction() {
       queryClient.setQueryData(actionKeys.detail(updatedAction.id), updatedAction);
       queryClient.invalidateQueries({ queryKey: actionKeys.lists() });
       queryClient.invalidateQueries({ queryKey: actionKeys.pendingCount() });
+      useActionQueueStore.getState().removePending(updatedAction.id);
     },
   });
 }
@@ -71,6 +73,7 @@ export function useRejectAction() {
       queryClient.setQueryData(actionKeys.detail(updatedAction.id), updatedAction);
       queryClient.invalidateQueries({ queryKey: actionKeys.lists() });
       queryClient.invalidateQueries({ queryKey: actionKeys.pendingCount() });
+      useActionQueueStore.getState().removePending(updatedAction.id);
     },
   });
 }
@@ -81,9 +84,13 @@ export function useBatchApprove() {
 
   return useMutation({
     mutationFn: (actionIds: string[]) => batchApproveActions(actionIds),
-    onSuccess: () => {
+    onSuccess: (_data, actionIds) => {
       queryClient.invalidateQueries({ queryKey: actionKeys.lists() });
       queryClient.invalidateQueries({ queryKey: actionKeys.pendingCount() });
+      const store = useActionQueueStore.getState();
+      for (const id of actionIds) {
+        store.removePending(id);
+      }
     },
   });
 }

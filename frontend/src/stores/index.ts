@@ -14,3 +14,5 @@ export { useModalityStore, type ModalityState } from './modalityStore';
 export { useNavigationStore, type NavigationState } from './navigationStore';
 export { useNotificationsStore, type NotificationsState, type Notification } from './notificationsStore';
 export { usePerceptionStore, type PerceptionState, type EmotionReading, type DetectedEmotion } from './perceptionStore';
+export { useAgentStatusStore, type AgentStatusState } from './agentStatusStore';
+export { useActionQueueStore, type ActionQueueState } from './actionQueueStore';
