@@ -959,3 +959,98 @@ async def get_user_usage(
         "budget": budget.model_dump(),
         "history": history,
     }
+
+
+# --- Goal Execution Trigger (OODA kickstart) ---
+
+
+class TriggerGoalExecutionRequest(BaseModel):
+    """Request to trigger goal execution."""
+
+    goal_id: str | None = Field(None, description="Specific goal ID to execute, or omit for all stalled goals")
+
+
+@router.post(
+    "/trigger-goal-execution",
+    status_code=status.HTTP_200_OK,
+)
+async def trigger_goal_execution(
+    _current_user: AdminUser,
+    data: TriggerGoalExecutionRequest | None = None,
+) -> dict[str, Any]:
+    """Trigger execution for stalled active goals.
+
+    Backfills missing goal_agents rows and kickstarts goals with 0% progress.
+    If goal_id is provided, only that goal is processed. Otherwise, all stalled
+    active goals are processed.
+
+    Args:
+        _current_user: Authenticated admin user.
+        data: Optional request with specific goal_id.
+
+    Returns:
+        Execution status and results.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.goal_execution import GoalExecutionService
+
+    db = SupabaseClient.get_client()
+    execution_service = GoalExecutionService()
+
+    goal_id = data.goal_id if data else None
+
+    if goal_id:
+        # Execute a specific goal
+        goal_result = (
+            db.table("goals")
+            .select("id, user_id, title, status, progress")
+            .eq("id", goal_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not goal_result.data:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Goal {goal_id} not found",
+            )
+
+        goal = goal_result.data
+        user_id = goal["user_id"]
+
+        # Backfill goal_agents if missing
+        agents_result = (
+            db.table("goal_agents")
+            .select("id")
+            .eq("goal_id", goal_id)
+            .execute()
+        )
+        if not (agents_result.data or []):
+            agent_type = goal.get("config", {}).get("agent_type", "analyst") if isinstance(goal.get("config"), dict) else "analyst"
+            db.table("goal_agents").insert(
+                {
+                    "goal_id": goal_id,
+                    "agent_type": agent_type,
+                    "agent_config": {"source": "admin_trigger"},
+                    "status": "pending",
+                }
+            ).execute()
+
+        result = await execution_service.execute_goal_sync(goal_id, user_id)
+        return {
+            "status": "complete",
+            "goals_processed": 1,
+            "results": [result],
+        }
+
+    else:
+        # Run the stalled goal kickstart for all goals
+        from src.services.scheduler import _run_stalled_goal_kickstart
+
+        await _run_stalled_goal_kickstart()
+        return {
+            "status": "complete",
+            "message": "Stalled goal kickstart executed for all active goals",
+        }

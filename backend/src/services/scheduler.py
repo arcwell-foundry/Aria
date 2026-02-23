@@ -256,14 +256,20 @@ async def _run_ooda_goal_checks() -> None:
                 working = WorkingMemory(user_id=user_id)
 
                 # Create agent executor callback to bridge OODA → GoalExecutionService
+                # OODALoop.act() calls: agent_executor(action=, agent=, parameters=, goal=,
+                #   capability_token=, approval_level=)
                 def _make_executor(uid: str):  # noqa: E301
                     async def _executor(
-                        action: str, agent: str, parameters: dict, goal_data: dict
+                        action: str,
+                        agent: str,
+                        parameters: dict,
+                        goal: dict,
+                        **kwargs: Any,  # absorbs capability_token, approval_level
                     ) -> dict:
                         try:
                             result = await execution_service._execute_agent(
                                 user_id=uid,
-                                goal=goal_data,
+                                goal=goal,
                                 agent_type=agent or "analyst",
                                 context={"action": action, **parameters},
                             )
@@ -273,6 +279,16 @@ async def _run_ooda_goal_checks() -> None:
                                 else {"success": True, "result": result}
                             )
                         except Exception as exc:
+                            logger.error(
+                                "Agent executor failed",
+                                extra={
+                                    "user_id": uid,
+                                    "agent": agent,
+                                    "action": action,
+                                    "error": str(exc),
+                                },
+                                exc_info=True,
+                            )
                             return {"success": False, "error": str(exc)}
 
                     return _executor
@@ -876,6 +892,135 @@ async def _run_draft_staleness_check() -> None:
         logger.exception("Draft staleness check scheduler run failed")
 
 
+async def _run_stalled_goal_kickstart() -> None:
+    """Backfill missing goal_agents and kickstart active goals with 0% progress.
+
+    For each active goal:
+    1. Check if it has any goal_agents rows — if not, insert one using config.agent_type
+    2. If progress is 0 and no agent_executions exist, trigger synchronous execution
+    3. Record goal_updates and send WebSocket events
+    """
+    try:
+        from src.core.ws import ws_manager
+        from src.db.supabase import SupabaseClient
+        from src.services.goal_execution import GoalExecutionService
+
+        db = SupabaseClient.get_client()
+
+        # Find active goals
+        result = (
+            db.table("goals")
+            .select("id, user_id, title, description, goal_type, config, progress")
+            .eq("status", "active")
+            .execute()
+        )
+
+        goals = result.data or []
+        if not goals:
+            return
+
+        logger.info("Stalled goal kickstart: checking %d active goals", len(goals))
+
+        execution_service = GoalExecutionService()
+        kickstarted = 0
+
+        for goal in goals:
+            goal_id = goal["id"]
+            user_id = goal["user_id"]
+
+            try:
+                # Check if goal has goal_agents rows
+                agents_result = (
+                    db.table("goal_agents")
+                    .select("id, agent_type")
+                    .eq("goal_id", goal_id)
+                    .execute()
+                )
+                existing_agents = agents_result.data or []
+
+                # Backfill missing goal_agents
+                if not existing_agents:
+                    agent_type = goal.get("config", {}).get("agent_type", "analyst")
+                    logger.info(
+                        "Backfilling goal_agents for stalled goal",
+                        extra={
+                            "goal_id": goal_id,
+                            "user_id": user_id,
+                            "agent_type": agent_type,
+                        },
+                    )
+                    try:
+                        db.table("goal_agents").insert(
+                            {
+                                "goal_id": goal_id,
+                                "agent_type": agent_type,
+                                "agent_config": {"source": "stalled_goal_kickstart"},
+                                "status": "pending",
+                            }
+                        ).execute()
+                    except Exception:
+                        logger.warning(
+                            "Failed to backfill goal_agents",
+                            extra={"goal_id": goal_id},
+                            exc_info=True,
+                        )
+
+                # Check if goal has any executions already
+                exec_result = (
+                    db.table("agent_executions")
+                    .select("id", count="exact")
+                    .eq("goal_agent_id", existing_agents[0]["id"] if existing_agents else "none")
+                    .limit(1)
+                    .execute()
+                )
+                has_executions = bool(exec_result.data)
+
+                # Only kickstart goals with 0 progress and no executions
+                progress = goal.get("progress") or 0
+                if progress == 0 and not has_executions:
+                    logger.info(
+                        "Kickstarting stalled goal execution",
+                        extra={
+                            "goal_id": goal_id,
+                            "user_id": user_id,
+                            "title": goal.get("title"),
+                        },
+                    )
+
+                    try:
+                        await ws_manager.send_progress_update(
+                            user_id=user_id,
+                            goal_id=goal_id,
+                            progress=0,
+                            status="active",
+                            message=f"Kickstarting execution: {goal.get('title', '')}",
+                        )
+                    except Exception:
+                        pass  # User may not be connected
+
+                    try:
+                        await execution_service.execute_goal_sync(goal_id, user_id)
+                        kickstarted += 1
+                    except Exception:
+                        logger.warning(
+                            "Stalled goal kickstart execution failed",
+                            extra={"goal_id": goal_id},
+                            exc_info=True,
+                        )
+
+            except Exception:
+                logger.warning(
+                    "Stalled goal kickstart failed for goal %s",
+                    goal_id,
+                    exc_info=True,
+                )
+
+        logger.info("Stalled goal kickstart complete: %d goals kickstarted", kickstarted)
+
+    except Exception:
+        logger.exception("Stalled goal kickstart scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -918,6 +1063,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
             id="ooda_goal_monitoring",
             name="OODA goal monitoring",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_stalled_goal_kickstart,
+            trigger=CronTrigger(minute="*/10"),  # Every 10 minutes
+            id="stalled_goal_kickstart",
+            name="Stalled goal backfill and kickstart",
             replace_existing=True,
         )
         _scheduler.add_job(
