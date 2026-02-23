@@ -1350,12 +1350,19 @@ this wasn't written by them. Do NOT sound like an AI assistant.""")
         if context.recipient_style and context.recipient_style.exists:
             rs = context.recipient_style
             recipient_label = email.sender_name or email.sender_email
+
+            # Helper to avoid literal "None" strings in prompt (BL-7)
+            def _clean_field(value: str | None, fallback: str) -> str:
+                if value is None or value == "None" or value == "":
+                    return fallback
+                return value
+
             style_lines = [
                 f"## How {user_name} writes to {recipient_label}",
-                f"- Greeting style: {rs.greeting_style or 'Use global style above'}",
-                f"- Signoff style: {rs.signoff_style or 'Use global style above'}",
+                f"- Greeting style: {_clean_field(rs.greeting_style, 'Use global style above')}",
+                f"- Signoff style: {_clean_field(rs.signoff_style, 'Use global style above')}",
                 f"- Formality: {rs.formality_level:.1f}/1.0",
-                f"- Tone: {rs.tone}",
+                f"- Tone: {_clean_field(rs.tone, 'balanced')}",
                 f"- Uses emoji: {'Yes' if rs.uses_emoji else 'No'}",
                 f"- Emails exchanged: {rs.email_count}",
             ]

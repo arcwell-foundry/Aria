@@ -32,7 +32,7 @@ class ContactHealth:
     contact_name: str = ""
     total_emails: int = 0
     weekly_frequency: float = 0.0
-    trend: str = "stable"  # warming, stable, cooling, new
+    trend: str = "stable"  # warming, established, stable, cooling, new
     trend_detail: str = ""
     last_email_date: str | None = None
     days_since_last: int = 0
@@ -121,11 +121,12 @@ class EmailRelationshipHealth:
 
         try:
             # Get all scan log entries for this contact
+            # Use ilike for case-insensitive matching (BL-8 fix)
             result = (
                 self._db.table("email_scan_log")
                 .select("*")
                 .eq("user_id", user_id)
-                .eq("sender_email", contact_email.lower())
+                .ilike("sender_email", contact_email.lower())
                 .order("scanned_at", desc=True)
                 .execute()
             )
@@ -230,9 +231,14 @@ class EmailRelationshipHealth:
         Returns:
             Tuple of (trend, detail_message).
         """
-        # New contact: very few emails
-        if health.total_emails <= 2:
+        # New contact: only 1 email or less (BL-8: changed from <= 2)
+        # 2+ emails means at least an established/stable relationship
+        if health.total_emails <= 1:
             return "new", f"Just {health.total_emails} email(s) — relationship starting"
+
+        # Established: 2-3 emails but no clear pattern yet
+        if health.total_emails <= 3:
+            return "established", f"{health.total_emails} emails exchanged — relationship established"
 
         # Cooling: no recent emails but had prior activity
         if health.recent_count == 0 and health.prior_count >= self.COOLING_PRIOR_MIN:
@@ -308,6 +314,8 @@ class EmailRelationshipHealth:
         # Trend component (up to 30 points, can go negative)
         if health.trend == "warming":
             score += 30
+        elif health.trend == "established":
+            score += 10  # Positive but not as high as warming
         elif health.trend == "stable" and health.weekly_frequency >= 1:
             score += 15
         elif health.trend == "cooling":
