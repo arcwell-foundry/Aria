@@ -73,37 +73,51 @@ export function ARIAWorkspace() {
   }, [user?.id, session?.id]);
 
   // Load most recent conversation on mount (hydrates first conversation after onboarding)
+  // IMPORTANT: Load BEFORE briefing injection to avoid race condition
   useEffect(() => {
     if (conversationLoadedRef.current) return;
-    const messages = useConversationStore.getState().messages;
-    if (messages.length > 0) return;
-
+    // Don't skip if messages exist - briefing may have loaded while we fetch
     conversationLoadedRef.current = true;
 
     listConversations()
       .then((conversations) => {
+        console.log('[ARIAWorkspace] Loaded conversations:', conversations.length);
         if (!conversations.length) return;
         // Load the most recent conversation
         const latest = conversations[0];
+        console.log('[ARIAWorkspace] Loading latest conversation:', latest.id);
         return getConversation(latest.id).then((chatMessages) => {
+          console.log('[ARIAWorkspace] Loaded messages:', chatMessages.length);
           if (!chatMessages.length) return;
+
           const store = useConversationStore.getState();
-          // Only load if store is still empty (avoid race with WebSocket)
-          if (store.messages.length > 0) return;
+
+          // Set active conversation
           store.setActiveConversation(latest.id);
-          for (const msg of chatMessages) {
-            store.addMessage({
-              role: msg.role === 'assistant' ? 'aria' : 'user',
-              content: msg.content,
-              rich_content: [],
-              ui_commands: [],
-              suggestions: [],
-            });
-          }
+
+          // Check if we already have these messages (avoid duplicates)
+          const existingIds = new Set(store.messages.map(m => m.id));
+          const messagesToAdd = chatMessages.filter(msg => !existingIds.has(msg.id));
+
+          // Prepend conversation messages BEFORE any briefing
+          // Use setMessages to replace the entire array with proper ordering
+          const historicMessages = messagesToAdd.map(msg => ({
+            id: msg.id,
+            role: msg.role === 'assistant' ? 'aria' as const : 'user' as const,
+            content: msg.content,
+            rich_content: [] as const,
+            ui_commands: [] as const,
+            suggestions: [] as const,
+            timestamp: msg.created_at,
+          }));
+
+          // Prepend historic messages, keep existing messages (like briefing) at the end
+          store.setMessages([...historicMessages, ...store.messages]);
+          console.log('[ARIAWorkspace] Conversation restored:', historicMessages.length, 'messages');
         });
       })
-      .catch(() => {
-        // Silently fail — workspace will just be empty
+      .catch((error) => {
+        console.warn('[ARIAWorkspace] Failed to load conversation history:', error);
       });
   }, []);
 

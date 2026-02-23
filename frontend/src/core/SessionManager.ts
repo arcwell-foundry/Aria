@@ -11,7 +11,39 @@ export interface UnifiedSession {
   metadata: Record<string, unknown>;
 }
 
+// Backend response format (session_data is nested)
+interface BackendSessionResponse {
+  id: string;
+  user_id: string;
+  session_data: {
+    current_route: string;
+    active_modality: string;
+    conversation_thread: string[];
+    metadata: Record<string, unknown>;
+  };
+  is_active: boolean;
+  day_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const SYNC_INTERVAL_MS = 30_000;
+
+/**
+ * Convert backend session response to frontend UnifiedSession format.
+ */
+function toUnifiedSession(backend: BackendSessionResponse): UnifiedSession {
+  return {
+    id: backend.id,
+    user_id: backend.user_id,
+    started_at: backend.created_at,
+    ended_at: null,
+    current_route: backend.session_data.current_route,
+    active_modality: backend.session_data.active_modality as "text" | "voice" | "avatar",
+    conversation_thread: backend.session_data.conversation_thread,
+    metadata: backend.session_data.metadata,
+  };
+}
 
 /**
  * Manages session lifecycle via REST API calls.
@@ -28,22 +60,15 @@ export class SessionManager {
    * unreachable, returns a local-only session.
    */
   async initialize(): Promise<UnifiedSession> {
-    // TODO: Re-enable API call when backend /sessions endpoints exist
-    return this.createLocalSession();
-  }
-
-  /**
-   * Create a new session on the backend.
-   */
-  async createSession(): Promise<UnifiedSession> {
     try {
-      const response = await apiClient.post<UnifiedSession>("/sessions", {
-        current_route: "/",
-        active_modality: "text",
-        conversation_thread: [],
-        metadata: {},
-      });
-      return response.data;
+      // First, try to get existing active session
+      const activeResponse = await apiClient.get<BackendSessionResponse | null>("/sessions/active");
+      if (activeResponse.data) {
+        return toUnifiedSession(activeResponse.data);
+      }
+
+      // No active session - create a new one
+      return await this.createSession();
     } catch {
       // Backend unreachable or endpoint doesn't exist — fall back to local
       return this.createLocalSession();
@@ -51,14 +76,30 @@ export class SessionManager {
   }
 
   /**
-   * Archive a session by setting its ended_at timestamp.
+   * Create a new session on the backend.
+   */
+  async createSession(): Promise<UnifiedSession> {
+    try {
+      const response = await apiClient.post<BackendSessionResponse>("/sessions", {
+        current_route: "/",
+        active_modality: "text",
+        conversation_thread: [],
+        metadata: {},
+      });
+      return toUnifiedSession(response.data);
+    } catch {
+      // Backend unreachable or endpoint doesn't exist — fall back to local
+      return this.createLocalSession();
+    }
+  }
+
+  /**
+   * Archive a session by calling the archive endpoint.
    * Silently ignores errors (endpoint may not exist).
    */
   async archiveSession(sessionId: string): Promise<void> {
     try {
-      await apiClient.patch(`/sessions/${sessionId}`, {
-        ended_at: new Date().toISOString(),
-      });
+      await apiClient.post(`/sessions/${sessionId}/archive`);
     } catch {
       // Silently ignore — endpoint may not exist
     }

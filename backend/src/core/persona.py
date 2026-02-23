@@ -311,6 +311,102 @@ class PersonaBuilder:
         """
         parts: list[str] = []
 
+        # 0. Basic user profile (name, company, title) - MOST IMPORTANT
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+
+            user_info_parts: list[str] = []
+
+            # Get user's profile with company info via JOIN
+            # user_profiles.id matches auth.users.id
+            profile_result = (
+                db.table("user_profiles")
+                .select("full_name, title, department, default_tone, communication_preferences, companies(name)")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if profile_result and profile_result.data:
+                name = profile_result.data.get("full_name")
+                if name:
+                    user_info_parts.append(f"Name: {name}")
+
+                title = profile_result.data.get("title")
+                if title:
+                    user_info_parts.append(f"Title: {title}")
+
+                department = profile_result.data.get("department")
+                if department:
+                    user_info_parts.append(f"Department: {department}")
+
+                # Company from joined companies table
+                company_data = profile_result.data.get("companies")
+                if company_data and isinstance(company_data, dict):
+                    company_name = company_data.get("name")
+                    if company_name:
+                        user_info_parts.append(f"Company: {company_name}")
+
+                # Default tone from user_profiles
+                default_tone = profile_result.data.get("default_tone")
+                if default_tone:
+                    user_info_parts.append(f"Preferred tone: {default_tone}")
+
+            # Also get digital_twin_profiles for additional tone/style preferences
+            twin_result = (
+                db.table("digital_twin_profiles")
+                .select("tone, writing_style, formality_level, vocabulary_patterns")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+
+            if twin_result and twin_result.data:
+                # Only add if not already set from user_profiles
+                tone = twin_result.data.get("tone")
+                if tone and "Preferred tone:" not in " ".join(user_info_parts):
+                    user_info_parts.append(f"Preferred tone: {tone}")
+                formality = twin_result.data.get("formality_level")
+                if formality:
+                    user_info_parts.append(f"Formality: {formality}")
+                writing_style = twin_result.data.get("writing_style")
+                if writing_style:
+                    user_info_parts.append(f"Writing style: {writing_style}")
+
+            if user_info_parts:
+                parts.append("## User Profile\n\n" + "\n".join(user_info_parts))
+
+        except Exception as e:
+            logger.debug("User profile unavailable for %s: %s", user_id, e)
+
+        # 0.5. Key facts from semantic memory about the user
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+            # Query memory_semantic for facts about the user
+            semantic_result = (
+                db.table("memory_semantic")
+                .select("fact, confidence")
+                .eq("user_id", user_id)
+                .order("confidence", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if semantic_result.data:
+                fact_lines = []
+                for item in semantic_result.data:
+                    conf = item.get("confidence", 1.0)
+                    conf_str = f" ({conf:.0%})" if conf < 0.9 else ""
+                    fact_lines.append(f"- {item['fact']}{conf_str}")
+                if fact_lines:
+                    parts.append("## Known Facts About User\n\n" + "\n".join(fact_lines))
+        except Exception as e:
+            logger.debug("Semantic memory unavailable for %s: %s", user_id, e)
+
         # 1. PersonalityCalibration
         try:
             from src.onboarding.personality_calibrator import PersonalityCalibrator
