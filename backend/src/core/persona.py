@@ -386,7 +386,9 @@ class PersonaBuilder:
             from src.db.supabase import get_supabase_client
 
             db = get_supabase_client()
-            # Query memory_semantic for facts about the user
+            fact_lines = []
+
+            # Query memory_semantic for facts about the user (from onboarding)
             semantic_result = (
                 db.table("memory_semantic")
                 .select("fact, confidence")
@@ -397,13 +399,31 @@ class PersonaBuilder:
             )
 
             if semantic_result.data:
-                fact_lines = []
                 for item in semantic_result.data:
                     conf = item.get("confidence", 1.0)
                     conf_str = f" ({conf:.0%})" if conf < 0.9 else ""
                     fact_lines.append(f"- {item['fact']}{conf_str}")
-                if fact_lines:
-                    parts.append("## Known Facts About User\n\n" + "\n".join(fact_lines))
+
+            # Also query semantic_facts for facts from conversations
+            structured_facts_result = (
+                db.table("semantic_facts")
+                .select("subject, predicate, object, confidence")
+                .eq("user_id", user_id)
+                .order("confidence", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if structured_facts_result.data:
+                for item in structured_facts_result.data:
+                    # Format as "subject predicate object"
+                    fact_str = f"{item['subject']} {item['predicate']} {item['object']}"
+                    conf = item.get("confidence", 1.0)
+                    conf_str = f" ({conf:.0%})" if conf < 0.9 else ""
+                    fact_lines.append(f"- {fact_str}{conf_str}")
+
+            if fact_lines:
+                parts.append("## Known Facts About User\n\n" + "\n".join(fact_lines[:15]))
         except Exception as e:
             logger.debug("Semantic memory unavailable for %s: %s", user_id, e)
 

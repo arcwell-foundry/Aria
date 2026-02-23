@@ -159,40 +159,65 @@ class ConversationPrimingService:
         Returns:
             List of fact dictionaries with full details.
         """
-        if not salient_records:
-            return []
+        facts: list[dict[str, Any]] = []
 
-        # Use memory_semantic table (has actual data) instead of semantic_facts (empty)
-        # The memory_semantic table has 'fact' as a text field with the full fact string
+        # Query memory_semantic table (onboarding facts)
         try:
             result = (
                 self.db.table("memory_semantic")
                 .select("id, fact, confidence")
                 .eq("user_id", user_id)
                 .order("confidence", desc=True)
-                .limit(self.MAX_FACTS)
+                .limit(self.MAX_FACTS // 2)  # Split between sources
                 .execute()
             )
             if result.data:
-                # Transform to expected format for _format_context
-                return [
-                    {
+                for item in result.data:
+                    facts.append({
                         "id": item["id"],
-                        "subject": item["fact"],  # Use full fact as subject for display
+                        "subject": item["fact"],
                         "predicate": "",
                         "object": "",
                         "confidence": item.get("confidence", 1.0),
-                    }
-                    for item in result.data
-                ]
-            return []
+                        "source": "onboarding",
+                    })
         except Exception as e:
             logger.error(
-                "Failed to fetch fact details for user %s: %s",
+                "Failed to fetch memory_semantic for user %s: %s",
                 user_id,
                 str(e),
             )
-            return []
+
+        # Also query semantic_facts table (conversation-extracted facts)
+        try:
+            result = (
+                self.db.table("semantic_facts")
+                .select("id, subject, predicate, object, confidence")
+                .eq("user_id", user_id)
+                .order("confidence", desc=True)
+                .limit(self.MAX_FACTS // 2)
+                .execute()
+            )
+            if result.data:
+                for item in result.data:
+                    facts.append({
+                        "id": item["id"],
+                        "subject": item["subject"],
+                        "predicate": item["predicate"],
+                        "object": item["object"],
+                        "confidence": item.get("confidence", 0.75),
+                        "source": "conversation",
+                    })
+        except Exception as e:
+            logger.error(
+                "Failed to fetch semantic_facts for user %s: %s",
+                user_id,
+                str(e),
+            )
+
+        # Sort by confidence and limit
+        facts.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        return facts[: self.MAX_FACTS]
 
     def _episode_to_dict(self, episode: Any) -> dict[str, Any]:
         """Convert episode to serializable dict.
@@ -254,10 +279,17 @@ class ConversationPrimingService:
             parts.append("\n## Key Facts I Remember")
             for fact in facts[:5]:
                 confidence = fact.get("confidence", 0)
-                parts.append(
-                    f"- {fact.get('subject', '')} {fact.get('predicate', '')} "
-                    f"{fact.get('object', '')} (confidence: {confidence:.0%})"
-                )
+                subject = fact.get("subject", "")
+                predicate = fact.get("predicate", "")
+                obj = fact.get("object", "")
+
+                # If predicate/object are empty, subject contains the full fact
+                if predicate and obj:
+                    fact_text = f"{subject} {predicate} {obj}"
+                else:
+                    fact_text = subject
+
+                parts.append(f"- {fact_text} ({confidence:.0%})")
 
         if entities:
             parts.append("\n## Relevant Context")

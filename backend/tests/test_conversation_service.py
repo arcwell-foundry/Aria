@@ -420,8 +420,8 @@ class TestExtractEpisode:
             messages=sample_messages,
         )
 
-        # Should have called generate_response twice (summary + extraction)
-        assert mock_llm.generate_response.call_count == 2
+        # Should have called generate_response three times (summary + extraction + facts)
+        assert mock_llm.generate_response.call_count == 3
 
     @pytest.mark.asyncio
     async def test_extract_episode_stores_in_database(

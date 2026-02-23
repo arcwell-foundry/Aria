@@ -186,16 +186,21 @@ class TestPrimeConversation:
     def mock_db_client(self) -> MagicMock:
         """Create mock Supabase client for fact lookup."""
         mock = MagicMock()
-        # Mock semantic_facts query for fact details
-        mock_response = MagicMock(
+
+        # Mock memory_semantic query (onboarding facts)
+        memory_semantic_response = MagicMock(
             data=[
                 {
                     "id": "fact-1",
-                    "subject": "John Doe",
-                    "predicate": "works_at",
-                    "object": "Acme Corp",
+                    "fact": "John Doe works_at Acme Corp",
                     "confidence": 0.95,
                 },
+            ]
+        )
+
+        # Mock semantic_facts query (conversation-extracted facts)
+        semantic_facts_response = MagicMock(
+            data=[
                 {
                     "id": "fact-2",
                     "subject": "Acme Corp",
@@ -205,7 +210,29 @@ class TestPrimeConversation:
                 },
             ]
         )
-        mock.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_response
+
+        # Set up chain for memory_semantic
+        memory_semantic_chain = (
+            mock.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
+        )
+        memory_semantic_chain.execute.return_value = memory_semantic_response
+
+        # Set up chain for semantic_facts - need to track which table is being queried
+        def table_side_effect(table_name: str):
+            table_mock = MagicMock()
+            select_mock = table_mock.select.return_value
+            eq_mock = select_mock.eq.return_value
+            order_mock = eq_mock.order.return_value
+            limit_mock = order_mock.limit.return_value
+
+            if table_name == "memory_semantic":
+                limit_mock.execute.return_value = memory_semantic_response
+            elif table_name == "semantic_facts":
+                limit_mock.execute.return_value = semantic_facts_response
+
+            return table_mock
+
+        mock.table.side_effect = table_side_effect
         return mock
 
     @pytest.mark.asyncio

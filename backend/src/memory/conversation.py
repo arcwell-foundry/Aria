@@ -132,6 +132,29 @@ Return a JSON object with:
 Return ONLY valid JSON, no explanation:"""
 
 
+FACT_EXTRACTION_PROMPT = """Extract structured facts from this conversation as subject-predicate-object triples.
+
+{conversation}
+
+Extract facts about:
+- User's role, responsibilities, team structure (e.g., "User manages 5 sales reps")
+- Account/company details (e.g., "Savillex evaluating ZoomInfo")
+- Key relationships (e.g., "Rob Douglas is the decision maker")
+- Timeline information (e.g., "Decision expected by March 1")
+- Active deals/pursuits (e.g., "Discovery call scheduled with Dave Stephens")
+- Preferences and priorities (e.g., "User prefers email over phone")
+
+Return a JSON object with a "facts" array where each fact has:
+- "subject": who/what the fact is about (e.g., "User", "Savillex", "Rob Douglas")
+- "predicate": the relationship/action (e.g., "manages", "is evaluating", "will decide by")
+- "object": the value/target (e.g., "5 sales reps", "ZoomInfo", "March 1")
+- "confidence": 0.0-1.0 (0.95 for user-stated, 0.75 for implied, 0.6 for inferred)
+
+Extract 3-8 meaningful facts. Focus on actionable, specific information.
+
+Return ONLY valid JSON, no explanation:"""
+
+
 class ConversationService:
     """Service for extracting and storing conversation episodes.
 
@@ -372,7 +395,22 @@ class ConversationService:
         if not result.data:
             raise RuntimeError("Failed to store conversation episode")
 
-        # Step 7: Return ConversationEpisode from stored data
+        # Step 7: Extract and store semantic facts (non-blocking, logs on failure)
+        try:
+            await self.extract_facts_from_conversation(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.warning(
+                "Fact extraction failed for conversation %s: %s",
+                conversation_id,
+                str(e),
+            )
+            # Don't fail the episode creation if fact extraction fails
+
+        # Step 8: Return ConversationEpisode from stored data
         stored_data: dict[str, Any] = result.data[0]  # type: ignore[assignment]
         return ConversationEpisode.from_dict(stored_data)
 
@@ -477,3 +515,161 @@ class ConversationService:
             return None
 
         return ConversationEpisode.from_dict(result.data)
+
+    async def extract_facts_from_conversation(
+        self,
+        user_id: str,
+        conversation_id: str,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Extract structured facts from a conversation and store in semantic_facts.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: The conversation ID.
+            messages: List of message dicts.
+
+        Returns:
+            List of extracted fact dictionaries.
+        """
+        if not messages or len(messages) < 2:
+            return []
+
+        formatted_conversation = self._format_messages(messages)
+
+        # Extract facts using LLM
+        fact_prompt = FACT_EXTRACTION_PROMPT.format(conversation=formatted_conversation)
+        fact_response = await self.llm.generate_response(
+            messages=[{"role": "user", "content": fact_prompt}],
+            max_tokens=1000,
+            temperature=0.2,
+        )
+
+        # Parse response
+        facts = self._parse_fact_response(fact_response)
+
+        if not facts:
+            return []
+
+        # Store facts in semantic_facts table
+        stored_facts = []
+        for fact in facts:
+            try:
+                fact_data = {
+                    "user_id": user_id,
+                    "subject": fact.get("subject", ""),
+                    "predicate": fact.get("predicate", ""),
+                    "object": fact.get("object", ""),
+                    "confidence": fact.get("confidence", 0.75),
+                    "source": "conversation_extraction",
+                    "metadata": {
+                        "conversation_id": conversation_id,
+                        "extracted_at": datetime.now(UTC).isoformat(),
+                    },
+                }
+
+                result = self.db.table("semantic_facts").insert(fact_data).execute()
+                if result.data:
+                    stored_facts.append({**fact_data, "id": result.data[0]["id"]})
+                    logger.debug(
+                        "Stored fact: %s %s %s",
+                        fact_data["subject"],
+                        fact_data["predicate"],
+                        fact_data["object"],
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to store fact: %s",
+                    str(e),
+                    extra={"fact": fact},
+                )
+
+        logger.info(
+            "Extracted %d facts from conversation %s",
+            len(stored_facts),
+            conversation_id,
+        )
+        return stored_facts
+
+    def _parse_fact_response(self, response: str) -> list[dict[str, Any]]:
+        """Parse LLM fact extraction response.
+
+        Args:
+            response: LLM response string.
+
+        Returns:
+            List of fact dictionaries.
+        """
+        try:
+            # Strip markdown code blocks if present
+            cleaned = response.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            elif cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+
+            parsed = json.loads(cleaned)
+            facts = parsed.get("facts", [])
+
+            # Validate each fact has required fields
+            valid_facts = []
+            for fact in facts:
+                if (
+                    isinstance(fact, dict)
+                    and fact.get("subject")
+                    and fact.get("predicate")
+                    and fact.get("object")
+                ):
+                    valid_facts.append({
+                        "subject": fact["subject"],
+                        "predicate": fact["predicate"],
+                        "object": fact["object"],
+                        "confidence": float(fact.get("confidence", 0.75)),
+                    })
+
+            return valid_facts
+
+        except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse fact extraction response as JSON",
+                extra={"response_preview": response[:100]},
+            )
+            return []
+        except Exception as e:
+            logger.warning(
+                "Error parsing fact response: %s",
+                str(e),
+            )
+            return []
+
+    async def get_semantic_facts(
+        self,
+        user_id: str,
+        limit: int = 20,
+        min_confidence: float = 0.5,
+    ) -> list[dict[str, Any]]:
+        """Get semantic facts for a user, ordered by confidence.
+
+        Args:
+            user_id: The user's ID.
+            limit: Maximum facts to return.
+            min_confidence: Minimum confidence threshold.
+
+        Returns:
+            List of fact dictionaries.
+        """
+        result = (
+            self.db.table("semantic_facts")
+            .select("id, subject, predicate, object, confidence, source, created_at")
+            .eq("user_id", user_id)
+            .gte("confidence", min_confidence)
+            .order("confidence", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        return result.data or []
