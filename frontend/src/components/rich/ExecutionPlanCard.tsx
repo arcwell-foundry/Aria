@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Shield, Clock, AlertTriangle, Check, Loader2, ChevronRight } from 'lucide-react';
+import { Shield, Clock, AlertTriangle, Check, Loader2, ChevronRight, Zap, X, Link } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
@@ -30,11 +30,13 @@ interface PlanTask {
 export interface ExecutionPlanData {
   goal_id: string;
   title: string;
-  // New resource-aware fields
+  // Resource-aware fields
   tasks?: PlanTask[];
   missing_integrations?: string[];
   approval_points?: string[];
   estimated_total_minutes?: number;
+  readiness_score?: number;
+  connected_integrations?: string[];
   // Legacy phase-based fields (backward compat)
   phases?: LegacyPhase[];
   autonomy?: {
@@ -81,6 +83,12 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
+/** Tools that require a user-connected OAuth integration. */
+const AUTH_TOOLS = new Set([
+  'composio_crm', 'composio_calendar', 'composio_email_send',
+  'salesforce', 'hubspot', 'google_calendar', 'gmail', 'outlook',
+]);
+
 function ResourceBadge({ resource }: { resource: TaskResource }) {
   if (resource.connected) {
     return (
@@ -90,9 +98,18 @@ function ResourceBadge({ resource }: { resource: TaskResource }) {
       </span>
     );
   }
+  // Distinguish "needs auth" (user can connect) from "not available"
+  if (AUTH_TOOLS.has(resource.tool)) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-amber-400 bg-amber-500/10">
+        <Link className="w-2.5 h-2.5" />
+        {resource.tool}
+      </span>
+    );
+  }
   return (
-    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-amber-400 bg-amber-500/10">
-      <AlertTriangle className="w-2.5 h-2.5" />
+    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-red-400 bg-red-500/10">
+      <X className="w-2.5 h-2.5" />
       {resource.tool}
     </span>
   );
@@ -103,6 +120,26 @@ function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function ReadinessBadge({ score }: { score: number }) {
+  const color =
+    score >= 80 ? '#10B981' :
+    score >= 50 ? '#F59E0B' :
+    '#EF4444';
+  const bg =
+    score >= 80 ? 'rgba(16, 185, 129, 0.1)' :
+    score >= 50 ? 'rgba(245, 158, 11, 0.1)' :
+    'rgba(239, 68, 68, 0.1)';
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono tracking-wider"
+      style={{ backgroundColor: bg, color }}
+    >
+      <Zap className="w-2.5 h-2.5" />
+      {score}% ready
+    </span>
+  );
 }
 
 // --- Legacy phase rendering (backward compat) ---
@@ -278,6 +315,24 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
 
       {/* Summary footer */}
       <div className="border-t border-[var(--border)] px-4 py-3 space-y-2">
+        {/* Resource summary */}
+        {(data.connected_integrations || data.missing_integrations) && (
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {(data.connected_integrations ?? []).map((name) => (
+              <span key={name} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-emerald-400 bg-emerald-500/10">
+                <Check className="w-2.5 h-2.5" />
+                {name}
+              </span>
+            ))}
+            {(data.missing_integrations ?? []).map((name) => (
+              <span key={name} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-amber-400 bg-amber-500/10">
+                <Link className="w-2.5 h-2.5" />
+                {name}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Timeline */}
         {data.estimated_total_minutes != null && data.estimated_total_minutes > 0 && (
           <div className="flex items-center gap-2">
@@ -288,7 +343,7 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
           </div>
         )}
 
-        {/* Missing integrations */}
+        {/* Missing integrations detail */}
         {data.missing_integrations && data.missing_integrations.length > 0 && (
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
@@ -417,6 +472,9 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
             </h3>
           </div>
           <div className="flex items-center gap-2">
+            {isResourceAware && data.readiness_score != null && (
+              <ReadinessBadge score={data.readiness_score} />
+            )}
             {isResourceAware && data.tasks && (
               <span className="text-[10px] font-mono text-[var(--text-secondary)]">
                 {data.tasks.length} tasks

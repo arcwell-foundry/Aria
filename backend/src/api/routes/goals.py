@@ -650,48 +650,55 @@ async def approve_goal_proposal(
     )
     result = await service.create_goal(current_user.id, goal_data)
 
-    execution_plan = _build_execution_plan(
-        goal_id=result["id"],
-        title=data.title,
-        goal_type=data.goal_type,
-        agents=data.agents,
-        timeline=data.timeline,
-    )
+    # Generate resource-aware execution plan (queries this user's
+    # integrations, trust profiles, and company facts via plan_goal)
+    exec_service = _get_execution_service()
+    plan_result = await exec_service.plan_goal(result["id"], current_user.id)
 
-    try:
-        from src.core.ws import ws_manager
-        from src.models.ws_events import AriaMessageEvent
+    # plan_goal() already emits the plan via WebSocket with rich_content,
+    # but if it failed we still send a confirmation message.
+    if plan_result.get("error"):
+        try:
+            from src.core.ws import ws_manager
+            from src.models.ws_events import AriaMessageEvent
 
-        confirmation = (
-            f"Great — I've created the goal **{data.title}**. "
-            f"Here's my execution plan. I'll start with discovery and "
-            f"keep you updated on progress."
-        )
-        event = AriaMessageEvent(
-            message=confirmation,
-            rich_content=[execution_plan],
-            ui_commands=[
-                {
-                    "action": "update_sidebar_badge",
-                    "sidebar_item": "actions",
-                    "badge_count": 1,
-                }
-            ],
-            suggestions=[
-                "Approve the plan",
-                "Adjust the timeline",
-                "Add more detail to phase 1",
-            ],
-        )
-        await ws_manager.send_to_user(current_user.id, event)
-    except Exception as e:
-        logger.warning(f"WebSocket delivery failed for goal approval: {e}")
+            # Fall back to legacy phase-based plan if resource-aware planning fails
+            execution_plan = _build_execution_plan(
+                goal_id=result["id"],
+                title=data.title,
+                goal_type=data.goal_type,
+                agents=data.agents,
+                timeline=data.timeline,
+            )
+            event = AriaMessageEvent(
+                message=(
+                    f"Great — I've created the goal **{data.title}**. "
+                    f"Here's my execution plan. I'll start with discovery and "
+                    f"keep you updated on progress."
+                ),
+                rich_content=[execution_plan],
+                ui_commands=[
+                    {
+                        "action": "update_sidebar_badge",
+                        "sidebar_item": "actions",
+                        "badge_count": 1,
+                    }
+                ],
+                suggestions=[
+                    "Approve the plan",
+                    "Adjust the timeline",
+                    "Add more detail to phase 1",
+                ],
+            )
+            await ws_manager.send_to_user(current_user.id, event)
+        except Exception as e:
+            logger.warning("WebSocket delivery failed for goal approval: %s", e)
 
     logger.info(
         "Goal proposal approved",
         extra={"user_id": current_user.id, "goal_id": result["id"]},
     )
-    return {**result, "execution_plan": execution_plan}
+    return {**result, "execution_plan": plan_result}
 
 
 # --- Standard Goal CRUD Endpoints ---

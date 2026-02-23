@@ -2124,6 +2124,8 @@ class GoalExecutionService:
         )
 
         # Annotate tasks with resource availability for this user
+        total_tools = 0
+        connected_tools = 0
         for task in tasks_json:
             task_resources: list[dict[str, Any]] = []
             for tool in task.get("tools_needed", []):
@@ -2131,7 +2133,14 @@ class GoalExecutionService:
                 task_resources.append(
                     {"tool": tool, "connected": connected}
                 )
+                total_tools += 1
+                if connected:
+                    connected_tools += 1
             task["resource_status"] = task_resources
+
+        readiness_score = (
+            round((connected_tools / total_tools) * 100) if total_tools > 0 else 100
+        )
 
         # Store plan in goal_execution_plans
         self._db.table("goal_execution_plans").insert(
@@ -2194,10 +2203,12 @@ class GoalExecutionService:
             "missing_integrations": missing_integrations,
             "approval_points": approval_points,
             "estimated_total_minutes": estimated_total,
+            "readiness_score": readiness_score,
+            "connected_integrations": active_integrations,
             "reasoning": plan_data.get("reasoning", ""),
         }
 
-        # Emit plan via WebSocket
+        # Emit plan via WebSocket with full resource context
         try:
             await ws_manager.send_aria_message(
                 user_id=user_id,
@@ -2215,6 +2226,8 @@ class GoalExecutionService:
                             "missing_integrations": missing_integrations,
                             "approval_points": approval_points,
                             "estimated_total_minutes": estimated_total,
+                            "readiness_score": readiness_score,
+                            "connected_integrations": active_integrations,
                         },
                     }
                 ],
