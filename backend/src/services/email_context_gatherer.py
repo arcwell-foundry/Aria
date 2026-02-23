@@ -266,8 +266,8 @@ class EmailContextGatherer:
             user_id,
         )
 
-        # 1. Fetch full thread
-        context.thread_context = await self._fetch_thread(user_id, thread_id)
+        # 1. Fetch full thread (pass sender_email for participant filtering)
+        context.thread_context = await self._fetch_thread(user_id, thread_id, sender_email)
         if context.thread_context:
             context.sources_used.append("composio_thread")
 
@@ -408,6 +408,7 @@ class EmailContextGatherer:
         self,
         user_id: str,
         thread_id: str,
+        sender_email: str = "",
     ) -> ThreadContext | None:
         """Fetch full email thread via Composio."""
         try:
@@ -447,7 +448,7 @@ class EmailContextGatherer:
 
             if provider == "outlook":
                 messages = await self._fetch_outlook_thread(
-                    user_id, connection_id, thread_id
+                    user_id, connection_id, thread_id, sender_email
                 )
             else:
                 messages = await self._fetch_gmail_thread(
@@ -585,8 +586,15 @@ class EmailContextGatherer:
         user_id: str,
         connection_id: str,
         thread_id: str,
+        sender_email: str = "",
     ) -> list[ThreadMessage]:
-        """Fetch Outlook conversation thread by conversationId."""
+        """Fetch Outlook conversation thread by conversationId.
+
+        Outlook's conversationId groups messages by subject-line similarity,
+        NOT by actual reply chain. This means unrelated senders can share a
+        conversationId. We post-filter to keep only messages between the user
+        and the target sender (the person being replied to).
+        """
         from src.integrations.oauth import get_oauth_client
 
         messages: list[ThreadMessage] = []
@@ -642,21 +650,66 @@ class EmailContextGatherer:
 
             for msg in messages_data:
                 sender = msg.get("from", {}).get("emailAddress", {})
-                sender_email = sender.get("address", "")
-                sender_name = sender.get("name", "")
+                msg_sender_email = sender.get("address", "")
+                msg_sender_name = sender.get("name", "")
                 body_content = msg.get("body", {}).get("content", "")
 
                 messages.append(ThreadMessage(
-                    sender_email=sender_email,
-                    sender_name=sender_name,
+                    sender_email=msg_sender_email,
+                    sender_name=msg_sender_name,
                     body=body_content,
                     timestamp=msg.get("receivedDateTime", ""),
-                    is_from_user=bool(user_email and user_email.lower() in sender_email.lower()),
+                    is_from_user=bool(user_email and user_email.lower() in msg_sender_email.lower()),
                 ))
 
+            unfiltered_count = len(messages)
+
+            # Post-filter: Outlook conversationId groups by subject similarity,
+            # not actual reply chain. Keep only messages between the user and
+            # the target sender to exclude unrelated conversations.
+            if sender_email and user_email:
+                target = sender_email.lower()
+                user = user_email.lower()
+                allowed = {target, user}
+                filtered = [
+                    m for m in messages
+                    if m.sender_email.lower() in allowed
+                ]
+                logger.info(
+                    "THREAD_FETCH_OUTLOOK: Participant filter applied — "
+                    "before=%d after=%d (kept senders: %s)",
+                    unfiltered_count,
+                    len(filtered),
+                    allowed,
+                )
+                messages = filtered
+            elif sender_email:
+                # No user_email available; keep messages from target sender
+                # plus messages already marked is_from_user (fallback)
+                target = sender_email.lower()
+                filtered = [
+                    m for m in messages
+                    if m.sender_email.lower() == target or m.is_from_user
+                ]
+                logger.info(
+                    "THREAD_FETCH_OUTLOOK: Partial filter (no user_email) — "
+                    "before=%d after=%d",
+                    unfiltered_count,
+                    len(filtered),
+                )
+                messages = filtered
+            else:
+                logger.warning(
+                    "THREAD_FETCH_OUTLOOK: No sender_email provided — "
+                    "skipping participant filter (%d messages unfiltered)",
+                    unfiltered_count,
+                )
+
             logger.info(
-                "THREAD_FETCH_OUTLOOK: Parsed %d messages from Outlook thread %s",
+                "THREAD_FETCH_OUTLOOK: Returning %d messages (of %d from API) "
+                "for thread %s",
                 len(messages),
+                unfiltered_count,
                 thread_id[:40] if thread_id else "NONE",
             )
 
