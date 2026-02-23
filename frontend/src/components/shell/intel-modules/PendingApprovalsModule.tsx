@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, X } from 'lucide-react';
+import { Check, X, MessageSquare } from 'lucide-react';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { useActionQueueStore } from '@/stores/actionQueueStore';
 import { useActions, useApproveAction, useRejectAction } from '@/hooks/useActionQueue';
@@ -127,6 +127,23 @@ export function PendingApprovalsModule() {
               </div>
 
               <div className="flex items-center gap-1.5 justify-end">
+                <button
+                  onClick={() => navigate(`/?discuss=action&id=${action.id}&title=${encodeURIComponent(action.title)}`)}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
+                  style={{
+                    color: 'var(--accent)',
+                    backgroundColor: 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(46, 102, 255, 0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <MessageSquare size={12} />
+                  Discuss
+                </button>
                 <button
                   onClick={() => rejectMutation.mutate({ actionId: action.id })}
                   disabled={isProcessing}

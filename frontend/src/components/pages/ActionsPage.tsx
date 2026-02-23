@@ -10,7 +10,7 @@
  * - Action Queue with pending approvals
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Target,
@@ -20,6 +20,7 @@ import {
   Loader2,
   AlertCircle,
   GitBranch,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { UpcomingMeetings } from '@/components/actions/UpcomingMeetings';
@@ -29,6 +30,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { AGENT_REGISTRY, AGENT_TYPES, resolveAgent } from '@/constants/agents';
 import type { AgentType } from '@/constants/agents';
+import { useAgentStatusStore } from '@/stores/agentStatusStore';
 import type { GoalStatus, GoalDashboard } from '@/api/goals';
 import type { Action, ActionStatus, RiskLevel } from '@/api/actionQueue';
 import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
@@ -200,33 +202,100 @@ function GoalCard({ goal, onClick }: { goal: GoalDashboard; onClick?: () => void
   );
 }
 
-// Agent Status Card Component
+// Elapsed time formatter
+function formatElapsed(startedAt: number | null): string {
+  if (!startedAt) return '';
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+const LIVE_STATUS_COLORS: Record<string, string> = {
+  active: 'var(--success)',
+  idle: 'var(--text-secondary)',
+  completed: 'var(--success)',
+  error: 'var(--critical)',
+  retrying: 'var(--warning)',
+};
+
+const LIVE_STATUS_LABELS: Record<string, string> = {
+  active: 'Working',
+  idle: 'Standing by',
+  completed: 'Done',
+  error: 'Error',
+  retrying: 'Retrying',
+};
+
+// Agent Status Card Component — live from WebSocket
 function AgentCard({ agent }: { agent: AgentType }) {
   const info = AGENT_REGISTRY[agent];
+  const live = useAgentStatusStore((s) => s.agents[agent]);
+  const [, setTick] = useState(0);
+
+  // Tick every second when agent is active for elapsed time display
+  useEffect(() => {
+    if (live?.status !== 'active') return;
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [live?.status]);
+
+  const status = live?.status ?? 'idle';
+  const statusColor = LIVE_STATUS_COLORS[status];
+  const isActive = status === 'active' || status === 'retrying';
 
   return (
     <div
-      className="border rounded-lg p-3 text-center"
+      className="border rounded-lg p-3"
       style={{
-        borderColor: 'var(--border)',
+        borderColor: isActive ? statusColor : 'var(--border)',
         backgroundColor: 'var(--bg-elevated)',
+        borderLeftWidth: isActive ? '3px' : undefined,
+        borderLeftColor: isActive ? statusColor : undefined,
       }}
     >
-      <div className="mx-auto mb-2 w-10 h-10">
-        <AgentAvatar agentKey={agent} size={40} />
+      <div className="flex items-center gap-2 mb-2">
+        <div className="relative">
+          <AgentAvatar agentKey={agent} size={28} />
+          <div
+            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 ${isActive ? 'animate-pulse' : ''}`}
+            style={{
+              backgroundColor: statusColor,
+              borderColor: 'var(--bg-elevated)',
+            }}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p
+            className="font-medium text-sm truncate"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {info.name}
+          </p>
+        </div>
+        {isActive && live?.startedAt && (
+          <span
+            className="font-mono text-[10px] tabular-nums shrink-0"
+            style={{ color: statusColor }}
+          >
+            {formatElapsed(live.startedAt)}
+          </span>
+        )}
       </div>
       <p
-        className="font-medium text-sm mb-1"
-        style={{ color: 'var(--text-primary)' }}
+        className="text-xs leading-tight truncate"
+        style={{ color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}
       >
-        {info.name}
+        {isActive ? live?.task : LIVE_STATUS_LABELS[status]}
       </p>
-      <p
-        className="text-xs leading-tight"
-        style={{ color: 'var(--text-secondary)' }}
-      >
-        {info.description}
-      </p>
+      {status === 'completed' && live?.resultSummary && (
+        <p
+          className="text-xs leading-tight mt-1 truncate"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {live.resultSummary}
+        </p>
+      )}
     </div>
   );
 }
@@ -236,12 +305,14 @@ function ActionItem({
   action,
   onApprove,
   onReject,
+  onDiscuss,
   isApproving,
   isRejecting,
 }: {
   action: Action;
   onApprove: () => void;
   onReject: () => void;
+  onDiscuss?: () => void;
   isApproving: boolean;
   isRejecting: boolean;
 }) {
@@ -297,6 +368,19 @@ function ActionItem({
         {/* Action buttons for pending items */}
         {action.status === 'pending' && (
           <div className="flex items-center gap-2 flex-shrink-0">
+            {onDiscuss && (
+              <button
+                onClick={onDiscuss}
+                className={cn(
+                  'p-2 rounded-lg transition-colors',
+                  'border border-[var(--border)] hover:bg-[var(--bg-subtle)]',
+                )}
+                style={{ color: 'var(--accent)' }}
+                title="Discuss with ARIA"
+              >
+                <MessageSquare className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={onReject}
               disabled={isRejecting || isApproving}
@@ -597,6 +681,7 @@ export function ActionsPage() {
                         action={action}
                         onApprove={() => approveMutation.mutate(action.id)}
                         onReject={() => rejectMutation.mutate({ actionId: action.id })}
+                        onDiscuss={() => navigate(`/?discuss=action&id=${action.id}&title=${encodeURIComponent(action.title)}`)}
                         isApproving={approveMutation.isPending}
                         isRejecting={rejectMutation.isPending}
                       />

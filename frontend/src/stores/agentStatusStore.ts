@@ -16,6 +16,7 @@ export interface AgentLiveStatus {
   success: boolean | null;
   resultSummary: string | null;
   changedAt: number;
+  startedAt: number | null;
 }
 
 export interface AgentStatusState {
@@ -41,6 +42,7 @@ function createInitialAgents(): Record<string, AgentLiveStatus> {
       success: null,
       resultSummary: null,
       changedAt: 0,
+      startedAt: null,
     };
   }
   return agents;
@@ -62,6 +64,7 @@ export const useAgentStatusStore = create<AgentStatusState>((set) => ({
           success: null,
           resultSummary: null,
           changedAt: Date.now(),
+          startedAt: Date.now(),
         },
       },
     })),
@@ -74,12 +77,13 @@ export const useAgentStatusStore = create<AgentStatusState>((set) => ({
         agents: {
           ...state.agents,
           [key]: {
-            ...(existing ?? { name: key, goalId: null, stepId: null }),
+            ...(existing ?? { name: key, goalId: null, stepId: null, startedAt: null }),
             status: success ? 'completed' : 'error',
             task: summary ?? (success ? 'Completed' : 'Failed'),
             success,
             resultSummary: summary,
             changedAt: Date.now(),
+            startedAt: null,
           },
         },
       };
@@ -93,12 +97,13 @@ export const useAgentStatusStore = create<AgentStatusState>((set) => ({
         agents: {
           ...state.agents,
           [key]: {
-            ...(existing ?? { name: key, goalId: null, stepId: null }),
+            ...(existing ?? { name: key, goalId: null, stepId: null, startedAt: null }),
             status: 'retrying',
             task: reason,
             success: null,
             resultSummary: null,
             changedAt: Date.now(),
+            startedAt: existing?.startedAt ?? null,
           },
         },
       };
@@ -119,6 +124,7 @@ export const useAgentStatusStore = create<AgentStatusState>((set) => ({
             success: null,
             resultSummary: null,
             changedAt: 0,
+            startedAt: null,
           },
         },
       };

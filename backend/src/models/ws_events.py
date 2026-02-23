@@ -22,6 +22,7 @@ class WSEventType(str, Enum):
     STEP_COMPLETED = "execution.step_completed"
     STEP_RETRYING = "execution.step_retrying"
     EXECUTION_COMPLETE = "execution.complete"
+    RECOMMENDATION_NEW = "recommendation.new"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -135,6 +136,16 @@ class ExecutionCompleteEvent(WSEvent):
     steps_completed: int
     steps_total: int
     summary: str | None = None
+
+
+class RecommendationEvent(WSEvent):
+    """A new recommendation from an agent."""
+
+    type: WSEventType = WSEventType.RECOMMENDATION_NEW
+    title: str
+    description: str = ""
+    priority: str = "medium"
+    agent: str = "Strategist"
 
 
 class ConnectedEvent(WSEvent):

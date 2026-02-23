@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { useIntelGoals } from '@/hooks/useIntelPanelData';
 import { useAgentStatusStore } from '@/stores/agentStatusStore';
@@ -30,6 +30,14 @@ const ALL_AGENTS = ['Hunter', 'Analyst', 'Strategist', 'Scribe', 'Operator', 'Sc
 
 /** Threshold in ms for "just changed" flash */
 const FLASH_DURATION = 5000;
+
+function formatElapsed(startedAt: number | null, now: number): string {
+  if (!startedAt) return '';
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
 
 function AgentStatusSkeleton() {
   return (
@@ -113,7 +121,7 @@ export function AgentStatusModule({ agents: propAgents }: AgentStatusModuleProps
         return { name, status: 'active' as const, task: apiTask };
       }
 
-      return { name, status: 'idle' as const, task: 'No active tasks' };
+      return { name, status: 'idle' as const, task: 'Standing by' };
     });
   }
 
@@ -150,7 +158,7 @@ export function AgentStatusModule({ agents: propAgents }: AgentStatusModuleProps
                   style={{ backgroundColor: STATUS_COLORS[agent.status] }}
                 />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="font-mono text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>
                   {agent.name}
                 </p>
@@ -158,6 +166,14 @@ export function AgentStatusModule({ agents: propAgents }: AgentStatusModuleProps
                   {agent.task}
                 </p>
               </div>
+              {(agent.status === 'active' || agent.status === 'retrying') && live?.startedAt && (
+                <span
+                  className="font-mono text-[10px] tabular-nums shrink-0 mt-0.5"
+                  style={{ color: STATUS_COLORS[agent.status] }}
+                >
+                  {formatElapsed(live.startedAt, now)}
+                </span>
+              )}
             </div>
           );
         })}

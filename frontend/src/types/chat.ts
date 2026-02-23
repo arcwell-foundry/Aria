@@ -40,6 +40,7 @@ export const WS_EVENTS = {
   STEP_COMPLETED: 'execution.step_completed',
   STEP_RETRYING: 'execution.step_retrying',
   EXECUTION_COMPLETE: 'execution.complete',
+  RECOMMENDATION_NEW: 'recommendation.new',
 
   // Client → Server
   USER_MESSAGE: 'user.message',

@@ -1,7 +1,10 @@
-import { Zap } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Zap, X } from 'lucide-react';
 import { useIntelligenceInsights } from '@/hooks/useIntelPanelData';
+import { useRecommendationsStore } from '@/stores/recommendationsStore';
 
 interface NextAction {
+  id?: string;
   action: string;
   priority: 'high' | 'medium' | 'low';
   impact: string;
@@ -34,29 +37,53 @@ export interface NextBestActionModuleProps {
 }
 
 export function NextBestActionModule({ action: propAction }: NextBestActionModuleProps) {
+  const navigate = useNavigate();
   const { data: insights, isLoading } = useIntelligenceInsights({ limit: 5 });
+  const liveRecommendations = useRecommendationsStore((s) =>
+    s.items.filter((r) => !r.dismissed),
+  );
+  const dismiss = useRecommendationsStore((s) => s.dismiss);
 
-  if (isLoading && !propAction) return <NextBestActionSkeleton />;
+  if (isLoading && !propAction && liveRecommendations.length === 0) return <NextBestActionSkeleton />;
 
-  let action: NextAction;
+  // Build list of actions: live WS recommendations first, then API insights
+  const actions: NextAction[] = [];
+
+  // Live WS-pushed recommendations take priority
+  for (const rec of liveRecommendations.slice(0, 3)) {
+    actions.push({
+      id: rec.id,
+      action: rec.title,
+      priority: rec.priority,
+      impact: rec.description,
+      agent: rec.agent,
+    });
+  }
+
+  // Prop-based override
   if (propAction) {
-    action = propAction;
-  } else if (insights && insights.length > 0) {
+    actions.unshift(propAction);
+  }
+
+  // Fill from API if no live recommendations
+  if (actions.length === 0 && insights && insights.length > 0) {
     const top = insights[0];
-    action = {
+    actions.push({
       action: top.recommended_actions?.[0] ?? top.content,
       priority: mapUrgencyToPriority(top.urgency ?? 0),
       impact: top.content,
       agent: top.insight_type ?? 'Strategist',
-    };
-  } else {
+    });
+  }
+
+  if (actions.length === 0) {
     return (
       <div data-aria-id="intel-next-action" className="space-y-2">
         <h3
           className="font-sans text-[11px] font-medium uppercase tracking-wider mb-3"
           style={{ color: 'var(--text-secondary)' }}
         >
-          Recommended Action
+          Recommended Actions
         </h3>
         <div
           className="rounded-lg border p-4"
@@ -76,45 +103,78 @@ export function NextBestActionModule({ action: propAction }: NextBestActionModul
         className="font-sans text-[11px] font-medium uppercase tracking-wider mb-3"
         style={{ color: 'var(--text-secondary)' }}
       >
-        Recommended Action
+        Recommended Actions
+        {liveRecommendations.length > 0 && (
+          <span
+            className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full text-[10px] font-mono px-1"
+            style={{ backgroundColor: 'var(--accent)', color: 'white' }}
+          >
+            {liveRecommendations.length}
+          </span>
+        )}
       </h3>
-      <div
-        className="rounded-lg border p-3"
-        style={{
-          borderColor: 'var(--border)',
-          backgroundColor: 'var(--bg-subtle)',
-          borderLeftWidth: '3px',
-          borderLeftColor: PRIORITY_COLORS[action.priority],
-        }}
-      >
-        <div className="flex items-start gap-2">
-          <Zap
-            size={14}
-            className="mt-0.5 flex-shrink-0"
-            style={{ color: PRIORITY_COLORS[action.priority] }}
-          />
-          <div className="min-w-0">
-            <p className="font-sans text-[13px] leading-[1.5] font-medium" style={{ color: 'var(--text-primary)' }}>
-              {action.action}
-            </p>
-            {action.impact !== action.action && (
-              <p className="font-sans text-[12px] leading-[1.5] mt-1" style={{ color: 'var(--text-secondary)' }}>
-                {action.impact}
-              </p>
-            )}
-            <div className="flex items-center gap-2 mt-1.5">
-              <span
-                className="font-mono text-[10px] uppercase"
+      <div className="space-y-2">
+        {actions.map((action, i) => (
+          <div
+            key={action.id ?? `action-${i}`}
+            className="rounded-lg border p-3"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: 'var(--bg-subtle)',
+              borderLeftWidth: '3px',
+              borderLeftColor: PRIORITY_COLORS[action.priority],
+            }}
+          >
+            <div className="flex items-start gap-2">
+              <Zap
+                size={14}
+                className="mt-0.5 flex-shrink-0"
                 style={{ color: PRIORITY_COLORS[action.priority] }}
-              >
-                {action.priority} priority
-              </span>
-              <span className="font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                · via {action.agent}
-              </span>
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-sans text-[13px] leading-[1.5] font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {action.action}
+                </p>
+                {action.impact && action.impact !== action.action && (
+                  <p className="font-sans text-[12px] leading-[1.5] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    {action.impact}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span
+                    className="font-mono text-[10px] uppercase"
+                    style={{ color: PRIORITY_COLORS[action.priority] }}
+                  >
+                    {action.priority} priority
+                  </span>
+                  <span className="font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                    · via {action.agent}
+                  </span>
+                </div>
+                {/* Action buttons for live recommendations */}
+                {action.id && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => navigate(`/?discuss=recommendation&title=${encodeURIComponent(action.action)}`)}
+                      className="font-sans text-[11px] font-medium px-2 py-1 rounded-md transition-colors"
+                      style={{ color: 'var(--accent)', backgroundColor: 'rgba(46, 102, 255, 0.1)' }}
+                    >
+                      Act on This
+                    </button>
+                    <button
+                      onClick={() => dismiss(action.id!)}
+                      className="font-sans text-[11px] font-medium px-2 py-1 rounded-md transition-colors"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      <X size={12} className="inline mr-0.5" />
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        ))}
       </div>
     </div>
   );

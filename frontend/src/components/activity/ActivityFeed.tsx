@@ -32,6 +32,7 @@ import { resolveAgent } from '@/constants/agents';
 import type { ActivityItem, ActivityFilters } from '@/api/activity';
 import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
 import { AutoExecutionGroup } from './AutoExecutionGroup';
+import { useLiveActivityStore } from '@/stores/liveActivityStore';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -472,11 +473,38 @@ export function ActivityFeed({
     isFetchingNextPage,
   } = useActivityFeed(filters);
 
-  // Flatten pages into single list
+  // Live WS entries — prepend above poll-based items
+  const liveEntries = useLiveActivityStore((s) => s.entries);
+
+  // Flatten pages into single list, prepend live entries
   const allItems = useMemo(() => {
-    if (!data?.pages) return [];
-    return data.pages.flatMap((page) => page.items);
-  }, [data]);
+    const apiItems = data?.pages ? data.pages.flatMap((page) => page.items) : [];
+    if (liveEntries.length === 0) return apiItems;
+
+    // Convert live entries to ActivityItem shape and prepend
+    const liveAsActivity: ActivityItem[] = liveEntries.map((entry) => ({
+      id: entry.id,
+      user_id: '',
+      agent: entry.agent,
+      activity_type: entry.activity_type,
+      title: entry.title,
+      description: entry.description,
+      reasoning: '',
+      confidence: 1,
+      related_entity_type: null,
+      related_entity_id: null,
+      metadata: { live: true },
+      created_at: entry.created_at,
+    }));
+
+    // Deduplicate: live entries that match poll items by title+agent get removed
+    const apiKeys = new Set(apiItems.map((i) => `${i.title}:${i.agent}`));
+    const deduped = liveAsActivity.filter(
+      (entry) => !apiKeys.has(`${entry.title}:${entry.agent}`),
+    );
+
+    return [...deduped, ...apiItems];
+  }, [data, liveEntries]);
 
   // Track the latest created_at for polling cursor
   const latestTimestamp = useMemo(() => {

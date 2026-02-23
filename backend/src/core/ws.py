@@ -16,6 +16,7 @@ from src.models.ws_events import (
     AriaMessageEvent,
     ExecutionCompleteEvent,
     ProgressUpdateEvent,
+    RecommendationEvent,
     SignalEvent,
     StepCompletedEvent,
     StepRetryingEvent,
@@ -362,6 +363,23 @@ class ConnectionManager:
             agent=agent,
             retry_count=retry_count,
             reason=reason,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_recommendation(
+        self,
+        user_id: str,
+        title: str,
+        description: str = "",
+        priority: str = "medium",
+        agent: str = "Strategist",
+    ) -> None:
+        """Send a recommendation event from an agent."""
+        event = RecommendationEvent(
+            title=title,
+            description=description,
+            priority=priority,
+            agent=agent,
         )
         await self.send_to_user(user_id, event)
 
