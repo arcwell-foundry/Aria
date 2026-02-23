@@ -219,7 +219,17 @@ class ConversationService:
         }
 
         try:
-            parsed = json.loads(response)
+            # Strip markdown code blocks if present (Claude sometimes wraps JSON)
+            cleaned = response.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            elif cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+
+            parsed = json.loads(cleaned)
             # Validate and merge with defaults
             return {
                 "key_topics": parsed.get("key_topics", []),
