@@ -34,20 +34,36 @@ _SESSION_PK_COL: str | None = None
 def _detect_pk_col(db: Any) -> str:
     """Auto-detect whether user_sessions PK column is 'id' or 'session_id'.
 
-    Caches after first successful detection to avoid repeated probing.
+    Caches after first *successful* detection. Transient errors (network,
+    timeout) are NOT cached so the next call retries the probe.
     """
     global _SESSION_PK_COL
     if _SESSION_PK_COL is not None:
         return _SESSION_PK_COL
 
-    # Probe: try selecting 'id' column
-    try:
-        db.table("user_sessions").select("id").limit(1).execute()
-        _SESSION_PK_COL = "id"
-    except Exception:
-        _SESSION_PK_COL = "session_id"
+    # Probe: try selecting 'session_id' first (matches the earliest migration)
+    for candidate in ("session_id", "id"):
+        try:
+            db.table("user_sessions").select(candidate).limit(1).execute()
+            _SESSION_PK_COL = candidate
+            logger.info("Detected user_sessions PK column: %s", candidate)
+            return candidate
+        except Exception as exc:
+            exc_str = str(exc)
+            # Column-not-found from PostgREST → try next candidate
+            if "column" in exc_str.lower() or "400" in exc_str or "PGRST" in exc_str:
+                continue
+            # Transient error (network, timeout) — don't cache, raise
+            logger.warning(
+                "Transient error probing user_sessions PK column '%s': %s",
+                candidate,
+                exc,
+            )
+            raise
 
-    logger.info("Detected user_sessions PK column: %s", _SESSION_PK_COL)
+    # Both candidates failed → default to 'session_id' (earliest migration)
+    _SESSION_PK_COL = "session_id"
+    logger.warning("Could not detect user_sessions PK column; defaulting to 'session_id'")
     return _SESSION_PK_COL
 
 
@@ -65,15 +81,42 @@ def _select_by_pk(db: Any, session_id: str, user_id: str) -> Any:
 
 
 def _update_by_pk(db: Any, session_id: str, user_id: str, payload: dict) -> Any:
-    """Update a session by PK + user_id guard. Returns execute() result."""
+    """Update a session by PK + user_id guard. Returns execute() result.
+
+    If the update succeeds but returns no data (some Supabase SDK / PostgREST
+    configurations omit the response body), a follow-up SELECT is issued to
+    return the updated row.
+    """
     pk = _detect_pk_col(db)
-    return (
-        db.table("user_sessions")
-        .update(payload)
-        .eq(pk, session_id)
-        .eq("user_id", user_id)
-        .execute()
-    )
+    try:
+        result = (
+            db.table("user_sessions")
+            .update(payload)
+            .eq(pk, session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception:
+        logger.exception(
+            "user_sessions UPDATE failed",
+            extra={"session_id": session_id, "user_id": user_id, "pk_col": pk},
+        )
+        raise
+
+    # Fallback: some SDK versions don't return data after UPDATE.
+    # Re-fetch the row so callers always get the updated record.
+    if not result.data:
+        logger.debug(
+            "UPDATE returned no data; re-fetching row (pk=%s, session_id=%s)",
+            pk,
+            session_id,
+        )
+        fallback = _select_by_pk(db, session_id, user_id)
+        if fallback and fallback.data:
+            # Wrap in a list to match the normal update response shape
+            result.data = [fallback.data] if isinstance(fallback.data, dict) else fallback.data
+
+    return result
 
 
 # =============================================================================
@@ -305,18 +348,27 @@ async def update_session(
     db = get_supabase_client()
 
     # Verify ownership and get current session
-    current = _select_by_pk(db, session_id, current_user.id)
+    try:
+        current = _select_by_pk(db, session_id, current_user.id)
+    except Exception:
+        logger.exception(
+            "Session SELECT failed",
+            extra={"user_id": current_user.id, "session_id": session_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to read session") from None
 
     if not current or not current.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Build update payload
-    current_data = current.data.get("session_data", {})
+    current_data = current.data.get("session_data") if isinstance(current.data, dict) else None
+    if current_data is None:
+        current_data = {}
     if isinstance(current_data, str):
         import json
         current_data = json.loads(current_data)
 
-    new_session_data = current_data.copy()
+    new_session_data = dict(current_data)
 
     if request.current_route is not None:
         new_session_data["current_route"] = request.current_route
@@ -336,17 +388,35 @@ async def update_session(
         update_payload["is_active"] = request.is_active
 
     # Perform update with user_id guard
-    result = _update_by_pk(db, session_id, current_user.id, update_payload)
+    try:
+        result = _update_by_pk(db, session_id, current_user.id, update_payload)
+    except Exception:
+        logger.exception(
+            "Session UPDATE failed",
+            extra={"user_id": current_user.id, "session_id": session_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to update session") from None
 
     if not result or not result.data:
+        logger.error(
+            "Session UPDATE returned no data",
+            extra={
+                "user_id": current_user.id,
+                "session_id": session_id,
+                "pk_col": _SESSION_PK_COL,
+            },
+        )
         raise HTTPException(status_code=500, detail="Failed to update session")
+
+    # Normalize: result.data may be a list or a dict depending on the query path
+    row = result.data[0] if isinstance(result.data, list) else result.data
 
     logger.debug(
         "Updated session",
         extra={"user_id": current_user.id, "session_id": session_id},
     )
 
-    return _row_to_response(result.data[0])
+    return _row_to_response(row)
 
 
 @router.post("/{session_id}/archive", response_model=SessionResponse)
@@ -360,25 +430,34 @@ async def archive_session(
     """
     db = get_supabase_client()
 
-    result = _update_by_pk(
-        db,
-        session_id,
-        current_user.id,
-        {
-            "is_active": False,
-            "updated_at": datetime.now(UTC).isoformat(),
-        },
-    )
+    try:
+        result = _update_by_pk(
+            db,
+            session_id,
+            current_user.id,
+            {
+                "is_active": False,
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Session archive failed",
+            extra={"user_id": current_user.id, "session_id": session_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to archive session") from None
 
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    row = result.data[0] if isinstance(result.data, list) else result.data
 
     logger.info(
         "Archived session",
         extra={"user_id": current_user.id, "session_id": session_id},
     )
 
-    return _row_to_response(result.data[0])
+    return _row_to_response(row)
 
 
 @router.get("", response_model=SessionListResponse)
