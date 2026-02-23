@@ -21,6 +21,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from src.services.email_analyzer import _strip_html
+
 logger = logging.getLogger(__name__)
 
 
@@ -555,7 +557,9 @@ class EmailContextGatherer:
                 sender = headers.get("From", "")
                 sender_email = self._extract_email_address(sender)
                 sender_name = self._extract_name(sender)
-                body = self._extract_gmail_body(msg.get("payload", {}))
+                raw_body = self._extract_gmail_body(msg.get("payload", {}))
+                # Strip HTML to avoid wasting tokens on CSS/style tags
+                body = _strip_html(raw_body) if raw_body else ""
 
                 messages.append(ThreadMessage(
                     sender_email=sender_email,
@@ -652,7 +656,9 @@ class EmailContextGatherer:
                 sender = msg.get("from", {}).get("emailAddress", {})
                 msg_sender_email = sender.get("address", "")
                 msg_sender_name = sender.get("name", "")
-                body_content = msg.get("body", {}).get("content", "")
+                raw_body = msg.get("body", {}).get("content", "")
+                # Strip HTML to avoid wasting tokens on CSS/style tags
+                body_content = _strip_html(raw_body) if raw_body else ""
 
                 messages.append(ThreadMessage(
                     sender_email=msg_sender_email,
