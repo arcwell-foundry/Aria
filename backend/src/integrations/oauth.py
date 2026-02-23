@@ -344,26 +344,13 @@ class ComposioOAuthClient:
         """
         composio_circuit_breaker.check()
 
-        # ============================================================
-        # COMPOSIO SDK CONFIGURATION — DO NOT MODIFY
-        # ============================================================
-        # Composio SDK 1.0.0-rc2 requires either:
-        #   - dangerously_skip_version_check=True, OR
-        #   - explicit toolkit_versions dict
-        # Without this flag, every call fails with:
-        #   "Toolkit version not specified. For manual execution of
-        #    the tool please pass a specific toolkit version."
-        # This has been fixed 3 times. The working configuration is
-        # locked below. If you change this, the email pipeline breaks.
-        # Last verified: 2026-02-22
-        # ============================================================
+        # Execute Composio action via SDK
         def _execute() -> Any:
             return self._client.tools.execute(
                 slug=action,
                 connected_account_id=connection_id,
                 user_id=user_id,
                 arguments=params,
-                dangerously_skip_version_check=True,
             )
 
         try:
@@ -407,19 +394,12 @@ class ComposioOAuthClient:
             except Exception as e:
                 logger.debug("Could not preload tool schema for %s: %s", action, e)
 
-        # ============================================================
-        # COMPOSIO SDK CONFIGURATION — DO NOT MODIFY
-        # ============================================================
-        # See comment in execute_action() above for full explanation.
-        # dangerously_skip_version_check=True is REQUIRED for 1.0.0-rc2.
-        # Last verified: 2026-02-22
-        # ============================================================
+        # Execute Composio action via SDK
         result = self._client.tools.execute(
             slug=action,
             connected_account_id=connection_id,
             user_id=user_id,
             arguments=params,
-            dangerously_skip_version_check=True,
         )
         # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):
