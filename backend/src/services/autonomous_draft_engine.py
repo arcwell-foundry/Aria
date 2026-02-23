@@ -1123,6 +1123,32 @@ Do not include any text outside the JSON object."""
             logger.debug("DRAFT_ENGINE: Could not fetch formatting patterns: %s", e)
         return None
 
+    async def _get_raw_writing_style(self, user_id: str) -> str | None:
+        """Fetch the raw writing_style description from digital_twin_profiles.
+
+        This is the descriptive prose about the user's writing style,
+        complementary to the structured style guidelines.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Raw writing style string, or None if not available.
+        """
+        try:
+            result = (
+                self._db.table("digital_twin_profiles")
+                .select("writing_style")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                return result.data.get("writing_style")
+        except Exception as e:
+            logger.debug("DRAFT_ENGINE: Could not fetch writing_style: %s", e)
+        return None
+
     def _detect_attachment_context(
         self,
         email: Any,
@@ -1268,11 +1294,15 @@ Example of well-formatted output:
         # Fetch formatting patterns for HTML output
         formatting_patterns = await self._get_formatting_patterns(user_id)
 
+        # Fetch raw writing_style description from digital twin
+        raw_writing_style = await self._get_raw_writing_style(user_id)
+
         prompt = self._build_reply_prompt(
             user_name, email, context, style_guidelines, tone_guidance,
             special_instructions=special_instructions,
             formatting_patterns=formatting_patterns,
             consolidated_from=consolidated_from,
+            raw_writing_style=raw_writing_style,
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -1328,6 +1358,7 @@ Example of well-formatted output:
         special_instructions: str | None = None,
         formatting_patterns: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
+        raw_writing_style: str | None = None,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
@@ -1342,9 +1373,41 @@ Example of well-formatted output:
 You must match their exact writing style — they should not be able to tell
 this wasn't written by them. Do NOT sound like an AI assistant.""")
 
+        # Anti-hallucination instruction (critical — placed early for emphasis)
+        sections.append("""## CRITICAL: Anti-Hallucination Rule
+ONLY reference information present in the email and thread below.
+Do NOT invent topics, projects, details, or context the sender didn't mention.
+If the sender mentioned something specific, address it directly.
+If you don't have information about something, do NOT make it up — either
+skip it or suggest following up.""")
+
+        # Filler phrase prohibition
+        sections.append("""## Banned Phrases — Do NOT use any of these:
+- "I hope this email finds you well"
+- "I hope this finds you well"
+- "Thank you for reaching out"
+- "Thanks for reaching out"
+- "Please don't hesitate to"
+- "Don't hesitate to reach out"
+- "Looking forward to your response"
+- "I appreciate your time"
+- "Per our conversation"
+- "As per my last email"
+- "Just circling back"
+- "Just following up"
+- "I wanted to touch base"
+- "Let's circle back on this"
+- "At your earliest convenience"
+- "Synergy", "leverage" (as verb), "alignment", "bandwidth"
+- "Moving forward"
+- Any variation of these corporate filler phrases.
+Write like a real person, not a template.""")
+
         # User's writing style guide
-        sections.append(f"""## Writing Style Guide
-{style_guidelines}""")
+        voice_section = f"## Writing Style Guide\n{style_guidelines}"
+        if raw_writing_style:
+            voice_section += f"\n\nVoice profile: {raw_writing_style}"
+        sections.append(voice_section)
 
         # Recipient-specific writing style
         if context.recipient_style and context.recipient_style.exists:
@@ -1586,16 +1649,23 @@ Recent messages:
                 f"thread in a single cohesive reply — don't reply to each separately"
             )
 
-        sections.append(f"""## Instructions
+        sections.append(f"""## Step 1: Extract Key Points (do this mentally before writing)
+Before writing the reply, identify every specific point, question, date,
+request, or commitment from the sender's email above. Your reply MUST
+address each one. Do not skip any.
+
+## Step 2: Write the Reply
 Write a reply that:
-1. Addresses everything the sender raised
+1. Addresses EVERY specific point the sender raised — dates, requests, questions, proposals
 2. Sounds EXACTLY like {user_name} — same greeting, tone, length, signoff
-3. References relevant context naturally (don't dump everything you know)
-4. Is ready to send with minimal editing
-5. Uses clean HTML formatting as described in the Email Formatting section{consolidation_instruction}
+3. References specific details from the sender's email (names, dates, topics they mentioned)
+4. Is direct and action-oriented — include next steps, dates, or asks where appropriate
+5. Is ready to send with minimal editing
+6. Uses clean HTML formatting as described in the Email Formatting section{consolidation_instruction}
 
 Sign off as {user_name}.
-Write ONLY the email body as HTML (no metadata, no <html>/<body> wrapper).
+Output ONLY the HTML email body. No JSON wrapper. No markdown.
+Use <p> tags for paragraphs. Start with a greeting. End with a signoff.
 
 Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Best,<br>{user_name}</p>"}}""")
 
