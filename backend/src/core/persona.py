@@ -407,6 +407,51 @@ class PersonaBuilder:
         except Exception as e:
             logger.debug("Semantic memory unavailable for %s: %s", user_id, e)
 
+        # 0.6. Recent conversation episodes for continuity
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+            # Query recent conversation_episodes for session continuity
+            episodes_result = (
+                db.table("conversation_episodes")
+                .select("summary, key_topics, ended_at, outcomes")
+                .eq("user_id", user_id)
+                .order("ended_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+
+            if episodes_result.data:
+                episode_lines = []
+                for ep in episodes_result.data:
+                    # Format date from ended_at
+                    ended_at = ep.get("ended_at", "")
+                    if ended_at:
+                        try:
+                            from datetime import datetime
+
+                            dt = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
+                            date_str = dt.strftime("%b %d")
+                        except Exception:
+                            date_str = ""
+                    else:
+                        date_str = ""
+
+                    summary = ep.get("summary", "")
+                    if summary:
+                        line = f"- {date_str}: {summary}" if date_str else f"- {summary}"
+                        episode_lines.append(line)
+
+                if episode_lines:
+                    parts.append(
+                        "## Recent Conversation History\n\n"
+                        "Previous sessions with this user:\n\n"
+                        + "\n".join(episode_lines)
+                    )
+        except Exception as e:
+            logger.debug("Conversation episodes unavailable for %s: %s", user_id, e)
+
         # 1. PersonalityCalibration
         try:
             from src.onboarding.personality_calibrator import PersonalityCalibrator

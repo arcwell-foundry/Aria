@@ -1846,3 +1846,227 @@ async def correct_memory(
         status=result["status"],
         new_confidence=result.get("new_confidence"),
     )
+
+
+# =============================================================================
+# Conversation Episode Endpoints
+# =============================================================================
+
+
+class EpisodeExtractionRequest(BaseModel):
+    """Request to extract an episode from a conversation."""
+
+    conversation_id: str = Field(..., description="Conversation ID to extract episode from")
+
+
+class EpisodeExtractionResponse(BaseModel):
+    """Response from episode extraction."""
+
+    id: str
+    conversation_id: str
+    summary: str
+    key_topics: list[str]
+    message_count: int
+
+
+class EpisodeListResponse(BaseModel):
+    """Response for listing episodes."""
+
+    id: str
+    conversation_id: str
+    summary: str
+    key_topics: list[str]
+    ended_at: datetime
+    message_count: int
+
+
+@router.post("/episodes/extract", response_model=EpisodeExtractionResponse)
+async def extract_conversation_episode(
+    body: EpisodeExtractionRequest,
+    current_user: CurrentUser,
+) -> EpisodeExtractionResponse:
+    """Manually extract an episode from a conversation.
+
+    Use this to generate an episode for a conversation that doesn't have one.
+    Episodes summarize conversations for future context priming.
+    """
+    from src.db.supabase import get_supabase_client
+
+    db = get_supabase_client()
+
+    # Get all messages for the conversation
+    messages_result = (
+        db.table("messages")
+        .select("role, content, created_at")
+        .eq("conversation_id", body.conversation_id)
+        .order("created_at")
+        .execute()
+    )
+
+    if not messages_result.data:
+        raise HTTPException(status_code=404, detail="Conversation not found or has no messages")
+
+    # Check if episode already exists
+    existing = (
+        db.table("conversation_episodes")
+        .select("id")
+        .eq("user_id", current_user.id)
+        .eq("conversation_id", body.conversation_id)
+        .maybe_single()
+        .execute()
+    )
+
+    if existing.data:
+        raise HTTPException(
+            status_code=409,
+            detail="Episode already exists for this conversation",
+        )
+
+    # Format messages for extraction
+    messages = [
+        {
+            "role": msg["role"],
+            "content": msg["content"],
+            "created_at": msg.get("created_at"),
+        }
+        for msg in messages_result.data
+    ]
+
+    # Extract episode
+    conv_service = ConversationService(
+        db_client=db,
+        llm_client=LLMClient(),
+    )
+
+    try:
+        episode = await conv_service.extract_episode(
+            user_id=current_user.id,
+            conversation_id=body.conversation_id,
+            messages=messages,
+        )
+
+        return EpisodeExtractionResponse(
+            id=episode.id,
+            conversation_id=episode.conversation_id,
+            summary=episode.summary,
+            key_topics=episode.key_topics,
+            message_count=episode.message_count,
+        )
+    except Exception as e:
+        logger.exception("Episode extraction failed")
+        raise HTTPException(status_code=500, detail=f"Episode extraction failed: {e}") from e
+
+
+@router.get("/episodes", response_model=list[EpisodeListResponse])
+async def list_conversation_episodes(
+    current_user: CurrentUser,
+    limit: int = Query(default=5, le=20, description="Max episodes to return"),
+) -> list[EpisodeListResponse]:
+    """List recent conversation episodes for the user.
+
+    Episodes are summaries of past conversations used for context priming.
+    """
+    from src.db.supabase import get_supabase_client
+
+    db = get_supabase_client()
+
+    result = (
+        db.table("conversation_episodes")
+        .select("id, conversation_id, summary, key_topics, ended_at, message_count")
+        .eq("user_id", current_user.id)
+        .order("ended_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+    if not result.data:
+        return []
+
+    return [
+        EpisodeListResponse(
+            id=ep["id"],
+            conversation_id=ep["conversation_id"],
+            summary=ep["summary"],
+            key_topics=ep.get("key_topics", []),
+            ended_at=datetime.fromisoformat(ep["ended_at"].replace("Z", "+00:00"))
+            if isinstance(ep["ended_at"], str)
+            else ep["ended_at"],
+            message_count=ep.get("message_count", 0),
+        )
+        for ep in result.data
+    ]
+
+
+@router.post("/episodes/extract-missing", response_model=dict[str, Any])
+async def extract_missing_episodes(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Extract episodes for all conversations that don't have one.
+
+    This is a bulk operation that processes up to 5 conversations.
+    """
+    from src.db.supabase import get_supabase_client
+
+    db = get_supabase_client()
+
+    # Find conversations without episodes
+    convs_result = db.table("conversations").select("id").eq("user_id", current_user.id).execute()
+
+    if not convs_result.data:
+        return {"extracted": 0, "message": "No conversations found"}
+
+    conv_ids = [c["id"] for c in convs_result.data]
+
+    # Check which have episodes
+    episodes_result = (
+        db.table("conversation_episodes")
+        .select("conversation_id")
+        .eq("user_id", current_user.id)
+        .in_("conversation_id", conv_ids)
+        .execute()
+    )
+    existing_ids = {e["conversation_id"] for e in (episodes_result.data or [])}
+
+    # Extract for missing (limit to 5)
+    missing_ids = [cid for cid in conv_ids if cid not in existing_ids][:5]
+
+    if not missing_ids:
+        return {"extracted": 0, "message": "All conversations have episodes"}
+
+    conv_service = ConversationService(
+        db_client=db,
+        llm_client=LLMClient(),
+    )
+
+    extracted = 0
+    for conv_id in missing_ids:
+        try:
+            # Get messages
+            msgs_result = (
+                db.table("messages")
+                .select("role, content, created_at")
+                .eq("conversation_id", conv_id)
+                .order("created_at")
+                .execute()
+            )
+
+            if msgs_result.data and len(msgs_result.data) >= 2:
+                messages = [
+                    {"role": m["role"], "content": m["content"], "created_at": m.get("created_at")}
+                    for m in msgs_result.data
+                ]
+                await conv_service.extract_episode(
+                    user_id=current_user.id,
+                    conversation_id=conv_id,
+                    messages=messages,
+                )
+                extracted += 1
+        except Exception as e:
+            logger.warning("Failed to extract episode for %s: %s", conv_id, e)
+
+    return {
+        "extracted": extracted,
+        "checked": len(conv_ids),
+        "missing": len(missing_ids),
+        "message": f"Extracted {extracted} episodes from {len(missing_ids)} conversations",
+    }

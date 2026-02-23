@@ -746,6 +746,10 @@ class ChatService:
             db_client=db,
         )
         self._episodic_memory = EpisodicMemory()
+        # Store conversation service for episode extraction
+        self._conversation_episode_service = ConversationService(
+            db_client=db, llm_client=self._llm_client
+        )
 
         # PersonaBuilder — lazily initialized on first use
         self._persona_builder: Any = None
@@ -1131,9 +1135,130 @@ class ChatService:
                     }
                 ).execute()
 
+                # NEW conversation started - extract episodes from previous
+                # conversations that don't have one yet (fire-and-forget)
+                asyncio.create_task(
+                    self._extract_missing_episodes(user_id, exclude_conversation_id=conversation_id)
+                )
+
         except Exception as e:
             logger.warning(
                 "Failed to ensure conversation record",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                },
+            )
+
+    async def _extract_missing_episodes(
+        self,
+        user_id: str,
+        exclude_conversation_id: str | None = None,
+    ) -> None:
+        """Extract episodes for conversations that don't have one yet.
+
+        Called when a new conversation starts to process previous conversations.
+
+        Args:
+            user_id: The user's ID.
+            exclude_conversation_id: Optional conversation ID to skip (current one).
+        """
+        from src.db.supabase import get_supabase_client
+
+        try:
+            db = get_supabase_client()
+
+            # Find conversations without episodes
+            result = db.table("conversations").select("id").eq("user_id", user_id).execute()
+
+            if not result.data:
+                return
+
+            conv_ids = [c["id"] for c in result.data if c["id"] != exclude_conversation_id]
+            if not conv_ids:
+                return
+
+            # Check which already have episodes
+            episodes_result = (
+                db.table("conversation_episodes")
+                .select("conversation_id")
+                .eq("user_id", user_id)
+                .in_("conversation_id", conv_ids)
+                .execute()
+            )
+            existing_ids = {e["conversation_id"] for e in (episodes_result.data or [])}
+
+            # Extract for missing ones (limit to 1 at a time to avoid overload)
+            for conv_id in conv_ids:
+                if conv_id not in existing_ids:
+                    await self._extract_episode_for_conversation(user_id, conv_id)
+                    break  # Only one per new conversation start
+
+        except Exception as e:
+            logger.warning(
+                "Failed to extract missing episodes",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+    async def _extract_episode_for_conversation(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> None:
+        """Extract and store an episode for a specific conversation.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: The conversation to extract.
+        """
+        from src.db.supabase import get_supabase_client
+
+        try:
+            db = get_supabase_client()
+
+            # Get all messages for this conversation
+            messages_result = (
+                db.table("messages")
+                .select("role, content, created_at")
+                .eq("conversation_id", conversation_id)
+                .order("created_at")
+                .execute()
+            )
+
+            if not messages_result.data or len(messages_result.data) < 2:
+                # Not enough messages to extract an episode
+                return
+
+            # Format messages for episode extraction
+            messages = [
+                {
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "created_at": msg.get("created_at"),
+                }
+                for msg in messages_result.data
+            ]
+
+            # Extract episode using ConversationService
+            episode = await self._conversation_episode_service.extract_episode(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                messages=messages,
+            )
+
+            logger.info(
+                "Extracted conversation episode",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "topics": episode.key_topics[:3] if episode.key_topics else [],
+                },
+            )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to extract episode for conversation",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,

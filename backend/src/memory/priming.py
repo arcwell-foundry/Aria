@@ -162,17 +162,30 @@ class ConversationPrimingService:
         if not salient_records:
             return []
 
-        fact_ids = [r["graphiti_episode_id"] for r in salient_records]
-
+        # Use memory_semantic table (has actual data) instead of semantic_facts (empty)
+        # The memory_semantic table has 'fact' as a text field with the full fact string
         try:
             result = (
-                self.db.table("semantic_facts")
-                .select("id, subject, predicate, object, confidence")
+                self.db.table("memory_semantic")
+                .select("id, fact, confidence")
                 .eq("user_id", user_id)
-                .in_("id", fact_ids)
+                .order("confidence", desc=True)
+                .limit(self.MAX_FACTS)
                 .execute()
             )
-            return result.data if result.data else []
+            if result.data:
+                # Transform to expected format for _format_context
+                return [
+                    {
+                        "id": item["id"],
+                        "subject": item["fact"],  # Use full fact as subject for display
+                        "predicate": "",
+                        "object": "",
+                        "confidence": item.get("confidence", 1.0),
+                    }
+                    for item in result.data
+                ]
+            return []
         except Exception as e:
             logger.error(
                 "Failed to fetch fact details for user %s: %s",
