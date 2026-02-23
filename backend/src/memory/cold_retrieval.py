@@ -333,7 +333,7 @@ class ColdMemoryRetriever:
         try:
             result = (
                 self.db.table("lead_memories")
-                .select("id, company_name, contact_name, status, context, created_at")
+                .select("id, company_name, lifecycle_stage, status, metadata, created_at")
                 .eq("user_id", user_id)
                 .ilike("company_name", f"%{query}%")
                 .order("created_at", desc=True)
@@ -350,7 +350,7 @@ class ColdMemoryRetriever:
                     created_at=created_at,
                     salience=None,
                 )
-                content = f"{row.get('company_name', '')} - {row.get('contact_name', '')} ({row.get('status', '')})"
+                content = f"{row.get('company_name', '')} - {row.get('lifecycle_stage', '')} ({row.get('status', '')})"
                 results.append(
                     ColdMemoryResult(
                         source=MemorySource.LEAD,

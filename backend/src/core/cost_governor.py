@@ -279,12 +279,19 @@ class CostGovernor:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("date", date.today().isoformat())
-                .maybe_single()
                 .execute()
             )
 
             if response.data:
-                return {**defaults, **response.data}
+                # Aggregate across all rows for today (one row per request)
+                totals = dict(defaults)
+                for row in response.data:
+                    totals["input_tokens"] += row.get("input_tokens", 0) or 0
+                    totals["output_tokens"] += row.get("output_tokens", 0) or 0
+                    totals["extended_thinking_tokens"] += row.get("extended_thinking_tokens", 0) or 0
+                    totals["estimated_cost_cents"] += row.get("estimated_cost_cents", 0.0) or 0.0
+                    totals["request_count"] += row.get("request_count", 0) or 0
+                return totals
         except Exception:
             logger.exception("Failed to fetch usage for user %s", user_id)
 

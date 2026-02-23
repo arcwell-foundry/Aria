@@ -606,14 +606,31 @@ If graph context is available, identify implication chains — non-obvious multi
             try:
                 orientation = json.loads(response)
             except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM response as JSON, using default orientation")
-                orientation = {
-                    "patterns": [],
-                    "opportunities": [],
-                    "threats": [],
-                    "recommended_focus": "Unable to analyze - proceeding with default strategy",
-                    "raw_response": response,
-                }
+                # Try extracting JSON from markdown code fences
+                import re
+
+                json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
+                if json_match:
+                    try:
+                        orientation = json.loads(json_match.group(1).strip())
+                    except json.JSONDecodeError:
+                        pass
+                if orientation is None:
+                    brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response, re.DOTALL)
+                    if brace_match:
+                        try:
+                            orientation = json.loads(brace_match.group(0))
+                        except json.JSONDecodeError:
+                            pass
+                if orientation is None:
+                    logger.warning("Failed to parse LLM response as JSON, using default orientation")
+                    orientation = {
+                        "patterns": [],
+                        "opportunities": [],
+                        "threats": [],
+                        "recommended_focus": "Unable to analyze - proceeding with default strategy",
+                        "raw_response": response[:500],
+                    }
 
         if orientation is None:
             orientation = {
@@ -874,19 +891,37 @@ Select the best action to make progress toward the goal."""
                     "error": str(e),
                 }
 
-        # Parse JSON response
+        # Parse JSON response — try raw first, then extract from markdown fences
         if response is not None and decision is None:
             try:
                 decision = json.loads(response)
             except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM decision as JSON")
-                decision = {
-                    "action": "blocked",
-                    "agent": None,
-                    "parameters": {},
-                    "reasoning": "Failed to parse decision",
-                    "raw_response": response,
-                }
+                # Try extracting JSON from markdown code fences
+                import re
+
+                json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
+                if json_match:
+                    try:
+                        decision = json.loads(json_match.group(1).strip())
+                    except json.JSONDecodeError:
+                        pass
+                if decision is None:
+                    # Try finding a JSON object in the response
+                    brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response, re.DOTALL)
+                    if brace_match:
+                        try:
+                            decision = json.loads(brace_match.group(0))
+                        except json.JSONDecodeError:
+                            pass
+                if decision is None:
+                    logger.warning("Failed to parse LLM decision as JSON")
+                    decision = {
+                        "action": "blocked",
+                        "agent": None,
+                        "parameters": {},
+                        "reasoning": "Failed to parse decision",
+                        "raw_response": response[:500],
+                    }
 
         if decision is None:
             decision = {
@@ -1256,27 +1291,38 @@ Select the best action to make progress toward the goal."""
         Returns:
             Updated OODAState after one full cycle.
         """
+        cycle_id = uuid.uuid4()
         logger.info(
             "OODA single iteration starting",
             extra={
                 "goal_id": state.goal_id,
                 "iteration": state.iteration,
+                "cycle_id": str(cycle_id),
             },
         )
 
         state = await self.observe(state, goal)
         self._update_token_count(state)
+        await self._log_phase(cycle_id, state, "observe")
 
         state = await self.orient(state, goal)
         self._update_token_count(state)
+        await self._log_phase(cycle_id, state, "orient")
 
         state = await self.decide(state, goal)
         self._update_token_count(state)
+        await self._log_phase(cycle_id, state, "decide")
 
         # Only act if not complete/blocked
         if not state.is_complete and not state.is_blocked:
             state = await self.act(state, goal)
             self._update_token_count(state)
+            await self._log_phase(cycle_id, state, "act")
+
+        # Mark cycle complete
+        if self._ooda_logger:
+            with contextlib.suppress(Exception):
+                await self._ooda_logger.mark_cycle_complete(cycle_id=cycle_id)
 
         logger.info(
             "OODA single iteration complete",

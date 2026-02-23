@@ -251,9 +251,12 @@ async def _run_ooda_goal_checks() -> None:
                 goal_id = goal["id"]
 
                 # Create memory services for this user
-                episodic = EpisodicMemory(user_id=user_id)
-                semantic = SemanticMemory(user_id=user_id)
-                working = WorkingMemory(user_id=user_id)
+                episodic = EpisodicMemory()
+                semantic = SemanticMemory()
+                working = WorkingMemory(
+                    conversation_id=f"ooda-{goal_id}",
+                    user_id=user_id,
+                )
 
                 # Create agent executor callback to bridge OODA → GoalExecutionService
                 # OODALoop.act() calls: agent_executor(action=, agent=, parameters=, goal=,

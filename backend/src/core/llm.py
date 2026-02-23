@@ -308,10 +308,14 @@ class LLMClient:
 
         budget_tokens = THINKING_BUDGETS.get(effort, THINKING_BUDGETS["complex"])
 
+        # Anthropic API requires max_tokens > budget_tokens when thinking is enabled.
+        # Ensure max_tokens is at least budget_tokens + 1024 for a reasonable text response.
+        effective_max_tokens = max(max_tokens, budget_tokens + 1024)
+
         # Build kwargs — no temperature when thinking is enabled
         kwargs: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": max_tokens,
+            "max_tokens": effective_max_tokens,
             "messages": messages,
             "thinking": {
                 "type": "enabled",

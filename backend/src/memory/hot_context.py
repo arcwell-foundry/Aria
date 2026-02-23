@@ -216,8 +216,8 @@ class HotContextBuilder:
         try:
             result = (
                 self.db.table("user_profiles")
-                .select("full_name, role, company_name")
-                .eq("user_id", user_id)
+                .select("full_name, role, company_id, companies(name)")
+                .eq("id", user_id)
                 .maybe_single()
                 .execute()
             )
@@ -230,8 +230,9 @@ class HotContextBuilder:
                 parts.append(f"Name: {data['full_name']}")
             if data.get("role"):
                 parts.append(f"Role: {data['role']}")
-            if data.get("company_name"):
-                parts.append(f"Company: {data['company_name']}")
+            company_name = (data.get("companies") or {}).get("name")
+            if company_name:
+                parts.append(f"Company: {company_name}")
 
             if not parts:
                 return None
@@ -352,11 +353,11 @@ class HotContextBuilder:
         try:
             result = (
                 self.db.table("prospective_memories")
-                .select("description, trigger_value")
+                .select("description, due_date, trigger_config")
                 .eq("user_id", user_id)
                 .eq("status", "pending")
                 .eq("trigger_type", "time")
-                .order("trigger_value", desc=False)
+                .order("due_date", desc=False)
                 .limit(5)
                 .execute()
             )
@@ -366,7 +367,7 @@ class HotContextBuilder:
 
             parts: list[str] = []
             for row in rows:
-                time_val = row.get("trigger_value", "")
+                time_val = row.get("due_date") or row.get("trigger_config") or ""
                 desc = row.get("description", "")
                 parts.append(f"- {time_val}: {desc}")
 

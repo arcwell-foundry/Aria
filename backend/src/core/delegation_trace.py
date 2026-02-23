@@ -138,19 +138,23 @@ class DelegationTraceService:
         Returns the trace_id (UUID string).
         """
         trace_id = str(uuid.uuid4())
+        # Map to actual DB column names
+        dct_perms: list[str] = []
+        if capability_token:
+            dct_perms = capability_token.get("allowed_actions", [])
         row = {
-            "trace_id": trace_id,
+            "id": trace_id,
             "goal_id": goal_id,
             "parent_trace_id": parent_trace_id,
             "user_id": user_id,
-            "delegator": delegator,
-            "delegatee": delegatee,
+            "delegating_agent": delegator,
+            "receiving_agent": delegatee,
             "task_description": task_description,
-            "task_characteristics": task_characteristics,
-            "capability_token": capability_token,
-            "inputs": inputs or {},
-            "status": "dispatched",
+            "reasoning": (task_characteristics or {}).get("reasoning"),
+            "dct_permissions": dct_perms,
+            "status": "pending",
             "started_at": datetime.now(UTC).isoformat(),
+            "metadata": inputs or {},
         }
         try:
             self._client.table(_TABLE).insert(row).execute()
@@ -178,14 +182,13 @@ class DelegationTraceService:
         """Mark a trace as completed (or re_delegated) with outputs."""
         now = datetime.now(UTC)
         update_data: dict[str, Any] = {
-            "outputs": outputs,
-            "verification_result": verification_result,
-            "cost_usd": cost_usd,
+            "result": outputs,
+            "cost_cents": int(cost_usd * 100),
             "status": status,
             "completed_at": now.isoformat(),
         }
         try:
-            self._client.table(_TABLE).update(update_data).eq("trace_id", trace_id).execute()
+            self._client.table(_TABLE).update(update_data).eq("id", trace_id).execute()
             logger.info(
                 "Trace completed: %s status=%s cost=$%.4f",
                 trace_id,
@@ -206,11 +209,11 @@ class DelegationTraceService:
         now = datetime.now(UTC)
         update_data: dict[str, Any] = {
             "status": "failed",
-            "outputs": {"error": error_message},
+            "error_message": error_message,
             "completed_at": now.isoformat(),
         }
         try:
-            self._client.table(_TABLE).update(update_data).eq("trace_id", trace_id).execute()
+            self._client.table(_TABLE).update(update_data).eq("id", trace_id).execute()
             logger.info("Trace failed: %s error=%s", trace_id, error_message)
         except Exception:
             logger.exception("Failed to mark delegation trace %s as failed", trace_id)

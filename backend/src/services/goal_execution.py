@@ -192,7 +192,7 @@ class GoalExecutionService:
             .execute()
         )
 
-        if not goal_result.data:
+        if not goal_result or not goal_result.data:
             logger.warning("Goal not found", extra={"goal_id": goal_id})
             return {"goal_id": goal_id, "status": "not_found", "results": []}
 
@@ -1201,7 +1201,7 @@ class GoalExecutionService:
             "operator": self._build_operator_prompt,
         }
 
-        builder = prompt_builder.get(agent_type)
+        builder = prompt_builder.get(agent_type.lower())
         if not builder:
             logger.warning(f"Unknown agent type: {agent_type}")
             return {"agent_type": agent_type, "success": False, "error": "Unknown agent type"}
@@ -1356,12 +1356,11 @@ class GoalExecutionService:
 
         except Exception as e:
             logger.error(
-                "Agent execution failed",
-                extra={
-                    "agent_type": agent_type,
-                    "user_id": user_id,
-                    "error": str(e),
-                },
+                "Agent execution failed: %s (agent=%s, user=%s)",
+                e,
+                agent_type,
+                user_id,
+                exc_info=True,
             )
 
             # Trust update on failure
@@ -1466,17 +1465,18 @@ class GoalExecutionService:
         now = datetime.now(UTC).isoformat()
 
         # If no goal_agent_id, find or create one
+        agent_type_lower = agent_type.lower()
         if not goal_agent_id:
             agent_result = (
                 self._db.table("goal_agents")
                 .select("id")
                 .eq("goal_id", goal_id)
-                .eq("agent_type", agent_type)
-                .maybe_single()
+                .eq("agent_type", agent_type_lower)
+                .limit(1)
                 .execute()
             )
             if agent_result.data:
-                goal_agent_id = agent_result.data["id"]
+                goal_agent_id = agent_result.data[0]["id"]
             else:
                 # Create a goal_agents record
                 insert_result = (
@@ -1484,7 +1484,7 @@ class GoalExecutionService:
                     .insert(
                         {
                             "goal_id": goal_id,
-                            "agent_type": agent_type,
+                            "agent_type": agent_type_lower,
                             "agent_config": {"source": "goal_execution"},
                             "status": "complete",
                         }
@@ -1538,7 +1538,7 @@ class GoalExecutionService:
         profile_result = (
             self._db.table("user_profiles").select("*").eq("id", user_id).maybe_single().execute()
         )
-        profile = profile_result.data or {}
+        profile = (profile_result.data if profile_result else None) or {}
 
         # Get company info
         company: dict[str, Any] = {}
@@ -1550,7 +1550,7 @@ class GoalExecutionService:
                 .maybe_single()
                 .execute()
             )
-            company = company_result.data or {}
+            company = (company_result.data if company_result else None) or {}
 
         # Get top semantic facts
         facts_result = (
@@ -1584,7 +1584,7 @@ class GoalExecutionService:
             .maybe_single()
             .execute()
         )
-        readiness = (state_result.data or {}).get("readiness_scores", {})
+        readiness = ((state_result.data if state_result else None) or {}).get("readiness_scores", {})
 
         # Build enrichment summary from facts
         fact_texts = [f.get("fact", "") for f in facts[:20]]
@@ -1610,7 +1610,7 @@ class GoalExecutionService:
                 .maybe_single()
                 .execute()
             )
-            if profile_result.data:
+            if profile_result and profile_result.data:
                 context["user_profile"] = profile_result.data
                 company_id = profile_result.data.get("company_id")
                 if company_id:
@@ -1621,7 +1621,7 @@ class GoalExecutionService:
                         .maybe_single()
                         .execute()
                     )
-                    if company_result.data:
+                    if company_result and company_result.data:
                         context["company_name"] = company_result.data.get("name", "")
         except Exception as e:
             logger.warning("Failed to fetch user profile for context: %s", e)
@@ -1635,7 +1635,7 @@ class GoalExecutionService:
                 .maybe_single()
                 .execute()
             )
-            if settings_result.data:
+            if settings_result and settings_result.data:
                 prefs = settings_result.data.get("preferences", {})
                 aria_config = prefs.get("aria_config", {})
                 if aria_config:
@@ -1655,12 +1655,12 @@ class GoalExecutionService:
     def _build_scout_prompt(self, goal: dict[str, Any], ctx: dict[str, Any]) -> str:
         """Build Scout agent prompt for competitive landscape analysis."""
         competitors = goal.get("config", {}).get("entities", [])
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:15])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:15])
 
         return (
-            f"Analyze the competitive landscape for {ctx['company_name']}.\n\n"
-            f"Company domain: {ctx['company_domain']}\n"
-            f"Classification: {json.dumps(ctx['classification'])}\n"
+            f"Analyze the competitive landscape for {ctx.get('company_name', 'the user company')}.\n\n"
+            f"Company domain: {ctx.get('company_domain', 'unknown')}\n"
+            f"Classification: {json.dumps(ctx.get('classification', {}))}\n"
             f"Known competitors/entities: {', '.join(str(c) for c in competitors) or 'None identified yet'}\n"
             f"Key facts:\n{facts or 'Limited data available'}\n\n"
             "Produce a competitive landscape analysis. Respond with JSON:\n"
@@ -1681,13 +1681,13 @@ class GoalExecutionService:
         ctx: dict[str, Any],
     ) -> str:
         """Build Analyst agent prompt for account analysis."""
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:15])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:15])
 
         return (
-            f"Perform an account analysis for {ctx['company_name']}.\n\n"
-            f"Company domain: {ctx['company_domain']}\n"
-            f"Classification: {json.dumps(ctx['classification'])}\n"
-            f"User role: {ctx['profile'].get('title', 'Unknown')}\n"
+            f"Perform an account analysis for {ctx.get('company_name', 'the user company')}.\n\n"
+            f"Company domain: {ctx.get('company_domain', 'unknown')}\n"
+            f"Classification: {json.dumps(ctx.get('classification', {}))}\n"
+            f"User role: {ctx.get('profile', {}).get('title', 'Unknown')}\n"
             f"Key facts:\n{facts or 'Limited data available'}\n\n"
             "Produce an account analysis. Respond with JSON:\n"
             "{\n"
@@ -1703,13 +1703,13 @@ class GoalExecutionService:
 
     def _build_hunter_prompt(self, goal: dict[str, Any], ctx: dict[str, Any]) -> str:
         """Build Hunter agent prompt for prospect identification."""
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:10])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:10])
         icp_description = goal.get("config", {}).get("icp_refinement", "")
 
         return (
-            f"Identify potential prospect companies for {ctx['company_name']}.\n\n"
-            f"Company domain: {ctx['company_domain']}\n"
-            f"Classification: {json.dumps(ctx['classification'])}\n"
+            f"Identify potential prospect companies for {ctx.get('company_name', 'the user company')}.\n\n"
+            f"Company domain: {ctx.get('company_domain', 'unknown')}\n"
+            f"Classification: {json.dumps(ctx.get('classification', {}))}\n"
             f"ICP context: {icp_description}\n"
             f"Key facts:\n{facts or 'Limited data available'}\n\n"
             "Identify 3-5 types of prospect companies that would match the user's "
@@ -1731,17 +1731,17 @@ class GoalExecutionService:
         ctx: dict[str, Any],
     ) -> str:
         """Build Strategist agent prompt for strategic recommendations."""
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:15])
-        gaps = "\n".join(f"- {g}" for g in ctx["gaps"][:5])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:15])
+        gaps = "\n".join(f"- {g}" for g in ctx.get("gaps", [])[:5])
 
         return (
-            f"Synthesize strategic recommendations for {ctx['company_name']}.\n\n"
-            f"Company domain: {ctx['company_domain']}\n"
-            f"Classification: {json.dumps(ctx['classification'])}\n"
-            f"User role: {ctx['profile'].get('title', 'Unknown')}\n"
+            f"Synthesize strategic recommendations for {ctx.get('company_name', 'the user company')}.\n\n"
+            f"Company domain: {ctx.get('company_domain', 'unknown')}\n"
+            f"Classification: {json.dumps(ctx.get('classification', {}))}\n"
+            f"User role: {ctx.get('profile', {}).get('title', 'Unknown')}\n"
             f"Key facts:\n{facts or 'Limited data available'}\n"
             f"Knowledge gaps:\n{gaps or 'None identified'}\n"
-            f"Readiness scores: {json.dumps(ctx['readiness'])}\n\n"
+            f"Readiness scores: {json.dumps(ctx.get('readiness', {}))}\n\n"
             "Produce strategic recommendations. Respond with JSON:\n"
             "{\n"
             '  "summary": "Strategic assessment overview",\n'
@@ -1761,13 +1761,13 @@ class GoalExecutionService:
         ctx: dict[str, Any],
     ) -> str:
         """Build Scribe agent prompt for follow-up draft."""
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:10])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:10])
 
         return (
-            f"Draft initial talking points for {ctx['company_name']}.\n\n"
-            f"User: {ctx['profile'].get('full_name', 'the user')}, "
-            f"{ctx['profile'].get('title', 'Sales Professional')}\n"
-            f"Company: {ctx['company_name']}\n"
+            f"Draft initial talking points for {ctx.get('company_name', 'the user company')}.\n\n"
+            f"User: {ctx.get('profile', {}).get('full_name', 'the user')}, "
+            f"{ctx.get('profile', {}).get('title', 'Sales Professional')}\n"
+            f"Company: {ctx.get('company_name', 'the user company')}\n"
             f"Key facts:\n{facts or 'Limited data available'}\n\n"
             "Produce talking points and a sample email draft that the user "
             "could use for outreach. Respond with JSON:\n"
@@ -1789,14 +1789,14 @@ class GoalExecutionService:
         ctx: dict[str, Any],
     ) -> str:
         """Build Operator agent prompt for data quality report."""
-        facts = "\n".join(f"- {f}" for f in ctx["facts"][:15])
-        gaps = "\n".join(f"- {g}" for g in ctx["gaps"][:5])
+        facts = "\n".join(f"- {f}" for f in ctx.get("facts", [])[:15])
+        gaps = "\n".join(f"- {g}" for g in ctx.get("gaps", [])[:5])
 
         return (
-            f"Generate a data quality report for {ctx['company_name']}.\n\n"
+            f"Generate a data quality report for {ctx.get('company_name', 'the user company')}.\n\n"
             f"Current data:\n{facts or 'No facts available'}\n"
             f"Known gaps:\n{gaps or 'No gaps identified'}\n"
-            f"Readiness scores: {json.dumps(ctx['readiness'])}\n"
+            f"Readiness scores: {json.dumps(ctx.get('readiness', {}))}\n"
             f"Total facts available: {len(ctx.get('facts_full', []))}\n\n"
             "Assess what ARIA knows vs what's missing. Respond with JSON:\n"
             "{\n"
@@ -1969,7 +1969,7 @@ class GoalExecutionService:
             .maybe_single()
             .execute()
         )
-        goal = goal_result.data
+        goal = goal_result.data if goal_result else None
         if not goal:
             return {"goal_id": goal_id, "error": "Goal not found", "tasks": []}
 

@@ -92,14 +92,18 @@ class TrustCalibrationService:
             client = SupabaseClient.get_client()
             response = (
                 client.table("user_trust_profiles")
-                .select("trust_score")
+                .select("overall_trust,category_scores")
                 .eq("user_id", user_id)
-                .eq("action_category", action_category)
                 .maybe_single()
                 .execute()
             )
-            if response.data:
-                return float(response.data["trust_score"])
+            if response and response.data:
+                # Check category_scores JSON for specific category
+                category_scores = response.data.get("category_scores") or {}
+                if action_category in category_scores:
+                    return float(category_scores[action_category])
+                # Fall back to overall_trust
+                return float(response.data.get("overall_trust", DEFAULT_TRUST_SCORE))
         except Exception:
             logger.exception(
                 "Failed to fetch trust score for user %s category %s",
@@ -403,18 +407,11 @@ class TrustCalibrationService:
             new_score: The trust score after the change.
             change_type: One of 'success', 'failure', 'override', 'manual'.
         """
-        try:
-            from src.db.supabase import SupabaseClient
-
-            client = SupabaseClient.get_client()
-            client.table("trust_score_history").insert({
-                "user_id": user_id,
-                "action_category": action_category,
-                "trust_score": new_score,
-                "change_type": change_type,
-            }).execute()
-        except Exception:
-            logger.exception("Failed to record trust history for user %s", user_id)
+        # trust_score_history table does not exist yet — log and skip
+        logger.debug(
+            "Trust history (no-op): user=%s cat=%s score=%.3f type=%s",
+            user_id, action_category, new_score, change_type,
+        )
 
     async def _call_update_rpc(
         self,
@@ -424,43 +421,56 @@ class TrustCalibrationService:
         success_delta: int = 0,
         failure_delta: int = 0,
         override_delta: int = 0,
-        set_last_failure: bool = False,
-        set_last_override: bool = False,
+        set_last_failure: bool = False,  # noqa: ARG002
+        set_last_override: bool = False,  # noqa: ARG002
     ) -> None:
-        """Call the update_trust_score RPC. Fail-open on errors.
+        """Update user_trust_profiles with new trust data. Fail-open on errors.
 
-        Args:
-            user_id: The user's UUID.
-            action_category: The action category.
-            new_score: Pre-computed new trust score.
-            success_delta: Increment for successful_actions counter.
-            failure_delta: Increment for failed_actions counter.
-            override_delta: Increment for override_count counter.
-            set_last_failure: Whether to set last_failure_at to now().
-            set_last_override: Whether to set last_override_at to now().
+        Uses upsert on user_trust_profiles — stores overall_trust and per-category
+        scores in the category_scores JSON column.
         """
         try:
             from src.db.supabase import SupabaseClient
 
             client = SupabaseClient.get_client()
-            client.rpc(
-                "update_trust_score",
-                {
-                    "p_user_id": user_id,
-                    "p_action_category": action_category,
-                    "p_new_score": new_score,
-                    "p_success_delta": success_delta,
-                    "p_failure_delta": failure_delta,
-                    "p_override_delta": override_delta,
-                    "p_set_last_failure": set_last_failure,
-                    "p_set_last_override": set_last_override,
-                },
-            ).execute()
+
+            # Fetch current row
+            resp = (
+                client.table("user_trust_profiles")
+                .select("id,overall_trust,category_scores,total_actions_taken,total_actions_approved,total_actions_rejected")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if resp and resp.data:
+                row = resp.data
+                cat_scores = dict(row.get("category_scores") or {})
+                cat_scores[action_category] = new_score
+                update: dict = {
+                    "category_scores": cat_scores,
+                    "overall_trust": new_score,
+                    "total_actions_taken": (row.get("total_actions_taken") or 0) + success_delta + failure_delta,
+                    "total_actions_approved": (row.get("total_actions_approved") or 0) + success_delta,
+                    "total_actions_rejected": (row.get("total_actions_rejected") or 0) + failure_delta,
+                }
+                client.table("user_trust_profiles").update(update).eq("id", row["id"]).execute()
+            else:
+                # Insert new row
+                client.table("user_trust_profiles").insert({
+                    "user_id": user_id,
+                    "overall_trust": new_score,
+                    "category_scores": {action_category: new_score},
+                }).execute()
+            logger.debug(
+                "Updated trust: user=%s cat=%s score=%.3f",
+                user_id, action_category, new_score,
+            )
         except Exception:
-            logger.exception(
-                "Failed to update trust score for user %s category %s",
+            logger.warning(
+                "Failed to update trust score for user %s category %s (fail-open)",
                 user_id,
                 action_category,
+                exc_info=True,
             )
 
 
