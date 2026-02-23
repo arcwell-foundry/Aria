@@ -317,7 +317,9 @@ async def approve_goal_plan(
     goal = goal_result.data
 
     if goal["status"] == "active":
-        raise HTTPException(status_code=400, detail="Goal is already active")
+        raise HTTPException(status_code=400, detail="Goal is already executing")
+    if goal["status"] == "complete":
+        raise HTTPException(status_code=400, detail="Goal is already complete")
 
     # Activate the goal
     now = datetime.now(UTC).isoformat()
@@ -329,12 +331,12 @@ async def approve_goal_plan(
     service = _get_execution_service()
     await service.execute_goal_async(goal_id, current_user.id)
 
-    # Emit WebSocket event
+    # Emit conversational WebSocket message
     try:
         event = AriaMessageEvent(
             message=(
-                f"Plan approved — I'm starting execution on **{goal['title']}**. "
-                f"I'll keep you updated as each step progresses."
+                f"Starting execution on **{goal['title']}**. "
+                f"I'll keep you updated as each phase completes."
             ),
             rich_content=[],
             ui_commands=[

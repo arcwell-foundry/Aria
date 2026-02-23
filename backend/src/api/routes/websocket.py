@@ -354,6 +354,77 @@ async def _handle_user_message(
         style_guidelines = await service._get_style_guidelines(user_id)
         priming_context = await service._get_priming_context(user_id, message_text)
 
+        # --- Pending plan context injection ---
+        # If the user has a goal in plan_ready status, inject the plan
+        # so ARIA can discuss, modify, or detect approval intent.
+        pending_plan_context = ""
+        pending_plan_goal_id: str | None = None
+        try:
+            db = get_supabase_client()
+            plan_ready_goals = (
+                db.table("goals")
+                .select("id, title, description, status")
+                .eq("user_id", user_id)
+                .eq("status", "plan_ready")
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if plan_ready_goals.data:
+                pg = plan_ready_goals.data[0]
+                pending_plan_goal_id = pg["id"]
+                # Fetch the execution plan
+                plan_result = (
+                    db.table("goal_execution_plans")
+                    .select("tasks, execution_mode, estimated_total_minutes, reasoning")
+                    .eq("goal_id", pg["id"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .maybe_single()
+                    .execute()
+                )
+                if plan_result.data:
+                    tasks_raw = plan_result.data.get("tasks", "[]")
+                    plan_tasks = (
+                        json.loads(tasks_raw)
+                        if isinstance(tasks_raw, str)
+                        else tasks_raw
+                    )
+                    # Build a human-readable plan summary for the LLM
+                    task_lines = []
+                    for i, t in enumerate(plan_tasks):
+                        deps = (
+                            f" (after #{', #'.join(str(d + 1) for d in t.get('dependencies', []))})"
+                            if t.get("dependencies")
+                            else ""
+                        )
+                        task_lines.append(
+                            f"  {i + 1}. {t.get('title', 'Task')} — "
+                            f"Agent: {t.get('agent', '?')}, "
+                            f"Risk: {t.get('risk_level', '?')}, "
+                            f"Tools: {', '.join(t.get('tools_needed', []))}"
+                            f"{deps}"
+                        )
+                    pending_plan_context = (
+                        f"\n\n## Pending Execution Plan (Awaiting User Approval)\n"
+                        f"Goal: {pg.get('title', '')}\n"
+                        f"Description: {pg.get('description', '')}\n"
+                        f"Execution mode: {plan_result.data.get('execution_mode', 'parallel')}\n"
+                        f"Estimated time: {plan_result.data.get('estimated_total_minutes', '?')} minutes\n"
+                        f"Reasoning: {plan_result.data.get('reasoning', '')}\n"
+                        f"Tasks:\n" + "\n".join(task_lines) + "\n\n"
+                        f"The user is reviewing this plan. Answer questions about it, "
+                        f"explain your reasoning for agent/tool choices, and suggest "
+                        f"modifications if asked. If the user approves (says 'approve', "
+                        f"'go ahead', 'looks good', 'start it', 'execute', 'do it', "
+                        f"'let's go', etc.), respond with your confirmation and include "
+                        f"the marker [PLAN_APPROVED] at the very end of your response "
+                        f"(the system will detect this to trigger execution). "
+                        f"If the user wants changes, describe the updated plan."
+                    )
+        except Exception as e:
+            logger.debug("Pending plan context lookup failed: %s", e)
+
         # Build system prompt
         system_prompt = service._build_system_prompt(
             memories,
@@ -363,6 +434,10 @@ async def _handle_user_message(
             style_guidelines,
             priming_context,
         )
+
+        # Append pending plan context if available
+        if pending_plan_context:
+            system_prompt += pending_plan_context
 
         # Stream LLM response
         full_content = ""
@@ -431,12 +506,20 @@ async def _handle_user_message(
                     "data": insight_dict,
                 })
 
+        # --- Detect plan approval via natural language ---
+        plan_approved_via_chat = False
+        display_content = full_content
+        if pending_plan_goal_id and "[PLAN_APPROVED]" in full_content:
+            plan_approved_via_chat = True
+            # Strip the marker from the displayed message
+            display_content = full_content.replace("[PLAN_APPROVED]", "").strip()
+
         # Send complete response
-        ui_commands = _analyze_ui_commands(full_content)
-        suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
+        ui_commands = _analyze_ui_commands(display_content)
+        suggestions = _generate_suggestions(display_content, conversation_messages[-4:])
 
         response_event = AriaMessageEvent(
-            message=full_content,
+            message=display_content,
             rich_content=rich_content,
             ui_commands=ui_commands,
             suggestions=suggestions,
@@ -447,6 +530,35 @@ async def _handle_user_message(
                 "conversation_id": conversation_id,
             }
         )
+
+        # --- Trigger plan execution if approved via chat ---
+        if plan_approved_via_chat and pending_plan_goal_id:
+            try:
+                from datetime import UTC, datetime
+
+                from src.services.goal_execution import GoalExecutionService
+
+                db = get_supabase_client()
+                now = datetime.now(UTC).isoformat()
+                db.table("goals").update(
+                    {"status": "active", "started_at": now, "updated_at": now}
+                ).eq("id", pending_plan_goal_id).eq("user_id", user_id).execute()
+
+                exec_service = GoalExecutionService()
+                await exec_service.execute_goal_async(
+                    pending_plan_goal_id, user_id
+                )
+                logger.info(
+                    "Plan approved via chat — execution started",
+                    extra={
+                        "goal_id": pending_plan_goal_id,
+                        "user_id": user_id,
+                    },
+                )
+            except Exception as approve_err:
+                logger.warning(
+                    "Failed to auto-approve plan via chat: %s", approve_err
+                )
 
     except Exception as chat_err:
         logger.exception("WebSocket chat error: %s", chat_err)

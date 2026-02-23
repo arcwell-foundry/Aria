@@ -2260,14 +2260,45 @@ class GoalExecutionService:
             "reasoning": plan_data.get("reasoning", ""),
         }
 
+        # Transition goal to plan_ready — pauses execution until user approves
+        try:
+            now = datetime.now(UTC).isoformat()
+            self._db.table("goals").update(
+                {"status": "plan_ready", "updated_at": now}
+            ).eq("id", goal_id).eq("user_id", user_id).execute()
+            logger.info(
+                "Goal status set to plan_ready (awaiting user approval)",
+                extra={"goal_id": goal_id, "user_id": user_id},
+            )
+        except Exception as e:
+            logger.warning("Failed to set goal status to plan_ready: %s", e)
+
         # Emit plan via WebSocket with full resource context
         try:
+            # Build a conversational message describing the plan
+            task_count = len(tasks_json)
+            agent_set = sorted({t.get("agent", "unknown") for t in tasks_json})
+            agents_str = ", ".join(agent_set)
+            plan_message = (
+                f"Here's my plan for **{goal.get('title', '')}**. "
+                f"I've broken it into {task_count} phases using "
+                f"{agents_str}."
+            )
+            if missing_integrations:
+                plan_message += (
+                    f" Note: connecting {', '.join(missing_integrations)} "
+                    f"would unlock more capabilities, but the plan works without them."
+                )
+            if readiness_score < 80:
+                plan_message += (
+                    f" Readiness is at {readiness_score}% — "
+                    f"some tools aren't connected yet."
+                )
+            plan_message += " Take a look and let me know what you think."
+
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=(
-                    f"I've created an execution plan for **{goal.get('title', '')}** "
-                    f"with {len(tasks_json)} tasks. Review it and approve when ready."
-                ),
+                message=plan_message,
                 rich_content=[
                     {
                         "type": "execution_plan",
@@ -2285,8 +2316,8 @@ class GoalExecutionService:
                 ],
                 suggestions=[
                     "Approve the plan",
-                    "What if we skip the outreach?",
-                    "Can you add a research step?",
+                    "Why this approach?",
+                    "Can you add a step?",
                 ],
             )
         except Exception as e:
@@ -2379,6 +2410,22 @@ class GoalExecutionService:
         event_bus = EventBus.get_instance()
 
         try:
+            # Guard: don't execute if goal is still awaiting user approval
+            goal_check = (
+                self._db.table("goals")
+                .select("status")
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if goal_check.data and goal_check.data.get("status") == "plan_ready":
+                logger.info(
+                    "Goal is plan_ready — skipping execution (awaiting user approval)",
+                    extra={"goal_id": goal_id, "user_id": user_id},
+                )
+                return
+
             # Load execution plan
             plan_result = (
                 self._db.table("goal_execution_plans")
@@ -2402,10 +2449,14 @@ class GoalExecutionService:
                         parsed = json.loads(plan_blob) if isinstance(plan_blob, str) else plan_blob
                         execution_mode = parsed.get("execution_mode", execution_mode)
             else:
-                # Auto-plan if no plan exists
-                plan = await self.plan_goal(goal_id, user_id)
-                tasks = plan.get("tasks", [])
-                execution_mode = plan.get("execution_mode", "sequential")
+                # Auto-plan if no plan exists — plan_goal() sets status to
+                # plan_ready and emits the plan card for user review.
+                await self.plan_goal(goal_id, user_id)
+                logger.info(
+                    "Auto-planned goal — now awaiting user approval (plan_ready)",
+                    extra={"goal_id": goal_id},
+                )
+                return  # Don't auto-execute — wait for user approval
 
             if not tasks:
                 await event_bus.publish(
@@ -2784,6 +2835,25 @@ class GoalExecutionService:
             except Exception:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
+            # Send conversational progress update to the user
+            try:
+                task_title = task.get("title", "task")
+                summary = result.get("summary", "")
+                summary_snippet = (
+                    f": {summary[:200]}" if summary else ""
+                )
+                await ws_manager.send_aria_message(
+                    user_id=user_id,
+                    message=(
+                        f"**{task_title}** complete{summary_snippet}."
+                    ),
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to send conversational progress",
+                    extra={"goal_id": goal_id},
+                )
+
             return {
                 "task_title": task.get("title", ""),
                 "agent_type": agent_type,
@@ -2824,6 +2894,22 @@ class GoalExecutionService:
                 )
             except Exception:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
+
+            # Send conversational failure notice to the user
+            try:
+                task_title = task.get("title", "task")
+                await ws_manager.send_aria_message(
+                    user_id=user_id,
+                    message=(
+                        f"**{task_title}** ran into an issue. "
+                        f"I'll try an alternative approach for the remaining steps."
+                    ),
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to send conversational failure notice",
+                    extra={"goal_id": goal_id},
+                )
 
             return {
                 "task_title": task.get("title", ""),
