@@ -261,6 +261,46 @@ class OnboardingCompletionOrchestrator:
             "activations": activations,
         }
 
+    async def _create_goal_with_agent(
+        self,
+        user_id: str,
+        goal: GoalCreate,
+        agent_type: str,
+    ) -> dict[str, Any]:
+        """Create a goal and insert a corresponding goal_agents row.
+
+        Ensures the agent assignment exists in goal_agents so the OODA
+        scheduler and GoalExecutionService can find and dispatch it.
+
+        Args:
+            user_id: The user's ID.
+            goal: The GoalCreate model.
+            agent_type: The agent type (scout, analyst, hunter, etc.).
+
+        Returns:
+            The created goal dict.
+        """
+        created = await self._goal_service.create_goal(user_id, goal)
+        try:
+            self._db.table("goal_agents").insert(
+                {
+                    "goal_id": created["id"],
+                    "agent_type": agent_type,
+                    "agent_config": goal.config or {},
+                    "status": "pending",
+                }
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to create goal_agent row",
+                extra={
+                    "goal_id": created["id"],
+                    "agent_type": agent_type,
+                    "error": str(e),
+                },
+            )
+        return created
+
     async def _activate_scout(
         self,
         user_id: str,
@@ -308,7 +348,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "scout")
 
             logger.info(
                 "Scout agent activated for competitive monitoring",
@@ -370,7 +410,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "analyst")
 
             logger.info(
                 "Analyst agent activated for account research",
@@ -424,7 +464,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "hunter")
 
             logger.info(
                 "Hunter agent activated for lead generation",
@@ -486,7 +526,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "operator")
 
             logger.info(
                 "Operator agent activated for pipeline health",
@@ -549,7 +589,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "scribe")
 
             logger.info(
                 "Scribe agent activated for follow-up drafts",
@@ -603,7 +643,7 @@ class OnboardingCompletionOrchestrator:
                 },
             )
 
-            created = await self._goal_service.create_goal(user_id, goal)
+            created = await self._create_goal_with_agent(user_id, goal, "strategist")
 
             logger.info(
                 "Strategist agent activated for strategic assessment",

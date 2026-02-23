@@ -181,6 +181,7 @@ async def _run_ooda_goal_checks() -> None:
     try:
         from src.core.llm import LLMClient
         from src.core.ooda import OODAConfig, OODALoop, OODAState
+        from src.core.ws import ws_manager
         from src.db.supabase import SupabaseClient
         from src.memory.episodic import EpisodicMemory
         from src.memory.semantic import SemanticMemory
@@ -202,6 +203,47 @@ async def _run_ooda_goal_checks() -> None:
 
         llm = LLMClient()
         execution_service = GoalExecutionService()
+
+        # Create shared service instances for OODA loop (best-effort)
+        ooda_logger = None
+        try:
+            from src.services.ooda_logger import OODALogger
+
+            ooda_logger = OODALogger()
+        except Exception:
+            logger.warning("OODALogger unavailable for scheduler OODA checks")
+
+        persona_builder = None
+        try:
+            from src.core.persona import get_persona_builder
+
+            persona_builder = get_persona_builder()
+        except Exception:
+            logger.warning("PersonaBuilder unavailable for scheduler OODA checks")
+
+        trust_service = None
+        try:
+            from src.core.trust import get_trust_calibration_service
+
+            trust_service = get_trust_calibration_service()
+        except Exception:
+            logger.warning("TrustCalibrationService unavailable for scheduler OODA checks")
+
+        dct_minter = None
+        try:
+            from src.core.capability_tokens import DCTMinter
+
+            dct_minter = DCTMinter()
+        except Exception:
+            logger.warning("DCTMinter unavailable for scheduler OODA checks")
+
+        cost_governor = None
+        try:
+            from src.core.cost_governor import CostGovernor
+
+            cost_governor = CostGovernor()
+        except Exception:
+            logger.warning("CostGovernor unavailable for scheduler OODA checks")
 
         for goal in goals:
             try:
@@ -246,6 +288,12 @@ async def _run_ooda_goal_checks() -> None:
                     working_memory=working,
                     config=ooda_config,
                     agent_executor=agent_executor,
+                    ooda_logger=ooda_logger,
+                    user_id=user_id,
+                    persona_builder=persona_builder,
+                    trust_service=trust_service,
+                    dct_minter=dct_minter,
+                    cost_governor=cost_governor,
                 )
 
                 state = OODAState(goal_id=goal_id)
@@ -253,12 +301,43 @@ async def _run_ooda_goal_checks() -> None:
 
                 decision_action = state.decision.get("action") if state.decision else None
 
+                # Emit WebSocket progress event after OODA iteration
+                try:
+                    agent_name = (
+                        state.decision.get("agent") if state.decision else None
+                    )
+                    await ws_manager.send_progress_update(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        progress=goal.get("progress", 0),
+                        status="active",
+                        agent_name=agent_name,
+                        message=f"OODA iteration complete for: {goal.get('title', '')}",
+                    )
+                except Exception:
+                    pass  # User may not be connected
+
                 if state.is_complete or decision_action == "complete":
                     await execution_service.complete_goal_with_retro(goal_id, user_id)
                     logger.info(
                         "OODA decided goal complete",
                         extra={"goal_id": goal_id},
                     )
+
+                    # Emit WebSocket completion event
+                    try:
+                        await ws_manager.send_execution_complete(
+                            user_id=user_id,
+                            goal_id=goal_id,
+                            title=goal.get("title", ""),
+                            success=True,
+                            steps_completed=1,
+                            steps_total=1,
+                            summary=f"Goal '{goal.get('title', '')}' completed",
+                        )
+                    except Exception:
+                        pass  # User may not be connected
+
                 elif state.is_blocked:
                     db.table("goals").update(
                         {
@@ -276,6 +355,18 @@ async def _run_ooda_goal_checks() -> None:
                             "reason": state.blocked_reason,
                         },
                     )
+
+                    # Emit WebSocket blocked event
+                    try:
+                        await ws_manager.send_progress_update(
+                            user_id=user_id,
+                            goal_id=goal_id,
+                            progress=goal.get("progress", 0),
+                            status="blocked",
+                            message=f"Blocked: {state.blocked_reason or 'Unknown reason'}",
+                        )
+                    except Exception:
+                        pass  # User may not be connected
 
             except Exception:
                 logger.warning(

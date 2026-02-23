@@ -120,6 +120,37 @@ class GoalExecutionService:
                 self._adaptive_coordinator = None
         return self._adaptive_coordinator
 
+    async def _record_goal_update(
+        self,
+        goal_id: str,
+        update_type: str,
+        content: str,
+        progress_delta: int = 0,
+    ) -> None:
+        """Record a goal lifecycle update in the goal_updates table.
+
+        Args:
+            goal_id: The goal ID.
+            update_type: Type of update (progress, milestone, blocker, note).
+            content: Description of the update.
+            progress_delta: Change in progress percentage.
+        """
+        try:
+            self._db.table("goal_updates").insert(
+                {
+                    "goal_id": goal_id,
+                    "update_type": update_type,
+                    "content": content,
+                    "progress_delta": progress_delta,
+                    "created_by": "aria",
+                }
+            ).execute()
+        except Exception:
+            logger.warning(
+                "Failed to record goal update",
+                extra={"goal_id": goal_id, "update_type": update_type},
+            )
+
     def register_dynamic_agent(self, agent_type: str, agent_class: type) -> None:
         """Register a dynamically created agent class for task routing.
 
@@ -172,6 +203,10 @@ class GoalExecutionService:
         self._db.table("goals").update(
             {"status": "active", "started_at": now, "updated_at": now}
         ).eq("id", goal_id).execute()
+
+        await self._record_goal_update(
+            goal_id, "progress", "Goal execution started", progress_delta=0
+        )
 
         # Notify frontend that ARIA is processing
         try:
@@ -253,8 +288,15 @@ class GoalExecutionService:
             }
         ).eq("id", goal_id).execute()
 
-        # Notify frontend that goal is complete
         success_count = sum(1 for r in results if r.get("success"))
+        await self._record_goal_update(
+            goal_id,
+            "milestone",
+            f"Goal completed: {success_count}/{len(results)} agents succeeded",
+            progress_delta=100,
+        )
+
+        # Notify frontend that goal is complete
         try:
             await ws_manager.send_aria_message(
                 user_id=user_id,
@@ -1030,6 +1072,13 @@ class GoalExecutionService:
                 goal_agent_id=goal_agent_id,
             )
 
+            # Record goal update
+            await self._record_goal_update(
+                goal["id"],
+                "progress",
+                f"{agent_type.title()} completed analysis (skill-aware)",
+            )
+
             # Record activity
             await self._activity.record(
                 user_id=user_id,
@@ -1184,6 +1233,13 @@ class GoalExecutionService:
                 agent_type=agent_type,
                 content=content,
                 goal_agent_id=goal_agent_id,
+            )
+
+            # Record goal update
+            await self._record_goal_update(
+                goal["id"],
+                "progress",
+                f"{agent_type.title()} completed analysis (prompt-based)",
             )
 
             # Record activity
@@ -2514,6 +2570,13 @@ class GoalExecutionService:
                 "updated_at": now,
             }
         ).eq("id", goal_id).execute()
+
+        await self._record_goal_update(
+            goal_id,
+            "milestone",
+            "Goal marked complete with retrospective",
+            progress_delta=100,
+        )
 
         # Generate retrospective
         retro = None

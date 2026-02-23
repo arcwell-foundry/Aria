@@ -193,6 +193,26 @@ async def lifespan(_app: FastAPI) -> Any:
         logger.info("Daily briefing startup check scheduled")
     except Exception:
         logger.exception("Failed to schedule daily briefing startup check")
+
+    # Process stalled goals on startup (active goals with 0 progress)
+    try:
+        import asyncio
+
+        async def _check_stalled_goals() -> None:
+            """Run OODA checks for stalled goals shortly after startup."""
+            await asyncio.sleep(10)  # Wait for services to initialize
+            try:
+                from src.services.scheduler import _run_ooda_goal_checks
+
+                await _run_ooda_goal_checks()
+                logger.info("Startup stalled goals check completed")
+            except Exception:
+                logger.exception("Startup stalled goals check failed")
+
+        asyncio.create_task(_check_stalled_goals())
+        logger.info("Startup stalled goals check scheduled")
+    except Exception:
+        logger.exception("Failed to schedule startup stalled goals check")
     # Mount MCP servers (SSE transport for external clients + in-process registry)
     try:
         from src.mcp_servers.registry import mount_mcp_servers
