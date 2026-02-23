@@ -134,11 +134,11 @@ class CostGovernor:
         row = await self._get_today_usage(user_id)
 
         total_used = (
-            row["input_tokens_total"]
-            + row["output_tokens_total"]
-            + row["thinking_tokens_total"]
+            row["input_tokens"]
+            + row["output_tokens"]
+            + row["extended_thinking_tokens"]
         )
-        thinking_used = row["thinking_tokens_total"]
+        thinking_used = row["extended_thinking_tokens"]
         daily_budget = s.COST_GOVERNOR_DAILY_TOKEN_BUDGET
         thinking_budget = s.COST_GOVERNOR_DAILY_THINKING_BUDGET
         utilization = total_used / daily_budget if daily_budget > 0 else 0.0
@@ -156,8 +156,8 @@ class CostGovernor:
             daily_budget=daily_budget,
             daily_thinking_budget=thinking_budget,
             utilization_percent=round(utilization * 100, 2),
-            estimated_cost_today_usd=float(row["estimated_cost_usd"]),
-            llm_calls_today=row["llm_calls_total"],
+            estimated_cost_today_usd=float(row["estimated_cost_cents"]) / 100.0,
+            llm_calls_today=row["request_count"],
         )
 
     async def record_usage(self, user_id: str, usage: LLMUsage) -> None:
@@ -261,14 +261,13 @@ class CostGovernor:
         Returns:
             Dict with token counts, defaulting to zeros if no row exists.
         """
+        # Column names match deployed usage_tracking table schema
         defaults: dict[str, Any] = {
-            "input_tokens_total": 0,
-            "output_tokens_total": 0,
-            "thinking_tokens_total": 0,
-            "cache_read_tokens_total": 0,
-            "cache_creation_tokens_total": 0,
-            "llm_calls_total": 0,
-            "estimated_cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "extended_thinking_tokens": 0,
+            "estimated_cost_cents": 0.0,
+            "request_count": 0,
         }
 
         try:

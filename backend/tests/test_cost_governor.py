@@ -145,13 +145,11 @@ class TestCostGovernor:
         )
         governor = CostGovernor()
         governor._get_today_usage = AsyncMock(return_value={  # type: ignore[method-assign]
-            "input_tokens_total": 100_000,
-            "output_tokens_total": 50_000,
-            "thinking_tokens_total": 10_000,
-            "cache_read_tokens_total": 0,
-            "cache_creation_tokens_total": 0,
-            "llm_calls_total": 5,
-            "estimated_cost_usd": 0.50,
+            "input_tokens": 100_000,
+            "output_tokens": 50_000,
+            "extended_thinking_tokens": 10_000,
+            "estimated_cost_cents": 50.0,  # 0.50 USD = 50 cents
+            "request_count": 5,
         })
 
         result = await governor.check_budget("user-123")
@@ -173,13 +171,11 @@ class TestCostGovernor:
         governor = CostGovernor()
         # 80% of 2M = 1.6M total
         governor._get_today_usage = AsyncMock(return_value={  # type: ignore[method-assign]
-            "input_tokens_total": 800_000,
-            "output_tokens_total": 600_000,
-            "thinking_tokens_total": 200_000,
-            "cache_read_tokens_total": 0,
-            "cache_creation_tokens_total": 0,
-            "llm_calls_total": 50,
-            "estimated_cost_usd": 10.0,
+            "input_tokens": 800_000,
+            "output_tokens": 600_000,
+            "extended_thinking_tokens": 200_000,
+            "estimated_cost_cents": 1000.0,  # 10.0 USD = 1000 cents
+            "request_count": 50,
         })
 
         result = await governor.check_budget("user-123")
@@ -200,13 +196,11 @@ class TestCostGovernor:
         )
         governor = CostGovernor()
         governor._get_today_usage = AsyncMock(return_value={  # type: ignore[method-assign]
-            "input_tokens_total": 1_000_000,
-            "output_tokens_total": 800_000,
-            "thinking_tokens_total": 300_000,
-            "cache_read_tokens_total": 0,
-            "cache_creation_tokens_total": 0,
-            "llm_calls_total": 100,
-            "estimated_cost_usd": 20.0,
+            "input_tokens": 1_000_000,
+            "output_tokens": 800_000,
+            "extended_thinking_tokens": 300_000,
+            "estimated_cost_cents": 2000.0,  # 20.0 USD = 2000 cents
+            "request_count": 100,
         })
 
         result = await governor.check_budget("user-123")
