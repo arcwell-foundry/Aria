@@ -167,15 +167,204 @@ async def plan_goal(
     goal_id: str,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Create an execution plan for a goal.
+    """Create a resource-aware execution plan for a goal.
 
-    Decomposes the goal into sub-tasks with agent assignments and
-    dependency ordering. Stores the plan in the database.
+    Gathers user's integrations, trust levels, and company context,
+    then uses Claude to decompose the goal into sub-tasks with agent
+    assignments, tool requirements, risk levels, and dependency ordering.
     """
     service = _get_execution_service()
     result = await service.plan_goal(goal_id, current_user.id)
     logger.info("Goal planned via API", extra={"goal_id": goal_id})
     return result
+
+
+@router.get("/{goal_id}/plan")
+async def get_goal_plan(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get the execution plan for a goal with per-task resource status.
+
+    Returns the stored execution plan with resource availability checks
+    for each task's required tools, an overall readiness score, and
+    lists of missing integrations.
+    """
+    from fastapi import HTTPException
+
+    from src.db.supabase import SupabaseClient
+
+    db = SupabaseClient.get_client()
+
+    # Validate user owns this goal
+    goal_result = (
+        db.table("goals")
+        .select("id, title, status, user_id")
+        .eq("id", goal_id)
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not goal_result.data:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    # Fetch latest plan
+    plan_result = (
+        db.table("goal_execution_plans")
+        .select("*")
+        .eq("goal_id", goal_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .maybe_single()
+        .execute()
+    )
+    if not plan_result.data:
+        raise HTTPException(status_code=404, detail="No execution plan found for this goal")
+
+    plan_row = plan_result.data
+    tasks_raw = plan_row.get("tasks", "[]")
+    tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
+
+    # Fetch user's active integrations for resource checking
+    integ_result = (
+        db.table("user_integrations")
+        .select("integration_type, status")
+        .eq("user_id", current_user.id)
+        .eq("status", "active")
+        .execute()
+    )
+    active_integrations = [
+        i["integration_type"] for i in (integ_result.data or [])
+    ]
+
+    # Annotate each task with live resource status
+    service = _get_execution_service()
+    total_tools = 0
+    connected_tools = 0
+    for task in tasks:
+        resource_status: list[dict[str, Any]] = []
+        for tool in task.get("tools_needed", []):
+            is_connected = service._check_tool_connected(tool, active_integrations)
+            resource_status.append({"tool": tool, "connected": is_connected})
+            total_tools += 1
+            if is_connected:
+                connected_tools += 1
+        task["resource_status"] = resource_status
+
+    # Compute readiness score
+    readiness_score = (
+        round((connected_tools / total_tools) * 100) if total_tools > 0 else 100
+    )
+
+    # Identify missing integrations
+    all_auth_required: set[str] = set()
+    for task in tasks:
+        for auth in task.get("auth_required", []):
+            if auth not in active_integrations:
+                all_auth_required.add(auth)
+
+    logger.info(
+        "Goal plan retrieved",
+        extra={"goal_id": goal_id, "readiness_score": readiness_score},
+    )
+
+    return {
+        "goal_id": goal_id,
+        "title": goal_result.data.get("title", ""),
+        "status": goal_result.data.get("status", "draft"),
+        "tasks": tasks,
+        "execution_mode": plan_row.get("execution_mode", "parallel"),
+        "estimated_total_minutes": plan_row.get("estimated_total_minutes", 0),
+        "reasoning": plan_row.get("reasoning", ""),
+        "readiness_score": readiness_score,
+        "missing_integrations": sorted(all_auth_required),
+        "connected_integrations": active_integrations,
+    }
+
+
+@router.post("/{goal_id}/approve")
+async def approve_goal_plan(
+    goal_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Approve an execution plan and start goal execution.
+
+    Validates that the JWT user owns the goal, sets status to active,
+    triggers async execution, and emits a WebSocket event.
+    """
+    from datetime import UTC, datetime
+
+    from fastapi import HTTPException
+
+    from src.core.ws import ws_manager
+    from src.db.supabase import SupabaseClient
+    from src.models.ws_events import AriaMessageEvent
+
+    db = SupabaseClient.get_client()
+
+    # Validate ownership
+    goal_result = (
+        db.table("goals")
+        .select("id, title, status, user_id")
+        .eq("id", goal_id)
+        .eq("user_id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not goal_result.data:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    goal = goal_result.data
+
+    if goal["status"] == "active":
+        raise HTTPException(status_code=400, detail="Goal is already active")
+
+    # Activate the goal
+    now = datetime.now(UTC).isoformat()
+    db.table("goals").update(
+        {"status": "active", "started_at": now, "updated_at": now}
+    ).eq("id", goal_id).execute()
+
+    # Trigger async execution
+    service = _get_execution_service()
+    await service.execute_goal_async(goal_id, current_user.id)
+
+    # Emit WebSocket event
+    try:
+        event = AriaMessageEvent(
+            message=(
+                f"Plan approved — I'm starting execution on **{goal['title']}**. "
+                f"I'll keep you updated as each step progresses."
+            ),
+            rich_content=[],
+            ui_commands=[
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "goals",
+                    "badge_count": 1,
+                }
+            ],
+            suggestions=[
+                "Show me the progress",
+                "What step is running now?",
+                "Pause if anything looks off",
+            ],
+        )
+        await ws_manager.send_to_user(current_user.id, event)
+    except Exception as e:
+        logger.warning("Failed to send approval WebSocket event: %s", e)
+
+    logger.info(
+        "Goal plan approved and execution started",
+        extra={"goal_id": goal_id, "user_id": current_user.id},
+    )
+
+    return {
+        "goal_id": goal_id,
+        "status": "active",
+        "started_at": now,
+        "message": f"Execution started for: {goal['title']}",
+    }
 
 
 @router.post("/{goal_id}/execute")

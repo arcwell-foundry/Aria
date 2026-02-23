@@ -1813,20 +1813,102 @@ class GoalExecutionService:
         except json.JSONDecodeError:
             return {"proposals": [], "context_summary": response.strip()}
 
-    async def plan_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
-        """Decompose a goal into executable tasks with agent assignments.
+    async def _gather_user_resources(self, user_id: str) -> dict[str, Any]:
+        """Gather this user's integrations, trust profiles, and company facts.
 
-        Uses LLM to break down the goal into GoalTasks, then stores
-        the execution plan in the goal_execution_plans table.
+        Returns a dict with keys: integrations, trust_profiles, company_facts,
+        company_id.
+        """
+        resources: dict[str, Any] = {
+            "integrations": [],
+            "trust_profiles": [],
+            "company_facts": [],
+            "company_id": None,
+        }
+
+        # Active integrations for this user
+        try:
+            integ_result = (
+                self._db.table("user_integrations")
+                .select("integration_type, status, display_name")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            resources["integrations"] = integ_result.data or []
+        except Exception as e:
+            logger.warning("Failed to fetch user integrations: %s", e)
+
+        # Trust profiles for this user
+        try:
+            trust_result = (
+                self._db.table("user_trust_profiles")
+                .select("action_category, trust_score, successful_actions, failed_actions")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            resources["trust_profiles"] = trust_result.data or []
+        except Exception as e:
+            logger.warning("Failed to fetch trust profiles: %s", e)
+
+        # Company facts
+        try:
+            profile_result = (
+                self._db.table("user_profiles")
+                .select("company_id")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            company_id = (profile_result.data or {}).get("company_id")
+            resources["company_id"] = company_id
+            if company_id:
+                # Try corporate_facts first, fall back to memory_semantic
+                try:
+                    facts_result = (
+                        self._db.table("corporate_facts")
+                        .select("fact_type, content")
+                        .eq("company_id", company_id)
+                        .limit(20)
+                        .execute()
+                    )
+                    resources["company_facts"] = facts_result.data or []
+                except Exception:
+                    # Table may not exist; fall back to semantic memory
+                    facts_result = (
+                        self._db.table("memory_semantic")
+                        .select("fact, confidence")
+                        .eq("user_id", user_id)
+                        .order("confidence", desc=True)
+                        .limit(15)
+                        .execute()
+                    )
+                    resources["company_facts"] = [
+                        {"fact_type": "semantic", "content": f.get("fact", "")}
+                        for f in (facts_result.data or [])
+                    ]
+        except Exception as e:
+            logger.warning("Failed to fetch company facts: %s", e)
+
+        return resources
+
+    async def plan_goal(self, goal_id: str, user_id: str) -> dict[str, Any]:
+        """Resource-aware goal planning: decomposes a goal into executable tasks.
+
+        Gathers THIS user's integrations, trust profiles, and company context,
+        then calls Claude to produce a detailed execution plan showing per-task
+        tools needed, risk levels, and resource availability.
 
         Args:
             goal_id: The goal to plan.
             user_id: The user who owns this goal.
 
         Returns:
-            Dict with goal_id, tasks, execution_mode, reasoning.
+            Dict with goal_id, tasks (with resource info), execution_mode,
+            missing_integrations, approval_points, estimated_total_minutes,
+            and reasoning.
         """
-        # Fetch goal
+        # Fetch goal — validate ownership
         goal_result = (
             self._db.table("goals")
             .select("*")
@@ -1857,32 +1939,37 @@ class GoalExecutionService:
                     goal_id,
                     matching.success_rate,
                 )
-                # Convert workflow steps to task format
                 tasks: list[dict[str, Any]] = []
                 for i, step in enumerate(matching.steps):
                     tasks.append(
                         {
                             "title": step.get("title", f"Step {i + 1}"),
                             "description": step.get("description", ""),
-                            "agent_type": step.get("agent_type", "analyst"),
-                            "depends_on": step.get("depends_on", []),
-                            "estimated_duration_minutes": step.get(
+                            "agent": step.get("agent_type", "analyst"),
+                            "dependencies": step.get("depends_on", []),
+                            "tools_needed": step.get("tools_needed", []),
+                            "auth_required": step.get("auth_required", []),
+                            "risk_level": step.get("risk_level", "LOW"),
+                            "estimated_minutes": step.get(
                                 "estimated_duration_minutes", 30
                             ),
+                            "auto_executable": step.get("auto_executable", True),
                         }
                     )
-                # Store the plan
                 plan: dict[str, Any] = {
                     "goal_id": goal_id,
                     "tasks": tasks,
                     "execution_mode": "reused_workflow",
+                    "missing_integrations": [],
+                    "approval_points": [],
+                    "estimated_total_minutes": sum(
+                        t.get("estimated_minutes", 30) for t in tasks
+                    ),
                     "reasoning": (
                         f"Reused successful workflow pattern "
                         f"(success rate: {matching.success_rate:.0%})"
                     ),
-                    "workflow_id": matching.id,
                 }
-                # Save to goal_execution_plans table
                 self._db.table("goal_execution_plans").upsert(
                     {
                         "goal_id": goal_id,
@@ -1893,74 +1980,293 @@ class GoalExecutionService:
                 ).execute()
                 return plan
         except Exception as e:
-            logger.debug("Procedural memory lookup failed, proceeding with LLM planning: %s", e)
+            logger.debug(
+                "Procedural memory lookup failed, proceeding with LLM planning: %s", e
+            )
 
+        # Gather user-specific resources and execution context
+        resources = await self._gather_user_resources(user_id)
         context = await self._gather_execution_context(user_id)
 
+        # Build integration summary for the prompt
+        active_integrations = [
+            i["integration_type"] for i in resources["integrations"]
+        ]
+        integration_summary = (
+            ", ".join(active_integrations) if active_integrations else "None connected"
+        )
+
+        # Build trust summary
+        trust_summary = "New user (default trust 0.3)"
+        if resources["trust_profiles"]:
+            trust_lines = [
+                f"  {t['action_category']}: {t['trust_score']:.2f} "
+                f"({t['successful_actions']} successes, {t['failed_actions']} failures)"
+                for t in resources["trust_profiles"]
+            ]
+            trust_summary = "\n".join(trust_lines)
+
+        # Build company facts summary
+        facts_summary = "No company facts available"
+        if resources["company_facts"]:
+            fact_lines = [
+                f"  [{f.get('fact_type', 'general')}] {f.get('content', '')}"
+                for f in resources["company_facts"][:10]
+            ]
+            facts_summary = "\n".join(fact_lines)
+
         prompt = (
-            f"Decompose this goal into executable sub-tasks:\n\n"
-            f"Goal: {goal.get('title', '')}\n"
+            f"Create a detailed execution plan for this goal.\n\n"
+            f"## Goal\n"
+            f"Title: {goal.get('title', '')}\n"
             f"Description: {goal.get('description', '')}\n"
             f"Type: {goal.get('goal_type', 'research')}\n\n"
-            f"Company: {context.get('company_name', '')}\n"
-            f"Available agents: scout, analyst, hunter, strategist, scribe, operator\n\n"
-            "Respond with JSON:\n"
-            "{\n"
-            '  "tasks": [\n'
-            '    {"title": "...", "description": "...", "agent_type": "analyst|hunter|...",\n'
-            '     "depends_on": [], "estimated_duration_minutes": 30}\n'
-            "  ],\n"
-            '  "execution_mode": "parallel|sequential",\n'
-            '  "reasoning": "why this decomposition"\n'
-            "}"
+            f"## User Context\n"
+            f"Company: {context.get('company_name', 'Unknown')}\n"
+            f"User role: {context.get('user_profile', {}).get('title', 'Unknown')}\n"
+            f"Connected integrations: {integration_summary}\n\n"
+            f"## Trust Levels\n{trust_summary}\n\n"
+            f"## Company Knowledge\n{facts_summary}\n\n"
+            f"## Available Agents & Their Tools\n"
+            f"- hunter: Lead discovery (tools: exa_search, apollo_search)\n"
+            f"- analyst: Scientific research (tools: pubmed_search, fda_search, "
+            f"chembl_search, clinicaltrials_search)\n"
+            f"- strategist: Strategic planning (tools: claude_analysis)\n"
+            f"- scribe: Email/doc drafting (tools: digital_twin_style, claude_drafting)\n"
+            f"- operator: CRM & calendar actions (tools: composio_crm, composio_calendar, "
+            f"composio_email_send)\n"
+            f"- scout: Market monitoring (tools: exa_search, news_apis)\n\n"
+            f"## Instructions\n"
+            f"Decompose the goal into 3-8 concrete sub-tasks. For each task, specify:\n"
+            f"- Which agent handles it\n"
+            f"- What tools/integrations are needed\n"
+            f"- What integrations the user must have connected (auth_required)\n"
+            f"- Risk level (LOW/MEDIUM/HIGH/CRITICAL)\n"
+            f"- Whether it can auto-execute or needs approval\n"
+            f"- Time estimate in minutes\n"
+            f"- Dependencies on other tasks (by index, 0-based)\n\n"
+            f"Also identify:\n"
+            f"- Missing integrations the user should connect\n"
+            f"- Points where ARIA needs user approval before proceeding\n\n"
+            f"Respond with JSON ONLY (no markdown fences):\n"
+            f'{{\n'
+            f'  "tasks": [\n'
+            f'    {{\n'
+            f'      "title": "Task title",\n'
+            f'      "agent": "hunter|analyst|strategist|scribe|operator|scout",\n'
+            f'      "dependencies": [],\n'
+            f'      "tools_needed": ["exa_search"],\n'
+            f'      "auth_required": ["salesforce"],\n'
+            f'      "risk_level": "LOW|MEDIUM|HIGH|CRITICAL",\n'
+            f'      "estimated_minutes": 15,\n'
+            f'      "auto_executable": true\n'
+            f'    }}\n'
+            f'  ],\n'
+            f'  "missing_integrations": ["salesforce"],\n'
+            f'  "approval_points": ["Before sending outreach emails"],\n'
+            f'  "estimated_total_minutes": 120\n'
+            f'}}'
         )
 
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
-                "You are ARIA's planning module. Decompose goals into agent-executable "
-                "tasks. Each task should have a clear agent assignment. Respond with JSON only."
+                "You are ARIA's resource-aware planning engine. You create detailed, "
+                "actionable execution plans that account for the user's connected "
+                "integrations, trust levels, and company context. "
+                "Each task must have a clear agent assignment and resource requirements. "
+                "Be realistic about time estimates. "
+                "Respond with valid JSON only — no markdown code fences or commentary."
             ),
-            max_tokens=2048,
+            max_tokens=4096,
             temperature=0.3,
+            user_id=user_id,
         )
 
+        # Strip markdown fences if present
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
         try:
-            plan_data = json.loads(response)
+            plan_data = json.loads(cleaned)
         except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse plan JSON for goal %s, using fallback", goal_id
+            )
             plan_data = {
                 "tasks": [
                     {
                         "title": goal.get("title", "Execute goal"),
-                        "description": goal.get("description", ""),
-                        "agent_type": goal.get("config", {}).get("agent_type", "analyst"),
-                        "depends_on": [],
+                        "agent": goal.get("config", {}).get("agent_type", "analyst"),
+                        "dependencies": [],
+                        "tools_needed": [],
+                        "auth_required": [],
+                        "risk_level": "LOW",
+                        "estimated_minutes": 30,
+                        "auto_executable": True,
                     }
                 ],
-                "execution_mode": "sequential",
-                "reasoning": "Fallback: single-task plan",
+                "missing_integrations": [],
+                "approval_points": [],
+                "estimated_total_minutes": 30,
             }
 
-        # Store plan in DB
         tasks_json = plan_data.get("tasks", [])
+        missing_integrations = plan_data.get("missing_integrations", [])
+        approval_points = plan_data.get("approval_points", [])
+        estimated_total = plan_data.get(
+            "estimated_total_minutes",
+            sum(t.get("estimated_minutes", 30) for t in tasks_json),
+        )
+
+        # Annotate tasks with resource availability for this user
+        for task in tasks_json:
+            task_resources: list[dict[str, Any]] = []
+            for tool in task.get("tools_needed", []):
+                connected = self._check_tool_connected(tool, active_integrations)
+                task_resources.append(
+                    {"tool": tool, "connected": connected}
+                )
+            task["resource_status"] = task_resources
+
+        # Store plan in goal_execution_plans
         self._db.table("goal_execution_plans").insert(
             {
                 "goal_id": goal_id,
                 "tasks": json.dumps(tasks_json),
                 "execution_mode": plan_data.get("execution_mode", "parallel"),
-                "estimated_total_minutes": sum(
-                    t.get("estimated_duration_minutes", 30) for t in tasks_json
-                ),
+                "estimated_total_minutes": estimated_total,
                 "reasoning": plan_data.get("reasoning", ""),
             }
         ).execute()
 
-        return {
+        # Create goal_milestones from tasks
+        for i, task in enumerate(tasks_json):
+            try:
+                self._db.table("goal_milestones").insert(
+                    {
+                        "goal_id": goal_id,
+                        "title": task.get("title", f"Task {i + 1}"),
+                        "description": (
+                            f"Agent: {task.get('agent', 'unknown')} | "
+                            f"Risk: {task.get('risk_level', 'LOW')}"
+                        ),
+                        "status": "pending",
+                        "sort_order": i,
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning("Failed to create milestone for task %d: %s", i, e)
+
+        # Create goal_agents entries for each unique agent
+        unique_agents = {task.get("agent", "analyst") for task in tasks_json}
+        for agent_type in unique_agents:
+            try:
+                self._db.table("goal_agents").insert(
+                    {
+                        "goal_id": goal_id,
+                        "agent_type": agent_type,
+                        "agent_config": json.dumps(
+                            {
+                                "tasks": [
+                                    t.get("title", "")
+                                    for t in tasks_json
+                                    if t.get("agent") == agent_type
+                                ]
+                            }
+                        ),
+                        "status": "pending",
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create goal_agent for %s: %s", agent_type, e
+                )
+
+        result = {
             "goal_id": goal_id,
             "tasks": tasks_json,
             "execution_mode": plan_data.get("execution_mode", "parallel"),
+            "missing_integrations": missing_integrations,
+            "approval_points": approval_points,
+            "estimated_total_minutes": estimated_total,
             "reasoning": plan_data.get("reasoning", ""),
         }
+
+        # Emit plan via WebSocket
+        try:
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=(
+                    f"I've created an execution plan for **{goal.get('title', '')}** "
+                    f"with {len(tasks_json)} tasks. Review it and approve when ready."
+                ),
+                rich_content=[
+                    {
+                        "type": "execution_plan",
+                        "data": {
+                            "goal_id": goal_id,
+                            "title": goal.get("title", ""),
+                            "tasks": tasks_json,
+                            "missing_integrations": missing_integrations,
+                            "approval_points": approval_points,
+                            "estimated_total_minutes": estimated_total,
+                        },
+                    }
+                ],
+                suggestions=[
+                    "Approve the plan",
+                    "What if we skip the outreach?",
+                    "Can you add a research step?",
+                ],
+            )
+        except Exception as e:
+            logger.warning("Failed to send plan via WebSocket: %s", e)
+
+        return result
+
+    @staticmethod
+    def _check_tool_connected(
+        tool: str, active_integrations: list[str]
+    ) -> bool:
+        """Check if a tool is available given the user's active integrations.
+
+        Args:
+            tool: Tool identifier (e.g. 'exa_search', 'composio_crm').
+            active_integrations: List of integration_type strings.
+
+        Returns:
+            True if the tool is available (either built-in or integration connected).
+        """
+        # Built-in tools that don't need user integrations
+        builtin = {
+            "exa_search", "pubmed_search", "fda_search", "chembl_search",
+            "clinicaltrials_search", "claude_analysis", "claude_drafting",
+            "digital_twin_style", "news_apis", "apollo_search",
+        }
+        if tool in builtin:
+            return True
+
+        # Map tools to required integration types
+        tool_to_integration: dict[str, list[str]] = {
+            "composio_crm": ["salesforce", "hubspot"],
+            "composio_calendar": ["google_calendar", "outlook_calendar", "outlook"],
+            "composio_email_send": ["gmail", "outlook", "outlook_email"],
+            "salesforce": ["salesforce"],
+            "hubspot": ["hubspot"],
+            "google_calendar": ["google_calendar"],
+            "gmail": ["gmail"],
+            "outlook": ["outlook"],
+        }
+
+        required = tool_to_integration.get(tool, [])
+        if not required:
+            return True  # Unknown tool — assume available
+        return any(i in active_integrations for i in required)
 
     async def execute_goal_async(self, goal_id: str, user_id: str) -> dict[str, Any]:
         """Start async background execution of a goal.

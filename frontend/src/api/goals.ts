@@ -236,3 +236,57 @@ export async function approveGoalProposal(data: GoalProposalApproval): Promise<G
   const response = await apiClient.post<Goal>("/goals/approve-proposal", data);
   return response.data;
 }
+
+// --- Resource-aware planning ---
+
+export interface PlanTaskResource {
+  tool: string;
+  connected: boolean;
+}
+
+export interface PlanTask {
+  title: string;
+  agent: string;
+  dependencies: number[];
+  tools_needed: string[];
+  auth_required: string[];
+  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  estimated_minutes: number;
+  auto_executable: boolean;
+  resource_status: PlanTaskResource[];
+}
+
+export interface ExecutionPlanResponse {
+  goal_id: string;
+  title: string;
+  status: string;
+  tasks: PlanTask[];
+  execution_mode: string;
+  estimated_total_minutes: number;
+  reasoning: string;
+  readiness_score: number;
+  missing_integrations: string[];
+  connected_integrations: string[];
+}
+
+export interface PlanApprovalResponse {
+  goal_id: string;
+  status: string;
+  started_at: string;
+  message: string;
+}
+
+export async function getGoalPlan(goalId: string): Promise<ExecutionPlanResponse> {
+  const response = await apiClient.get<ExecutionPlanResponse>(`/goals/${goalId}/plan`);
+  return response.data;
+}
+
+export async function approveGoalPlan(goalId: string): Promise<PlanApprovalResponse> {
+  const response = await apiClient.post<PlanApprovalResponse>(`/goals/${goalId}/approve`);
+  return response.data;
+}
+
+export async function createGoalPlan(goalId: string): Promise<ExecutionPlanResponse> {
+  const response = await apiClient.post<ExecutionPlanResponse>(`/goals/${goalId}/plan`);
+  return response.data;
+}
