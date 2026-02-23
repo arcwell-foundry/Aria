@@ -228,6 +228,7 @@ async def connect_integration(
             composio_connection_id=connection_data.get("connection_id", ""),
             composio_account_id=connection_data.get("account_id"),
             display_name=connection_data.get("account_email"),
+            account_email=connection_data.get("account_email"),
         )
 
         logger.info(

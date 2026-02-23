@@ -193,12 +193,20 @@ class ComposioOAuthClient:
         account_id = getattr(result, "id", None) or code
         account_email = getattr(result, "member_email", None) or ""
 
+        # BL-4 FIX: If member_email is empty, try to fetch from provider profile
+        # This is critical for is_from_user detection in email processing
+        if not account_email:
+            account_email = await self._fetch_email_from_provider_profile(
+                code, integration_type, user_id
+            )
+
         logger.info(
             "OAuth code exchanged for connection",
             extra={
                 "user_id": user_id,
                 "integration_type": str(integration_type),
                 "connection_id": code,
+                "account_email": account_email or "NOT_FOUND",
             },
         )
 
@@ -207,6 +215,73 @@ class ComposioOAuthClient:
             "account_id": str(account_id),
             "account_email": account_email,
         }
+
+    async def _fetch_email_from_provider_profile(
+        self,
+        connection_id: str,
+        integration_type: "Any",
+        user_id: str,
+    ) -> str:
+        """Fetch user's email from the provider's profile API.
+
+        Called as a fallback when Composio's member_email is empty.
+
+        Args:
+            connection_id: The Composio connection ID.
+            integration_type: The integration type (e.g., OUTLOOK, GMAIL).
+            user_id: The user's ID for the action.
+
+        Returns:
+            The user's email address, or empty string if not found.
+        """
+        integration_str = str(integration_type).lower()
+
+        try:
+            if "outlook" in integration_str or "microsoft" in integration_str:
+                # Try OUTLOOK_GET_PROFILE
+                result = await self.execute_action(
+                    connection_id=connection_id,
+                    action="OUTLOOK_GET_PROFILE",
+                    params={},
+                    user_id=user_id,
+                )
+                if result.get("successful"):
+                    data = result.get("data", {})
+                    email = (
+                        data.get("emailAddress")
+                        or data.get("mail")
+                        or data.get("userPrincipalName")
+                        or ""
+                    )
+                    if email:
+                        logger.info(
+                            "Fetched email from Outlook profile: %s", email
+                        )
+                        return email
+
+            elif "gmail" in integration_str or "google" in integration_str:
+                # Try GMAIL_GET_PROFILE
+                result = await self.execute_action(
+                    connection_id=connection_id,
+                    action="GMAIL_GET_PROFILE",
+                    params={},
+                    user_id=user_id,
+                )
+                if result.get("successful"):
+                    data = result.get("data", {})
+                    email = data.get("emailAddress") or data.get("email") or ""
+                    if email:
+                        logger.info(
+                            "Fetched email from Gmail profile: %s", email
+                        )
+                        return email
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch email from provider profile: %s", e
+            )
+
+        return ""
 
     async def disconnect_integration(
         self,

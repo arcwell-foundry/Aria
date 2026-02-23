@@ -113,6 +113,7 @@ class IntegrationService:
         composio_connection_id: str,
         display_name: str | None = None,
         composio_account_id: str | None = None,
+        account_email: str | None = None,
     ) -> dict[str, Any]:
         """Create a new integration connection.
 
@@ -122,6 +123,8 @@ class IntegrationService:
             composio_connection_id: Composio connection ID
             display_name: Optional display name
             composio_account_id: Optional Composio account ID
+            account_email: The user's email address for this integration
+                (required for email providers to enable is_from_user detection)
 
         Returns:
             Created integration dictionary
@@ -137,6 +140,7 @@ class IntegrationService:
                 "composio_connection_id": composio_connection_id,
                 "composio_account_id": composio_account_id,
                 "display_name": display_name,
+                "account_email": account_email,
                 "status": IntegrationStatus.ACTIVE.value,
                 "sync_status": SyncStatus.SUCCESS.value,
             }
