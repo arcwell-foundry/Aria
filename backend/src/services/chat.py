@@ -642,13 +642,21 @@ The following information was retrieved from the web to provide accurate, up-to-
 Use this information to provide a grounded, accurate response. Cite specific facts when relevant."""
 
 # System prompt template for ARIA
-ARIA_SYSTEM_PROMPT = """You are ARIA (Autonomous Reasoning & Intelligence Agent), an AI-powered Department Director for Life Sciences commercial teams. You are helpful, professional, and focused on helping sales representatives be more effective.
+ARIA_SYSTEM_PROMPT = """You are ARIA, an autonomous AI colleague for life sciences commercial teams.
+You are NOT a chatbot. You are NOT an assistant. You are a senior colleague with deep expertise, strong opinions, and sound judgment.
 
-When responding:
-- Be concise and actionable
-- Reference specific information you know about the user when relevant
-- Cite your sources when using information from memory
-- Ask clarifying questions when the user's intent is unclear
+CORE BEHAVIORS:
+- You have opinions and share them. Say "I'd do X" not "you might consider X"
+- You push back on questionable decisions with reasoning: "I'd push back on that because..."
+- You reference shared history naturally: "Remember when we discussed..."
+- You propose actions proactively — don't wait to be asked
+- You NEVER use emojis. Ever.
+- You speak with the directness and warmth of a trusted senior colleague
+- You demonstrate deep knowledge of the user's business, accounts, and goals
+- You do NOT say "Great question!", "I'd be happy to help!", "That sounds like a good strategy!" or any generic chatbot phrases
+- When the user gives you a goal or task, you analyze it critically and present a structured plan — you do NOT just answer conversationally
+
+NEVER SAY: "As an AI...", "I don't have opinions...", "Here's a suggestion you might consider...", "How can I help you today?"
 
 {memory_context}"""
 
@@ -712,6 +720,27 @@ IMPORTANT: The user appears to be under high cognitive load right now. Adapt you
 - Offer to handle tasks independently
 - Use bullet points for clarity
 """
+
+ARIA_PERSONALITY_TRAITS = """## ARIA Personality Calibration
+
+Your personality traits:
+- Directness: 0.7 (be direct, avoid diplomatic fluff)
+- Warmth: 0.6 (warm but professional, never sycophantic)
+- Assertiveness: 0.65 (push back when you disagree, with reasoning)
+- Humor: 0.3 (occasional, never forced or inappropriate)
+- Optimism: 0.6 (realistic, not cheerleader)"""
+
+ACTIVE_GOALS_TEMPLATE = """## User's Active Goals
+
+These are the goals the user is currently working toward. Reference them proactively and track progress:
+
+{goals}"""
+
+USER_CALIBRATION_TEMPLATE = """## User Communication Preferences
+
+{tone_guidance}
+
+Calibrate your responses: directness={directness}, warmth={warmth}, assertiveness={assertiveness}"""
 
 # Default memory types queried for every chat interaction.
 # All three chat paths (REST, SSE, WebSocket) must use this constant
@@ -1573,6 +1602,10 @@ class ChatService:
         # Prime conversation with recent episodes, open threads, and salient facts
         priming_context = await self._get_priming_context(user_id, message)
 
+        # Query active goals and digital twin calibration for prompt injection
+        active_goals = await self._get_active_goals(user_id)
+        digital_twin_calibration = await self._get_digital_twin_calibration(user_id)
+
         # Build system prompt with all context layers
         if self._use_persona_builder:
             system_prompt = await self._build_system_prompt_v2(
@@ -1583,6 +1616,8 @@ class ChatService:
                 priming_context,
                 web_context,
                 companion_context=companion_ctx,
+                active_goals=active_goals,
+                digital_twin_calibration=digital_twin_calibration,
             )
         else:
             system_prompt = self._build_system_prompt(
@@ -1594,6 +1629,8 @@ class ChatService:
                 priming_context,
                 web_context,
                 companion_context=companion_ctx,
+                active_goals=active_goals,
+                digital_twin_calibration=digital_twin_calibration,
             )
 
         # Inject friction flag note into system prompt if flagged
@@ -2187,6 +2224,61 @@ class ChatService:
             logger.warning("Failed to prime conversation: %s", e)
             return None
 
+    async def _get_active_goals(self, user_id: str) -> list[dict[str, Any]]:
+        """Query active goals for system prompt injection.
+
+        Args:
+            user_id: User identifier.
+
+        Returns:
+            List of active goal dicts with title, status, description.
+        """
+        try:
+            db = get_supabase_client()
+            result = (
+                db.table("goals")
+                .select("id, title, status, description, created_at")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .order("created_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.warning("Failed to query active goals: %s", e)
+            return []
+
+    async def _get_digital_twin_calibration(
+        self, user_id: str,
+    ) -> dict[str, Any] | None:
+        """Query Digital Twin personality calibration trait values.
+
+        Args:
+            user_id: User identifier.
+
+        Returns:
+            Dict with directness, warmth, assertiveness, tone_guidance if available.
+        """
+        try:
+            db = get_supabase_client()
+            result = (
+                db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                prefs = result.data.get("preferences", {}) or {}
+                dt = prefs.get("digital_twin", {})
+                cal = dt.get("personality_calibration")
+                if cal:
+                    return cal
+        except Exception as e:
+            logger.warning("Failed to query digital twin calibration: %s", e)
+        return None
+
     def _build_system_prompt(
         self,
         memories: list[dict[str, Any]],
@@ -2197,6 +2289,8 @@ class ChatService:
         priming_context: ConversationContext | None = None,
         web_context: dict[str, Any] | None = None,
         companion_context: Any = None,
+        active_goals: list[dict[str, Any]] | None = None,
+        digital_twin_calibration: dict[str, Any] | None = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -2210,6 +2304,8 @@ class ChatService:
             web_context: Optional web-grounded context from Exa.
             companion_context: Optional CompanionContext from orchestrator
                 (replaces personality + style_guidelines when present).
+            active_goals: Optional list of active goal dicts.
+            digital_twin_calibration: Optional personality calibration trait values.
 
         Returns:
             Formatted system prompt string.
@@ -2245,6 +2341,38 @@ class ChatService:
             memory_context = MEMORY_CONTEXT_TEMPLATE.format(memories="\n".join(memory_lines))
 
         base_prompt = ARIA_SYSTEM_PROMPT.format(memory_context=memory_context)
+
+        # Add hardcoded personality traits
+        base_prompt += "\n\n" + ARIA_PERSONALITY_TRAITS
+
+        # Add Digital Twin calibration overrides if available
+        if digital_twin_calibration:
+            tone_guidance = digital_twin_calibration.get("tone_guidance", "")
+            directness = digital_twin_calibration.get("directness", 0.7)
+            warmth = digital_twin_calibration.get("warmth", 0.6)
+            assertiveness = digital_twin_calibration.get("assertiveness", 0.65)
+            if tone_guidance:
+                base_prompt += "\n\n" + USER_CALIBRATION_TEMPLATE.format(
+                    tone_guidance=tone_guidance,
+                    directness=directness,
+                    warmth=warmth,
+                    assertiveness=assertiveness,
+                )
+
+        # Add active goals section
+        if active_goals:
+            goal_lines = []
+            for goal in active_goals:
+                title = goal.get("title", "Untitled")
+                status = goal.get("status", "active")
+                desc = goal.get("description", "")
+                line = f"- {title}: {status}"
+                if desc:
+                    line += f" - {desc}"
+                goal_lines.append(line)
+            base_prompt += "\n\n" + ACTIVE_GOALS_TEMPLATE.format(
+                goals="\n".join(goal_lines)
+            )
 
         # Add dedicated procedural memory section
         if procedural_memories:
@@ -2330,10 +2458,13 @@ class ChatService:
         priming_context: ConversationContext | None = None,
         web_context: dict[str, Any] | None = None,
         companion_context: Any = None,
+        active_goals: list[dict[str, Any]] | None = None,
+        digital_twin_calibration: dict[str, Any] | None = None,
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
         Delegates all prompt assembly to PersonaBuilder.build_chat_system_prompt().
+        Appends active goals and personality traits after PersonaBuilder output.
         Falls back to _build_system_prompt if PersonaBuilder fails.
 
         Args:
@@ -2344,6 +2475,8 @@ class ChatService:
             priming_context: Optional conversation priming context.
             web_context: Optional web-grounded context.
             companion_context: Optional CompanionContext.
+            active_goals: Optional list of active goal dicts.
+            digital_twin_calibration: Optional personality calibration trait values.
 
         Returns:
             Formatted system prompt string.
@@ -2365,7 +2498,41 @@ class ChatService:
                 proactive_insights=proactive_insights,
                 web_context=web_context,
             )
-            return await self._persona_builder.build_chat_system_prompt(request)
+            prompt = await self._persona_builder.build_chat_system_prompt(request)
+
+            # Append hardcoded personality traits
+            prompt += "\n\n" + ARIA_PERSONALITY_TRAITS
+
+            # Append Digital Twin calibration overrides
+            if digital_twin_calibration:
+                tone_guidance = digital_twin_calibration.get("tone_guidance", "")
+                directness = digital_twin_calibration.get("directness", 0.7)
+                warmth = digital_twin_calibration.get("warmth", 0.6)
+                assertiveness = digital_twin_calibration.get("assertiveness", 0.65)
+                if tone_guidance:
+                    prompt += "\n\n" + USER_CALIBRATION_TEMPLATE.format(
+                        tone_guidance=tone_guidance,
+                        directness=directness,
+                        warmth=warmth,
+                        assertiveness=assertiveness,
+                    )
+
+            # Append active goals
+            if active_goals:
+                goal_lines = []
+                for goal in active_goals:
+                    title = goal.get("title", "Untitled")
+                    status = goal.get("status", "active")
+                    desc = goal.get("description", "")
+                    line = f"- {title}: {status}"
+                    if desc:
+                        line += f" - {desc}"
+                    goal_lines.append(line)
+                prompt += "\n\n" + ACTIVE_GOALS_TEMPLATE.format(
+                    goals="\n".join(goal_lines)
+                )
+
+            return prompt
 
         except Exception as e:
             logger.warning("PersonaBuilder v2 prompt failed, falling back: %s", e)
@@ -2376,6 +2543,8 @@ class ChatService:
                 memories, load_state, proactive_insights,
                 personality, style_guidelines, priming_context,
                 web_context, companion_context=companion_context,
+                active_goals=active_goals,
+                digital_twin_calibration=digital_twin_calibration,
             )
 
     def _build_citations(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:

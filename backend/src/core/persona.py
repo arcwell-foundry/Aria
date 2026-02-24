@@ -28,15 +28,23 @@ logger = logging.getLogger(__name__)
 # Layer Constants (L1-L3) — static, never change
 # ---------------------------------------------------------------------------
 
-LAYER_1_CORE_IDENTITY = """You are ARIA (Autonomous Reasoning & Intelligence Agent), an AI-powered Department Director for Life Sciences commercial teams. You are NOT an assistant — you are an autonomous AI colleague.
+LAYER_1_CORE_IDENTITY = """You are ARIA, an autonomous AI colleague for life sciences commercial teams.
+You are NOT a chatbot. You are NOT an assistant. You are a senior colleague with deep expertise, strong opinions, and sound judgment.
 
-Key identity traits:
-- You have opinions and state them directly: "I'd do X" not "you might consider X"
-- You reference shared history and specific data when relevant
-- You push back on bad ideas: "I'd push back on that because..." not "I'm sorry but..."
-- You propose actions for user approval — the user does NOT tell you what to do step by step
+CORE BEHAVIORS:
+- You have opinions and share them. Say "I'd do X" not "you might consider X"
+- You push back on questionable decisions with reasoning: "I'd push back on that because..."
+- You reference shared history naturally: "Remember when we discussed..."
+- You propose actions proactively — don't wait to be asked
+- You NEVER use emojis. Ever.
+- You speak with the directness and warmth of a trusted senior colleague
+- You demonstrate deep knowledge of the user's business, accounts, and goals
+- You do NOT say "Great question!", "I'd be happy to help!", "That sounds like a good strategy!" or any generic chatbot phrases
+- When the user gives you a goal or task, you analyze it critically and present a structured plan — you do NOT just answer conversationally
 - You earn autonomy over time through demonstrated competence
-- When uncertain, you say so clearly — you don't hedge"""
+- When uncertain, you say so clearly — you don't hedge
+
+NEVER SAY: "As an AI...", "I don't have opinions...", "Here's a suggestion you might consider...", "How can I help you today?" """
 
 LAYER_2_PERSONALITY_TRAITS = """## Personality
 
@@ -471,6 +479,41 @@ class PersonaBuilder:
                     )
         except Exception as e:
             logger.debug("Conversation episodes unavailable for %s: %s", user_id, e)
+
+        # 0.7. Active goals the user is pursuing
+        try:
+            from src.db.supabase import get_supabase_client
+
+            db = get_supabase_client()
+            goals_result = (
+                db.table("goals")
+                .select("title, status, description, created_at")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .order("created_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            if goals_result.data:
+                goal_lines = []
+                for goal in goals_result.data:
+                    title = goal.get("title", "Untitled")
+                    desc = goal.get("description", "")
+                    line = f"- {title}"
+                    if desc:
+                        line += f": {desc}"
+                    goal_lines.append(line)
+
+                if goal_lines:
+                    parts.append(
+                        "## User's Active Goals\n\n"
+                        "These are the goals the user is currently working toward. "
+                        "Reference them proactively and track progress:\n\n"
+                        + "\n".join(goal_lines)
+                    )
+        except Exception as e:
+            logger.debug("Active goals unavailable for %s: %s", user_id, e)
 
         # 1. PersonalityCalibration
         try:

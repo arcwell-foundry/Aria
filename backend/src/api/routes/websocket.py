@@ -435,6 +435,10 @@ async def _handle_user_message(
             pending_plan_goal_id, user_id,
         )
 
+        # Query active goals and digital twin calibration for prompt injection
+        active_goals = await service._get_active_goals(user_id)
+        digital_twin_calibration = await service._get_digital_twin_calibration(user_id)
+
         # Build system prompt
         system_prompt = service._build_system_prompt(
             memories,
@@ -443,6 +447,8 @@ async def _handle_user_message(
             personality,
             style_guidelines,
             priming_context,
+            active_goals=active_goals,
+            digital_twin_calibration=digital_twin_calibration,
         )
 
         # Append pending plan context if available

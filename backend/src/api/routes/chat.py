@@ -419,6 +419,10 @@ async def chat_stream(
         # Prime conversation with recent episodes, open threads, salient facts
         priming_context = await service._get_priming_context(current_user.id, request.message)
 
+        # Query active goals and digital twin calibration for prompt injection
+        active_goals = await service._get_active_goals(current_user.id)
+        digital_twin_calibration = await service._get_digital_twin_calibration(current_user.id)
+
         # Build system prompt with all context layers
         system_prompt = service._build_system_prompt(
             memories,
@@ -427,6 +431,8 @@ async def chat_stream(
             personality,
             style_guidelines,
             priming_context,
+            active_goals=active_goals,
+            digital_twin_calibration=digital_twin_calibration,
         )
 
         # Send metadata event
