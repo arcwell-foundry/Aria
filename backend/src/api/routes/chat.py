@@ -130,6 +130,7 @@ class ConversationMessageResponse(BaseModel):
     role: str
     content: str
     created_at: str
+    metadata: dict = {}
 
 
 @router.post("", response_model=ChatResponse)
@@ -478,6 +479,7 @@ async def get_conversation_messages(
             role=m.role,
             content=m.content,
             created_at=m.created_at.isoformat(),
+            metadata=m.metadata or {},
         )
         for m in messages
     ]

@@ -2323,6 +2323,68 @@ class GoalExecutionService:
         except Exception as e:
             logger.warning("Failed to send plan via WebSocket: %s", e)
 
+        # Persist plan message to the messages table so it survives page refresh
+        try:
+            from src.services.conversations import ConversationService
+
+            # Find user's most recent conversation
+            conv_result = (
+                self._db.table("conversations")
+                .select("id")
+                .eq("user_id", user_id)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            conversation_id = (
+                conv_result.data[0]["id"] if conv_result.data else None
+            )
+
+            if conversation_id:
+                plan_metadata = {
+                    "type": "execution_plan",
+                    "data": {
+                        "goal_id": goal_id,
+                        "title": goal.get("title", ""),
+                        "tasks": tasks_json,
+                        "missing_integrations": missing_integrations,
+                        "approval_points": approval_points,
+                        "estimated_total_minutes": estimated_total,
+                        "readiness_score": readiness_score,
+                        "connected_integrations": active_integrations,
+                    },
+                }
+                conv_service = ConversationService(self._db)
+                message_id = await conv_service.save_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=plan_message,
+                    metadata=plan_metadata,
+                )
+
+                # Update the plan row with lifecycle data
+                now_ts = datetime.now(UTC).isoformat()
+                self._db.table("goal_execution_plans").update(
+                    {
+                        "status": "plan_ready",
+                        "presented_at": now_ts,
+                        "conversation_id": conversation_id,
+                        "plan_message_id": message_id,
+                        "updated_at": now_ts,
+                    }
+                ).eq("goal_id", goal_id).execute()
+
+                logger.info(
+                    "Plan message persisted to messages table",
+                    extra={
+                        "goal_id": goal_id,
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                    },
+                )
+        except Exception as e:
+            logger.warning("Failed to persist plan message: %s", e)
+
         return result
 
     @staticmethod
@@ -2368,7 +2430,7 @@ class GoalExecutionService:
         """Start async background execution of a goal.
 
         Creates an asyncio.Task running _run_goal_background, updates
-        goal status to 'active', and returns immediately.
+        goal status to 'active' (if not already), and returns immediately.
 
         Args:
             goal_id: The goal to execute.
@@ -2377,11 +2439,19 @@ class GoalExecutionService:
         Returns:
             Dict with goal_id and status 'executing'.
         """
-        # Update goal status to active
+        # Only update status if not already active (approve endpoint may have set it)
         now = datetime.now(UTC).isoformat()
-        self._db.table("goals").update(
-            {"status": "active", "started_at": now, "updated_at": now}
-        ).eq("id", goal_id).execute()
+        goal_check = (
+            self._db.table("goals")
+            .select("status")
+            .eq("id", goal_id)
+            .maybe_single()
+            .execute()
+        )
+        if goal_check.data and goal_check.data.get("status") != "active":
+            self._db.table("goals").update(
+                {"status": "active", "started_at": now, "updated_at": now}
+            ).eq("id", goal_id).execute()
 
         # Launch background task
         task = asyncio.create_task(self._run_goal_background(goal_id, user_id))

@@ -7,6 +7,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown>;
   /** Skill execution data attached to this message (Enhancement 5) */
   skill_execution?: {
     type: "simple" | "plan";

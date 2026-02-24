@@ -84,15 +84,22 @@ export function ARIAWorkspace() {
 
           // Prepend conversation messages BEFORE any briefing
           // Use setMessages to replace the entire array with proper ordering
-          const historicMessages = messagesToAdd.map(msg => ({
-            id: msg.id,
-            role: msg.role === 'assistant' ? 'aria' as const : 'user' as const,
-            content: msg.content,
-            rich_content: [] as const,
-            ui_commands: [] as const,
-            suggestions: [] as const,
-            timestamp: msg.created_at,
-          }));
+          const historicMessages = messagesToAdd.map(msg => {
+            // Reconstruct rich_content from persisted metadata
+            const richContent = msg.metadata && (msg.metadata as Record<string, unknown>).type
+              ? [{ type: (msg.metadata as Record<string, unknown>).type as string, data: ((msg.metadata as Record<string, unknown>).data ?? msg.metadata) as Record<string, unknown> }]
+              : [];
+
+            return {
+              id: msg.id,
+              role: msg.role === 'assistant' ? 'aria' as const : 'user' as const,
+              content: msg.content,
+              rich_content: richContent,
+              ui_commands: [] as const,
+              suggestions: [] as const,
+              timestamp: msg.created_at,
+            };
+          });
 
           // Prepend historic messages, keep existing messages (like briefing) at the end
           store.setMessages([...historicMessages, ...store.messages]);

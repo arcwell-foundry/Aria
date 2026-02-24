@@ -58,7 +58,8 @@ async def create_goal(
     """Create a new goal.
 
     Creates a new goal with the provided title, description, type, and config.
-    Goals start in draft status.
+    Goals start in draft status, then auto-plan generates an execution plan
+    and transitions to plan_ready for user approval.
     """
     service = _get_service()
     result = await service.create_goal(current_user.id, data)
@@ -71,6 +72,14 @@ async def create_goal(
             "title": data.title,
         },
     )
+
+    # Auto-generate execution plan and present for approval
+    try:
+        exec_service = _get_execution_service()
+        plan_result = await exec_service.plan_goal(result["id"], current_user.id)
+        result["execution_plan"] = plan_result
+    except Exception as e:
+        logger.warning("Auto-plan failed for goal %s: %s", result["id"], e)
 
     return result
 
@@ -289,8 +298,10 @@ async def approve_goal_plan(
 ) -> dict[str, Any]:
     """Approve an execution plan and start goal execution.
 
-    Validates that the JWT user owns the goal, sets status to active,
-    triggers async execution, and emits a WebSocket event.
+    Validates that the JWT user owns the goal and the goal is in an
+    approvable state (plan_ready or draft), updates the plan row,
+    sets goal status to active, triggers async execution, persists
+    a confirmation message, and emits a WebSocket event.
     """
     from datetime import UTC, datetime
 
@@ -299,6 +310,7 @@ async def approve_goal_plan(
     from src.core.ws import ws_manager
     from src.db.supabase import SupabaseClient
     from src.models.ws_events import AriaMessageEvent
+    from src.services.conversations import ConversationService
 
     db = SupabaseClient.get_client()
 
@@ -316,13 +328,28 @@ async def approve_goal_plan(
 
     goal = goal_result.data
 
-    if goal["status"] == "active":
-        raise HTTPException(status_code=400, detail="Goal is already executing")
-    if goal["status"] == "complete":
-        raise HTTPException(status_code=400, detail="Goal is already complete")
+    # Validate goal is in an approvable state
+    if goal["status"] not in ("plan_ready", "draft"):
+        if goal["status"] == "active":
+            raise HTTPException(status_code=400, detail="Goal is already executing")
+        if goal["status"] == "complete":
+            raise HTTPException(status_code=400, detail="Goal is already complete")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Goal cannot be approved in '{goal['status']}' status",
+        )
+
+    now = datetime.now(UTC).isoformat()
+
+    # Update goal_execution_plans row: mark as approved
+    try:
+        db.table("goal_execution_plans").update(
+            {"status": "approved", "approved_at": now, "updated_at": now}
+        ).eq("goal_id", goal_id).execute()
+    except Exception as e:
+        logger.warning("Failed to update plan row on approval: %s", e)
 
     # Activate the goal
-    now = datetime.now(UTC).isoformat()
     db.table("goals").update(
         {"status": "active", "started_at": now, "updated_at": now}
     ).eq("id", goal_id).execute()
@@ -330,6 +357,33 @@ async def approve_goal_plan(
     # Trigger async execution
     service = _get_execution_service()
     await service.execute_goal_async(goal_id, current_user.id)
+
+    # Persist a confirmation message to the conversation
+    try:
+        conv_result = (
+            db.table("conversations")
+            .select("id")
+            .eq("user_id", current_user.id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if conv_result.data:
+            conv_service = ConversationService(db)
+            await conv_service.save_message(
+                conversation_id=conv_result.data[0]["id"],
+                role="assistant",
+                content=(
+                    f"Starting execution on **{goal['title']}**. "
+                    f"I'll keep you updated as each phase completes."
+                ),
+                metadata={
+                    "type": "plan_approved",
+                    "data": {"goal_id": goal_id, "title": goal["title"]},
+                },
+            )
+    except Exception as e:
+        logger.warning("Failed to persist approval message: %s", e)
 
     # Emit conversational WebSocket message
     try:

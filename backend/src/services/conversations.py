@@ -85,6 +85,7 @@ class ConversationMessage:
     role: str
     content: str
     created_at: datetime
+    metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
@@ -94,6 +95,7 @@ class ConversationMessage:
             "role": self.role,
             "content": self.content,
             "created_at": self.created_at.isoformat(),
+            "metadata": self.metadata or {},
         }
 
     @classmethod
@@ -109,6 +111,7 @@ class ConversationMessage:
             role=data["role"],
             content=data["content"],
             created_at=created_at,
+            metadata=data.get("metadata") or {},
         )
 
 
