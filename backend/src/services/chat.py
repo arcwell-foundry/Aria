@@ -899,6 +899,544 @@ class ChatService:
             logger.warning("Intent classification failed (fall-through to conversation): %s", e)
             return None
 
+    # ------------------------------------------------------------------
+    # Plan-Aware Conversation Handling
+    # ------------------------------------------------------------------
+
+    async def _classify_plan_action(
+        self, user_id: str, message: str
+    ) -> dict[str, Any] | None:
+        """Classify user message when a plan_ready goal exists.
+
+        Determines whether the user wants to approve, modify, discuss,
+        or ignore the pending plan.  Returns a dict with ``action``,
+        ``goal_id``, ``goal``, and ``plan_tasks`` on success, or ``None``
+        if no plan_ready goal exists.
+        """
+        try:
+            db = get_supabase_client()
+            plan_ready = (
+                db.table("goals")
+                .select("id, title, description, status")
+                .eq("user_id", user_id)
+                .eq("status", "plan_ready")
+                .limit(1)
+                .execute()
+            )
+            if not plan_ready.data:
+                return None
+
+            goal = plan_ready.data[0]
+            goal_id = goal["id"]
+
+            # Fetch the latest plan tasks
+            plan_row = (
+                db.table("goal_execution_plans")
+                .select("tasks")
+                .eq("goal_id", goal_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            raw_tasks = (plan_row.data or {}).get("tasks", "[]")
+            plan_tasks: list[dict[str, Any]] = (
+                json.loads(raw_tasks) if isinstance(raw_tasks, str) else raw_tasks
+            )
+
+            task_titles = [t.get("title", f"Task {i+1}") for i, t in enumerate(plan_tasks)]
+            tasks_str = "\n".join(f"  {i+1}. {t}" for i, t in enumerate(task_titles))
+
+            classification_prompt = (
+                "A user has a pending execution plan from ARIA. "
+                "Classify the user's message into one of four actions.\n\n"
+                f'Goal: "{goal.get("title", "")}"\n'
+                f'Description: {goal.get("description", "")}\n'
+                f"Plan tasks:\n{tasks_str}\n\n"
+                f'User message: "{message}"\n\n'
+                "Actions:\n"
+                '- "approve": user accepts the plan (e.g. "looks good", "let\'s go", '
+                '"approve it", "yes do it", "start", "run it")\n'
+                '- "modify": user wants changes (e.g. "skip X", "add Y", "remove Z", '
+                '"reorder", "change the approach", "what if we...")\n'
+                '- "discuss": user asks about the plan (e.g. "why this approach?", '
+                '"what does phase 2 do?", "explain the risk", "tell me more")\n'
+                '- "unrelated": message is not about the plan\n\n'
+                "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+                '{"action": "approve"|"modify"|"discuss"|"unrelated"}'
+            )
+
+            llm = LLMClient()
+            raw = await llm.generate_response(
+                messages=[{"role": "user", "content": classification_prompt}],
+                max_tokens=64,
+                temperature=0.1,
+                user_id=user_id,
+            )
+
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            cleaned = cleaned.strip()
+
+            result = json.loads(cleaned)
+            action = result.get("action", "unrelated")
+            logger.info(
+                "Plan action classification: %s for goal %s",
+                action, goal_id,
+            )
+            return {
+                "action": action,
+                "goal_id": goal_id,
+                "goal": goal,
+                "plan_tasks": plan_tasks,
+            }
+
+        except json.JSONDecodeError as je:
+            logger.warning("Plan action classification JSON error: %s", je)
+            return None
+        except Exception as e:
+            logger.warning("Plan action classification failed: %s", e)
+            return None
+
+    async def _handle_plan_modification(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        goal_id: str,
+        goal: dict[str, Any],
+        current_tasks: list[dict[str, Any]],
+        working_memory: Any,
+        load_state: Any,
+    ) -> dict[str, Any]:
+        """Interpret a modification request and regenerate the plan.
+
+        Uses an LLM call to apply the user's requested changes to the
+        current task list, persists the updated plan, and returns the
+        response dict with updated ``execution_plan`` rich content.
+        """
+        from src.services.goal_execution import GoalExecutionService
+
+        tasks_json_str = json.dumps(current_tasks, indent=2)
+
+        modify_prompt = (
+            "You are ARIA's plan modification engine. The user wants to change "
+            "an existing execution plan. Apply their requested changes and return "
+            "the COMPLETE updated tasks array plus a brief summary of what changed.\n\n"
+            f"## Current Plan\n"
+            f"Goal: {goal.get('title', '')}\n"
+            f"Description: {goal.get('description', '')}\n\n"
+            f"Current tasks:\n{tasks_json_str}\n\n"
+            f"## User's Modification Request\n"
+            f'"{message}"\n\n'
+            "## Instructions\n"
+            "Apply the user's changes. You may add, remove, reorder, or modify tasks. "
+            "Keep the same JSON schema for each task (title, agent, dependencies, "
+            "tools_needed, auth_required, risk_level, estimated_minutes, auto_executable). "
+            "Include resource_status if present in the original.\n\n"
+            "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+            '{\n'
+            '  "tasks": [...],\n'
+            '  "changes_summary": "Brief description of what changed"\n'
+            '}'
+        )
+
+        llm = LLMClient()
+        raw = await llm.generate_response(
+            messages=[{"role": "user", "content": modify_prompt}],
+            system_prompt=(
+                "You are ARIA's plan editor. Return valid JSON only. "
+                "Preserve the task schema exactly. Be concise in the summary."
+            ),
+            max_tokens=4096,
+            temperature=0.2,
+            user_id=user_id,
+        )
+
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        try:
+            modification = json.loads(cleaned)
+        except json.JSONDecodeError:
+            logger.warning("Plan modification JSON parse failed, keeping original plan")
+            modification = {
+                "tasks": current_tasks,
+                "changes_summary": "Could not parse modification — plan unchanged.",
+            }
+
+        new_tasks = modification.get("tasks", current_tasks)
+        changes_summary = modification.get(
+            "changes_summary", "Plan updated per your request."
+        )
+
+        # --- Persist updated plan ---
+        db = get_supabase_client()
+        now = datetime.now(UTC).isoformat()
+
+        # Update goal_execution_plans
+        try:
+            db.table("goal_execution_plans").update(
+                {"tasks": json.dumps(new_tasks), "updated_at": now}
+            ).eq("goal_id", goal_id).execute()
+        except Exception as e:
+            logger.warning("Failed to update plan tasks: %s", e)
+
+        # Rebuild milestones
+        try:
+            db.table("goal_milestones").delete().eq("goal_id", goal_id).execute()
+            for i, task in enumerate(new_tasks):
+                db.table("goal_milestones").insert(
+                    {
+                        "goal_id": goal_id,
+                        "title": task.get("title", f"Task {i + 1}"),
+                        "description": (
+                            f"Agent: {task.get('agent', 'unknown')} | "
+                            f"Risk: {task.get('risk_level', 'LOW')}"
+                        ),
+                        "status": "pending",
+                        "sort_order": i,
+                    }
+                ).execute()
+        except Exception as e:
+            logger.warning("Failed to rebuild milestones: %s", e)
+
+        # Rebuild goal_agents
+        try:
+            db.table("goal_agents").delete().eq("goal_id", goal_id).execute()
+            unique_agents = {task.get("agent", "analyst") for task in new_tasks}
+            for agent_type in unique_agents:
+                db.table("goal_agents").insert(
+                    {
+                        "goal_id": goal_id,
+                        "agent_type": agent_type,
+                        "agent_config": json.dumps(
+                            {
+                                "tasks": [
+                                    t.get("title", "")
+                                    for t in new_tasks
+                                    if t.get("agent") == agent_type
+                                ]
+                            }
+                        ),
+                        "status": "pending",
+                    }
+                ).execute()
+        except Exception as e:
+            logger.warning("Failed to rebuild goal_agents: %s", e)
+
+        # Recalculate readiness score
+        exec_svc = GoalExecutionService()
+        resources = await exec_svc._gather_user_resources(user_id)
+        active_integrations = [
+            i["integration_type"] for i in resources.get("integrations", [])
+        ]
+        total_tools = 0
+        connected_tools = 0
+        for task in new_tasks:
+            for tool in task.get("tools_needed", []):
+                connected = exec_svc._check_tool_connected(tool, active_integrations)
+                total_tools += 1
+                if connected:
+                    connected_tools += 1
+        readiness_score = (
+            round((connected_tools / total_tools) * 100) if total_tools > 0 else 100
+        )
+
+        # Build response text
+        title = goal.get("title", "your plan")
+        response_text = f"Done — I've updated the plan for **{title}**. {changes_summary}"
+
+        rich_content: list[dict[str, Any]] = [
+            {
+                "type": "execution_plan",
+                "data": {
+                    "goal_id": goal_id,
+                    "title": goal.get("title", ""),
+                    "tasks": new_tasks,
+                    "missing_integrations": [],
+                    "approval_points": [],
+                    "estimated_total_minutes": sum(
+                        t.get("estimated_minutes", 15) for t in new_tasks
+                    ),
+                    "readiness_score": readiness_score,
+                    "connected_integrations": active_integrations,
+                },
+            }
+        ]
+
+        # Emit updated plan via WebSocket
+        try:
+            from src.core.ws import ws_manager
+
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=response_text,
+                rich_content=rich_content,
+                suggestions=[
+                    "Approve the plan",
+                    "Make more changes",
+                    "Why this approach?",
+                ],
+            )
+        except Exception as e:
+            logger.warning("Failed to send modified plan via WebSocket: %s", e)
+
+        # Persist turn
+        working_memory.add_message("assistant", response_text)
+        await self.persist_turn(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message,
+            assistant_message=response_text,
+            assistant_metadata={
+                "intent_detected": "plan_modify",
+                "goal_id": goal_id,
+                "changes_summary": changes_summary,
+            },
+            conversation_context=[],
+        )
+
+        return {
+            "message": response_text,
+            "citations": [],
+            "conversation_id": conversation_id,
+            "rich_content": rich_content,
+            "ui_commands": [],
+            "suggestions": [
+                "Approve the plan",
+                "Make more changes",
+                "Why this approach?",
+            ],
+            "timing": {"memory_query_ms": 0, "llm_response_ms": 0, "total_ms": 0},
+            "cognitive_load": {
+                "level": load_state.level.value,
+                "score": round(load_state.score, 3),
+                "recommendation": load_state.recommendation,
+            },
+            "proactive_insights": [],
+            "intent_detected": "plan_modify",
+        }
+
+    async def _handle_plan_approval_from_chat(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        goal_id: str,
+        goal: dict[str, Any],
+        working_memory: Any,
+        load_state: Any,
+    ) -> dict[str, Any]:
+        """Approve a plan_ready goal via chat message and trigger execution.
+
+        Mirrors the approval logic from ``routes/goals.py`` POST /{goal_id}/approve.
+        """
+        from src.core.ws import ws_manager
+        from src.models.ws_events import AriaMessageEvent
+        from src.services.conversations import ConversationService as _ConvService
+        from src.services.goal_execution import GoalExecutionService
+
+        db = get_supabase_client()
+        now = datetime.now(UTC).isoformat()
+
+        # Mark plan as approved
+        try:
+            db.table("goal_execution_plans").update(
+                {"status": "approved", "approved_at": now, "updated_at": now}
+            ).eq("goal_id", goal_id).execute()
+        except Exception as e:
+            logger.warning("Failed to update plan status on chat approval: %s", e)
+
+        # Update plan card message metadata
+        try:
+            plan_row = (
+                db.table("goal_execution_plans")
+                .select("plan_message_id")
+                .eq("goal_id", goal_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            plan_message_id = (plan_row.data or {}).get("plan_message_id")
+            if plan_message_id:
+                msg_result = (
+                    db.table("messages")
+                    .select("metadata")
+                    .eq("id", str(plan_message_id))
+                    .maybe_single()
+                    .execute()
+                )
+                if msg_result.data:
+                    meta = msg_result.data.get("metadata", {})
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    if "data" in meta and isinstance(meta["data"], dict):
+                        meta["data"]["status"] = "approved"
+                        meta["data"]["approved_at"] = now
+                    else:
+                        meta["status"] = "approved"
+                        meta["approved_at"] = now
+                    db.table("messages").update(
+                        {"metadata": meta}
+                    ).eq("id", str(plan_message_id)).execute()
+        except Exception as e:
+            logger.warning("Failed to update plan card metadata on chat approval: %s", e)
+
+        # Activate the goal
+        db.table("goals").update(
+            {"status": "active", "started_at": now, "updated_at": now}
+        ).eq("id", goal_id).execute()
+
+        # Trigger async execution
+        exec_svc = GoalExecutionService()
+        await exec_svc.execute_goal_async(goal_id, user_id)
+
+        title = goal.get("title", "the plan")
+        response_text = (
+            f"On it. Kicking off **{title}** now — "
+            f"I'll keep you updated as each phase completes."
+        )
+
+        rich_content: list[dict[str, Any]] = [
+            {
+                "type": "plan_approved",
+                "data": {"goal_id": goal_id, "title": title},
+            }
+        ]
+
+        # Persist turn
+        working_memory.add_message("assistant", response_text)
+        await self.persist_turn(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message,
+            assistant_message=response_text,
+            assistant_metadata={
+                "intent_detected": "plan_approve",
+                "goal_id": goal_id,
+            },
+            conversation_context=[],
+        )
+
+        # WebSocket notification
+        try:
+            event = AriaMessageEvent(
+                message=response_text,
+                rich_content=rich_content,
+                ui_commands=[
+                    {
+                        "action": "update_sidebar_badge",
+                        "sidebar_item": "goals",
+                        "badge_count": 1,
+                    }
+                ],
+                suggestions=[
+                    "Show me the progress",
+                    "What step is running now?",
+                    "Pause if anything looks off",
+                ],
+            )
+            await ws_manager.send_to_user(user_id, event)
+        except Exception as e:
+            logger.warning("Failed to send approval WebSocket event: %s", e)
+
+        return {
+            "message": response_text,
+            "citations": [],
+            "conversation_id": conversation_id,
+            "rich_content": rich_content,
+            "ui_commands": [
+                {
+                    "action": "update_sidebar_badge",
+                    "sidebar_item": "goals",
+                    "badge_count": 1,
+                }
+            ],
+            "suggestions": [
+                "Show me the progress",
+                "What step is running now?",
+                "Pause if anything looks off",
+            ],
+            "timing": {"memory_query_ms": 0, "llm_response_ms": 0, "total_ms": 0},
+            "cognitive_load": {
+                "level": load_state.level.value,
+                "score": round(load_state.score, 3),
+                "recommendation": load_state.recommendation,
+            },
+            "proactive_insights": [],
+            "intent_detected": "plan_approve",
+        }
+
+    async def _get_pending_plan_context(self, user_id: str) -> str | None:
+        """Build a context string for a pending plan_ready goal.
+
+        Returns a markdown block describing the pending plan so the LLM
+        can reference it during normal conversation, or ``None`` if no
+        plan_ready goal exists.
+        """
+        try:
+            db = get_supabase_client()
+            goal_result = (
+                db.table("goals")
+                .select("id, title, description")
+                .eq("user_id", user_id)
+                .eq("status", "plan_ready")
+                .limit(1)
+                .execute()
+            )
+            if not goal_result.data:
+                return None
+
+            goal = goal_result.data[0]
+            goal_id = goal["id"]
+
+            plan_row = (
+                db.table("goal_execution_plans")
+                .select("tasks")
+                .eq("goal_id", goal_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            raw_tasks = (plan_row.data or {}).get("tasks", "[]")
+            tasks: list[dict[str, Any]] = (
+                json.loads(raw_tasks) if isinstance(raw_tasks, str) else raw_tasks
+            )
+
+            task_lines = []
+            for i, t in enumerate(tasks):
+                agent = t.get("agent", "unknown")
+                risk = t.get("risk_level", "LOW")
+                task_lines.append(
+                    f"  {i+1}. {t.get('title', f'Task {i+1}')} "
+                    f"(agent: {agent}, risk: {risk})"
+                )
+            tasks_str = "\n".join(task_lines)
+
+            return (
+                f"## Pending Plan\n"
+                f"ARIA has proposed an execution plan awaiting review.\n"
+                f"Goal: \"{goal.get('title', '')}\" — {goal.get('description', '')}\n"
+                f"Plan tasks:\n{tasks_str}\n\n"
+                f"The user may be discussing or modifying this plan. Reference specific "
+                f"tasks and agents when relevant. If the user seems satisfied, suggest "
+                f"they approve."
+            )
+
+        except Exception as e:
+            logger.warning("Failed to build pending plan context: %s", e)
+            return None
+
     async def _handle_goal_intent(
         self,
         user_id: str,
@@ -1783,6 +2321,31 @@ class ChatService:
                 load_state=load_state,
             )
 
+        # --- Check for pending plan interactions ---
+        plan_action = await self._classify_plan_action(user_id, message)
+        if plan_action and plan_action["action"] in ("approve", "modify"):
+            if plan_action["action"] == "approve":
+                return await self._handle_plan_approval_from_chat(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    goal_id=plan_action["goal_id"],
+                    goal=plan_action["goal"],
+                    working_memory=working_memory,
+                    load_state=load_state,
+                )
+            else:
+                return await self._handle_plan_modification(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    goal_id=plan_action["goal_id"],
+                    goal=plan_action["goal"],
+                    current_tasks=plan_action["plan_tasks"],
+                    working_memory=working_memory,
+                    load_state=load_state,
+                )
+
         # Build companion context (replaces personality calibration + style guidelines)
         companion_ctx = None
         try:
@@ -1855,6 +2418,11 @@ class ChatService:
                 f"Surface this concern naturally alongside your response: "
                 f"{friction_decision.user_message}"
             )
+
+        # Inject pending plan context for discuss/unrelated plan interactions
+        pending_plan_ctx = await self._get_pending_plan_context(user_id)
+        if pending_plan_ctx:
+            system_prompt += f"\n\n{pending_plan_ctx}"
 
         # Debug: log complete system prompt to verify ARIA identity is present
         logger.info(

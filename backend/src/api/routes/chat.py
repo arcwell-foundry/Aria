@@ -294,6 +294,55 @@ async def chat_stream(
             yield "data: [DONE]\n\n"
             return
 
+        # --- Check for pending plan interactions ---
+        plan_action = await service._classify_plan_action(current_user.id, request.message)
+        if plan_action and plan_action["action"] in ("approve", "modify"):
+            # Short-circuit: handle plan action
+            metadata = {
+                "type": "metadata",
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+            }
+            yield f"data: {json.dumps(metadata)}\n\n"
+
+            if plan_action["action"] == "approve":
+                plan_response = await service._handle_plan_approval_from_chat(
+                    user_id=current_user.id,
+                    conversation_id=conversation_id,
+                    message=request.message,
+                    goal_id=plan_action["goal_id"],
+                    goal=plan_action["goal"],
+                    working_memory=working_memory,
+                    load_state=load_state,
+                )
+            else:
+                plan_response = await service._handle_plan_modification(
+                    user_id=current_user.id,
+                    conversation_id=conversation_id,
+                    message=request.message,
+                    goal_id=plan_action["goal_id"],
+                    goal=plan_action["goal"],
+                    current_tasks=plan_action["plan_tasks"],
+                    working_memory=working_memory,
+                    load_state=load_state,
+                )
+
+            # Emit response as token + complete events
+            token_event = {"type": "token", "content": plan_response["message"]}
+            yield f"data: {json.dumps(token_event)}\n\n"
+
+            complete_event = {
+                "type": "complete",
+                "rich_content": plan_response.get("rich_content", []),
+                "ui_commands": plan_response.get("ui_commands", []),
+                "suggestions": plan_response.get("suggestions", []),
+                "intent_detected": plan_response.get("intent_detected"),
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+
+            yield "data: [DONE]\n\n"
+            return
+
         # --- Normal conversational streaming path ---
 
         # Get proactive insights
@@ -342,6 +391,11 @@ async def chat_stream(
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
             )
+
+        # Inject pending plan context for discuss/unrelated plan interactions
+        pending_plan_ctx = await service._get_pending_plan_context(current_user.id)
+        if pending_plan_ctx:
+            system_prompt += f"\n\n{pending_plan_ctx}"
 
         # Debug: log system prompt to verify ARIA identity
         logger.info(
