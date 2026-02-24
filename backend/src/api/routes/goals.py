@@ -1031,3 +1031,349 @@ async def generate_retrospective(
 
         raise HTTPException(status_code=404, detail="Goal not found")
     return retro
+
+
+# ── Temporary debug endpoint: test intent detection pipeline ──────────────
+
+
+class IntentTestRequest(BaseModel):
+    """Request body for intent detection test."""
+
+    message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: str | None = None
+
+
+@router.post("/debug/test-pipeline")
+async def test_plan_pipeline_noauth(
+    body: IntentTestRequest,
+    user_id: str = Query(..., description="User ID (no auth required — debug only)"),
+) -> dict[str, Any]:
+    """NO-AUTH debug endpoint. Tests full intent → goal → plan pipeline.
+
+    Usage:
+        curl -X POST 'http://localhost:8000/api/v1/goals/debug/test-pipeline?user_id=YOUR_USER_ID' \
+          -H 'Content-Type: application/json' \
+          -d '{"message":"Research CDMOs in the Northeast US"}'
+
+    Remove before production.
+    """
+    import traceback
+
+    from src.core.llm import LLMClient
+    from src.db.supabase import get_supabase_client
+    from src.models.goal import GoalCreate, GoalType
+    from src.services.goal_execution import GoalExecutionService
+
+    results: dict[str, Any] = {"user_id": user_id, "steps": []}
+
+    def step(name: str, data: Any) -> None:
+        results["steps"].append({"step": name, "data": data})
+
+    # Step 0: Verify user exists
+    try:
+        db = get_supabase_client()
+        user_check = (
+            db.table("profiles")
+            .select("id, email")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not user_check.data:
+            step("verify_user", {"error": f"No profile found for user_id={user_id}"})
+            results["status"] = "failed_at_user_check"
+            return results
+        step("verify_user", {"email": user_check.data.get("email", "?")})
+    except Exception as e:
+        step("verify_user", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_user_check"
+        return results
+
+    # Step 1: Check for blocking plan_ready goals
+    try:
+        plan_ready = (
+            db.table("goals")
+            .select("id, title, status, created_at, updated_at")
+            .eq("user_id", user_id)
+            .eq("status", "plan_ready")
+            .order("updated_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        step("check_plan_ready_goals", {
+            "count": len(plan_ready.data) if plan_ready.data else 0,
+            "goals": plan_ready.data or [],
+            "verdict": (
+                "BLOCKING — intent detection would be SKIPPED in WebSocket"
+                if plan_ready.data
+                else "CLEAR — no plan_ready goals, guard passes"
+            ),
+        })
+    except Exception as e:
+        step("check_plan_ready_goals", {"error": str(e)})
+
+    # Step 2: LLM intent classification
+    try:
+        intent_prompt = (
+            "Analyze this user message and determine if it implies a goal "
+            "or task that ARIA should plan and execute autonomously.\n\n"
+            f'User message: "{body.message}"\n\n'
+            "A message implies a goal if the user wants ARIA to:\n"
+            "- Research, analyze, or investigate something\n"
+            "- Find, compare, or evaluate options\n"
+            "- Monitor, track, or watch for changes\n"
+            "- Create, draft, prepare, or write something\n"
+            "- Schedule, plan, or organize something\n"
+            "- Build a strategy, report, or recommendation\n\n"
+            "Do NOT classify as a goal if the message is:\n"
+            "- Casual conversation, greetings, or small talk\n"
+            "- A simple factual question (what is X, who is Y)\n"
+            "- Feedback on a previous response\n"
+            "- A request to explain or clarify something\n"
+            "- A single-step task that doesn't need planning\n\n"
+            "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+            "{\n"
+            '  "is_goal": true or false,\n'
+            '  "goal_title": "concise title if is_goal is true, else null",\n'
+            '  "goal_type": "research|analysis|lead_gen|competitive_intel'
+            '|outreach|meeting_prep|territory|custom",\n'
+            '  "goal_description": "1-2 sentence description if is_goal '
+            'is true, else null"\n'
+            "}"
+        )
+
+        llm = LLMClient()
+        intent_raw = await llm.generate_response(
+            messages=[{"role": "user", "content": intent_prompt}],
+            max_tokens=256,
+            temperature=0.1,
+            user_id=user_id,
+        )
+        step("llm_call", {"raw_response": intent_raw})
+    except Exception as e:
+        step("llm_call", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_llm"
+        return results
+
+    # Step 3: JSON parse
+    try:
+        cleaned = intent_raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+        intent = json.loads(cleaned)
+        step("json_parse", {"parsed": intent})
+    except json.JSONDecodeError as e:
+        step("json_parse", {
+            "error": str(e),
+            "cleaned_input": cleaned,
+            "raw_input": intent_raw,
+        })
+        results["status"] = "failed_at_json_parse"
+        return results
+
+    if not intent.get("is_goal"):
+        step("classification", {"is_goal": False, "verdict": "Not classified as goal"})
+        results["status"] = "not_a_goal"
+        return results
+
+    step("classification", {"is_goal": True, "title": intent.get("goal_title")})
+
+    # Step 4: Goal creation
+    try:
+        goal_type_str = intent.get("goal_type", "research")
+        try:
+            goal_type = GoalType(goal_type_str)
+        except ValueError:
+            goal_type = GoalType.RESEARCH
+
+        goal_data = GoalCreate(
+            title=intent.get("goal_title", body.message[:100]),
+            description=intent.get("goal_description", body.message),
+            goal_type=goal_type,
+        )
+
+        svc = GoalService()
+        goal = await svc.create_goal(user_id, goal_data)
+        step("goal_creation", {"goal_id": goal["id"], "title": goal_data.title})
+    except Exception as e:
+        step("goal_creation", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_goal_creation"
+        return results
+
+    # Step 5: Plan generation
+    try:
+        exec_svc = GoalExecutionService()
+        plan = await exec_svc.plan_goal(goal["id"], user_id)
+        step("plan_generation", {
+            "task_count": len(plan.get("tasks", [])),
+            "readiness_score": plan.get("readiness_score"),
+            "execution_mode": plan.get("execution_mode"),
+        })
+    except Exception as e:
+        step("plan_generation", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_plan_generation"
+        return results
+
+    results["status"] = "success"
+    results["goal_id"] = goal["id"]
+    return results
+
+
+@router.post("/debug/test-intent")
+async def test_intent_detection(
+    current_user: CurrentUser,
+    body: IntentTestRequest,
+) -> dict[str, Any]:
+    """Temporary endpoint to test intent detection pipeline in isolation.
+
+    Tests each stage: LLM call, JSON parse, goal creation, plan generation.
+    Returns detailed diagnostics at each step.  Remove after debugging.
+    """
+    import traceback
+
+    from src.core.llm import LLMClient
+    from src.db.supabase import get_supabase_client
+    from src.models.goal import GoalCreate, GoalType
+    from src.services.goal_execution import GoalExecutionService
+
+    user_id = str(current_user.id)
+    results: dict[str, Any] = {"user_id": user_id, "steps": []}
+
+    def step(name: str, data: Any) -> None:
+        results["steps"].append({"step": name, "data": data})
+
+    # Step 0: Check for stale plan_ready goals (the guard condition)
+    try:
+        db = get_supabase_client()
+        plan_ready = (
+            db.table("goals")
+            .select("id, title, status, created_at, updated_at")
+            .eq("user_id", user_id)
+            .eq("status", "plan_ready")
+            .order("updated_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        step("check_plan_ready_goals", {
+            "count": len(plan_ready.data) if plan_ready.data else 0,
+            "goals": plan_ready.data or [],
+            "verdict": (
+                "BLOCKING — intent detection would be SKIPPED in WebSocket"
+                if plan_ready.data
+                else "CLEAR — no plan_ready goals, guard passes"
+            ),
+        })
+    except Exception as e:
+        step("check_plan_ready_goals", {"error": str(e)})
+
+    # Step 1: LLM intent classification
+    try:
+        intent_prompt = (
+            "Analyze this user message and determine if it implies a goal "
+            "or task that ARIA should plan and execute autonomously.\n\n"
+            f'User message: "{body.message}"\n\n'
+            "A message implies a goal if the user wants ARIA to:\n"
+            "- Research, analyze, or investigate something\n"
+            "- Find, compare, or evaluate options\n"
+            "- Monitor, track, or watch for changes\n"
+            "- Create, draft, prepare, or write something\n"
+            "- Schedule, plan, or organize something\n"
+            "- Build a strategy, report, or recommendation\n\n"
+            "Do NOT classify as a goal if the message is:\n"
+            "- Casual conversation, greetings, or small talk\n"
+            "- A simple factual question (what is X, who is Y)\n"
+            "- Feedback on a previous response\n"
+            "- A request to explain or clarify something\n"
+            "- A single-step task that doesn't need planning\n\n"
+            "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+            "{\n"
+            '  "is_goal": true or false,\n'
+            '  "goal_title": "concise title if is_goal is true, else null",\n'
+            '  "goal_type": "research|analysis|lead_gen|competitive_intel'
+            '|outreach|meeting_prep|territory|custom",\n'
+            '  "goal_description": "1-2 sentence description if is_goal '
+            'is true, else null"\n'
+            "}"
+        )
+
+        llm = LLMClient()
+        intent_raw = await llm.generate_response(
+            messages=[{"role": "user", "content": intent_prompt}],
+            max_tokens=256,
+            temperature=0.1,
+            user_id=user_id,
+        )
+        step("llm_call", {"raw_response": intent_raw})
+    except Exception as e:
+        step("llm_call", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_llm"
+        return results
+
+    # Step 2: JSON parse
+    try:
+        cleaned = intent_raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+        intent = json.loads(cleaned)
+        step("json_parse", {"parsed": intent, "cleaned_input": cleaned})
+    except json.JSONDecodeError as e:
+        step("json_parse", {
+            "error": str(e),
+            "cleaned_input": cleaned,
+            "raw_input": intent_raw,
+        })
+        results["status"] = "failed_at_json_parse"
+        return results
+
+    if not intent.get("is_goal"):
+        step("classification", {"is_goal": False, "verdict": "Not classified as goal"})
+        results["status"] = "not_a_goal"
+        return results
+
+    step("classification", {"is_goal": True, "title": intent.get("goal_title")})
+
+    # Step 3: Goal creation
+    try:
+        goal_type_str = intent.get("goal_type", "research")
+        try:
+            goal_type = GoalType(goal_type_str)
+        except ValueError:
+            goal_type = GoalType.RESEARCH
+
+        goal_data = GoalCreate(
+            title=intent.get("goal_title", body.message[:100]),
+            description=intent.get("goal_description", body.message),
+            goal_type=goal_type,
+        )
+
+        svc = GoalService()
+        goal = await svc.create_goal(user_id, goal_data)
+        step("goal_creation", {"goal_id": goal["id"], "title": goal_data.title})
+    except Exception as e:
+        step("goal_creation", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_goal_creation"
+        return results
+
+    # Step 4: Plan generation
+    try:
+        exec_svc = GoalExecutionService()
+        plan = await exec_svc.plan_goal(goal["id"], user_id)
+        step("plan_generation", {
+            "task_count": len(plan.get("tasks", [])),
+            "readiness_score": plan.get("readiness_score"),
+            "execution_mode": plan.get("execution_mode"),
+        })
+    except Exception as e:
+        step("plan_generation", {"error": str(e), "traceback": traceback.format_exc()})
+        results["status"] = "failed_at_plan_generation"
+        return results
+
+    results["status"] = "success"
+    results["goal_id"] = goal["id"]
+    return results
