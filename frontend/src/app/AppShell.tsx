@@ -24,6 +24,7 @@ import { useWebSocketStatus } from '@/hooks/useWebSocketStatus';
 import { UrgentEmailNotification } from '@/components/notifications/UrgentEmailNotification';
 import { useDashboardEvents } from '@/hooks/useDashboardEvents';
 import { useExecutionProgress } from '@/hooks/useExecutionProgress';
+import { useUICommands } from '@/hooks/useUICommands';
 import { UndoToastContainer } from '@/components/execution/UndoToast';
 import { wsManager } from '@/core/WebSocketManager';
 import { useSession } from '@/contexts/SessionContext';
@@ -67,6 +68,8 @@ export function AppShell() {
   useDashboardEvents();
   // Wire execution step events to executionStore
   useExecutionProgress();
+  // Wire UI commands from ARIA messages to UICommandExecutor
+  useUICommands();
 
   useEffect(() => {
     modalityController.setNavigate(navigate);

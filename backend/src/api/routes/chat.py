@@ -282,10 +282,13 @@ async def chat_stream(
                 yield f"data: {json.dumps(event)}\n\n"
 
             # Emit completion with rich_content containing the execution plan
+            goal_ui_commands = goal_response.get("ui_commands", [])
+            if not goal_ui_commands:
+                goal_ui_commands = [{"action": "navigate", "route": "/actions"}]
             complete_event = {
                 "type": "complete",
                 "rich_content": goal_response.get("rich_content", []),
-                "ui_commands": [],
+                "ui_commands": goal_ui_commands,
                 "suggestions": goal_response.get("suggestions", []),
                 "intent_detected": "goal",
             }
@@ -702,7 +705,7 @@ async def delete_conversation(
 _ROUTE_KEYWORDS: dict[str, str] = {
     "pipeline": "/pipeline",
     "intelligence": "/intelligence",
-    "battle card": "/intelligence/battle-cards",
+    "battle card": "/intelligence",
     "communication": "/communications",
     "action": "/actions",
     "briefing": "/briefing",

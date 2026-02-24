@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import { uiCommandExecutor } from "@/core/UICommandExecutor";
 
 // Types
 export interface ChatMessage {
@@ -206,7 +207,10 @@ export function streamMessage(
                 onError(new Error(event.content));
                 return;
               } else if (event.type === "complete") {
-                // Envelope data available for future UI command processing
+                const cmds = event.ui_commands as UICommand[] | undefined;
+                if (cmds?.length) {
+                  void uiCommandExecutor.executeCommands(cmds);
+                }
               }
             } catch {
               // Ignore parse errors for incomplete chunks

@@ -582,7 +582,7 @@ class GoalExecutionService:
                 message=msg,
                 rich_content=rich,
                 ui_commands=[
-                    {"action": "navigate", "route": f"/goals/{goal_id}"},
+                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
                 ],
                 suggestions=sugg,
             )
@@ -2649,6 +2649,17 @@ class GoalExecutionService:
                         },
                     }
                 ],
+                ui_commands=[
+                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
+                    {
+                        "action": "update_intel_panel",
+                        "content": {
+                            "module": "goal_tracker",
+                            "title": goal.get("title", "Goal Plan"),
+                            "source": "plan_presentation",
+                        },
+                    },
+                ],
                 suggestions=[
                     "Approve the plan",
                     "Why this approach?",
@@ -3728,6 +3739,14 @@ class GoalExecutionService:
                 user_id=user_id,
                 message=message,
                 rich_content=rich_content_items,
+                ui_commands=[
+                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
+                    {
+                        "action": "show_notification",
+                        "notification_type": "success",
+                        "notification_message": f"Goal complete: {goal_title}",
+                    },
+                ],
                 suggestions=retro_suggestions,
             )
 
