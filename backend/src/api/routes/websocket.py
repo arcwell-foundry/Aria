@@ -98,8 +98,12 @@ async def websocket_endpoint(
     # Drain login message queue (deliver HIGH-priority insights queued while offline)
     await _drain_login_queue(user_id)
 
-    # Generate proactive return greeting if user was away > 1 hour
-    await _send_return_greeting(user_id)
+    # Deliver first conversation or morning briefing (both take priority over generic greeting)
+    first_conversation_sent = await _maybe_deliver_first_conversation(user_id)
+    briefing_sent = await _maybe_deliver_morning_briefing(user_id)
+    if not first_conversation_sent and not briefing_sent:
+        # Generate proactive return greeting if user was away > 1 hour
+        await _send_return_greeting(user_id)
 
     # Message loop
     try:
@@ -139,6 +143,9 @@ async def websocket_endpoint(
 
             elif msg_type == "user.undo":
                 await _handle_undo_request(websocket, data, user_id)
+
+            elif msg_type == "user.approve_proposal":
+                await _handle_proposal_approval(websocket, data, user_id)
 
             elif msg_type == "modality.change":
                 payload = data.get("payload", {})
@@ -642,6 +649,315 @@ async def _handle_user_message(
                 "conversation_id": conversation_id,
             }
         )
+
+
+async def _maybe_deliver_first_conversation(user_id: str) -> bool:
+    """Deliver the stored first-conversation message on WebSocket connect.
+
+    Checks whether onboarding is complete and a first_conversation message
+    exists in the DB but hasn't been delivered via WebSocket yet.  If found,
+    sends it as an ARIA message with rich_content and goal cards.
+
+    Returns True if the first conversation was delivered (caller should skip
+    the generic return greeting).
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # 1. Check onboarding state
+        onboarding = (
+            db.table("onboarding_state")
+            .select("completed_at, metadata")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not onboarding.data or not onboarding.data.get("completed_at"):
+            return False
+
+        ob_metadata = onboarding.data.get("metadata") or {}
+        if ob_metadata.get("first_conversation_ws_delivered"):
+            return False
+
+        # 2. Look for stored first_conversation message
+        conv_result = (
+            db.table("conversations")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("metadata->>type", "first_conversation")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        content: str = ""
+        rich_content: list[dict] = []
+        ui_commands: list[dict] = []
+        suggestions: list[str] = []
+
+        if conv_result.data:
+            conv_id = conv_result.data[0]["id"]
+            msg_result = (
+                db.table("messages")
+                .select("content, metadata")
+                .eq("conversation_id", conv_id)
+                .eq("metadata->>type", "first_conversation")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if msg_result.data:
+                row = msg_result.data[0]
+                content = row.get("content", "")
+                msg_meta = row.get("metadata") or {}
+                rich_content = msg_meta.get("rich_content", [])
+                ui_commands = msg_meta.get("ui_commands", [])
+                suggestions = msg_meta.get("suggestions", [])
+
+        # 3. If no stored message, generate fresh (background pipeline may not have run)
+        if not content:
+            try:
+                from src.onboarding.first_conversation import FirstConversationGenerator
+
+                gen = FirstConversationGenerator()
+                msg = await gen.generate(user_id)
+                content = msg.content
+                rich_content = msg.rich_content
+                ui_commands = msg.ui_commands
+                suggestions = msg.suggestions
+            except Exception as gen_err:
+                logger.debug("First conversation generation failed: %s", gen_err)
+                return False
+
+        if not content:
+            return False
+
+        # 4. Deliver via WebSocket
+        await ws_manager.send_aria_message(
+            user_id=user_id,
+            message=content,
+            rich_content=rich_content,
+            ui_commands=ui_commands,
+            suggestions=suggestions,
+        )
+
+        # 5. Mark as delivered
+        new_metadata = {**ob_metadata, "first_conversation_ws_delivered": True}
+        db.table("onboarding_state").update(
+            {"metadata": new_metadata}
+        ).eq("user_id", user_id).execute()
+
+        logger.info("First conversation delivered via WS", extra={"user_id": user_id})
+        return True
+
+    except Exception:
+        logger.debug(
+            "First conversation delivery failed for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return False
+
+
+async def _maybe_deliver_morning_briefing(user_id: str) -> bool:
+    """Deliver today's morning briefing on WebSocket connect if not yet delivered.
+
+    Checks the ``daily_briefings`` table for today's row.  If content exists
+    and ``ws_delivered`` is False (or the column doesn't exist yet), sends it
+    as an ARIA message with rich_content cards.
+
+    Returns True if a briefing was delivered.
+    """
+    try:
+        from datetime import date
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Skip if onboarding not complete
+        onboarding = (
+            db.table("onboarding_state")
+            .select("completed_at")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not onboarding.data or not onboarding.data.get("completed_at"):
+            return False
+
+        # Query today's briefing
+        today_str = date.today().isoformat()
+        briefing_result = (
+            db.table("daily_briefings")
+            .select("id, content, ws_delivered")
+            .eq("user_id", user_id)
+            .eq("briefing_date", today_str)
+            .limit(1)
+            .execute()
+        )
+
+        briefing_content: dict | None = None
+        briefing_id: str | None = None
+
+        if briefing_result.data:
+            row = briefing_result.data[0]
+            briefing_id = row["id"]
+
+            # Already delivered?
+            if row.get("ws_delivered"):
+                return False
+
+            raw_content = row.get("content")
+            if raw_content:
+                briefing_content = (
+                    json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+                )
+
+        # If no briefing content yet, try to generate
+        if not briefing_content:
+            try:
+                from src.services.briefing import BriefingService
+
+                svc = BriefingService()
+                briefing_content = await svc.get_or_generate_briefing(user_id)
+            except Exception as gen_err:
+                logger.debug("Briefing generation failed: %s", gen_err)
+                return False
+
+        if not briefing_content:
+            return False
+
+        # Extract display fields
+        summary = briefing_content.get("summary", "")
+        if not summary:
+            return False
+
+        rich_content = briefing_content.get("rich_content", [])
+        ui_commands = briefing_content.get("ui_commands", [])
+        suggestions = briefing_content.get("suggestions", ["Show me details", "Dismiss"])
+
+        # Deliver
+        await ws_manager.send_aria_message(
+            user_id=user_id,
+            message=summary,
+            rich_content=rich_content,
+            ui_commands=ui_commands,
+            suggestions=suggestions,
+        )
+
+        # Mark as delivered
+        if briefing_id:
+            try:
+                db.table("daily_briefings").update(
+                    {"ws_delivered": True}
+                ).eq("id", briefing_id).execute()
+            except Exception:
+                # ws_delivered column may not exist yet — tolerate gracefully
+                logger.debug("Could not set ws_delivered on daily_briefings (column may not exist)")
+
+        logger.info("Morning briefing delivered via WS", extra={"user_id": user_id})
+        return True
+
+    except Exception:
+        logger.debug(
+            "Morning briefing delivery failed for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return False
+
+
+async def _handle_proposal_approval(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle a user.approve_proposal event — create a goal from a proactive proposal.
+
+    Expected payload keys:
+    - ``proposal_id``: UUID of the proactive_proposals row
+    """
+    payload = data.get("payload", {})
+    proposal_id = payload.get("proposal_id")
+    if not proposal_id:
+        return
+
+    try:
+        from src.db.supabase import get_supabase_client
+        from src.services.goal_execution import GoalExecutionService
+
+        db = get_supabase_client()
+
+        # Fetch proposal
+        proposal_result = (
+            db.table("proactive_proposals")
+            .select("*")
+            .eq("id", proposal_id)
+            .eq("user_id", user_id)
+            .eq("status", "proposed")
+            .maybe_single()
+            .execute()
+        )
+        if not proposal_result.data:
+            logger.warning("Proposal not found or already processed: %s", proposal_id)
+            return
+
+        proposal = proposal_result.data
+        proposal_data = proposal.get("proposal_data") or {}
+
+        # Create a goal
+        from datetime import UTC, datetime
+
+        goal_id = str(uuid.uuid4())
+        now = datetime.now(UTC).isoformat()
+        db.table("goals").insert(
+            {
+                "id": goal_id,
+                "user_id": user_id,
+                "title": proposal.get("goal_title", "Signal-driven goal"),
+                "description": proposal_data.get("rationale", ""),
+                "status": "planning",
+                "goal_type": proposal_data.get("goal_type", "custom"),
+                "created_at": now,
+                "updated_at": now,
+                "metadata": {
+                    "source": "proactive_proposal",
+                    "proposal_id": proposal_id,
+                    "source_signal_id": proposal.get("source_signal_id"),
+                },
+            }
+        ).execute()
+
+        # Update proposal status
+        db.table("proactive_proposals").update(
+            {"status": "approved", "goal_id": goal_id, "updated_at": now}
+        ).eq("id", proposal_id).execute()
+
+        # Kick off goal planning
+        exec_service = GoalExecutionService()
+        await exec_service.plan_goal(goal_id, user_id)
+
+        # Send confirmation
+        await websocket.send_json(
+            {
+                "type": "aria.message",
+                "message": (
+                    "On it. I've created a goal and I'm building an execution plan now."
+                ),
+                "rich_content": [],
+                "ui_commands": [],
+                "suggestions": ["Show me the plan", "What's next?"],
+            }
+        )
+        logger.info(
+            "Proposal approved — goal created",
+            extra={"proposal_id": proposal_id, "goal_id": goal_id, "user_id": user_id},
+        )
+    except Exception as e:
+        logger.warning("Proposal approval failed: %s", e)
 
 
 async def _handle_action_approval(

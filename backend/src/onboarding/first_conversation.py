@@ -624,6 +624,9 @@ class FirstConversationGenerator:
                             "memory_delta": message.memory_delta,
                             "facts_referenced": message.facts_referenced,
                             "confidence_level": message.confidence_level,
+                            "rich_content": message.rich_content,
+                            "ui_commands": message.ui_commands,
+                            "suggestions": message.suggestions,
                         },
                     }
                 ).execute()

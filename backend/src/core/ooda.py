@@ -667,6 +667,40 @@ If graph context is available, identify implication chains — non-obvious multi
             },
         )
 
+        # Evaluate high-urgency implication chains for proactive goal proposals
+        if self._user_id and orientation:
+            try:
+                from src.services.proactive_goal_proposer import (
+                    ProactiveGoalProposer,
+                    _MAX_PROPOSALS_PER_ORIENT,
+                )
+
+                proposer = ProactiveGoalProposer()
+                chains = [
+                    t for t in orientation.get("threats", [])
+                    if isinstance(t, dict) and t.get("urgency") == "high"
+                ] + [
+                    o for o in orientation.get("opportunities", [])
+                    if isinstance(o, dict) and o.get("urgency") == "high"
+                ]
+                proposals_sent = 0
+                for chain in chains[:_MAX_PROPOSALS_PER_ORIENT]:
+                    with contextlib.suppress(Exception):
+                        sent = await proposer.evaluate_implication_chain(
+                            user_id=self._user_id,
+                            goal_id=state.goal_id,
+                            chain=chain,
+                        )
+                        if sent:
+                            proposals_sent += 1
+                if proposals_sent:
+                    logger.debug(
+                        "Proactive proposals from orient: %d", proposals_sent,
+                        extra={"user_id": self._user_id, "goal_id": state.goal_id},
+                    )
+            except Exception:
+                pass  # Best-effort — never break OODA for proposals
+
         return state
 
     async def _get_graph_context_for_orient(

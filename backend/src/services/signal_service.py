@@ -100,6 +100,23 @@ class SignalService:
             lead_id=data.linked_lead_id,
         )
 
+        # Evaluate for proactive goal proposal (best-effort)
+        try:
+            from src.services.proactive_goal_proposer import ProactiveGoalProposer
+
+            proposer = ProactiveGoalProposer()
+            await proposer.evaluate_signal(
+                user_id=user_id,
+                signal_id=signal["id"],
+                signal_type=data.signal_type.value,
+                headline=data.headline,
+                summary=data.summary,
+                relevance_score=data.relevance_score or 0.0,
+                company_name=data.company_name,
+            )
+        except Exception:
+            logger.debug("Proactive goal proposal evaluation failed", exc_info=True)
+
         return signal
 
     async def get_signals(
