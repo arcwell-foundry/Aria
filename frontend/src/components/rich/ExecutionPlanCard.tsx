@@ -30,6 +30,9 @@ interface PlanTask {
 export interface ExecutionPlanData {
   goal_id: string;
   title: string;
+  // Persisted status (set when plan is approved, survives page refresh)
+  status?: 'approved' | string;
+  approved_at?: string;
   // Resource-aware fields
   tasks?: PlanTask[];
   missing_integrations?: string[];
@@ -373,7 +376,7 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
 // --- Main component ---
 
 export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
-  const [isApproved, setIsApproved] = useState(false);
+  const [isApproved, setIsApproved] = useState(() => data.status === 'approved');
   const [isLoading, setIsLoading] = useState(false);
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);

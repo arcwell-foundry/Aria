@@ -84,8 +84,17 @@ class WebSocketManagerImpl {
     const url = this.buildWsUrl(this.config.userId, this.config.sessionId);
     const token = localStorage.getItem('access_token');
 
+    // If there's no auth token yet, skip the WebSocket attempt entirely —
+    // the server requires it and will reject with 403. Fall back to SSE and
+    // the upgrade-retry loop will reconnect once the token is available.
+    if (!token) {
+      console.debug('[WebSocketManager] No access_token in localStorage, falling back to SSE');
+      this.fallbackToSSE();
+      return;
+    }
+
     try {
-      this.ws = new WebSocket(token ? `${url}&token=${token}` : url);
+      this.ws = new WebSocket(`${url}&token=${token}`);
     } catch {
       this.fallbackToSSE();
       return;
@@ -258,8 +267,11 @@ class WebSocketManagerImpl {
     this.stopWSUpgradeRetry();
     this.wsUpgradeTimer = setInterval(() => {
       if (this._transport === 'sse' && !this.intentionalDisconnect) {
+        const token = localStorage.getItem('access_token');
+        if (!token) return; // Can't probe without auth token
+
         const url = this.buildWsUrl(this.config?.userId || '', this.config?.sessionId || '');
-        const probe = new WebSocket(url);
+        const probe = new WebSocket(`${url}&token=${token}`);
         const timeout = setTimeout(() => probe.close(), 3_000);
 
         probe.onopen = () => {

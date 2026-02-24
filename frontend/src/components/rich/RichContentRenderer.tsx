@@ -129,6 +129,42 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <IntegrationRequestCard data={item.data as unknown as IntegrationRequestData} />;
     case 'goal_completion':
       return <GoalCompletionCard data={item.data as unknown as GoalCompletionData} />;
+    case 'plan_approved': {
+      const pa = item.data as Record<string, unknown>;
+      return (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 my-2 max-w-2xl">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs">
+              &#x2713;
+            </span>
+            <span className="text-emerald-300 font-medium text-sm">
+              Plan approved — executing {(pa?.title as string) || 'your plan'}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    case 'task_progress': {
+      const tp = item.data as Record<string, unknown>;
+      return (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 my-1 max-w-2xl">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px]">
+              &#x2713;
+            </span>
+            <span className="text-sm text-[var(--text-primary)]">
+              <strong>{(tp?.task_title as string) || 'Task'}</strong>
+              <span className="text-[var(--text-secondary)]"> complete</span>
+            </span>
+            {tp?.agent && (
+              <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-secondary)] ml-auto">
+                {tp.agent as string}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
     case 'friction_decision': {
       const fd = item.data as unknown as Omit<ChallengeCardProps, 'onApprove' | 'onModify' | 'onCancel'>;
       return (

@@ -2551,6 +2551,11 @@ class GoalExecutionService:
             goal = goal_result.data or {"id": goal_id, "title": "Unknown", "config": {}}
             context = await self._gather_execution_context(user_id)
 
+            # Extract conversation_id from plan row for persisting progress messages
+            plan_conversation_id = (
+                plan_result.data.get("conversation_id") if plan_result.data else None
+            )
+
             total_tasks = len(tasks)
             completed_tasks = 0
 
@@ -2568,6 +2573,7 @@ class GoalExecutionService:
                                 user_id=user_id,
                                 goal=goal,
                                 context=context,
+                                conversation_id=plan_conversation_id,
                             )
                             for t in layer
                         ],
@@ -2616,6 +2622,7 @@ class GoalExecutionService:
                         user_id=user_id,
                         goal=goal,
                         context=context,
+                        conversation_id=plan_conversation_id,
                     )
 
                     completed_tasks += 1
@@ -2832,6 +2839,7 @@ class GoalExecutionService:
         user_id: str,
         goal: dict[str, Any],
         context: dict[str, Any],
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a single task and publish lifecycle events.
 
@@ -2844,6 +2852,7 @@ class GoalExecutionService:
             user_id: The user ID.
             goal: The full goal dict.
             context: Gathered execution context.
+            conversation_id: Optional conversation ID for persisting progress messages.
 
         Returns:
             Dict with task_title, agent_type, success, and optional error.
@@ -2906,23 +2915,46 @@ class GoalExecutionService:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
             # Send conversational progress update to the user
+            task_title = task.get("title", "task")
+            summary = result.get("summary", "")
+            summary_snippet = f": {summary[:200]}" if summary else ""
+            progress_content = f"**{task_title}** complete{summary_snippet}."
             try:
-                task_title = task.get("title", "task")
-                summary = result.get("summary", "")
-                summary_snippet = (
-                    f": {summary[:200]}" if summary else ""
-                )
                 await ws_manager.send_aria_message(
                     user_id=user_id,
-                    message=(
-                        f"**{task_title}** complete{summary_snippet}."
-                    ),
+                    message=progress_content,
                 )
             except Exception:
                 logger.debug(
                     "Failed to send conversational progress",
                     extra={"goal_id": goal_id},
                 )
+
+            # Persist progress message so it survives page refresh
+            if conversation_id:
+                try:
+                    from src.services.conversations import ConversationService
+
+                    conv_svc = ConversationService(self._db)
+                    await conv_svc.save_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=progress_content,
+                        metadata={
+                            "type": "task_progress",
+                            "data": {
+                                "goal_id": goal_id,
+                                "task_title": task_title,
+                                "agent": agent_type,
+                                "status": "complete",
+                            },
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to persist progress message",
+                        extra={"goal_id": goal_id},
+                    )
 
             return {
                 "task_title": task.get("title", ""),
@@ -2966,20 +2998,47 @@ class GoalExecutionService:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
             # Send conversational failure notice to the user
+            task_title = task.get("title", "task")
+            failure_content = (
+                f"**{task_title}** ran into an issue. "
+                f"I'll try an alternative approach for the remaining steps."
+            )
             try:
-                task_title = task.get("title", "task")
                 await ws_manager.send_aria_message(
                     user_id=user_id,
-                    message=(
-                        f"**{task_title}** ran into an issue. "
-                        f"I'll try an alternative approach for the remaining steps."
-                    ),
+                    message=failure_content,
                 )
             except Exception:
                 logger.debug(
                     "Failed to send conversational failure notice",
                     extra={"goal_id": goal_id},
                 )
+
+            # Persist failure message so it survives page refresh
+            if conversation_id:
+                try:
+                    from src.services.conversations import ConversationService
+
+                    conv_svc = ConversationService(self._db)
+                    await conv_svc.save_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=failure_content,
+                        metadata={
+                            "type": "task_progress",
+                            "data": {
+                                "goal_id": goal_id,
+                                "task_title": task_title,
+                                "agent": agent_type,
+                                "status": "failed",
+                            },
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to persist failure message",
+                        extra={"goal_id": goal_id},
+                    )
 
             return {
                 "task_title": task.get("title", ""),

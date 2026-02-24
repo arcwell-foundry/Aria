@@ -342,12 +342,57 @@ async def approve_goal_plan(
     now = datetime.now(UTC).isoformat()
 
     # Update goal_execution_plans row: mark as approved
+    plan_message_id = None
+    conversation_id = None
     try:
+        plan_row = (
+            db.table("goal_execution_plans")
+            .select("plan_message_id, conversation_id")
+            .eq("goal_id", goal_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if plan_row.data:
+            plan_message_id = plan_row.data.get("plan_message_id")
+            conversation_id = plan_row.data.get("conversation_id")
+
         db.table("goal_execution_plans").update(
             {"status": "approved", "approved_at": now, "updated_at": now}
         ).eq("goal_id", goal_id).execute()
     except Exception as e:
         logger.warning("Failed to update plan row on approval: %s", e)
+
+    # Update the original plan card message metadata so it renders as approved on refresh
+    if plan_message_id:
+        try:
+            msg_result = (
+                db.table("messages")
+                .select("metadata")
+                .eq("id", str(plan_message_id))
+                .maybe_single()
+                .execute()
+            )
+            if msg_result.data:
+                current_meta = msg_result.data.get("metadata", {})
+                if isinstance(current_meta, str):
+                    current_meta = json.loads(current_meta)
+                if "data" in current_meta and isinstance(current_meta["data"], dict):
+                    current_meta["data"]["status"] = "approved"
+                    current_meta["data"]["approved_at"] = now
+                else:
+                    current_meta["status"] = "approved"
+                    current_meta["approved_at"] = now
+                db.table("messages").update(
+                    {"metadata": current_meta}
+                ).eq("id", str(plan_message_id)).execute()
+                logger.info(
+                    "Updated plan card message metadata to approved",
+                    extra={"message_id": plan_message_id, "goal_id": goal_id},
+                )
+        except Exception as e:
+            logger.warning("Failed to update plan card message metadata: %s", e)
 
     # Activate the goal
     db.table("goals").update(
@@ -360,18 +405,20 @@ async def approve_goal_plan(
 
     # Persist a confirmation message to the conversation
     try:
-        conv_result = (
-            db.table("conversations")
-            .select("id")
-            .eq("user_id", current_user.id)
-            .order("updated_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if conv_result.data:
+        if not conversation_id:
+            conv_result = (
+                db.table("conversations")
+                .select("id")
+                .eq("user_id", current_user.id)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+        if conversation_id:
             conv_service = ConversationService(db)
             await conv_service.save_message(
-                conversation_id=conv_result.data[0]["id"],
+                conversation_id=conversation_id,
                 role="assistant",
                 content=(
                     f"Starting execution on **{goal['title']}**. "
