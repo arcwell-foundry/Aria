@@ -18,6 +18,9 @@ from src.agents.skill_aware_agent import SkillAwareAgent
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.core.persona import PersonaBuilder
+    from src.memory.cold_retrieval import ColdMemoryRetriever
+    from src.memory.hot_context import HotContextBuilder
     from src.skills.index import SkillIndex
     from src.skills.orchestrator import SkillOrchestrator
 
@@ -62,6 +65,9 @@ class AnalystAgent(SkillAwareAgent):
         user_id: str,
         skill_orchestrator: "SkillOrchestrator | None" = None,
         skill_index: "SkillIndex | None" = None,
+        persona_builder: "PersonaBuilder | None" = None,
+        hot_context_builder: "HotContextBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
     ) -> None:
         """Initialize the Analyst agent.
 
@@ -70,6 +76,9 @@ class AnalystAgent(SkillAwareAgent):
             user_id: ID of the user this agent is working for.
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
+            persona_builder: Optional PersonaBuilder for centralized prompt assembly.
+            hot_context_builder: Optional builder for always-loaded context.
+            cold_retriever: Optional retriever for on-demand deep memory search.
         """
         self._research_cache: dict[str, Any] = {}
         self._http_client: httpx.AsyncClient | None = None
@@ -79,6 +88,9 @@ class AnalystAgent(SkillAwareAgent):
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
+            persona_builder=persona_builder,
+            hot_context_builder=hot_context_builder,
+            cold_retriever=cold_retriever,
         )
 
     def _get_exa_provider(self) -> Any:

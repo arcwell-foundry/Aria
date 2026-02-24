@@ -802,11 +802,13 @@ class GoalExecutionService:
         agent_type: str,
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Try to execute using skill-aware agent instance.
+        """Execute using the agent's native execute() method with optional skill augmentation.
 
         Creates an agent instance, builds a compatible task, and calls
-        execute_with_skills(). Returns the result data if skills were
-        used successfully, or None to fall through to prompt-based execution.
+        execute_with_skills() which routes to either skill-augmented or
+        native execution (using real APIs like Exa, PubMed, FDA, Composio).
+        Returns the result data on success, or None to fall through to
+        prompt-based execution.
 
         Args:
             user_id: The user's ID.
@@ -815,7 +817,7 @@ class GoalExecutionService:
             context: Gathered execution context.
 
         Returns:
-            Result data dict if skills were used, None otherwise.
+            Result data dict if agent execution succeeded, None otherwise.
         """
         try:
             agent = self._create_agent_instance(agent_type, user_id)
@@ -826,19 +828,18 @@ class GoalExecutionService:
             if task is None:
                 return None
 
-            # Only proceed with skill execution if the agent thinks skills are needed
-            analysis = await agent._analyze_skill_needs(task)
-            if not analysis.skills_needed:
-                return None  # Let prompt-based flow handle it
-
+            # execute_with_skills handles both skill-augmented and native paths:
+            # - If skills are needed: routes through skill orchestrator
+            # - If skills aren't needed: calls agent.execute() directly,
+            #   which uses real APIs (Exa, PubMed, FDA, Composio, etc.)
             result = await agent.execute_with_skills(task)
             if result.success and result.data:
-                return result.data
+                return result.data if isinstance(result.data, dict) else {"result": result.data}
 
             return None
 
         except Exception as e:
-            logger.debug(f"Skill execution attempt failed for {agent_type}: {e}")
+            logger.debug(f"Agent execution attempt failed for {agent_type}: {e}")
             return None
 
     async def _verify_and_adapt(

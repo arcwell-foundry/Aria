@@ -14,6 +14,9 @@ from src.core.config import settings
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
+    from src.core.persona import PersonaBuilder
+    from src.memory.cold_retrieval import ColdMemoryRetriever
+    from src.memory.hot_context import HotContextBuilder
     from src.skills.index import SkillIndex
     from src.skills.orchestrator import SkillOrchestrator
 
@@ -76,6 +79,9 @@ class HunterAgent(SkillAwareAgent):
         user_id: str,
         skill_orchestrator: "SkillOrchestrator | None" = None,
         skill_index: "SkillIndex | None" = None,
+        persona_builder: "PersonaBuilder | None" = None,
+        hot_context_builder: "HotContextBuilder | None" = None,
+        cold_retriever: "ColdMemoryRetriever | None" = None,
     ) -> None:
         """Initialize the Hunter agent.
 
@@ -84,6 +90,9 @@ class HunterAgent(SkillAwareAgent):
             user_id: ID of the user this agent is working for.
             skill_orchestrator: Optional orchestrator for multi-skill execution.
             skill_index: Optional index for skill discovery.
+            persona_builder: Optional PersonaBuilder for centralized prompt assembly.
+            hot_context_builder: Optional builder for always-loaded context.
+            cold_retriever: Optional retriever for on-demand deep memory search.
         """
         self._company_cache: dict[str, Any] = {}
         self._exa_provider: Any = None
@@ -92,6 +101,9 @@ class HunterAgent(SkillAwareAgent):
             user_id=user_id,
             skill_orchestrator=skill_orchestrator,
             skill_index=skill_index,
+            persona_builder=persona_builder,
+            hot_context_builder=hot_context_builder,
+            cold_retriever=cold_retriever,
         )
 
     def _get_exa_provider(self) -> Any:
