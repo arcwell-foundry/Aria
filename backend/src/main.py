@@ -224,10 +224,21 @@ async def lifespan(_app: FastAPI) -> Any:
 
     # Capability registry — scan static capabilities for ARIA self-awareness
     try:
+        import asyncio as _asyncio
+
         from src.services.capability_registry import get_capability_registry
 
         registry = get_capability_registry()
         registry.scan_static()
+
+        # Persist inventory to skills_index (async, fire-and-forget)
+        async def _persist_registry() -> None:
+            try:
+                await registry.persist_to_db()
+            except Exception:
+                logger.exception("REGISTRY: persist_to_db failed")
+
+        _asyncio.create_task(_persist_registry())
     except Exception:
         logger.exception("Failed to run capability registry static scan")
     yield

@@ -36,7 +36,9 @@ SEC_EDGAR_COMPANY_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
 SEC_EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions"
 
 # ── USPTO constants ──────────────────────────────────────────────────────
-USPTO_SEARCH_URL = "https://developer.uspto.gov/ibd-api/v1/application/publications"
+# NOTE: The old developer.uspto.gov IBD API was retired in 2025.
+# We use Google Patents as the primary search source now.
+GOOGLE_PATENTS_XHR_URL = "https://patents.google.com/xhr/query"
 
 # ── Press release source URLs ────────────────────────────────────────────
 PR_NEWSWIRE_SEARCH_URL = "https://www.prnewswire.com/search/news/"
@@ -546,18 +548,33 @@ class WebIntelligenceCapability(BaseCapability):
 
                     for hit in hits[:20]:
                         source = hit.get("_source", {})
+
+                        # Entity name: EDGAR returns display_names as a list
+                        display_names = source.get("display_names", [])
+                        entity_name = display_names[0] if display_names else company
+
+                        # Form type: EDGAR returns root_forms (list) or form (str)
+                        root_forms = source.get("root_forms", [])
+                        form_type = root_forms[0] if root_forms else source.get("form", "")
+
+                        # File number
+                        file_num_raw = source.get("file_num", "")
+                        file_number = (
+                            file_num_raw[0]
+                            if isinstance(file_num_raw, list) and file_num_raw
+                            else str(file_num_raw)
+                        )
+
                         filing = Filing(
-                            company=source.get("display_names", [company])[0]
-                            if source.get("display_names")
-                            else company,
+                            company=entity_name,
                             cik=str(source.get("entity_id", "")),
-                            filing_type=source.get("form_type", ""),
+                            filing_type=form_type,
                             filed_date=source.get("file_date", ""),
-                            period_of_report=source.get("period_of_report", ""),
+                            period_of_report=source.get("period_ending", ""),
                             description=source.get("file_description", ""),
                             filing_url=f"https://www.sec.gov/Archives/edgar/data/"
-                            f"{source.get('entity_id', '')}/{source.get('file_num', '')}",
-                            accession_number=source.get("accession_no", ""),
+                            f"{source.get('entity_id', '')}/{file_number}",
+                            accession_number=source.get("adsh", ""),
                         )
                         filings.append(filing)
         except httpx.HTTPError as exc:
@@ -600,11 +617,11 @@ class WebIntelligenceCapability(BaseCapability):
         return filings
 
     async def search_patents(self, query: str) -> list[Patent]:
-        """Search USPTO for patent publications.
+        """Search for patent publications via Google Patents.
 
-        Uses the USPTO Open Data API (public, no auth) to find patent
-        applications by keyword. Life sciences keywords are appended
-        to improve relevance for therapeutic area tracking.
+        The old USPTO IBD API was retired in 2025. This method now
+        searches Google Patents via their XHR endpoint, falling back to
+        an empty result set if the endpoint is unavailable.
 
         Args:
             query: Search query (e.g. ``"CAR-T cell therapy"``).
@@ -617,44 +634,56 @@ class WebIntelligenceCapability(BaseCapability):
         patents: list[Patent] = []
         user_id = self._user_context.user_id
 
+        # Strategy 1: Google Patents XHR
         try:
             async with httpx.AsyncClient(
                 timeout=30.0,
                 headers={
-                    "User-Agent": DEFAULT_USER_AGENT,
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
                     "Accept": "application/json",
                 },
             ) as http_client:
                 resp = await http_client.get(
-                    USPTO_SEARCH_URL,
-                    params={
-                        "searchText": query,
-                        "start": "0",
-                        "rows": "20",
-                    },
+                    GOOGLE_PATENTS_XHR_URL,
+                    params={"url": f"q={query}&oq={query}&num=20"},
                 )
-                resp.raise_for_status()
-                data = resp.json()
+                if resp.status_code == 200:
+                    data = resp.json()
+                    clusters = data.get("results", {}).get("cluster", [])
+                    for cluster in clusters:
+                        for result in cluster.get("result", []):
+                            patent_info = result.get("patent", {})
+                            pub_number = patent_info.get("publication_number", "")
+                            title = patent_info.get("title", "")
+                            snippet = result.get("snippet", "")
+                            assignee = patent_info.get("assignee", "")
+                            filing_date = patent_info.get("filing_date", "")
+                            pub_date = patent_info.get("publication_date", "")
 
-                results = data.get("results", [])
-                for result in results:
-                    patent = Patent(
-                        title=result.get("inventionTitle", ""),
-                        application_number=result.get("applicationNumber", ""),
-                        publication_number=result.get("publicationNumber", ""),
-                        applicant=self._extract_first_applicant(result),
-                        filed_date=result.get("filingDate", ""),
-                        publication_date=result.get("publicationDate", ""),
-                        abstract=result.get("abstractText", [""])[0]
-                        if isinstance(result.get("abstractText"), list)
-                        else str(result.get("abstractText", "")),
-                        patent_url=f"https://patents.google.com/patent/"
-                        f"US{result.get('publicationNumber', '')}",
+                            if title:
+                                patents.append(
+                                    Patent(
+                                        title=title,
+                                        publication_number=pub_number,
+                                        applicant=assignee,
+                                        filed_date=filing_date,
+                                        publication_date=pub_date,
+                                        abstract=snippet,
+                                        patent_url=f"https://patents.google.com/patent/{pub_number}",
+                                    )
+                                )
+                else:
+                    logger.info(
+                        "Google Patents returned %d for query '%s'",
+                        resp.status_code,
+                        query,
                     )
-                    patents.append(patent)
-
         except httpx.HTTPError as exc:
-            logger.warning("USPTO search failed: %s", exc)
+            logger.warning("Google Patents search failed: %s", exc)
 
         # Store patents as market signals
         if patents:
@@ -670,7 +699,6 @@ class WebIntelligenceCapability(BaseCapability):
                     source_url=patent.patent_url,
                     relevance_score=0.7,
                     metadata={
-                        "application_number": patent.application_number,
                         "publication_number": patent.publication_number,
                         "filed_date": patent.filed_date,
                     },

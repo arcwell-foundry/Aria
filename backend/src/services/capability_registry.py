@@ -4,6 +4,10 @@ Discovers what ARIA can actually do at startup (agents, capabilities, skills,
 API keys, MCP servers) and provides per-user live status (integrations,
 recent usage, installed MCP).  The rendered output is injected into the
 system prompt so ARIA never hallucinates about her own capabilities.
+
+NEW in v2: Reads ``config/capability_manifest.yaml`` as single source of
+truth, merges with code auto-discovery, and persists the full inventory to
+``skills_index`` so ARIA knows about designed capabilities too.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +81,22 @@ class McpServerInfo:
 
 
 @dataclass
+class ManifestEntry:
+    """A capability from the manifest, merged with code discovery status.
+
+    This is the unified representation used for DB persistence and
+    cognitive context rendering.
+    """
+
+    name: str
+    category: str  # agent, capability, skill_definition, workflow, api, mcp_server, infrastructure
+    description: str
+    status: str  # designed, implemented, operational
+    agents: list[str] = field(default_factory=list)
+    module: str | None = None
+
+
+@dataclass
 class StaticSnapshot:
     """Everything discoverable from code and config at startup."""
 
@@ -84,6 +105,7 @@ class StaticSnapshot:
     skill_definitions: list[SkillDefinitionInfo] = field(default_factory=list)
     api_keys: list[ApiKeyStatus] = field(default_factory=list)
     mcp_servers: list[McpServerInfo] = field(default_factory=list)
+    manifest_inventory: list[ManifestEntry] = field(default_factory=list)
     scan_time_ms: int = 0
 
 
@@ -144,6 +166,9 @@ _SKIP_AGENT_FILES = {
     "skill_aware_agent",
 }
 
+# Path to the manifest YAML relative to this file
+_MANIFEST_PATH = Path(__file__).resolve().parent.parent / "config" / "capability_manifest.yaml"
+
 # ---------------------------------------------------------------------------
 # Core service
 # ---------------------------------------------------------------------------
@@ -164,6 +189,10 @@ class CapabilityRegistry:
     def scan_static(self) -> StaticSnapshot:
         """Discover everything introspectable from code and config.
 
+        Also loads the capability manifest and merges with code discovery
+        to produce a complete inventory of all capabilities (operational,
+        implemented, and designed).
+
         Returns the cached StaticSnapshot.
         """
         start = time.perf_counter()
@@ -174,6 +203,13 @@ class CapabilityRegistry:
         api_keys = self._check_api_keys()
         mcp_servers = self._discover_mcp_servers()
 
+        # Load manifest and merge with code scan results
+        manifest_inventory = self._load_and_merge_manifest(
+            agents=agents,
+            capabilities=capabilities,
+            skill_defs=skill_defs,
+        )
+
         elapsed_ms = int((time.perf_counter() - start) * 1000)
 
         self._static = StaticSnapshot(
@@ -182,21 +218,264 @@ class CapabilityRegistry:
             skill_definitions=skill_defs,
             api_keys=api_keys,
             mcp_servers=mcp_servers,
+            manifest_inventory=manifest_inventory,
             scan_time_ms=elapsed_ms,
         )
 
+        # Summary counts by status
+        status_counts: dict[str, int] = {}
+        for entry in manifest_inventory:
+            status_counts[entry.status] = status_counts.get(entry.status, 0) + 1
+
         logger.info(
-            "Capability registry static scan completed: "
-            "%d agents, %d capabilities, %d skill definitions, %d API keys, %d MCP servers (%d ms)",
+            "REGISTRY: Static scan completed — %d agents, %d capabilities, "
+            "%d skill definitions, %d API keys, %d MCP servers. "
+            "Manifest inventory: %d total (%s). Scan took %d ms.",
             len(agents),
             len(capabilities),
             len(skill_defs),
             sum(1 for k in api_keys if k.configured),
             len(mcp_servers),
+            len(manifest_inventory),
+            ", ".join(f"{v} {k}" for k, v in sorted(status_counts.items())),
             elapsed_ms,
         )
 
         return self._static
+
+    # ------------------------------------------------------------------
+    # Manifest loading and merging
+    # ------------------------------------------------------------------
+
+    def _load_and_merge_manifest(
+        self,
+        agents: list[AgentInfo],
+        capabilities: list[CapabilityInfo],
+        skill_defs: list[SkillDefinitionInfo],
+    ) -> list[ManifestEntry]:
+        """Load capability_manifest.yaml and merge with code scan results.
+
+        For each manifest entry, checks if corresponding code was discovered.
+        If code exists, status is at least 'implemented'.  Code that was
+        discovered but NOT in the manifest is still included (additive).
+        """
+        manifest = self._read_manifest_yaml()
+        if manifest is None:
+            # No manifest — fall back to code-only entries
+            return self._code_only_inventory(agents, capabilities, skill_defs)
+
+        inventory: list[ManifestEntry] = []
+        seen_names: set[str] = set()
+
+        # Names found in code (for auto-upgrade)
+        discovered_agent_names = {a.name.lower() for a in agents}
+        discovered_cap_names = {c.capability_name.lower().replace("_", "-") for c in capabilities}
+        discovered_skill_names = {s.name.lower() for s in skill_defs}
+
+        # Process each manifest section
+        for section_key, category, discovered_set in [
+            ("agents", "agent", discovered_agent_names),
+            ("capabilities", "capability", discovered_cap_names),
+            ("skill_definitions", "skill_definition", discovered_skill_names),
+            ("workflows", "workflow", set()),  # workflows not auto-discovered yet
+            ("scientific_apis", "api", set()),
+            ("mcp_servers", "mcp_server", set()),
+            ("infrastructure", "infrastructure", set()),
+        ]:
+            entries = manifest.get(section_key, [])
+            if not isinstance(entries, list):
+                continue
+
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name", "")
+                if not name:
+                    continue
+
+                declared_status = item.get("status", "designed")
+                # Auto-upgrade: if code was discovered, status is at least 'implemented'
+                if name.lower() in discovered_set and declared_status == "designed":
+                    declared_status = "implemented"
+
+                entry = ManifestEntry(
+                    name=name,
+                    category=category,
+                    description=item.get("description", ""),
+                    status=declared_status,
+                    agents=item.get("agents", []),
+                    module=item.get("module") or item.get("directory"),
+                )
+                inventory.append(entry)
+                seen_names.add(f"{category}:{name.lower()}")
+
+        # Add code-discovered items not in manifest (additive)
+        for agent in agents:
+            key = f"agent:{agent.name.lower()}"
+            if key not in seen_names:
+                inventory.append(ManifestEntry(
+                    name=agent.name,
+                    category="agent",
+                    description=agent.description,
+                    status="implemented",
+                    module=agent.module,
+                ))
+
+        for cap in capabilities:
+            cap_name = cap.capability_name.lower().replace("_", "-")
+            key = f"capability:{cap_name}"
+            if key not in seen_names:
+                inventory.append(ManifestEntry(
+                    name=cap.capability_name,
+                    category="capability",
+                    description=cap.docstring or "",
+                    status="implemented",
+                    agents=cap.agent_types,
+                    module=cap.module,
+                ))
+
+        for skill in skill_defs:
+            key = f"skill_definition:{skill.name.lower()}"
+            if key not in seen_names:
+                inventory.append(ManifestEntry(
+                    name=skill.name,
+                    category="skill_definition",
+                    description=skill.description,
+                    status="implemented",
+                ))
+
+        return inventory
+
+    @staticmethod
+    def _read_manifest_yaml() -> dict[str, Any] | None:
+        """Read and parse capability_manifest.yaml."""
+        if not _MANIFEST_PATH.exists():
+            logger.warning("REGISTRY: Manifest not found at %s", _MANIFEST_PATH)
+            return None
+        try:
+            data = yaml.safe_load(_MANIFEST_PATH.read_text())
+            if not isinstance(data, dict):
+                logger.warning("REGISTRY: Manifest is not a valid YAML mapping")
+                return None
+            return data
+        except Exception:
+            logger.exception("REGISTRY: Failed to parse manifest YAML")
+            return None
+
+    @staticmethod
+    def _code_only_inventory(
+        agents: list[AgentInfo],
+        capabilities: list[CapabilityInfo],
+        skill_defs: list[SkillDefinitionInfo],
+    ) -> list[ManifestEntry]:
+        """Build inventory from code discovery only (no manifest)."""
+        inventory: list[ManifestEntry] = []
+        for a in agents:
+            inventory.append(ManifestEntry(
+                name=a.name, category="agent", description=a.description,
+                status="implemented", module=a.module,
+            ))
+        for c in capabilities:
+            inventory.append(ManifestEntry(
+                name=c.capability_name, category="capability",
+                description=c.docstring or "", status="implemented",
+                agents=c.agent_types, module=c.module,
+            ))
+        for s in skill_defs:
+            inventory.append(ManifestEntry(
+                name=s.name, category="skill_definition",
+                description=s.description, status="implemented",
+            ))
+        return inventory
+
+    # ------------------------------------------------------------------
+    # Persistence to skills_index
+    # ------------------------------------------------------------------
+
+    async def persist_to_db(self) -> int:
+        """Persist the manifest inventory to the skills_index table.
+
+        Each capability is upserted with skill_path = 'aria:{category}/{name}'
+        so it's uniquely identifiable and won't conflict with skills.sh entries.
+
+        Returns the number of rows written.
+        """
+        if self._static is None:
+            logger.warning("REGISTRY: Cannot persist — no static scan available")
+            return 0
+
+        inventory = self._static.manifest_inventory
+        if not inventory:
+            logger.warning("REGISTRY: Manifest inventory is empty, nothing to persist")
+            return 0
+
+        logger.info("REGISTRY: Persisting %d capabilities to skills_index...", len(inventory))
+
+        try:
+            from src.db.supabase import SupabaseClient
+
+            client = SupabaseClient.get_client()
+        except Exception:
+            logger.exception("REGISTRY: Supabase client unavailable — persistence skipped")
+            return 0
+
+        now = datetime.now(timezone.utc).isoformat()
+        written = 0
+
+        for entry in inventory:
+            skill_path = f"aria:{entry.category}/{entry.name}"
+            record = {
+                "skill_path": skill_path,
+                "skill_name": entry.name,
+                "description": entry.description[:500] if entry.description else None,
+                "trust_level": "core",
+                "life_sciences_relevant": True,
+                "tags": [
+                    f"category:{entry.category}",
+                    f"status:{entry.status}",
+                    *[f"agent:{a.lower()}" for a in entry.agents],
+                ],
+                "declared_permissions": [],
+                "summary_verbosity": "minimal",
+                "last_synced": now,
+            }
+
+            try:
+                client.table("skills_index").upsert(
+                    record, on_conflict="skill_path"
+                ).execute()
+                written += 1
+            except Exception as e:
+                logger.debug("REGISTRY: Failed to upsert %s: %s", skill_path, e)
+
+        # Verify write
+        try:
+            verify = (
+                client.table("skills_index")
+                .select("id", count="exact")
+                .like("skill_path", "aria:%")
+                .execute()
+            )
+            db_count = verify.count or 0
+            logger.info(
+                "REGISTRY: Persistence complete — wrote %d/%d entries. "
+                "Verified %d aria:* rows in skills_index.",
+                written,
+                len(inventory),
+                db_count,
+            )
+        except Exception:
+            logger.info(
+                "REGISTRY: Wrote %d/%d entries (verification query failed).",
+                written,
+                len(inventory),
+            )
+
+        return written
+
+    # ------------------------------------------------------------------
+    # Code discovery helpers (unchanged)
+    # ------------------------------------------------------------------
 
     def _discover_agents(self) -> list[AgentInfo]:
         """Import agent modules and extract name, description, tool names."""
@@ -541,7 +820,10 @@ class CapabilityRegistry:
     def render_for_cognitive_context(self, snapshot: FullSnapshot) -> str:
         """Render factual-only text for system prompt injection.
 
-        Target: <500 tokens (~2000 chars).
+        Includes capability status so ARIA knows what's operational,
+        implemented, and still in design.
+
+        Target: <600 tokens (~2400 chars).
 
         Args:
             snapshot: Combined static + live snapshot.
@@ -556,6 +838,37 @@ class CapabilityRegistry:
         for agent in snapshot.static.agents:
             tools_str = ", ".join(agent.tools) if agent.tools else "(no tools parsed)"
             parts.append(f"- {agent.name}: {tools_str}")
+
+        # Capability inventory summary by status
+        inventory = snapshot.static.manifest_inventory
+        if inventory:
+            by_status: dict[str, list[ManifestEntry]] = {}
+            for entry in inventory:
+                by_status.setdefault(entry.status, []).append(entry)
+
+            operational = by_status.get("operational", [])
+            implemented = by_status.get("implemented", [])
+            designed = by_status.get("designed", [])
+
+            parts.append(
+                f"\n**Capability Inventory:** "
+                f"{len(operational)} operational, "
+                f"{len(implemented)} implemented, "
+                f"{len(designed)} designed"
+            )
+
+            # List skills by category for operational
+            if operational:
+                by_cat: dict[str, list[str]] = {}
+                for e in operational:
+                    by_cat.setdefault(e.category, []).append(e.name)
+                for cat, names in sorted(by_cat.items()):
+                    parts.append(f"  [{cat}] {', '.join(names)}")
+
+            # List designed capabilities so ARIA knows what's planned
+            if designed:
+                names = [e.name for e in designed]
+                parts.append(f"  [designed] {', '.join(names)}")
 
         # Connected integrations
         active = [
@@ -621,16 +934,15 @@ class CapabilityRegistry:
 
         # Token budget check (~4 chars per token)
         estimated_tokens = len(text) // 4
-        if estimated_tokens > 500:
-            # Truncate skill details first
+        if estimated_tokens > 600:
             text = self._truncate_to_budget(text)
 
         return text
 
     @staticmethod
     def _truncate_to_budget(text: str) -> str:
-        """Truncate text to ~500 tokens if needed."""
-        max_chars = 500 * 4  # ~2000 chars
+        """Truncate text to ~600 tokens if needed."""
+        max_chars = 600 * 4  # ~2400 chars
         if len(text) <= max_chars:
             return text
         return text[:max_chars].rsplit("\n", 1)[0] + "\n..."
@@ -705,6 +1017,17 @@ class CapabilityRegistry:
                         "enabled": m.enabled,
                     }
                     for m in snapshot.static.mcp_servers
+                ],
+                "manifest_inventory": [
+                    {
+                        "name": e.name,
+                        "category": e.category,
+                        "description": e.description,
+                        "status": e.status,
+                        "agents": e.agents,
+                        "module": e.module,
+                    }
+                    for e in snapshot.static.manifest_inventory
                 ],
                 "scan_time_ms": snapshot.static.scan_time_ms,
             },

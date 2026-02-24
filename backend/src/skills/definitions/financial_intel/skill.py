@@ -226,13 +226,29 @@ class FinancialIntelSkill(BaseSkillDefinition):
         filings: list[dict[str, Any]] = []
         for hit in hits[:limit]:
             source = hit.get("_source", {})
+
+            # Entity name: EDGAR returns a list under display_names
+            display_names = source.get("display_names", [])
+            entity_name = display_names[0] if display_names else ""
+
+            # Form type: EDGAR returns root_forms (list) or form (str)
+            root_forms = source.get("root_forms", [])
+            form_type = root_forms[0] if root_forms else source.get("form", "")
+
+            # File number: may be a list
+            file_num_raw = source.get("file_num", "")
+            file_number = (
+                file_num_raw[0] if isinstance(file_num_raw, list) and file_num_raw
+                else str(file_num_raw)
+            )
+
             filing: dict[str, Any] = {
-                "accession_number": source.get("accession_no", ""),
-                "form_type": source.get("form_type", ""),
+                "accession_number": source.get("adsh", ""),
+                "form_type": form_type,
                 "filed_date": source.get("file_date", ""),
-                "entity_name": source.get("entity_name", ""),
-                "file_number": source.get("file_num", ""),
-                "period": source.get("period_of_report", ""),
+                "entity_name": entity_name,
+                "file_number": file_number,
+                "period": source.get("period_ending", ""),
             }
             filings.append(filing)
 

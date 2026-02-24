@@ -17,13 +17,16 @@ The capability is designed to run on an hourly cron during business hours
 via the SyncScheduler.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
+import subprocess
 import time
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from pydantic import BaseModel, Field
 
@@ -57,7 +60,9 @@ FDA_WARNING_LETTERS_URL = "https://api.fda.gov/drug/enforcement.json"
 FDA_DEVICE_APPROVALS_URL = "https://api.fda.gov/device/510k.json"
 CLINICAL_TRIALS_URL = "https://clinicaltrials.gov/api/v2/studies"
 SEC_EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions"
-USPTO_SEARCH_URL = "https://developer.uspto.gov/ibd-api/v1/application/publications"
+# NOTE: The old developer.uspto.gov IBD API was retired in 2025.
+# Patent search now uses Google Patents as primary source.
+GOOGLE_PATENTS_XHR_URL = "https://patents.google.com/xhr/query"
 
 # ── Wire service URLs ──────────────────────────────────────────────────
 PR_NEWSWIRE_SEARCH_URL = "https://www.prnewswire.com/search/news/"
@@ -919,7 +924,8 @@ class SignalRadarCapability(BaseCapability):
         """Scan ClinicalTrials.gov v2 API for new/updated trials.
 
         Searches for trials matching monitored keywords that were
-        posted or updated in the last 7 days.
+        posted or updated in the last 7 days. Falls back to curl if
+        httpx is blocked by TLS fingerprinting.
 
         Args:
             keywords: Terms to search for (company names, drugs, areas).
@@ -931,63 +937,88 @@ class SignalRadarCapability(BaseCapability):
 
         signals: list[Signal] = []
         search_term = " OR ".join(keywords[:10])
+        params: dict[str, Any] = {
+            "query.term": search_term,
+            "pageSize": 20,
+            "sort": "LastUpdatePostDate:desc",
+            "format": "json",
+        }
 
+        data: dict[str, Any] | None = None
         try:
             async with httpx.AsyncClient(
                 timeout=20.0,
                 headers={"User-Agent": DEFAULT_USER_AGENT},
             ) as client:
-                resp = await client.get(
-                    CLINICAL_TRIALS_URL,
-                    params={
-                        "query.term": search_term,
-                        "pageSize": 20,
-                        "sort": "LastUpdatePostDate:desc",
-                        "format": "json",
+                resp = await client.get(CLINICAL_TRIALS_URL, params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                else:
+                    logger.info(
+                        "ClinicalTrials.gov httpx returned %d, trying curl",
+                        resp.status_code,
+                    )
+        except httpx.HTTPError as exc:
+            logger.info("ClinicalTrials.gov httpx failed (%s), trying curl", exc)
+
+        # Curl fallback — CT.gov blocks some HTTP clients via TLS fingerprinting
+        if data is None:
+            try:
+                url = f"{CLINICAL_TRIALS_URL}?{urlencode(params, doseq=True)}"
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ["curl", "-s", "-f", "--max-time", "30", url],
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                if proc.returncode == 0:
+                    data = json.loads(proc.stdout)
+                else:
+                    logger.warning(
+                        "ClinicalTrials.gov curl fallback failed (exit %d)",
+                        proc.returncode,
+                    )
+            except Exception as curl_exc:
+                logger.warning("ClinicalTrials.gov curl fallback error: %s", curl_exc)
+
+        if data is None:
+            return signals
+
+        studies = data.get("studies", [])
+        for study in studies:
+            protocol = study.get("protocolSection", {})
+            ident = protocol.get("identificationModule", {})
+            status_mod = protocol.get("statusModule", {})
+            sponsor_mod = protocol.get("sponsorCollaboratorsModule", {})
+            design_mod = protocol.get("designModule", {})
+
+            nct_id = ident.get("nctId", "")
+            title = ident.get("briefTitle", "Untitled trial")
+            sponsor = sponsor_mod.get("leadSponsor", {}).get("name", "Unknown")
+            phase_list = design_mod.get("phases", [])
+            phase = phase_list[0] if phase_list else "N/A"
+            overall_status = status_mod.get("overallStatus", "Unknown")
+
+            signals.append(
+                Signal(
+                    company_name=sponsor,
+                    signal_type="clinical_trial",
+                    headline=f"Trial update: {title[:120]}",
+                    summary=(
+                        f"NCT: {nct_id}. Sponsor: {sponsor}. "
+                        f"Phase: {phase}. Status: {overall_status}."
+                    ),
+                    source_url=f"https://clinicaltrials.gov/study/{nct_id}",
+                    source_name="ClinicalTrials.gov",
+                    metadata={
+                        "nct_id": nct_id,
+                        "phase": phase,
+                        "overall_status": overall_status,
+                        "sponsor": sponsor,
                     },
                 )
-                if resp.status_code != 200:
-                    return signals
-
-                data = resp.json()
-                studies = data.get("studies", [])
-
-                for study in studies:
-                    protocol = study.get("protocolSection", {})
-                    ident = protocol.get("identificationModule", {})
-                    status_mod = protocol.get("statusModule", {})
-                    sponsor_mod = protocol.get("sponsorCollaboratorsModule", {})
-                    design_mod = protocol.get("designModule", {})
-
-                    nct_id = ident.get("nctId", "")
-                    title = ident.get("briefTitle", "Untitled trial")
-                    sponsor = sponsor_mod.get("leadSponsor", {}).get("name", "Unknown")
-                    phase_list = design_mod.get("phases", [])
-                    phase = phase_list[0] if phase_list else "N/A"
-                    overall_status = status_mod.get("overallStatus", "Unknown")
-
-                    signals.append(
-                        Signal(
-                            company_name=sponsor,
-                            signal_type="clinical_trial",
-                            headline=f"Trial update: {title[:120]}",
-                            summary=(
-                                f"NCT: {nct_id}. Sponsor: {sponsor}. "
-                                f"Phase: {phase}. Status: {overall_status}."
-                            ),
-                            source_url=(f"https://clinicaltrials.gov/study/{nct_id}"),
-                            source_name="ClinicalTrials.gov",
-                            metadata={
-                                "nct_id": nct_id,
-                                "phase": phase,
-                                "overall_status": overall_status,
-                                "sponsor": sponsor,
-                            },
-                        )
-                    )
-
-        except httpx.HTTPError as exc:
-            logger.warning("ClinicalTrials.gov scan failed: %s", exc)
+            )
 
         return signals
 
@@ -1090,7 +1121,10 @@ class SignalRadarCapability(BaseCapability):
         return signals
 
     async def _scan_patents(self, keywords: list[str]) -> list[Signal]:
-        """Scan USPTO for recent patent publications.
+        """Scan for recent patent publications via Google Patents.
+
+        The old USPTO IBD API was retired in 2025. This method now uses
+        Google Patents XHR as the primary source.
 
         Args:
             keywords: Search terms for patent text search.
@@ -1107,62 +1141,56 @@ class SignalRadarCapability(BaseCapability):
             async with httpx.AsyncClient(
                 timeout=20.0,
                 headers={
-                    "User-Agent": DEFAULT_USER_AGENT,
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
                     "Accept": "application/json",
                 },
             ) as client:
                 resp = await client.get(
-                    USPTO_SEARCH_URL,
-                    params={
-                        "searchText": search_text,
-                        "start": "0",
-                        "rows": "20",
-                    },
+                    GOOGLE_PATENTS_XHR_URL,
+                    params={"url": f"q={search_text}&oq={search_text}&num=20"},
                 )
                 if resp.status_code != 200:
+                    logger.info(
+                        "Google Patents returned %d for patent scan",
+                        resp.status_code,
+                    )
                     return signals
 
                 data = resp.json()
-                for result in data.get("results", []):
-                    applicants = result.get("applicants", [])
-                    applicant = ""
-                    if isinstance(applicants, list) and applicants:
-                        first = applicants[0]
-                        applicant = (
-                            first.get("applicantName", "")
-                            if isinstance(first, dict)
-                            else str(first)
-                        )
+                clusters = data.get("results", {}).get("cluster", [])
+                for cluster in clusters:
+                    for result in cluster.get("result", []):
+                        patent_info = result.get("patent", {})
+                        pub_number = patent_info.get("publication_number", "")
+                        title = patent_info.get("title", "Untitled patent")
+                        snippet = result.get("snippet", "")
+                        assignee = patent_info.get("assignee", "")
+                        filing_date = patent_info.get("filing_date", "")
+                        pub_date = patent_info.get("publication_date", "")
 
-                    pub_number = result.get("publicationNumber", "")
-                    title = result.get("inventionTitle", "Untitled patent")
-
-                    abstract_raw = result.get("abstractText", "")
-                    abstract = (
-                        abstract_raw[0]
-                        if isinstance(abstract_raw, list) and abstract_raw
-                        else str(abstract_raw)
-                    )
-
-                    signals.append(
-                        Signal(
-                            company_name=applicant or "Unknown",
-                            signal_type="patent",
-                            headline=title,
-                            summary=abstract[:500],
-                            source_url=(f"https://patents.google.com/patent/US{pub_number}"),
-                            source_name="USPTO",
-                            metadata={
-                                "application_number": result.get("applicationNumber", ""),
-                                "publication_number": pub_number,
-                                "filed_date": result.get("filingDate", ""),
-                                "publication_date": result.get("publicationDate", ""),
-                            },
-                        )
-                    )
+                        if title:
+                            signals.append(
+                                Signal(
+                                    company_name=assignee or "Unknown",
+                                    signal_type="patent",
+                                    headline=title,
+                                    summary=snippet[:500],
+                                    source_url=f"https://patents.google.com/patent/{pub_number}",
+                                    source_name="Google Patents",
+                                    metadata={
+                                        "publication_number": pub_number,
+                                        "filed_date": filing_date,
+                                        "publication_date": pub_date,
+                                    },
+                                )
+                            )
 
         except httpx.HTTPError as exc:
-            logger.warning("USPTO scan failed: %s", exc)
+            logger.warning("Google Patents scan failed: %s", exc)
 
         return signals
 

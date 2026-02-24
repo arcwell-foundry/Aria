@@ -14,8 +14,10 @@ Trust level: core
 import asyncio
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -170,6 +172,7 @@ class TrialRadarSkill(BaseSkillDefinition):
             "format": "json",
         }
 
+        data: dict[str, Any] | None = None
         try:
             async with httpx.AsyncClient(
                 timeout=_REQUEST_TIMEOUT_SECONDS,
@@ -181,11 +184,38 @@ class TrialRadarSkill(BaseSkillDefinition):
                 )
                 data = response.json()
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
-            logger.warning(
-                "ClinicalTrials.gov search failed for '%s': %s",
+            logger.info(
+                "ClinicalTrials.gov httpx failed for '%s' (%s), trying curl fallback",
                 therapeutic_area,
                 exc,
             )
+
+        # Curl fallback — CT.gov blocks some HTTP clients via TLS fingerprinting
+        if data is None:
+            try:
+                url = f"{_CT_BASE_URL}?{urlencode(params, doseq=True)}"
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ["curl", "-s", "-f", "--max-time", "30", url],
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                if proc.returncode == 0:
+                    data = json.loads(proc.stdout)
+                else:
+                    logger.warning(
+                        "ClinicalTrials.gov curl fallback failed (exit %d)",
+                        proc.returncode,
+                    )
+            except Exception as curl_exc:
+                logger.warning(
+                    "ClinicalTrials.gov curl fallback error for '%s': %s",
+                    therapeutic_area,
+                    curl_exc,
+                )
+
+        if data is None:
             return {"total_count": 0, "trials": []}
 
         total_count: int = data.get("totalCount", 0)
@@ -216,6 +246,7 @@ class TrialRadarSkill(BaseSkillDefinition):
         url = f"{_CT_BASE_URL}/{nct_id}"
         params: dict[str, str] = {"format": "json"}
 
+        data: dict[str, Any] | None = None
         try:
             async with httpx.AsyncClient(
                 timeout=_REQUEST_TIMEOUT_SECONDS,
@@ -227,11 +258,38 @@ class TrialRadarSkill(BaseSkillDefinition):
                 )
                 data = response.json()
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
-            logger.warning(
-                "ClinicalTrials.gov detail fetch failed for '%s': %s",
+            logger.info(
+                "ClinicalTrials.gov httpx detail fetch failed for '%s' (%s), trying curl",
                 nct_id,
                 exc,
             )
+
+        # Curl fallback
+        if data is None:
+            try:
+                full_url = f"{url}?{urlencode(params)}"
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ["curl", "-s", "-f", "--max-time", "30", full_url],
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                if proc.returncode == 0:
+                    data = json.loads(proc.stdout)
+                else:
+                    logger.warning(
+                        "ClinicalTrials.gov curl detail fetch failed (exit %d)",
+                        proc.returncode,
+                    )
+            except Exception as curl_exc:
+                logger.warning(
+                    "ClinicalTrials.gov curl detail error for '%s': %s",
+                    nct_id,
+                    curl_exc,
+                )
+
+        if data is None:
             return None
 
         return self._normalise_study(data)

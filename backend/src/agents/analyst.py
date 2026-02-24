@@ -5,9 +5,12 @@ including PubMed, ClinicalTrials.gov, FDA, and ChEMBL.
 """
 
 import asyncio
+import json as _json_mod
 import logging
+import subprocess
 from datetime import UTC
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlencode
 
 import httpx
 
@@ -408,23 +411,45 @@ class AnalystAgent(SkillAwareAgent):
             logger.info(f"ClinicalTrials cache hit for query: {query}")
             return cast(dict[str, Any], self._research_cache[cache_key])
 
+        params: dict[str, str | int] = {
+            "query.term": query,
+            "pageSize": max_results,
+        }
+
+        if status:
+            params["filter.oversightStatus"] = status
+
+        # ClinicalTrials.gov blocks Python HTTP clients via TLS
+        # fingerprinting (returns 403).  Try httpx first, fall back to curl.
+        data: dict[str, Any] | None = None
+
         try:
             client = await self._get_http_client()
-
-            # Build parameters
-            params: dict[str, str | int] = {
-                "query.term": query,
-                "pageSize": max_results,
-            }
-
-            if status:
-                params["filter.oversightStatus"] = status
-
             response = await client.get(CLINICALTRIALS_API_URL, params=params)
             response.raise_for_status()
-
             data = response.json()
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            logger.info("ClinicalTrials.gov httpx failed (%s), trying curl", exc)
 
+        if data is None:
+            try:
+                url = f"{CLINICALTRIALS_API_URL}?{urlencode(params, doseq=True)}"
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ["curl", "-s", "-f", "--max-time", "30", url],
+                    capture_output=True, text=True, timeout=35,
+                )
+                if proc.returncode == 0:
+                    data = _json_mod.loads(proc.stdout)
+                else:
+                    logger.error("ClinicalTrials.gov curl failed: %s", proc.stderr[:200])
+            except Exception as curl_exc:
+                logger.error("ClinicalTrials.gov curl fallback failed: %s", curl_exc)
+
+        if data is None:
+            return {"error": "ClinicalTrials.gov unavailable", "studies": [], "total_count": 0}
+
+        try:
             # Transform studies to a cleaner format
             studies = []
             for study in data.get("studies", []):
@@ -459,11 +484,8 @@ class AnalystAgent(SkillAwareAgent):
 
             return result
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"ClinicalTrials API error: {e}")
-            return {"error": str(e), "studies": [], "total_count": 0}
         except Exception as e:
-            logger.error(f"ClinicalTrials search failed: {e}")
+            logger.error(f"ClinicalTrials response parsing failed: {e}")
             return {"error": str(e), "studies": [], "total_count": 0}
 
     async def _fda_drug_search(

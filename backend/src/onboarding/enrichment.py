@@ -13,11 +13,13 @@ Architecture:
 import asyncio
 import json
 import logging
+import subprocess
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from pydantic import BaseModel
@@ -693,42 +695,69 @@ Respond ONLY with the JSON object, no additional text."""
             List of clinical trial data dicts.
         """
         results: list[dict[str, Any]] = []
+        ct_url = "https://clinicaltrials.gov/api/v2/studies"
+        params: dict[str, Any] = {
+            "query.spons": company_name,
+            "filter.overallStatus": (
+                "RECRUITING,ACTIVE_NOT_RECRUITING,ENROLLING_BY_INVITATION"
+            ),
+            "pageSize": 20,
+            "format": "json",
+        }
+
+        data: dict[str, Any] | None = None
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://clinicaltrials.gov/api/v2/studies",
-                    params={
-                        "query.spons": company_name,
-                        "filter.overallStatus": (
-                            "RECRUITING,ACTIVE_NOT_RECRUITING,ENROLLING_BY_INVITATION"
-                        ),
-                        "pageSize": 20,
-                        "format": "json",
-                    },
-                    timeout=30.0,
-                )
+                response = await client.get(ct_url, params=params, timeout=30.0)
                 if response.status_code == 200:
                     data = response.json()
-                    for study in data.get("studies", []):
-                        protocol = study.get("protocolSection", {})
-                        id_module = protocol.get("identificationModule", {})
-                        status_module = protocol.get("statusModule", {})
-                        design_module = protocol.get("designModule", {})
-                        results.append(
-                            {
-                                "source": "clinical_trials",
-                                "nct_id": id_module.get("nctId", ""),
-                                "title": id_module.get("briefTitle", ""),
-                                "status": status_module.get("overallStatus", ""),
-                                "phase": design_module.get("phases", []),
-                                "content": id_module.get("briefTitle", ""),
-                            }
-                        )
-
-            logger.info(f"Clinical trials research found {len(results)} studies")
+                else:
+                    logger.info(
+                        "ClinicalTrials.gov httpx returned %d, trying curl",
+                        response.status_code,
+                    )
         except Exception as e:
-            logger.warning(f"Clinical trials research failed: {e}")
+            logger.info("ClinicalTrials.gov httpx failed (%s), trying curl", e)
 
+        # Curl fallback — CT.gov blocks some HTTP clients via TLS fingerprinting
+        if data is None:
+            try:
+                url = f"{ct_url}?{urlencode(params, doseq=True)}"
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ["curl", "-s", "-f", "--max-time", "30", url],
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                if proc.returncode == 0:
+                    data = json.loads(proc.stdout)
+                else:
+                    logger.warning(
+                        "ClinicalTrials.gov curl fallback failed (exit %d)",
+                        proc.returncode,
+                    )
+            except Exception as curl_exc:
+                logger.warning("ClinicalTrials.gov curl fallback error: %s", curl_exc)
+
+        if data is not None:
+            for study in data.get("studies", []):
+                protocol = study.get("protocolSection", {})
+                id_module = protocol.get("identificationModule", {})
+                status_module = protocol.get("statusModule", {})
+                design_module = protocol.get("designModule", {})
+                results.append(
+                    {
+                        "source": "clinical_trials",
+                        "nct_id": id_module.get("nctId", ""),
+                        "title": id_module.get("briefTitle", ""),
+                        "status": status_module.get("overallStatus", ""),
+                        "phase": design_module.get("phases", []),
+                        "content": id_module.get("briefTitle", ""),
+                    }
+                )
+
+        logger.info(f"Clinical trials research found {len(results)} studies")
         return results
 
     async def _research_leadership(self, company_name: str) -> list[dict[str, Any]]:

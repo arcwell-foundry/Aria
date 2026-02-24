@@ -9,9 +9,12 @@ PubMed rate limiting (3 req/sec without API key).
 from __future__ import annotations
 
 import asyncio
+import json as _json_mod
 import logging
+import subprocess
 import time
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -26,7 +29,9 @@ CLINICALTRIALS_API_URL = "https://clinicaltrials.gov/api/v2/studies"
 FDA_DRUG_API_URL = "https://api.fda.gov/drug/label.json"
 FDA_DEVICE_API_URL = "https://api.fda.gov/device/510k.json"
 CHEMBL_API_URL = "https://www.ebi.ac.uk/chembl/api/data"
-USPTO_SEARCH_URL = "https://developer.uspto.gov/ibd-api/v1/application/publications"
+# NOTE: The old developer.uspto.gov IBD API was retired in 2025.
+# Patent search now uses Google Patents as primary source.
+GOOGLE_PATENTS_XHR_URL = "https://patents.google.com/xhr/query"
 USPTO_USER_AGENT = "ARIA-Intelligence/1.0 (support@aria-intel.com)"
 
 # ---------------------------------------------------------------------------
@@ -46,6 +51,47 @@ def _get_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(timeout=30.0)
     return _http_client
+
+
+async def _curl_get_json(
+    url: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
+    """Fetch JSON via curl subprocess as a fallback for TLS-fingerprint blocks.
+
+    Some government APIs (e.g. ClinicalTrials.gov) block Python HTTP clients
+    via bot-detection / TLS fingerprinting while allowing curl.  This function
+    shells out to curl as a reliable fallback.
+
+    Args:
+        url: The URL to GET.
+        params: Optional query parameters.
+        timeout: Curl timeout in seconds.
+
+    Returns:
+        Parsed JSON dict.
+
+    Raises:
+        RuntimeError: If curl fails or returns non-JSON.
+    """
+    if params:
+        url = f"{url}?{urlencode(params, doseq=True)}"
+
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["curl", "-s", "-f", "--max-time", str(timeout), url],
+        capture_output=True,
+        text=True,
+        timeout=timeout + 5,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"curl failed (exit {result.returncode}): {result.stderr[:200]}"
+        )
+
+    return _json_mod.loads(result.stdout)
 
 
 async def _pubmed_rate_limit() -> None:
@@ -218,22 +264,38 @@ async def clinical_trials_search_impl(
         logger.info("ClinicalTrials cache hit for query: %s", query)
         return _research_cache[cache_key]
 
+    params: dict[str, str | int] = {
+        "query.term": query,
+        "pageSize": max_results,
+    }
+
+    if status:
+        params["filter.oversightStatus"] = status
+
+    # ClinicalTrials.gov blocks Python HTTP clients via TLS fingerprinting,
+    # returning 403 for httpx/requests while allowing curl.  Try httpx first
+    # for speed, then fall back to curl subprocess.
+    data: dict[str, Any] | None = None
+
     try:
         client = _get_client()
-
-        params: dict[str, str | int] = {
-            "query.term": query,
-            "pageSize": max_results,
-        }
-
-        if status:
-            params["filter.oversightStatus"] = status
-
         response = await client.get(CLINICALTRIALS_API_URL, params=params)
         response.raise_for_status()
-
         data = response.json()
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        logger.info(
+            "ClinicalTrials.gov httpx request failed (%s), falling back to curl",
+            exc,
+        )
 
+    if data is None:
+        try:
+            data = await _curl_get_json(CLINICALTRIALS_API_URL, params)
+        except Exception as curl_exc:
+            logger.error("ClinicalTrials.gov curl fallback also failed: %s", curl_exc)
+            return {"error": str(curl_exc), "studies": [], "total_count": 0}
+
+    try:
         studies: list[dict[str, Any]] = []
         for study in data.get("studies", []):
             proto = study.get("protocolSection", {})
@@ -267,11 +329,8 @@ async def clinical_trials_search_impl(
 
         return result
 
-    except httpx.HTTPStatusError as e:
-        logger.error("ClinicalTrials API error: %s", e)
-        return {"error": str(e), "studies": [], "total_count": 0}
     except Exception as e:
-        logger.error("ClinicalTrials search failed: %s", e)
+        logger.error("ClinicalTrials response parsing failed: %s", e)
         return {"error": str(e), "studies": [], "total_count": 0}
 
 
@@ -476,16 +535,143 @@ async def chembl_search_impl(
 # ---------------------------------------------------------------------------
 # USPTO patent search
 # ---------------------------------------------------------------------------
+
+# Google Patents is the most reliable free patent search since the old
+# developer.uspto.gov/ibd-api was retired and PatentsView requires an
+# API key.  We scrape Google Patents results via curl and parse the
+# structured snippets.
+_GOOGLE_PATENTS_SEARCH_URL = "https://patents.google.com/xhr/query"
+
+
+async def _search_google_patents(
+    query: str, max_results: int = 20
+) -> list[dict[str, Any]]:
+    """Search Google Patents via its XHR endpoint (public, no auth).
+
+    Falls back gracefully if blocked.
+
+    Args:
+        query: Patent search query.
+        max_results: Maximum results.
+
+    Returns:
+        List of patent dicts.
+    """
+    params: dict[str, str | int] = {
+        "url": f"q={query}&oq={query}&num={min(max_results, 100)}",
+        "exp": "",
+    }
+    try:
+        data = await _curl_get_json(_GOOGLE_PATENTS_SEARCH_URL, params)
+    except Exception:
+        # Google Patents XHR may not return clean JSON — this is expected
+        return []
+
+    patents: list[dict[str, Any]] = []
+    clusters = data.get("results", {}).get("cluster", [])
+    for cluster in clusters:
+        for result in cluster.get("result", []):
+            patent = result.get("patent", {})
+            if not patent:
+                continue
+
+            pub_number = patent.get("publication_number", "")
+            title = patent.get("title", "")
+            # Remove HTML tags from title if present
+            if "<" in title:
+                import re
+                title = re.sub(r"<[^>]+>", "", title)
+
+            snippet = result.get("snippet", "")
+            if "<" in snippet:
+                import re
+                snippet = re.sub(r"<[^>]+>", "", snippet)
+
+            assignee = ""
+            assignee_list = patent.get("assignee", [])
+            if assignee_list:
+                assignee = assignee_list[0] if isinstance(assignee_list[0], str) else ""
+
+            patents.append({
+                "title": title,
+                "application_number": patent.get("application_number", ""),
+                "publication_number": pub_number,
+                "applicant": assignee,
+                "filed_date": patent.get("filing_date", ""),
+                "publication_date": patent.get("publication_date", ""),
+                "abstract": snippet[:500],
+                "patent_url": f"https://patents.google.com/patent/{pub_number}",
+            })
+
+    return patents
+
+
+async def _search_exa_patents(query: str, max_results: int = 20) -> list[dict[str, Any]]:
+    """Search for patents via the Exa API (if available).
+
+    Uses domain-filtered web search against patents.google.com.
+
+    Args:
+        query: Patent search query.
+        max_results: Maximum results.
+
+    Returns:
+        List of patent dicts.
+    """
+    try:
+        from src.agents.capabilities.enrichment_providers.exa_provider import (
+            ExaEnrichmentProvider,
+        )
+    except ImportError:
+        return []
+
+    try:
+        exa = ExaEnrichmentProvider()
+        results = await exa.search_fast(
+            query=f"patent {query}",
+            num_results=max_results,
+            include_domains=["patents.google.com"],
+        )
+
+        patents: list[dict[str, Any]] = []
+        for r in results:
+            url = r.get("url", "")
+            # Extract publication number from Google Patents URL
+            pub_number = ""
+            if "patents.google.com/patent/" in url:
+                pub_number = url.split("/patent/")[1].split("/")[0]
+
+            patents.append({
+                "title": r.get("title", ""),
+                "application_number": "",
+                "publication_number": pub_number,
+                "applicant": r.get("author", ""),
+                "filed_date": "",
+                "publication_date": r.get("published_date", ""),
+                "abstract": (r.get("text", "") or r.get("highlights", ""))[:500],
+                "patent_url": url,
+            })
+
+        return patents
+
+    except Exception as exc:
+        logger.warning("Exa patent search failed: %s", exc)
+        return []
+
+
 async def uspto_patent_search_impl(
     query: str,
     max_results: int = 20,
 ) -> dict[str, Any]:
-    """Search USPTO for patent application publications.
+    """Search for US patent publications.
 
-    Uses the USPTO Open Data Portal API (public, no auth required) to
-    find patent applications matching a keyword query.  Useful for
-    tracking IP activity in therapeutic areas and monitoring competitor
-    filings.
+    Tries multiple sources in order:
+    1. Google Patents XHR API (public, no auth)
+    2. Exa web search filtered to patents.google.com
+    3. Returns empty result with informational note
+
+    The legacy USPTO IBD API (developer.uspto.gov/ibd-api) was retired
+    in 2025.  PatentsView requires an API key with suspended grants.
 
     Args:
         query: Search query string (e.g. ``"CAR-T cell therapy"``).
@@ -493,92 +679,48 @@ async def uspto_patent_search_impl(
 
     Returns:
         Dict with ``query``, ``total_count``, and ``patents`` list.
-        Each patent contains ``title``, ``application_number``,
-        ``publication_number``, ``applicant``, ``filed_date``,
-        ``publication_date``, ``abstract``, and ``patent_url``.
     """
     cache_key = f"uspto:{query}:{max_results}"
     if cache_key in _research_cache:
         logger.info("USPTO cache hit for query: %s", query)
         return _research_cache[cache_key]
 
-    try:
-        client = _get_client()
+    patents: list[dict[str, Any]] = []
+    source = "none"
 
-        params: dict[str, str | int] = {
-            "searchText": query,
-            "start": 0,
-            "rows": min(max_results, 100),
-        }
+    # Strategy 1: Google Patents XHR
+    patents = await _search_google_patents(query, max_results)
+    if patents:
+        source = "google_patents"
 
-        response = await client.get(
-            USPTO_SEARCH_URL,
-            params=params,
-            headers={
-                "User-Agent": USPTO_USER_AGENT,
-                "Accept": "application/json",
-            },
-        )
-        response.raise_for_status()
+    # Strategy 2: Exa domain-filtered search
+    if not patents:
+        patents = await _search_exa_patents(query, max_results)
+        if patents:
+            source = "exa"
 
-        data = response.json()
-        raw_results: list[dict[str, Any]] = data.get("results", [])
-
-        patents: list[dict[str, Any]] = []
-        for item in raw_results:
-            # Extract first applicant name
-            applicants = item.get("applicants", [])
-            applicant = ""
-            if isinstance(applicants, list) and applicants:
-                first = applicants[0]
-                applicant = (
-                    first.get("applicantName", "")
-                    if isinstance(first, dict)
-                    else str(first)
-                )
-
-            # Abstract may be a list or string
-            abstract_raw = item.get("abstractText", "")
-            abstract = (
-                abstract_raw[0]
-                if isinstance(abstract_raw, list) and abstract_raw
-                else str(abstract_raw)
-            )
-
-            pub_number = item.get("publicationNumber", "")
-
-            patents.append(
-                {
-                    "title": item.get("inventionTitle", ""),
-                    "application_number": item.get("applicationNumber", ""),
-                    "publication_number": pub_number,
-                    "applicant": applicant,
-                    "filed_date": item.get("filingDate", ""),
-                    "publication_date": item.get("publicationDate", ""),
-                    "abstract": abstract[:500],
-                    "patent_url": f"https://patents.google.com/patent/US{pub_number}",
-                }
-            )
-
-        result: dict[str, Any] = {
-            "query": query,
-            "total_count": data.get("numFound", len(patents)),
-            "patents": patents,
-        }
-
-        _research_cache[cache_key] = result
-
-        logger.info(
-            "USPTO search found %d patents for: %s",
-            result["total_count"],
+    if not patents:
+        logger.warning(
+            "No patent results for '%s' from any source. "
+            "USPTO IBD API is retired; PatentsView requires an API key.",
             query,
         )
 
-        return result
+    result: dict[str, Any] = {
+        "query": query,
+        "total_count": len(patents),
+        "patents": patents,
+        "source": source,
+    }
 
-    except httpx.HTTPStatusError as e:
-        logger.error("USPTO API error: %s", e)
-        return {"error": str(e), "patents": [], "total_count": 0}
-    except Exception as e:
-        logger.error("USPTO search failed: %s", e)
-        return {"error": str(e), "patents": [], "total_count": 0}
+    if patents:
+        _research_cache[cache_key] = result
+
+    logger.info(
+        "Patent search found %d results for '%s' via %s",
+        len(patents),
+        query,
+        source,
+    )
+
+    return result
