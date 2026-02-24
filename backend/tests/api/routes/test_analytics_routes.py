@@ -347,7 +347,10 @@ class TestExportEndpoint:
         mock_aria_impact: dict,
     ) -> None:
         """Exports analytics as CSV by default."""
-        with patch("src.api.routes.analytics._get_analytics_service") as mock_service_factory:
+        with (
+            patch("src.api.routes.analytics._get_analytics_service") as mock_service_factory,
+            patch("src.api.routes.analytics.logger"),
+        ):
             mock_service = MagicMock()
             mock_service.get_overview_metrics = AsyncMock(return_value=mock_overview_metrics)
             mock_service.get_conversion_funnel = AsyncMock(return_value=mock_conversion_funnel)
@@ -372,7 +375,10 @@ class TestExportEndpoint:
         mock_aria_impact: dict,
     ) -> None:
         """Exports analytics as JSON when format=json."""
-        with patch("src.api.routes.analytics._get_analytics_service") as mock_service_factory:
+        with (
+            patch("src.api.routes.analytics._get_analytics_service") as mock_service_factory,
+            patch("src.api.routes.analytics.logger"),
+        ):
             mock_service = MagicMock()
             mock_service.get_overview_metrics = AsyncMock(return_value=mock_overview_metrics)
             mock_service.get_conversion_funnel = AsyncMock(return_value=mock_conversion_funnel)

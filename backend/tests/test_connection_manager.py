@@ -99,7 +99,7 @@ async def test_send_aria_message(manager):
     ws.send_json.assert_called_once()
     sent_data = ws.send_json.call_args[0][0]
     assert sent_data["type"] == "aria.message"
-    assert sent_data["message"] == "Hello"
+    assert sent_data["payload"]["message"] == "Hello"
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_send_action_pending(manager):
     )
     sent_data = ws.send_json.call_args[0][0]
     assert sent_data["type"] == "action.pending"
-    assert sent_data["action_id"] == "act-1"
+    assert sent_data["payload"]["action_id"] == "act-1"
 
 
 @pytest.mark.asyncio
@@ -142,8 +142,8 @@ async def test_send_progress_update(manager):
     )
     sent_data = ws.send_json.call_args[0][0]
     assert sent_data["type"] == "progress.update"
-    assert sent_data["goal_id"] == "goal-1"
-    assert sent_data["progress"] == 50
+    assert sent_data["payload"]["goal_id"] == "goal-1"
+    assert sent_data["payload"]["progress"] == 50
 
 
 @pytest.mark.asyncio
@@ -159,7 +159,7 @@ async def test_send_signal(manager):
     )
     sent_data = ws.send_json.call_args[0][0]
     assert sent_data["type"] == "signal.detected"
-    assert sent_data["signal_type"] == "competitor_news"
+    assert sent_data["payload"]["signal_type"] == "competitor_news"
 
 
 @pytest.mark.asyncio

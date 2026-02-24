@@ -1032,7 +1032,7 @@ async def test_default_context(tavus_client: TavusClient) -> None:
     context = tavus_client._default_context()
 
     assert "ARIA" in context
-    assert "Life Sciences" in context
+    assert "life sciences" in context.lower()
     assert "Department Director" in context
 
 

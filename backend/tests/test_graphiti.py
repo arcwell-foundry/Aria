@@ -12,6 +12,10 @@ def reset_client() -> None:
     """Reset the singleton and module state before each test."""
     GraphitiClient._instance = None
     GraphitiClient._initialized = False
+    GraphitiClient._init_failed = False
+    # Reset the module-level circuit breaker so state doesn't leak between tests
+    from src.db.graphiti import _graphiti_circuit_breaker
+    _graphiti_circuit_breaker.record_success()
 
 
 def test_graphiti_client_is_singleton() -> None:
@@ -172,7 +176,8 @@ async def test_graphiti_circuit_breaker_opens_after_failures() -> None:
 
     mock_func = AsyncMock(side_effect=Exception("Neo4j down"))
 
-    for _ in range(5):
+    # The circuit breaker has failure_threshold=3, so after 3 failures it opens
+    for _ in range(3):
         with pytest.raises(Exception, match="Neo4j down"):
             await _graphiti_circuit_breaker.call_async(mock_func)
 

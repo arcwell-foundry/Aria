@@ -26,13 +26,36 @@ from src.core.trust import (
 
 
 def _mock_supabase_select(data: dict | None) -> MagicMock:
-    """Build a mock Supabase client that returns *data* from a select query."""
+    """Build a mock Supabase client that returns *data* from a double-eq select query.
+
+    Used by get_trust_profile / can_request_autonomy_upgrade / format_autonomy_request
+    which chain two .eq() calls.
+    """
     mock_client = MagicMock()
     response = MagicMock()
     response.data = data
     (
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value
     ) = response
+    return mock_client
+
+
+def _mock_supabase_trust_score(score: float) -> MagicMock:
+    """Build a mock Supabase client for get_trust_score + _call_update_rpc.
+
+    get_trust_score() uses a single .eq() chain and reads overall_trust /
+    category_scores from the response.  _call_update_rpc() also uses
+    .table().select()...eq().maybe_single().execute() then .update()...eq().execute().
+    This helper wires both paths on the same mock client.
+    """
+    mock_client = MagicMock()
+    response = MagicMock()
+    response.data = {"overall_trust": score, "category_scores": {}}
+    (
+        mock_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value
+    ) = response
+    mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock()
     return mock_client
 
 
@@ -55,12 +78,9 @@ class TestTrustScoreMath:
     async def test_success_from_default(self) -> None:
         """Success from 0.3 → 0.3 + 0.02*(1-0.3) = 0.314."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.3})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.3)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            # First call: get_trust_score (select), second: _call_update_rpc (rpc)
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_success("u1", "email_send")
 
         expected = 0.3 + SUCCESS_INCREMENT_FACTOR * (1.0 - 0.3)
@@ -70,11 +90,9 @@ class TestTrustScoreMath:
     async def test_success_from_high_score(self) -> None:
         """Success from 0.9 → 0.9 + 0.02*(0.1) = 0.902 (logarithmic slowdown)."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.9})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.9)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_success("u1", "email_send")
 
         expected = 0.9 + SUCCESS_INCREMENT_FACTOR * (1.0 - 0.9)
@@ -84,11 +102,9 @@ class TestTrustScoreMath:
     async def test_success_clamped_at_one(self) -> None:
         """Success from 0.999 should clamp at 1.0."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.999})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.999)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_success("u1", "email_send")
 
         assert result <= 1.0
@@ -97,11 +113,9 @@ class TestTrustScoreMath:
     async def test_failure_from_default(self) -> None:
         """Failure from 0.3 → 0.3 * 0.7 = 0.21."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.3})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.3)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_failure("u1", "email_send")
 
         assert result == pytest.approx(0.3 * FAILURE_DECAY_FACTOR)
@@ -110,11 +124,9 @@ class TestTrustScoreMath:
     async def test_failure_from_high_score(self) -> None:
         """Failure from 0.8 → 0.8 * 0.7 = 0.56."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.8})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.8)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_failure("u1", "email_send")
 
         assert result == pytest.approx(0.8 * FAILURE_DECAY_FACTOR)
@@ -123,11 +135,9 @@ class TestTrustScoreMath:
     async def test_failure_floor_at_zero(self) -> None:
         """Failure from very low score stays >= 0.0."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.001})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.001)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_failure("u1", "email_send")
 
         assert result >= 0.0
@@ -136,11 +146,9 @@ class TestTrustScoreMath:
     async def test_override_from_default(self) -> None:
         """Override from 0.3 → 0.3 - 0.05 = 0.25."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.3})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.3)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_override("u1", "email_send")
 
         assert result == pytest.approx(0.3 - OVERRIDE_PENALTY)
@@ -149,11 +157,9 @@ class TestTrustScoreMath:
     async def test_override_floor_at_zero(self) -> None:
         """Override from 0.02 should clamp at 0.0."""
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.02})
-        rpc_client = _mock_supabase_rpc()
+        mock_client = _mock_supabase_trust_score(0.02)
 
-        with patch("src.db.supabase.SupabaseClient.get_client") as mock_get:
-            mock_get.side_effect = [mock_client, rpc_client]
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.update_on_override("u1", "email_send")
 
         assert result == 0.0
@@ -259,7 +265,7 @@ class TestGetTrustScore:
     @pytest.mark.asyncio
     async def test_returns_score_from_db(self) -> None:
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select({"trust_score": 0.75})
+        mock_client = _mock_supabase_trust_score(0.75)
 
         with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.get_trust_score("u1", "email_send")
@@ -269,7 +275,13 @@ class TestGetTrustScore:
     @pytest.mark.asyncio
     async def test_returns_default_when_no_row(self) -> None:
         svc = TrustCalibrationService()
-        mock_client = _mock_supabase_select(None)
+        # Single-eq chain returning None data
+        mock_client = MagicMock()
+        response = MagicMock()
+        response.data = None
+        (
+            mock_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value
+        ) = response
 
         with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_client):
             result = await svc.get_trust_score("u1", "email_send")

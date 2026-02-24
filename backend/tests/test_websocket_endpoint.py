@@ -48,10 +48,14 @@ def test_websocket_accepts_valid_token(client):
         with patch("src.api.routes.websocket.ws_manager") as mock_mgr:
             mock_mgr.connect = AsyncMock()
             mock_mgr.disconnect = MagicMock()
-            with client.websocket_connect("/ws/user-1?token=valid-token") as ws:
-                data = ws.receive_json()
-                assert data["type"] == "connected"
-                assert data["user_id"] == "user-1"
+            mock_mgr.get_absence_duration_seconds = MagicMock(return_value=None)
+            with patch("src.api.routes.websocket._drain_login_queue", new_callable=AsyncMock):
+                with patch("src.api.routes.websocket._send_return_greeting", new_callable=AsyncMock):
+                    with client.websocket_connect("/ws/user-1?token=valid-token") as ws:
+                        data = ws.receive_json()
+                        assert data["type"] == "connected"
+                        # ConnectedEvent uses to_ws_dict() which nests fields under "payload"
+                        assert data["payload"]["user_id"] == "user-1"
 
 
 def test_websocket_ping_pong(client):
@@ -64,11 +68,14 @@ def test_websocket_ping_pong(client):
         with patch("src.api.routes.websocket.ws_manager") as mock_mgr:
             mock_mgr.connect = AsyncMock()
             mock_mgr.disconnect = MagicMock()
-            with client.websocket_connect("/ws/user-1?token=valid-token") as ws:
-                ws.receive_json()  # consume connected event
-                ws.send_json({"type": "ping"})
-                data = ws.receive_json()
-                assert data["type"] == "pong"
+            mock_mgr.get_absence_duration_seconds = MagicMock(return_value=None)
+            with patch("src.api.routes.websocket._drain_login_queue", new_callable=AsyncMock):
+                with patch("src.api.routes.websocket._send_return_greeting", new_callable=AsyncMock):
+                    with client.websocket_connect("/ws/user-1?token=valid-token") as ws:
+                        ws.receive_json()  # consume connected event
+                        ws.send_json({"type": "ping"})
+                        data = ws.receive_json()
+                        assert data["type"] == "pong"
 
 
 def test_websocket_rejects_user_id_mismatch(client):

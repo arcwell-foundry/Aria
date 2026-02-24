@@ -43,8 +43,12 @@ async def client(auth_app):
 async def test_activity_feed(client):
     with patch("src.api.routes.activity._get_service") as mock_get_svc:
         mock_svc = MagicMock()
-        mock_svc.get_feed = AsyncMock(
-            return_value=[{"id": "1", "title": "Test", "type": "agent"}]
+        mock_svc.get_activity_feed = AsyncMock(
+            return_value={
+                "activities": [{"id": "1", "title": "Test", "type": "agent"}],
+                "total_count": 1,
+                "page": 1,
+            }
         )
         mock_get_svc.return_value = mock_svc
 
@@ -52,30 +56,24 @@ async def test_activity_feed(client):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "activities" in data
-    assert isinstance(data["activities"], list)
-    assert "count" in data
-    assert isinstance(data["count"], int)
+    assert "items" in data
+    assert isinstance(data["items"], list)
+    assert "total" in data
+    assert isinstance(data["total"], int)
 
 
 # --------------------------------------------------------------------------- #
-# 2. GET /api/v1/activity/agents  ->  {"agents": list}
+# 2. GET /api/v1/activity/{activity_id} -> activity detail dict
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_activity_agent_status(client):
-    with patch("src.api.routes.activity._get_service") as mock_get_svc:
-        mock_svc = MagicMock()
-        mock_svc.get_agent_status = AsyncMock(
-            return_value=[{"name": "Hunter", "status": "idle"}]
-        )
-        mock_get_svc.return_value = mock_svc
-
-        resp = await client.get("/api/v1/activity/agents")
+    mock_detail = {"id": "act-1", "title": "Hunter ran", "agent": "hunter", "status": "completed"}
+    with patch("src.services.activity_service.ActivityService.get_activity_detail", new_callable=AsyncMock, return_value=mock_detail):
+        resp = await client.get("/api/v1/activity/act-1")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "agents" in data
-    assert isinstance(data["agents"], list)
+    assert data["id"] == "act-1"
 
 
 # --------------------------------------------------------------------------- #
@@ -115,7 +113,7 @@ async def test_analytics_roi(client):
         "calculated_at": "2026-02-16T00:00:00Z",
     }
 
-    with patch("src.api.routes.analytics._get_service") as mock_get_svc:
+    with patch("src.api.routes.analytics._get_roi_service") as mock_get_svc:
         mock_svc = MagicMock()
         mock_svc.get_all_metrics = AsyncMock(return_value=mock_metrics)
         mock_get_svc.return_value = mock_svc

@@ -153,7 +153,13 @@ class TestEmailContextGatherer:
     @pytest.mark.asyncio
     async def test_get_recipient_style_not_found(self, gatherer):
         """Test getting recipient style when no profile exists."""
+        # Source now falls back to digital_twin_profiles when per-recipient not found.
+        # Both queries must return data=None to get exists=False.
         gatherer._db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        # Also mock the fallback: digital_twin_profiles uses .eq(user_id).maybe_single()
+        gatherer._db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
             data=None
         )
 
@@ -165,6 +171,7 @@ class TestEmailContextGatherer:
     @pytest.mark.asyncio
     async def test_get_relationship_history(self, gatherer):
         """Test getting relationship history from memory."""
+        # Source 1: memory_semantic facts (via .ilike chain)
         gatherer._db.table.return_value.select.return_value.eq.return_value.ilike.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
             data=[
                 {
@@ -176,6 +183,14 @@ class TestEmailContextGatherer:
                     "metadata": {"relationship_type": "client"},
                 },
             ]
+        )
+        # Source 2: recipient_writing_profiles (via .eq().eq().maybe_single())
+        gatherer._db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        # Source 3: email_scan_log (via .eq().eq().order().limit())
+        gatherer._db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
         )
 
         history = await gatherer._get_relationship_history("user-123", "john@acme.com")

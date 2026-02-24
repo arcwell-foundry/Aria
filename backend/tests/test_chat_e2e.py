@@ -296,6 +296,10 @@ class TestLLMCalledWithSystemPrompt:
             return_value="Be direct and concise. Avoid jargon."
         )
 
+        # Disable PersonaBuilder so fallback to _build_system_prompt is used,
+        # which directly uses the WRITING_STYLE_TEMPLATE with style_guidelines.
+        service._use_persona_builder = False
+
         # Ensure companion orchestrator is disabled so fallback to digital twin is used
         service._companion_orchestrator = MagicMock()
         service._companion_orchestrator.build_full_context = AsyncMock(

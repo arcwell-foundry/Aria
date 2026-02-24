@@ -18,9 +18,9 @@ from src.integrations.tavus_tool_executor import VideoToolExecutor
 # ====================
 
 
-def test_twelve_tools_defined() -> None:
-    """All 12 video tools are defined."""
-    assert len(ARIA_VIDEO_TOOLS) == 12
+def test_thirteen_tools_defined() -> None:
+    """All 13 video tools are defined."""
+    assert len(ARIA_VIDEO_TOOLS) == 13
 
 
 def test_all_tools_have_valid_schema() -> None:
@@ -60,7 +60,7 @@ def test_required_params_are_subset_of_properties() -> None:
 
 def test_tool_agent_map_values() -> None:
     """Agent map routes to known agents or 'service'."""
-    valid_agents = {"hunter", "analyst", "scribe", "operator", "scout", "service"}
+    valid_agents = {"hunter", "analyst", "scribe", "operator", "scout", "service", "ooda"}
     for tool_name, agent in TOOL_AGENT_MAP.items():
         assert agent in valid_agents, f"{tool_name} maps to unknown agent: {agent}"
 
@@ -109,7 +109,7 @@ def executor() -> VideoToolExecutor:
 async def test_execute_unknown_tool(executor: VideoToolExecutor) -> None:
     """Unknown tool returns graceful message."""
     result = await executor.execute("nonexistent_tool", {})
-    assert "don't have a tool" in result
+    assert "don't have a tool" in result.spoken_text
 
 
 @pytest.mark.asyncio
@@ -128,12 +128,13 @@ async def test_execute_get_lead_details_found(executor: VideoToolExecutor) -> No
     ]
     executor._db.table.return_value.select.return_value.eq.return_value.ilike.return_value.limit.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("get_lead_details", {"company_name": "Lonza"})
 
-    assert "Lonza" in result
-    assert "82" in result
-    assert "qualified" in result
+    assert "Lonza" in result.spoken_text
+    assert "82" in result.spoken_text
+    assert "qualified" in result.spoken_text
 
 
 @pytest.mark.asyncio
@@ -143,10 +144,11 @@ async def test_execute_get_lead_details_not_found(executor: VideoToolExecutor) -
     mock_result.data = []
     executor._db.table.return_value.select.return_value.eq.return_value.ilike.return_value.limit.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("get_lead_details", {"company_name": "UnknownCo"})
 
-    assert "don't have" in result or "research" in result.lower()
+    assert "don't have" in result.spoken_text or "research" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
@@ -161,12 +163,13 @@ async def test_execute_get_pipeline_summary(executor: VideoToolExecutor) -> None
     ]
     executor._db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("get_pipeline_summary", {})
 
-    assert "4 active leads" in result
-    assert "prospect" in result
-    assert "qualified" in result
+    assert "4 active leads" in result.spoken_text
+    assert "prospect" in result.spoken_text
+    assert "qualified" in result.spoken_text
 
 
 @pytest.mark.asyncio
@@ -176,10 +179,11 @@ async def test_execute_get_pipeline_summary_empty(executor: VideoToolExecutor) -
     mock_result.data = []
     executor._db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("get_pipeline_summary", {})
 
-    assert "empty" in result.lower()
+    assert "empty" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
@@ -197,11 +201,12 @@ async def test_execute_get_battle_card_found(executor: VideoToolExecutor) -> Non
     ]
     executor._db.table.return_value.select.return_value.eq.return_value.ilike.return_value.limit.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("get_battle_card", {"competitor_name": "Catalent"})
 
-    assert "Catalent" in result
-    assert "Scale" in result or "strengths" in result.lower()
+    assert "Catalent" in result.spoken_text
+    assert "Scale" in result.spoken_text or "strengths" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
@@ -213,10 +218,11 @@ async def test_execute_add_lead_existing(executor: VideoToolExecutor) -> None:
     ]
     executor._db.table.return_value.select.return_value.eq.return_value.ilike.return_value.limit.return_value.execute.return_value = mock_result
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute("add_lead_to_pipeline", {"company_name": "Lonza"})
 
-    assert "already" in result.lower()
+    assert "already" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
@@ -250,40 +256,38 @@ async def test_execute_add_lead_new(executor: VideoToolExecutor) -> None:
     table_mock.insert = insert_side_effect
     executor._db.table.return_value = table_mock
 
-    with patch.object(executor, "_log_activity", new_callable=AsyncMock):
+    with patch.object(executor, "_log_activity", new_callable=AsyncMock), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         result = await executor.execute(
             "add_lead_to_pipeline",
             {"company_name": "NewBiotech", "contact_name": "Jane Doe"},
         )
 
-    assert "NewBiotech" in result
-    assert "pipeline" in result.lower() or "prospect" in result.lower()
+    assert "NewBiotech" in result.spoken_text
+    assert "pipeline" in result.spoken_text.lower() or "prospect" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
 async def test_execute_search_companies() -> None:
     """search_companies routes to HunterAgent."""
+    from src.integrations.tavus_tool_executor import ToolResult
+
     executor = VideoToolExecutor(user_id="test-user")
 
-    mock_agent = MagicMock()
-    mock_agent._call_tool = AsyncMock(
-        return_value=[
-            {"name": "BioGenTech", "description": "Cell therapy startup"},
-            {"name": "NovaCDMO", "description": "Contract manufacturer"},
-        ]
+    mock_result = ToolResult(
+        spoken_text="I found 2 companies matching your search. 1. BioGenTech 2. NovaCDMO",
+        rich_content={"type": "lead_card", "data": {}},
     )
 
     with (
-        patch("src.integrations.tavus_tool_executor.VideoToolExecutor.llm", new_callable=lambda: property(lambda self: MagicMock())),
-        patch("src.agents.HunterAgent", return_value=mock_agent),
+        patch.object(executor, "_handle_search_companies", new_callable=AsyncMock, return_value=mock_result),
         patch.object(executor, "_log_activity", new_callable=AsyncMock),
+        patch.object(executor, "_store_episodic", new_callable=AsyncMock),
     ):
-        # Directly patch the import inside the handler
-        with patch("src.integrations.tavus_tool_executor.VideoToolExecutor._handle_search_companies") as mock_handler:
-            mock_handler.return_value = "I found 2 companies matching your search. 1. BioGenTech 2. NovaCDMO"
-            result = await executor.execute("search_companies", {"query": "cell therapy biotechs"})
+        result = await executor.execute("search_companies", {"query": "cell therapy biotechs"})
 
-    assert "BioGenTech" in result or "companies" in result.lower()
+    text = result.spoken_text if hasattr(result, "spoken_text") else str(result)
+    assert "BioGenTech" in text or "companies" in text.lower()
 
 
 @pytest.mark.asyncio
@@ -299,7 +303,7 @@ async def test_execute_handles_exception_gracefully(executor: VideoToolExecutor)
     ):
         result = await executor.execute("get_lead_details", {"company_name": "Test"})
 
-    assert "issue" in result.lower()
+    assert "issue" in result.spoken_text.lower()
 
 
 @pytest.mark.asyncio
@@ -321,7 +325,8 @@ async def test_activity_logging(executor: VideoToolExecutor) -> None:
     mock_activity = MagicMock()
     mock_activity.record = AsyncMock()
 
-    with patch("src.services.activity_service.ActivityService", return_value=mock_activity):
+    with patch("src.services.activity_service.ActivityService", return_value=mock_activity), \
+         patch.object(executor, "_store_episodic", new_callable=AsyncMock):
         await executor.execute("get_lead_details", {"company_name": "TestCo"})
 
     mock_activity.record.assert_called_once()

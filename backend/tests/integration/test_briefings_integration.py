@@ -98,8 +98,9 @@ class TestBriefingsIntegration:
         ):
             mock_db = MagicMock()
             # No existing briefing
-            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-                data=None
+            # get_briefing uses .eq().eq().order().limit().execute()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[]
             )
             mock_db_class.get_client.return_value = mock_db
 
@@ -131,8 +132,9 @@ class TestBriefingsIntegration:
                 "briefing_date": datetime.now(UTC).date().isoformat(),
                 "content": mock_briefing_content,
             }
-            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-                data=existing_briefing
+            # get_briefing uses .eq().eq().order().limit().execute() and returns list
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[existing_briefing]
             )
             mock_db_class.get_client.return_value = mock_db
 
@@ -266,8 +268,9 @@ class TestBriefingsIntegration:
                 "briefing_date": "2026-02-01",
                 "content": mock_briefing_content,
             }
-            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-                data=expected_briefing
+            # get_briefing uses .eq().eq().order().limit().execute() and returns list
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[expected_briefing]
             )
             mock_db_class.get_client.return_value = mock_db
 
@@ -287,8 +290,9 @@ class TestBriefingsIntegration:
             mock_db = MagicMock()
 
             # No briefing found
-            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-                data=None
+            # get_briefing uses .eq().eq().order().limit().execute()
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[]
             )
             mock_db_class.get_client.return_value = mock_db
 
@@ -395,11 +399,12 @@ class TestBriefingFullFlow:
             today = datetime.now(UTC).date().isoformat()
 
             # Initial check - no briefing exists
+            # get_briefing uses .eq().eq().order().limit().execute() and returns list
             def mock_select_execute() -> MagicMock:
                 matching = [b for b in stored_briefings if b["briefing_date"] == today]
-                return MagicMock(data=matching[0] if matching else None)
+                return MagicMock(data=matching if matching else [])
 
-            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute = mock_select_execute
+            mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute = mock_select_execute
 
             # Upsert stores the briefing
             def mock_upsert(data: dict[str, Any]) -> MagicMock:

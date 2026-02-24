@@ -1,6 +1,6 @@
 """Tests for Composio OAuth client (SDK-based)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -217,18 +217,25 @@ async def test_execute_action(mock_composio):
     mock_result.model_dump.return_value = {"success": True, "data": {"id": "msg-1"}}
     mock_composio.tools.execute.return_value = mock_result
 
-    result = await client.execute_action(
-        connection_id="conn-1",
-        action="gmail_send_email",
-        params={"to": "test@example.com", "body": "Hello"},
-    )
+    # Source wraps calls in asyncio.to_thread; patch to run synchronously
+    async def _fake_to_thread(fn, *args, **kw):
+        return fn(*args, **kw) if args else fn()
+
+    with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+        result = await client.execute_action(
+            connection_id="conn-1",
+            action="gmail_send_email",
+            params={"to": "test@example.com", "body": "Hello"},
+        )
 
     assert result == {"success": True, "data": {"id": "msg-1"}}
+    from unittest.mock import ANY
     mock_composio.tools.execute.assert_called_once_with(
         slug="gmail_send_email",
         connected_account_id="conn-1",
         user_id=None,
         arguments={"to": "test@example.com", "body": "Hello"},
+        version=ANY,
     )
 
 

@@ -121,6 +121,7 @@ def test_preference_response_full_response() -> None:
         default_tone="friendly",
         tracked_competitors=["Competitor X", "Competitor Y"],
         timezone="America/New_York",
+        video_briefing_enabled=False,
         created_at="2026-01-15T10:00:00Z",
         updated_at="2026-01-20T15:30:00Z",
     )

@@ -89,11 +89,11 @@ def _build_db_mock(
         if name == "user_profiles":
             mock_select = MagicMock()
             mock_eq = MagicMock()
-            mock_single = MagicMock()
-            mock_single.execute.return_value = MagicMock(
+            mock_maybe_single = MagicMock()
+            mock_maybe_single.execute.return_value = MagicMock(
                 data=user_profile,
             )
-            mock_eq.single.return_value = mock_single
+            mock_eq.maybe_single.return_value = mock_maybe_single
             mock_select.eq.return_value = mock_eq
             mock_table.select.return_value = mock_select
 
@@ -101,11 +101,11 @@ def _build_db_mock(
             # For select queries
             mock_select = MagicMock()
             mock_eq = MagicMock()
-            mock_single = MagicMock()
-            mock_single.execute.return_value = MagicMock(
+            mock_maybe_single = MagicMock()
+            mock_maybe_single.execute.return_value = MagicMock(
                 data=user_settings,
             )
-            mock_eq.single.return_value = mock_single
+            mock_eq.maybe_single.return_value = mock_maybe_single
             mock_select.eq.return_value = mock_eq
             mock_table.select.return_value = mock_select
 

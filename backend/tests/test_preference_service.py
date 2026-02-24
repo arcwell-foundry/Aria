@@ -96,6 +96,11 @@ async def test_get_preferences_creates_defaults_when_not_found(mock_db: MagicMoc
 @pytest.mark.asyncio
 async def test_get_preferences_handles_pgrst116_error(mock_db: MagicMock) -> None:
     """Test get_preferences handles PGRST116 (no rows found) exception from Supabase."""
+    # Clear cached preferences from prior tests to ensure isolation
+    from src.core.cache import clear_all_caches
+
+    clear_all_caches()
+
     with patch("src.services.preference_service.SupabaseClient") as mock_db_class:
         default_prefs = {
             "id": "pref-new",

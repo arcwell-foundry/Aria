@@ -238,6 +238,11 @@ async def test_run_daily_briefing_job_generates_and_sends_email() -> None:
             "src.jobs.daily_briefing_job._send_briefing_email",
             new_callable=AsyncMock,
         ) as mock_email,
+        patch(
+            "src.jobs.daily_briefing_job._consume_briefing_queue",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await run_daily_briefing_job()
 
@@ -245,10 +250,11 @@ async def test_run_daily_briefing_job_generates_and_sends_email() -> None:
         assert result["skipped"] == 0
         assert result["errors"] == 0
 
-        # Verify briefing was generated
+        # Verify briefing was generated (source also passes queued_insights)
         mock_briefing_service.generate_briefing.assert_called_once_with(
             user_id="user-1",
             briefing_date=date(2026, 2, 8),
+            queued_insights=None,
         )
 
         # Verify email was sent

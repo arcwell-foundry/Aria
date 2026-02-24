@@ -310,9 +310,9 @@ class TestPersonaBuilder:
     @pytest.mark.asyncio
     async def test_anti_patterns_present(self, builder: PersonaBuilder) -> None:
         """L3 includes key anti-patterns."""
-        assert 'NEVER' in LAYER_3_ANTI_PATTERNS
+        assert "doesn't" in LAYER_3_ANTI_PATTERNS
         assert 'As an AI' in LAYER_3_ANTI_PATTERNS
-        assert 'sycophantic' in LAYER_3_ANTI_PATTERNS
+        assert 'enthusiasm' in LAYER_3_ANTI_PATTERNS
         assert 'emojis' in LAYER_3_ANTI_PATTERNS
 
 

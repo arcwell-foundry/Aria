@@ -351,29 +351,35 @@ async def test_list_goals(client: AsyncClient) -> None:
 async def test_get_activity(client: AsyncClient) -> None:
     """Test activity feed returns activities and count."""
     mock_service_instance = MagicMock()
-    mock_service_instance.get_feed = AsyncMock(
-        return_value=[
-            {
-                "id": "act-1",
-                "agent": "Hunter",
-                "activity_type": "lead_discovery",
-                "title": "Discovered 3 new leads matching ICP",
-            }
-        ],
+    # Source now uses ActivityFeedService.get_activity_feed (not ActivityService.get_feed)
+    # Route returns {"items": ..., "total": ..., "page": ...}
+    mock_service_instance.get_activity_feed = AsyncMock(
+        return_value={
+            "activities": [
+                {
+                    "id": "act-1",
+                    "agent": "Hunter",
+                    "activity_type": "lead_discovery",
+                    "title": "Discovered 3 new leads matching ICP",
+                }
+            ],
+            "total_count": 1,
+            "page": 1,
+        },
     )
 
     with patch(
-        "src.api.routes.activity.ActivityService",
+        "src.api.routes.activity._get_service",
         return_value=mock_service_instance,
     ):
         response = await client.get("/api/v1/activity")
 
     assert response.status_code == 200
     data = response.json()
-    assert "activities" in data
-    assert "count" in data
-    assert data["count"] == 1
-    assert data["activities"][0]["agent"] == "Hunter"
+    assert "items" in data
+    assert "total" in data
+    assert data["total"] == 1
+    assert data["items"][0]["agent"] == "Hunter"
 
 
 # ---------------------------------------------------------------------------

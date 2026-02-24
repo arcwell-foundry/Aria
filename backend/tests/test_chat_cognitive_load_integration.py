@@ -210,18 +210,45 @@ async def test_critical_load_also_adds_high_load_instruction() -> None:
                         mock_working.return_value.get_or_create = AsyncMock(return_value=mock_wm)
 
                         with patch("src.services.chat.ExtractionService"):
-                            with patch.object(
-                                ChatService, "_ensure_conversation_record", new_callable=AsyncMock
+                            with patch(
+                                "src.services.chat.get_email_integration",
+                                new_callable=AsyncMock,
+                                return_value=None,
                             ):
                                 with patch.object(
-                                    ChatService, "_update_conversation_metadata", new_callable=AsyncMock
+                                    ChatService, "_ensure_conversation_record", new_callable=AsyncMock
                                 ):
-                                    service = ChatService()
-                                    await service.process_message(
-                                        user_id="user-123",
-                                        conversation_id="conv-123",
-                                        message="URGENT!!!",
-                                    )
+                                    with patch.object(
+                                        ChatService, "_update_conversation_metadata", new_callable=AsyncMock
+                                    ):
+                                        service = ChatService()
+                                        # Add mocks for intermediate services
+                                        service._classify_intent = AsyncMock(return_value=None)
+                                        service._classify_plan_action = AsyncMock(return_value=None)
+                                        service._detect_skill_match = AsyncMock(return_value=(False, [], 0.0))
+                                        service._detect_plan_extension = AsyncMock(return_value=None)
+                                        service._get_proactive_insights = AsyncMock(return_value=[])
+                                        service._get_priming_context = AsyncMock(return_value=None)
+                                        service._get_personality_calibration = AsyncMock(return_value=None)
+                                        service._get_style_guidelines = AsyncMock(return_value=None)
+                                        service._get_active_goals = AsyncMock(return_value=[])
+                                        service._get_digital_twin_calibration = AsyncMock(return_value=None)
+                                        service._get_capability_context = AsyncMock(return_value=None)
+                                        service._get_friction_engine = MagicMock(return_value=None)
+                                        service._get_pending_plan_context = AsyncMock(return_value=None)
+                                        service._companion_orchestrator = MagicMock()
+                                        service._companion_orchestrator.build_full_context = AsyncMock(return_value=None)
+                                        service.persist_turn = AsyncMock()
+                                        service._extract_information = AsyncMock()
+                                        service._episodic_memory = MagicMock()
+                                        service._episodic_memory.record_exchange = AsyncMock()
+                                        service._web_grounding = MagicMock()
+                                        service._web_grounding.detect_and_ground = AsyncMock(return_value=None)
+                                        await service.process_message(
+                                            user_id="user-123",
+                                            conversation_id="conv-123",
+                                            message="URGENT!!!",
+                                        )
 
     assert captured_system_prompt is not None
     assert "concise" in captured_system_prompt.lower() or "brief" in captured_system_prompt.lower()

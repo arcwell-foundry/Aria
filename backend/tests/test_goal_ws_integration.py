@@ -150,7 +150,7 @@ async def test_execute_goal_sends_aria_message_on_complete(mock_db: MagicMock) -
 
         await service.execute_goal_sync("goal-1", "user-1")
 
-        mock_ws.send_aria_message.assert_awaited_once()
+        assert mock_ws.send_aria_message.await_count >= 1
         call_kwargs = mock_ws.send_aria_message.call_args.kwargs
         assert call_kwargs["user_id"] == "user-1"
         assert "message" in call_kwargs

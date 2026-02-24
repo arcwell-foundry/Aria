@@ -225,14 +225,14 @@ class TestContactExtraction:
 
     @pytest.mark.asyncio
     async def test_returns_top_50_contacts(self, service: PriorityEmailIngestion) -> None:
-        """Contact list is capped at 50 entries."""
+        """Contact list is capped at 100 entries."""
         emails = [
-            _make_email(to=[{"email": f"user{i}@corp.com", "name": f"User {i}"}]) for i in range(60)
+            _make_email(to=[{"email": f"user{i}@corp.com", "name": f"User {i}"}]) for i in range(120)
         ]
 
         contacts = await service._extract_contacts(emails)
 
-        assert len(contacts) <= 50
+        assert len(contacts) <= 100
 
     @pytest.mark.asyncio
     async def test_sorted_by_interaction_count(self, service: PriorityEmailIngestion) -> None:
@@ -485,10 +485,10 @@ class TestWritingSampleExtraction:
     def test_extracts_appropriate_length_emails(self, service: PriorityEmailIngestion) -> None:
         """Only emails between 100-3000 chars are extracted as samples."""
         emails = [
-            _make_email(body="too short"),  # < 100 chars
-            _make_email(body="A" * 150),  # good length
-            _make_email(body="B" * 500),  # good length
-            _make_email(body="C" * 4000),  # > 3000 chars, excluded
+            _make_email(subject="Short one", body="too short"),  # < 100 chars
+            _make_email(subject="Good A", body="A" * 150),  # good length
+            _make_email(subject="Good B", body="B" * 500),  # good length
+            _make_email(subject="Too long", body="C" * 4000),  # > 3000 chars, excluded
         ]
 
         samples = service._extract_writing_samples(emails)

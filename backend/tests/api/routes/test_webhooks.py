@@ -469,6 +469,14 @@ class TestUtteranceHandler:
 class TestToolCallHandler:
     """Tests for conversation.tool_call event handling with execution."""
 
+    @staticmethod
+    def _make_tool_result(spoken_text: str, rich_content: dict | None = None) -> MagicMock:
+        """Create a mock ToolResult with spoken_text and rich_content."""
+        result = MagicMock()
+        result.spoken_text = spoken_text
+        result.rich_content = rich_content
+        return result
+
     def _make_mock_db(self, user_id: str = "user-123") -> MagicMock:
         """Create a mock DB that returns user_id from video_sessions."""
         mock_db = MagicMock()
@@ -487,7 +495,9 @@ class TestToolCallHandler:
         """Test that tool_call event executes the tool and returns the result."""
         mock_db = self._make_mock_db()
         mock_executor = AsyncMock()
-        mock_executor.execute.return_value = "I found 3 companies matching your criteria."
+        mock_executor.execute.return_value = self._make_tool_result(
+            "I found 3 companies matching your criteria."
+        )
 
         with patch.object(_webhooks_mod, "verify_webhook_secret", return_value=True):
             with patch.object(_webhooks_mod, "get_supabase_client", return_value=mock_db):
@@ -522,7 +532,9 @@ class TestToolCallHandler:
         """Test that tool execution logs to aria_activity with duration_ms."""
         mock_db = self._make_mock_db()
         mock_executor = AsyncMock()
-        mock_executor.execute.return_value = "Here's the battle card for Lonza."
+        mock_executor.execute.return_value = self._make_tool_result(
+            "Here's the battle card for Lonza."
+        )
 
         with patch.object(_webhooks_mod, "verify_webhook_secret", return_value=True):
             with patch.object(_webhooks_mod, "get_supabase_client", return_value=mock_db):
@@ -591,7 +603,7 @@ class TestToolCallHandler:
         """Test that tool_call handles JSON string arguments from Tavus."""
         mock_db = self._make_mock_db()
         mock_executor = AsyncMock()
-        mock_executor.execute.return_value = "Found results."
+        mock_executor.execute.return_value = self._make_tool_result("Found results.")
 
         with patch.object(_webhooks_mod, "verify_webhook_secret", return_value=True):
             with patch.object(_webhooks_mod, "get_supabase_client", return_value=mock_db):
@@ -622,12 +634,15 @@ class TestToolCallHandler:
 
         call_count = 0
 
-        async def slow_then_fast(tool_name: str, arguments: dict) -> str:  # noqa: ARG001
+        async def slow_then_fast(tool_name: str, arguments: dict):  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 await asyncio.sleep(20)  # Will be cancelled by timeout
-            return "Done on retry."
+            result = MagicMock()
+            result.spoken_text = "Done on retry."
+            result.rich_content = None
+            return result
 
         mock_executor = MagicMock()
         mock_executor.execute = slow_then_fast
@@ -701,7 +716,7 @@ class TestToolCallHandler:
         """Test that tool_call event skips the generic webhook activity log."""
         mock_db = self._make_mock_db()
         mock_executor = AsyncMock()
-        mock_executor.execute.return_value = "Result here."
+        mock_executor.execute.return_value = self._make_tool_result("Result here.")
 
         with patch.object(_webhooks_mod, "verify_webhook_secret", return_value=True):
             with patch.object(_webhooks_mod, "get_supabase_client", return_value=mock_db):

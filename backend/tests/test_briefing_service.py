@@ -93,10 +93,10 @@ async def test_generate_briefing_stores_result_in_db(
 async def test_get_briefing_returns_none_when_not_found() -> None:
     """Test get_briefing returns None when briefing doesn't exist."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
-        # Setup DB mock to return None
+        # Setup DB mock to return empty list (source uses .order().limit())
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data=None
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
         )
         mock_db_class.get_client.return_value = mock_db
 
@@ -118,10 +118,10 @@ async def test_get_briefing_returns_existing_briefing() -> None:
             "briefing_date": "2026-02-02",
             "content": {"summary": "Existing briefing"},
         }
-        # Setup DB mock
+        # Setup DB mock - source uses .order().limit() not .maybe_single()
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data=expected_briefing
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[expected_briefing]
         )
         mock_db_class.get_client.return_value = mock_db
 
@@ -142,10 +142,10 @@ async def test_get_or_generate_briefing_generates_when_not_exists(
         patch("src.services.briefing.SupabaseClient") as mock_db_class,
         patch("src.services.briefing.LLMClient") as mock_llm_class,
     ):
-        # Setup DB mock to return None (not found)
+        # Setup DB mock to return empty list (not found) - source uses .order().limit()
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data=None
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
         )
         mock_upsert = MagicMock()
         mock_upsert.return_value.execute.return_value = MagicMock(
@@ -171,12 +171,20 @@ async def test_get_or_generate_briefing_generates_when_not_exists(
 @pytest.mark.asyncio
 async def test_get_or_generate_briefing_returns_existing_when_exists() -> None:
     """Test get_or_generate_briefing returns existing briefing."""
-    with patch("src.services.briefing.SupabaseClient") as mock_db_class:
+    # Clear any cached briefings from prior tests
+    from src.core.cache import clear_all_caches
+
+    clear_all_caches()
+
+    with (
+        patch("src.services.briefing.SupabaseClient") as mock_db_class,
+        patch("src.services.briefing.LLMClient"),
+    ):
         existing_content = {"summary": "Existing briefing summary"}
-        # Setup DB mock to return existing
+        # Setup DB mock to return existing - source uses .order().limit()
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data={"content": existing_content}
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"content": existing_content}]
         )
         mock_db_class.get_client.return_value = mock_db
 

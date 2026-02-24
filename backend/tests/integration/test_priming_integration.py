@@ -101,9 +101,25 @@ class TestPrimingIntegration:
                 table.select.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
                     data=salience_data
                 )
+            elif table_name == "memory_semantic":
+                # _fetch_fact_details now queries memory_semantic with .eq().order().limit()
+                table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[
+                        {"id": "fact-1", "fact": "John Doe works_at Acme Corp", "confidence": 0.95},
+                    ]
+                )
             elif table_name == "semantic_facts":
-                table.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-                    data=facts_data
+                # _fetch_fact_details now queries semantic_facts with .eq().order().limit()
+                table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[
+                        {
+                            "id": "fact-2",
+                            "subject": "Acme Corp",
+                            "predicate": "industry",
+                            "object": "Technology",
+                            "confidence": 0.88,
+                        },
+                    ]
                 )
 
             return table
@@ -150,6 +166,7 @@ class TestPrimingIntegration:
         assert "Increase Q1 target by 10%" in context.formatted_context  # Outcome
         assert "## Open Threads" in context.formatted_context
         assert "## Key Facts I Remember" in context.formatted_context
+        # Facts come from memory_semantic (subject=fact text) and semantic_facts
         assert "John Doe works_at Acme Corp" in context.formatted_context
 
     @pytest.mark.asyncio

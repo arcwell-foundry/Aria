@@ -385,6 +385,18 @@ class TestSyncFlow:
         """Test triggering a manual sync."""
         service = IntegrationService()
 
+        # Mock get_integration_by_id (select().eq().maybe_single().execute())
+        mock_get_response = MagicMock()
+        mock_get_response.data = {
+            "id": "int-123",
+            "user_id": "user-123",
+            "integration_type": "google_calendar",
+            "status": "active",
+        }
+        mock_supabase.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+            mock_get_response
+        )
+
         # Mock update responses for pending then success
         call_count = 0
 
@@ -408,7 +420,13 @@ class TestSyncFlow:
 
         mock_supabase.table.return_value.update.return_value.eq.return_value.execute.side_effect = mock_execute
 
-        result = await service.trigger_sync("int-123")
+        # Mock DeepSyncService (trigger_sync routes to deep_sync for calendar types)
+        with patch("src.integrations.deep_sync.get_deep_sync_service") as mock_deep_sync_fn:
+            mock_deep_sync = MagicMock()
+            mock_deep_sync.sync_calendar = AsyncMock()
+            mock_deep_sync_fn.return_value = mock_deep_sync
+
+            result = await service.trigger_sync("int-123")
 
         assert result["sync_status"] == "success"
         assert call_count == 2

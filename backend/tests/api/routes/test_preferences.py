@@ -41,6 +41,7 @@ def mock_preferences() -> dict:
         "default_tone": "friendly",
         "tracked_competitors": [],
         "timezone": "UTC",
+        "video_briefing_enabled": False,
         "created_at": "2026-02-03T10:00:00+00:00",
         "updated_at": "2026-02-03T10:00:00+00:00",
     }

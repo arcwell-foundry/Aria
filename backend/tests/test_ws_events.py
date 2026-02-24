@@ -31,10 +31,10 @@ def test_aria_message_event_serializes():
     )
     data = event.to_ws_dict()
     assert data["type"] == "aria.message"
-    assert data["message"] == "Here is the battle card"
-    assert len(data["rich_content"]) == 1
-    assert len(data["ui_commands"]) == 1
-    assert len(data["suggestions"]) == 1
+    assert data["payload"]["message"] == "Here is the battle card"
+    assert len(data["payload"]["rich_content"]) == 1
+    assert len(data["payload"]["ui_commands"]) == 1
+    assert len(data["payload"]["suggestions"]) == 1
 
 
 def test_thinking_event_serializes():
@@ -53,8 +53,8 @@ def test_action_pending_event_serializes():
     )
     data = event.to_ws_dict()
     assert data["type"] == "action.pending"
-    assert data["action_id"] == "act-123"
-    assert data["risk_level"] == "medium"
+    assert data["payload"]["action_id"] == "act-123"
+    assert data["payload"]["risk_level"] == "medium"
 
 
 def test_progress_update_event_serializes():
@@ -67,7 +67,7 @@ def test_progress_update_event_serializes():
     )
     data = event.to_ws_dict()
     assert data["type"] == "progress.update"
-    assert data["progress"] == 75
+    assert data["payload"]["progress"] == 75
 
 
 def test_signal_event_serializes():
@@ -79,14 +79,14 @@ def test_signal_event_serializes():
     )
     data = event.to_ws_dict()
     assert data["type"] == "signal.detected"
-    assert data["signal_type"] == "competitor_news"
+    assert data["payload"]["signal_type"] == "competitor_news"
 
 
 def test_connected_event():
     event = ConnectedEvent(user_id="user-1", session_id="sess-1")
     data = event.to_ws_dict()
     assert data["type"] == "connected"
-    assert data["user_id"] == "user-1"
+    assert data["payload"]["user_id"] == "user-1"
 
 
 def test_pong_event():

@@ -33,6 +33,33 @@ def mock_cognitive_load_deps() -> Generator[MagicMock, None, None]:
             yield mock_monitor
 
 
+def _add_chat_service_mocks(service: object) -> None:
+    """Add mocks for all intermediate ChatService dependencies."""
+    service._web_grounding = MagicMock()
+    service._web_grounding.detect_and_ground = AsyncMock(return_value=None)
+    service._classify_intent = AsyncMock(return_value=None)
+    service._classify_plan_action = AsyncMock(return_value=None)
+    service._detect_skill_match = AsyncMock(return_value=(False, [], 0.0))
+    service._detect_plan_extension = AsyncMock(return_value=None)
+    service._get_proactive_insights = AsyncMock(return_value=[])
+    service._get_priming_context = AsyncMock(return_value=None)
+    service._get_personality_calibration = AsyncMock(return_value=None)
+    service._get_style_guidelines = AsyncMock(return_value=None)
+    service._get_active_goals = AsyncMock(return_value=[])
+    service._get_digital_twin_calibration = AsyncMock(return_value=None)
+    service._get_capability_context = AsyncMock(return_value=None)
+    service._get_friction_engine = MagicMock(return_value=None)
+    service._get_pending_plan_context = AsyncMock(return_value=None)
+    service._companion_orchestrator = MagicMock()
+    service._companion_orchestrator.build_full_context = AsyncMock(return_value=None)
+    service.persist_turn = AsyncMock()
+    service._extract_information = AsyncMock()
+    service._episodic_memory = MagicMock()
+    service._episodic_memory.record_exchange = AsyncMock()
+    service._ensure_conversation_record = AsyncMock()
+    service._update_conversation_metadata = AsyncMock()
+
+
 @pytest.mark.asyncio
 async def test_chat_queries_memory_and_includes_in_response() -> None:
     """Test full chat flow with memory retrieval."""
@@ -56,6 +83,7 @@ async def test_chat_queries_memory_and_includes_in_response() -> None:
             patch("src.services.chat.LLMClient") as mock_llm_class,
             patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
             patch("src.services.chat.ExtractionService") as mock_extract_class,
+            patch("src.services.chat.get_email_integration", new_callable=AsyncMock, return_value=None),
         ):
             # Setup memory query service to return relevant memories
             mock_mqs = AsyncMock()
@@ -93,6 +121,8 @@ async def test_chat_queries_memory_and_includes_in_response() -> None:
             mock_extract_class.return_value = mock_extract
 
             service = ChatService()
+            _add_chat_service_mocks(service)
+
             result = await service.process_message(
                 user_id="user-123",
                 conversation_id="conv-456",
@@ -256,6 +286,7 @@ async def test_memory_context_improves_response_quality() -> None:
             patch("src.services.chat.LLMClient") as mock_llm_class,
             patch("src.services.chat.WorkingMemoryManager") as mock_wmm_class,
             patch("src.services.chat.ExtractionService") as mock_extract_class,
+            patch("src.services.chat.get_email_integration", new_callable=AsyncMock, return_value=None),
         ):
             # Setup memory with relevant context
             mock_mqs = AsyncMock()
@@ -314,6 +345,8 @@ async def test_memory_context_improves_response_quality() -> None:
             mock_extract_class.return_value = mock_extract
 
             service = ChatService()
+            _add_chat_service_mocks(service)
+
             result = await service.process_message(
                 user_id="user-123",
                 conversation_id="conv-456",

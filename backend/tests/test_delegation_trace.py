@@ -228,8 +228,8 @@ class TestDelegationTraceService:
             status="completed",
         )
 
-        # Verify the update call included cost_usd
+        # Verify the update call included cost_cents (cost_usd * 100, truncated to int)
         update_call = mock_db.table.return_value.update
         update_call.assert_called_once()
         update_data = update_call.call_args[0][0]
-        assert update_data["cost_usd"] == 0.1234
+        assert update_data["cost_cents"] == 12

@@ -21,8 +21,8 @@ async def test_list_tools_returns_all() -> None:
     client = MCPToolClient("u-1")
     result = await client.list_tools()
     assert len(result) == len(TOOL_SERVER_MAP)
-    # Verify expected count from the registry (lifesci 5 + exa 6 + business 5 = 16)
-    assert len(result) == 16
+    # Verify expected count from the registry (lifesci 6 + exa 6 + business 5 = 17)
+    assert len(result) == 17
 
 
 @pytest.mark.asyncio
@@ -30,7 +30,7 @@ async def test_list_tools_filtered_by_server() -> None:
     """list_tools(server_name='lifesci') should return only lifesci tools."""
     client = MCPToolClient("u-1")
     result = await client.list_tools(server_name="lifesci")
-    assert len(result) == 5
+    assert len(result) == 6
     assert all(t["server"] == "lifesci" for t in result)
 
 

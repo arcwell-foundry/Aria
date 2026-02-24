@@ -91,6 +91,8 @@ def _make_goal_execution_service():
     svc._active_tasks = {}
     svc._trust_service = None
     svc._trace_service = None
+    svc._adaptive_coordinator = None
+    svc._tool_discovery = None
     svc._store_execution = AsyncMock()
     svc._submit_actions_to_queue = AsyncMock()
     svc._try_skill_execution = AsyncMock(return_value=None)
@@ -100,6 +102,7 @@ def _make_goal_execution_service():
     svc._build_strategist_prompt = MagicMock(return_value="strategize this")
     svc._build_scribe_prompt = MagicMock(return_value="write this")
     svc._build_operator_prompt = MagicMock(return_value="operate this")
+    svc._record_goal_update = AsyncMock()
     return svc
 
 
@@ -208,9 +211,16 @@ class TestWave2PipelineHappyPath:
     async def test_goal_execution_updates_trust_on_success(self):
         """Successful agent execution updates trust score."""
         svc = _make_goal_execution_service()
+        # Make LLM's generate_response_with_thinking async so VerifierAgent works
+        svc._llm.generate_response_with_thinking = AsyncMock(
+            return_value=MagicMock(
+                text='{"passed": true, "issues": [], "confidence": 0.9, "suggestions": []}'
+            )
+        )
 
         mock_trust = MagicMock()
         mock_trust.update_on_success = AsyncMock(return_value=0.35)
+        mock_trust.update_on_failure = AsyncMock(return_value=0.15)
         svc._trust_service = mock_trust
 
         result = await svc._execute_agent(

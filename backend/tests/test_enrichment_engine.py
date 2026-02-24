@@ -459,6 +459,7 @@ async def test_run_research_modules_aggregates_results() -> None:
         engine._research_leadership = AsyncMock(return_value=[  # type: ignore[method-assign]
             {"source": "leadership", "title": "Team", "content": "CEO John"}
         ])
+        engine._research_competitors = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
         classification = CompanyClassification(
             company_type="Biotech",
@@ -474,6 +475,7 @@ async def test_run_research_modules_aggregates_results() -> None:
     assert "news" in sources
     assert "leadership" in sources
     assert "clinical_trials" not in sources  # returned empty
+    assert "competitors" not in sources  # returned empty
 
 
 @pytest.mark.asyncio
@@ -497,6 +499,7 @@ async def test_run_research_modules_handles_individual_failures() -> None:
         ])
         engine._research_clinical_trials = AsyncMock(return_value=[])  # type: ignore[method-assign]
         engine._research_leadership = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        engine._research_competitors = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
         classification = CompanyClassification(
             company_type="Biotech",

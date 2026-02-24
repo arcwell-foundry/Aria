@@ -784,7 +784,8 @@ class TestJarvisFlowPhaseE:
         """High-risk action is queued via ActionQueueService.submit_action()."""
         with (
             patch("src.services.action_queue_service.SupabaseClient") as mock_db_cls,
-            patch("src.services.action_queue_service.get_autonomy_calibration_service") as mock_auto_fn,
+            patch("src.services.action_queue_service.get_action_execution_service") as mock_exec_fn,
+            patch("src.services.action_queue_service.ActivityService"),
         ):
             mock_db = _chain_mock(_db_row({
                 "id": str(uuid.uuid4()),
@@ -798,9 +799,10 @@ class TestJarvisFlowPhaseE:
             }))
             mock_db_cls.get_client.return_value = mock_db
 
-            mock_autonomy = MagicMock()
-            mock_autonomy.should_auto_execute = AsyncMock(return_value=False)
-            mock_auto_fn.return_value = mock_autonomy
+            # Mock the execution service's determine_execution_mode
+            mock_exec_svc = MagicMock()
+            mock_exec_svc.determine_execution_mode = AsyncMock(return_value="APPROVE_EACH")
+            mock_exec_fn.return_value = mock_exec_svc
 
             from src.models.action_queue import ActionAgent, ActionCreate, ActionType, RiskLevel
             from src.services.action_queue_service import ActionQueueService

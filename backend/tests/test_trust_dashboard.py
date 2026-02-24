@@ -86,18 +86,13 @@ class TestGetTrustHistory:
 class TestRecordHistory:
     @pytest.mark.asyncio
     async def test_inserts_history_row(self, service, mock_client) -> None:
-        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{}])
+        """_record_history is currently a no-op (table does not exist yet).
+        Verify it completes without error and does NOT call the DB."""
         await service._record_history("u1", "email_send", 0.72, "success")
-        mock_client.table.assert_called_with("trust_score_history")
-        mock_client.table.return_value.insert.assert_called_once()
-        call_args = mock_client.table.return_value.insert.call_args[0][0]
-        assert call_args["user_id"] == "u1"
-        assert call_args["action_category"] == "email_send"
-        assert call_args["trust_score"] == 0.72
-        assert call_args["change_type"] == "success"
+        # _record_history is a no-op that only logs; it should not touch the DB
+        mock_client.table.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_silently_handles_error(self, service, mock_client) -> None:
-        mock_client.table.return_value.insert.return_value.execute.side_effect = Exception("db error")
-        # Should not raise
+        # _record_history is a no-op, so no error can occur; just verify it completes
         await service._record_history("u1", "email_send", 0.72, "success")

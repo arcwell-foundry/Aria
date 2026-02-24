@@ -45,17 +45,18 @@ def _clear_research_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifesci_lists_five_tools() -> None:
-    """The lifesci server should expose exactly 5 tools."""
+async def test_lifesci_lists_six_tools() -> None:
+    """The lifesci server should expose exactly 6 tools."""
     tools = await lifesci_mcp.list_tools()
     names = {t.name for t in tools}
-    assert len(tools) == 5
+    assert len(tools) == 6
     assert names == {
         "pubmed_search",
         "pubmed_fetch_details",
         "clinical_trials_search",
         "fda_drug_search",
         "chembl_search",
+        "uspto_patent_search",
     }
 
 

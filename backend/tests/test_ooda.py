@@ -169,6 +169,8 @@ def test_ooda_config_to_dict() -> None:
 @pytest.mark.asyncio
 async def test_ooda_loop_observe_gathers_memory_context() -> None:
     """Test observe phase queries episodic and semantic memory."""
+    from unittest.mock import patch
+
     from src.core.ooda import OODALoop, OODAState
 
     # Mock dependencies
@@ -199,12 +201,15 @@ async def test_ooda_loop_observe_gathers_memory_context() -> None:
     ]
     mock_working.user_id = "user-123"
 
-    loop = OODALoop(
-        llm_client=mock_llm,
-        episodic_memory=mock_episodic,
-        semantic_memory=mock_semantic,
-        working_memory=mock_working,
-    )
+    # Pass sentinel None values to prevent auto-init of hot/cold memory
+    # by patching SupabaseClient so auto-init fails silently
+    with patch("src.db.supabase.SupabaseClient.get_client", side_effect=Exception("No DB in test")):
+        loop = OODALoop(
+            llm_client=mock_llm,
+            episodic_memory=mock_episodic,
+            semantic_memory=mock_semantic,
+            working_memory=mock_working,
+        )
 
     state = OODAState(goal_id="goal-123")
     goal = {

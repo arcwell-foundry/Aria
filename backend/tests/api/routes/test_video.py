@@ -182,7 +182,7 @@ class TestCreateVideoSession:
                         assert call_kwargs["memory_stores"] == [
                             {"memory_store_id": "aria-user-test-user-123"}
                         ]
-                        assert call_kwargs["document_tags"] == ["aria-context"]
+                        assert call_kwargs["document_tags"] == ["aria-context", "life-sciences", "competitive", "signals"]
                         assert call_kwargs["retrieval_strategy"] == "balanced"
 
     def test_create_session_with_lead_id(
@@ -768,12 +768,12 @@ class TestBuildAriaContext:
     async def test_build_context_with_lead(self, mock_db: MagicMock) -> None:
         """Test that lead context is included when lead_id provided."""
         profile_result = MagicMock()
-        profile_result.data = [{
-            "first_name": "John",
-            "last_name": "Doe",
+        profile_result.data = {
+            "full_name": "John Doe",
+            "title": "Sales Manager",
             "role": "Sales Manager",
-            "company_name": "Acme Corp",
-        }]
+            "companies": {"name": "Acme Corp"},
+        }
 
         goals_result = MagicMock()
         goals_result.data = [
@@ -792,8 +792,8 @@ class TestBuildAriaContext:
             # Set up different query chains
             def table_side_effect(table_name: str):
                 mock_chain = MagicMock()
-                if table_name == "profiles":
-                    mock_chain.select.return_value.eq.return_value.execute.return_value = (
+                if table_name == "user_profiles":
+                    mock_chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
                         profile_result
                     )
                 elif table_name == "goals":
@@ -824,12 +824,12 @@ class TestBuildAriaContext:
     async def test_build_context_without_lead(self, mock_db: MagicMock) -> None:
         """Test that context is built without lead when no lead_id."""
         profile_result = MagicMock()
-        profile_result.data = [{
-            "first_name": "Jane",
-            "last_name": "Smith",
+        profile_result.data = {
+            "full_name": "Jane Smith",
+            "title": "Account Executive",
             "role": "Account Executive",
-            "company_name": "Tech Inc",
-        }]
+            "companies": {"name": "Tech Inc"},
+        }
 
         goals_result = MagicMock()
         goals_result.data = []
@@ -837,8 +837,8 @@ class TestBuildAriaContext:
         with patch.object(_video_mod, "get_supabase_client", return_value=mock_db):
             def table_side_effect(table_name: str):
                 mock_chain = MagicMock()
-                if table_name == "profiles":
-                    mock_chain.select.return_value.eq.return_value.execute.return_value = (
+                if table_name == "user_profiles":
+                    mock_chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
                         profile_result
                     )
                 elif table_name == "goals":

@@ -252,7 +252,7 @@ class TestSyncIntegration:
 
         with patch("src.api.routes.integrations.get_integration_service") as m:
             service = MagicMock()
-            service.update_sync_status = AsyncMock(return_value=mock_integration)
+            service.trigger_sync = AsyncMock(return_value=mock_integration)
             m.return_value = service
 
             response = test_client.post("/api/v1/integrations/integration-123/sync")

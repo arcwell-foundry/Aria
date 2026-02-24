@@ -9,6 +9,19 @@ from src.core.exceptions import DatabaseError
 from src.services.analytics_service import AnalyticsService, LIFECYCLE_STAGES
 
 
+@pytest.fixture(autouse=True)
+def _reset_supabase_client():
+    """Reset SupabaseClient singleton and caches between tests."""
+    from src.core.cache import clear_all_caches
+    from src.db.supabase import SupabaseClient
+
+    SupabaseClient._client = None
+    clear_all_caches()
+    yield
+    SupabaseClient._client = None
+    clear_all_caches()
+
+
 @pytest.fixture
 def analytics_service():
     """Create AnalyticsService instance."""

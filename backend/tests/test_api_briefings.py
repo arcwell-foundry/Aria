@@ -51,8 +51,9 @@ def test_get_today_briefing_returns_briefing(test_client: TestClient) -> None:
                 "generated_at": "2026-02-12T10:00:00+00:00",
             },
         }
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data=existing_briefing
+        # get_briefing uses .eq().eq().order().limit().execute() chain
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[existing_briefing]
         )
         mock_db_class.get_client.return_value = mock_db
 
@@ -151,10 +152,10 @@ def test_get_briefing_by_date_returns_briefing(test_client: TestClient) -> None:
                 "generated_at": "2026-02-01T10:00:00",
             },
         }
-        # Setup DB mock
+        # Setup DB mock — get_briefing uses .eq().eq().order().limit().execute()
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
-            data=expected_briefing
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[expected_briefing]
         )
         mock_db_class.get_client.return_value = mock_db
 
