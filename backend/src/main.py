@@ -20,6 +20,7 @@ from src.api.routes import (
     admin_dashboard,
     ambient_onboarding,
     analytics,
+    aria_capabilities,  # ARIA self-awareness capability registry
     aria_config,
     auth,
     autonomy,
@@ -220,6 +221,15 @@ async def lifespan(_app: FastAPI) -> Any:
         mount_mcp_servers(_app)
     except Exception:
         logger.exception("Failed to mount MCP servers")
+
+    # Capability registry — scan static capabilities for ARIA self-awareness
+    try:
+        from src.services.capability_registry import get_capability_registry
+
+        registry = get_capability_registry()
+        registry.scan_static()
+    except Exception:
+        logger.exception("Failed to run capability registry static scan")
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
@@ -279,6 +289,7 @@ app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(admin_dashboard.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(aria_capabilities.router, prefix="/api/v1")  # ARIA self-awareness
 app.include_router(aria_config.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(battle_cards.router, prefix="/api/v1")

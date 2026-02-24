@@ -742,6 +742,10 @@ USER_CALIBRATION_TEMPLATE = """## User Communication Preferences
 
 Calibrate your responses: directness={directness}, warmth={warmth}, assertiveness={assertiveness}"""
 
+CAPABILITY_CONTEXT_TEMPLATE = """## ARIA's Current Capabilities
+
+{capability_context}"""
+
 # Default memory types queried for every chat interaction.
 # All three chat paths (REST, SSE, WebSocket) must use this constant
 # so that responses are equally informed regardless of transport.
@@ -1818,9 +1822,10 @@ class ChatService:
         # Prime conversation with recent episodes, open threads, and salient facts
         priming_context = await self._get_priming_context(user_id, message)
 
-        # Query active goals and digital twin calibration for prompt injection
+        # Query active goals, digital twin calibration, and capability context
         active_goals = await self._get_active_goals(user_id)
         digital_twin_calibration = await self._get_digital_twin_calibration(user_id)
+        capability_context = await self._get_capability_context(user_id)
 
         # Build system prompt with all context layers
         if self._use_persona_builder:
@@ -1834,6 +1839,7 @@ class ChatService:
                 companion_context=companion_ctx,
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
+                capability_context=capability_context,
             )
         else:
             system_prompt = self._build_system_prompt(
@@ -1847,6 +1853,7 @@ class ChatService:
                 companion_context=companion_ctx,
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
+                capability_context=capability_context,
             )
 
         # Inject friction flag note into system prompt if flagged
@@ -2495,6 +2502,25 @@ class ChatService:
             logger.warning("Failed to query digital twin calibration: %s", e)
         return None
 
+    async def _get_capability_context(self, user_id: str) -> str | None:
+        """Fetch rendered capability context for system prompt injection.
+
+        Args:
+            user_id: Authenticated user UUID.
+
+        Returns:
+            Rendered capability text or None if unavailable.
+        """
+        try:
+            from src.services.capability_registry import get_capability_registry
+
+            registry = get_capability_registry()
+            snapshot = await registry.get_full_snapshot(user_id)
+            return registry.render_for_cognitive_context(snapshot)
+        except Exception as e:
+            logger.debug("Capability context unavailable: %s", e)
+            return None
+
     def _build_system_prompt(
         self,
         memories: list[dict[str, Any]],
@@ -2507,6 +2533,7 @@ class ChatService:
         companion_context: Any = None,
         active_goals: list[dict[str, Any]] | None = None,
         digital_twin_calibration: dict[str, Any] | None = None,
+        capability_context: str | None = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -2659,6 +2686,12 @@ class ChatService:
                 web_section = WEB_GROUNDING_TEMPLATE.format(web_context=web_context_str)
                 base_prompt = base_prompt + "\n\n" + web_section
 
+        # Add capability context for ARIA self-awareness
+        if capability_context:
+            base_prompt += "\n\n" + CAPABILITY_CONTEXT_TEMPLATE.format(
+                capability_context=capability_context
+            )
+
         # Add high load instruction if needed
         if load_state and load_state.level in [LoadLevel.HIGH, LoadLevel.CRITICAL]:
             base_prompt = HIGH_LOAD_INSTRUCTION + "\n\n" + base_prompt
@@ -2676,6 +2709,7 @@ class ChatService:
         companion_context: Any = None,
         active_goals: list[dict[str, Any]] | None = None,
         digital_twin_calibration: dict[str, Any] | None = None,
+        capability_context: str | None = None,
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
@@ -2748,6 +2782,12 @@ class ChatService:
                     goals="\n".join(goal_lines)
                 )
 
+            # Add capability context for ARIA self-awareness
+            if capability_context:
+                prompt += "\n\n" + CAPABILITY_CONTEXT_TEMPLATE.format(
+                    capability_context=capability_context
+                )
+
             return prompt
 
         except Exception as e:
@@ -2761,6 +2801,7 @@ class ChatService:
                 web_context, companion_context=companion_context,
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
+                capability_context=capability_context,
             )
 
     def _build_citations(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
