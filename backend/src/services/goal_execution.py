@@ -2294,7 +2294,7 @@ class GoalExecutionService:
                     f" Readiness is at {readiness_score}% — "
                     f"some tools aren't connected yet."
                 )
-            plan_message += " Take a look and let me know what you think."
+            plan_message += " Here's what I'd do — review the plan and approve when ready."
 
             await ws_manager.send_aria_message(
                 user_id=user_id,

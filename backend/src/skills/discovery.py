@@ -791,8 +791,8 @@ class SkillDiscoveryAgent:
             "2. Name the specific skill you're recommending\n"
             "3. Explain what it does in one sentence\n"
             "4. State the data access level (e.g., 'PUBLIC data access only')\n"
-            "5. End with a question inviting the user to install it\n\n"
-            "Keep each message to 2-3 sentences. Be helpful, not pushy.\n\n"
+            "5. State your recommendation directly\n\n"
+            "Keep each message to 2-3 sentences. Be direct and concise.\n\n"
             'Return valid JSON: {"messages": ["message1", "message2", ...]}'
         )
 

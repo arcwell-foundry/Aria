@@ -1507,7 +1507,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
 
         # Closing
         script_parts.append(
-            "Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with."
+            "That's the picture for today. I'd prioritize the flagged items first."
         )
 
         # Join with natural pauses (double spaces for brief pauses)
@@ -1516,7 +1516,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
         # Ensure we stay under ~5,000 tokens (~20,000 characters as rough estimate)
         # Truncate if necessary while preserving the closing
         max_chars = 18000  # Conservative estimate for 4,500 tokens
-        closing = " Let me know if you'd like to dive deeper into any of these items, or if there's something else I can help you with."
+        closing = " That's the picture for today. I'd prioritize the flagged items first."
         if len(script) > max_chars:
             script = script[: max_chars - len(closing)] + closing
 

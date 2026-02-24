@@ -300,7 +300,7 @@ ARIA_GUARDRAILS = [
             "prescribing medication",
             "treatment protocols",
         ],
-        "response": "I can't provide medical or clinical advice. Please consult with your medical affairs team or a healthcare professional for questions about drug dosing, treatment protocols, or clinical recommendations. I'm here to help with commercial and strategic questions.",
+        "response": "That's outside my lane — medical and clinical advice needs to go through your medical affairs team. My focus is the commercial side.",
     },
     {
         "type": "topic",
@@ -311,7 +311,7 @@ ARIA_GUARDRAILS = [
             "confidential contracts",
             "insider information",
         ],
-        "response": "I can't share competitor pricing or proprietary customer information. If you need competitive intelligence, I can help research publicly available information or analyze market positioning.",
+        "response": "I don't have access to competitor pricing or proprietary customer data. For competitive intelligence, I work from publicly available information and market positioning analysis.",
     },
     {
         "type": "topic",
@@ -332,7 +332,7 @@ ARIA_GUARDRAILS = [
             "adverse events",
             "efficacy data",
         ],
-        "response": "Clinical data and patient outcomes are best discussed with your medical affairs or clinical operations team. I can help you prepare questions for them or understand the commercial implications of public trial results.",
+        "response": "Clinical data and patient outcomes sit with your medical affairs team. On my end, I can work with the commercial implications of public trial results.",
     },
 ]
 

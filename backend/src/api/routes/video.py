@@ -144,7 +144,7 @@ async def build_aria_context(user_id: str, session_type: str, lead_id: str | Non
         "briefing": "This is a briefing session. Provide concise updates on key metrics and priorities.",
         "debrief": "This is a debrief session. Help the user reflect on recent activities and outcomes.",
         "consultation": "This is a consultation session. Provide expert guidance and strategic advice.",
-        "chat": "This is a general chat session. Be helpful and conversational.",
+        "chat": "This is a general chat session. Be direct and conversational.",
     }
     if session_type in session_contexts:
         context_parts.append(session_contexts[session_type])

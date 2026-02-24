@@ -509,7 +509,7 @@ class EmotionalIntelligenceEngine:
         elif context == EmotionalContext.NEUTRAL:
             elements = [
                 "Respond appropriately to the content",
-                "Stay professional and helpful",
+                "Stay professional and direct",
             ]
 
         return elements

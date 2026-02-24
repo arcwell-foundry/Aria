@@ -534,7 +534,7 @@ Respond ONLY with the JSON array, no markdown or commentary."""
                 description="Research and create briefing documents for your scheduled meetings",
                 category=GoalCategory.MEETING_PREP,
                 urgency=GoalUrgency.THIS_WEEK,
-                reason="Meeting prep is one of the highest-value activities I can help with. "
+                reason="Meeting prep is where I add the most value. "
                 "I'll research attendees, companies, and topics so you're prepared.",
                 goal_type=GoalType.ANALYSIS,
             ),
@@ -543,7 +543,7 @@ Respond ONLY with the JSON array, no markdown or commentary."""
                 description="Identify new prospects and qualify existing opportunities",
                 category=GoalCategory.PIPELINE,
                 urgency=GoalUrgency.THIS_WEEK,
-                reason="Pipeline generation is foundational. I can help identify prospects "
+                reason="Pipeline generation is foundational. I'll identify prospects "
                 "that match your ICP and qualify existing opportunities.",
                 goal_type=GoalType.LEAD_GEN,
             ),
