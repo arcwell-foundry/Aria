@@ -1,0 +1,415 @@
+# ARIA Capability Manifest — Single Source of Truth
+#
+# This file defines ALL capabilities ARIA is designed to have.
+# The CapabilityRegistry reads this file on startup alongside scanning code.
+#
+# Status lifecycle:
+#   designed    → capability planned, no code yet
+#   implemented → code file exists, not fully tested
+#   operational → code exists AND verified working with live APIs
+#
+# The registry auto-upgrades status: if code is discovered in the expected
+# directory, status becomes at least 'implemented'. The manifest ensures
+# designed capabilities are tracked even before code is built.
+#
+# To add a new capability:
+#   1. Add an entry here with status: designed
+#   2. ARIA immediately knows about it on next restart
+#   3. When code is built, registry auto-detects and upgrades status
+#   4. No prompt changes or registry code changes needed
+
+# ──────────────────────────────────────────────────────────────
+# AGENTS — Specialized agent modules under agents/
+# ──────────────────────────────────────────────────────────────
+agents:
+  - name: hunter
+    description: "Lead discovery via Exa/Apollo APIs and company profiling"
+    module: agents/hunter.py
+    status: operational
+
+  - name: scout
+    description: "Market monitoring, news signals, FDA/USPTO tracking"
+    module: agents/scout.py
+    status: operational
+
+  - name: analyst
+    description: "Scientific research via PubMed, ClinicalTrials.gov, ChEMBL, FDA APIs"
+    module: agents/analyst.py
+    status: operational
+
+  - name: scribe
+    description: "Email and document drafting with Digital Twin style matching"
+    module: agents/scribe.py
+    status: operational
+
+  - name: strategist
+    description: "Battle cards, account strategy, competitive intelligence"
+    module: agents/strategist.py
+    status: operational
+
+  - name: operator
+    description: "CRM/calendar actions via Composio OAuth connectors"
+    module: agents/operator.py
+    status: operational
+
+  - name: verifier
+    description: "Quality verification gate for agent outputs"
+    module: agents/verifier.py
+    status: implemented
+
+  - name: executor
+    description: "Browser automation fallback agent for web interactions"
+    module: agents/executor.py
+    status: implemented
+
+# ──────────────────────────────────────────────────────────────
+# CAPABILITY MODULES — Under agents/capabilities/
+# ──────────────────────────────────────────────────────────────
+capabilities:
+  - name: crm-sync
+    description: "Deep CRM synchronization — bidirectional Salesforce/HubSpot sync, pipeline monitoring"
+    module: agents/capabilities/crm_sync.py
+    agents: [Operator]
+    status: implemented
+
+  - name: email-intelligence
+    description: "Email classification, priority scoring, thread analysis, autonomous draft engine"
+    module: agents/capabilities/email_intel.py
+    agents: [Scribe, Operator]
+    status: implemented
+
+  - name: web-intelligence
+    description: "Web research, SEC EDGAR filings, news aggregation, competitor monitoring"
+    module: agents/capabilities/web_intel.py
+    agents: [Scout, Analyst]
+    status: implemented
+
+  - name: calendar-intelligence
+    description: "Meeting prep, scheduling optimization, attendee enrichment"
+    module: agents/capabilities/calendar_intel.py
+    agents: [Operator]
+    status: implemented
+
+  - name: messenger
+    description: "Multi-channel message delivery — Slack, email, in-app notifications"
+    module: agents/capabilities/messenger.py
+    agents: [Operator, Scribe]
+    status: implemented
+
+  - name: contact-enricher
+    description: "Contact and company profile enrichment from multiple data sources"
+    module: agents/capabilities/contact_enricher.py
+    agents: [Hunter]
+    status: implemented
+
+  - name: compliance
+    description: "PHI/PII detection, Sunshine Act reporting, regulatory compliance checks"
+    module: agents/capabilities/compliance.py
+    agents: [Scribe, Analyst]
+    status: implemented
+
+  - name: linkedin-intelligence
+    description: "LinkedIn profile analysis, connection mapping, social selling signals"
+    module: agents/capabilities/linkedin.py
+    agents: [Hunter, Scribe]
+    status: implemented
+
+  - name: meeting-intelligence
+    description: "Meeting transcription analysis, action item extraction, follow-up tracking"
+    module: agents/capabilities/meeting_intel.py
+    agents: [Operator, Scribe]
+    status: implemented
+
+  - name: mcp-discovery
+    description: "Discover and catalog external MCP servers from registries"
+    module: agents/capabilities/mcp_discovery.py
+    agents: [Scout]
+    status: implemented
+
+  - name: mcp-evaluator
+    description: "Security evaluation and trust scoring of external MCP servers"
+    module: agents/capabilities/mcp_evaluator.py
+    agents: [Analyst]
+    status: implemented
+
+  - name: signal-radar
+    description: "Market signal detection, relevance scoring, alert generation"
+    module: agents/capabilities/signal_radar.py
+    agents: [Scout, Analyst]
+    status: implemented
+
+# ──────────────────────────────────────────────────────────────
+# SKILL DEFINITIONS — LLM prompt-driven skills under skills/definitions/
+# ──────────────────────────────────────────────────────────────
+skill_definitions:
+  - name: document-forge
+    description: "Generate professional documents — one-pagers, briefs, proposals"
+    directory: skills/definitions/document_forge
+    agents: [Scribe]
+    status: operational
+
+  - name: kol-mapper
+    description: "Map and rank Key Opinion Leaders via PubMed publication tracking"
+    directory: skills/definitions/kol_mapper
+    agents: [Analyst, Scout]
+    status: operational
+
+  - name: territory-planner
+    description: "Analyze geographic distribution for territory optimization and white-space ID"
+    directory: skills/definitions/territory_planner
+    agents: [Strategist, Analyst]
+    status: operational
+
+  - name: financial-intel
+    description: "Extract SEC EDGAR filings intelligence — revenue trends, R&D patterns, risk factors"
+    directory: skills/definitions/financial_intel
+    agents: [Analyst, Strategist]
+    status: operational
+
+  - name: compliance-guardian
+    description: "Detect PHI/PII and flag Sunshine Act reporting requirements"
+    directory: skills/definitions/compliance_guardian
+    agents: [Scribe, Operator, Analyst]
+    status: operational
+
+  - name: trial-radar
+    description: "Track clinical trials — phase distribution, enrollment, competitive endpoints"
+    directory: skills/definitions/trial_radar
+    agents: [Analyst, Scout, Strategist]
+    status: operational
+
+  - name: deck-builder
+    description: "Generate python-pptx slide specifications for sales presentations"
+    directory: skills/definitions/deck_builder
+    agents: [Scribe, Strategist]
+    status: operational
+
+  - name: insight-visualizer
+    description: "Generate Recharts-compatible data visualization specifications"
+    directory: skills/definitions/insight_visualizer
+    agents: [Analyst, Strategist]
+    status: operational
+
+  - name: battle-card-generator
+    description: "Generate competitive battle cards with win/loss intelligence"
+    directory: skills/definitions/battle_card_generator
+    agents: [Strategist]
+    status: designed
+
+  - name: email-sequence-builder
+    description: "Multi-touch email campaign sequences with personalization"
+    directory: skills/definitions/email_sequence_builder
+    agents: [Scribe]
+    status: designed
+
+  - name: roi-calculator
+    description: "Custom ROI models for prospect-specific value propositions"
+    directory: skills/definitions/roi_calculator
+    agents: [Strategist, Analyst]
+    status: designed
+
+# ──────────────────────────────────────────────────────────────
+# PREBUILT WORKFLOWS — Multi-step compositions under skills/workflows/
+# ──────────────────────────────────────────────────────────────
+workflows:
+  - name: morning-prep
+    description: "Daily morning briefing delivered to Slack at 6 AM on weekdays"
+    module: skills/workflows/prebuilt.py
+    agents: [Scout, Analyst, Operator]
+    status: operational
+
+  - name: post-meeting
+    description: "Post-meeting notes, action item extraction, follow-up email draft"
+    module: skills/workflows/prebuilt.py
+    agents: [Operator, Scribe]
+    status: operational
+
+  - name: signal-alert
+    description: "Real-time market signal alerts when relevance exceeds threshold"
+    module: skills/workflows/prebuilt.py
+    agents: [Scout]
+    status: operational
+
+  - name: newsletter-curator
+    description: "Weekly AI-curated newsletter from market signals for prospects"
+    module: skills/workflows/newsletter_curator.py
+    agents: [Scout, Scribe]
+    status: operational
+
+  - name: deep-research
+    description: "Multi-source research — SEC filings, patents, web scraping, AI synthesis"
+    module: skills/workflows/deep_research.py
+    agents: [Analyst, Scout]
+    status: operational
+
+  - name: smart-alerts
+    description: "Event-driven alert pipeline with LLM urgency scoring"
+    module: skills/workflows/smart_alerts.py
+    agents: [Scout, Operator]
+    status: operational
+
+  - name: domain-intelligence
+    description: "Daily competitor website monitoring with diff analysis"
+    module: skills/workflows/domain_intelligence.py
+    agents: [Scout]
+    status: operational
+
+  - name: pre-meeting-pipeline
+    description: "Daily meeting prep — attendee enrichment, company research, one-pager"
+    module: skills/workflows/pre_meeting_pipeline.py
+    agents: [Operator, Hunter, Scribe]
+    status: operational
+
+  - name: account-review-pipeline
+    description: "Quarterly account health review with stakeholder mapping"
+    agents: [Strategist, Analyst, Hunter]
+    status: designed
+
+  - name: competitive-response
+    description: "Triggered workflow when competitor activity detected — analysis + recommendations"
+    agents: [Scout, Strategist, Scribe]
+    status: designed
+
+# ──────────────────────────────────────────────────────────────
+# SCIENTIFIC & DATA APIS — External APIs accessed by agents/MCP
+# ──────────────────────────────────────────────────────────────
+scientific_apis:
+  - name: PubMed E-utilities
+    url: eutils.ncbi.nlm.nih.gov
+    auth_required: false
+    agent: Analyst
+    mcp_tool: pubmed_search
+    status: operational
+
+  - name: ClinicalTrials.gov API v2
+    url: clinicaltrials.gov/api/v2
+    auth_required: false
+    agent: Analyst
+    mcp_tool: clinical_trials_search
+    status: operational
+
+  - name: ChEMBL
+    url: ebi.ac.uk/chembl/api
+    auth_required: false
+    agent: Analyst
+    mcp_tool: chembl_search
+    status: operational
+
+  - name: OpenFDA
+    url: api.fda.gov
+    auth_required: false
+    agent: Analyst
+    mcp_tool: fda_drug_search
+    status: operational
+
+  - name: SEC EDGAR
+    url: efts.sec.gov
+    auth_required: false
+    agent: Scout
+    mcp_tool: null
+    status: operational
+
+  - name: USPTO Patents
+    url: developer.uspto.gov
+    auth_required: false
+    agent: Scout
+    mcp_tool: uspto_patent_search
+    status: implemented
+
+  - name: Exa Web Intelligence
+    url: api.exa.ai
+    auth_required: true
+    agent: Scout
+    mcp_tool: exa_search_web
+    status: operational
+
+# ──────────────────────────────────────────────────────────────
+# MCP SERVERS — Built-in Model Context Protocol servers
+# ──────────────────────────────────────────────────────────────
+mcp_servers:
+  - name: lifesci
+    description: "Life sciences APIs — PubMed, ClinicalTrials.gov, ChEMBL, FDA, USPTO"
+    path: mcp_servers/lifesci
+    tools: [pubmed_search, pubmed_fetch_details, clinical_trials_search, fda_drug_search, chembl_search, uspto_patent_search]
+    status: operational
+
+  - name: exa
+    description: "Exa web intelligence — search, news, find similar, research"
+    path: mcp_servers/exa
+    tools: [exa_search_web, exa_search_news, exa_find_similar, exa_answer, exa_research, exa_get_contents]
+    status: operational
+
+  - name: business
+    description: "Business operations — CRM, calendar, email via Composio"
+    path: mcp_servers/business
+    tools: [calendar_read, calendar_write, crm_read, crm_write, email_send]
+    status: operational
+
+# ──────────────────────────────────────────────────────────────
+# CORE INFRASTRUCTURE — Cross-cutting systems
+# ──────────────────────────────────────────────────────────────
+infrastructure:
+  - name: ooda-loop
+    description: "Observe-Orient-Decide-Act cognitive loop with extended thinking"
+    module: core/ooda.py
+    status: operational
+
+  - name: persona-builder
+    description: "6-layer personality system for all LLM calls"
+    module: core/persona.py
+    status: operational
+
+  - name: cost-governor
+    description: "Token budget enforcement and usage tracking"
+    module: core/cost_governor.py
+    status: operational
+
+  - name: trust-calibration
+    description: "Per-category trust scoring that determines autonomy level"
+    module: core/trust.py
+    status: operational
+
+  - name: cognitive-friction
+    description: "Pushback engine — challenge/flag/comply/refuse decisions"
+    module: core/cognitive_friction.py
+    status: operational
+
+  - name: delegation-traces
+    description: "Immutable audit trail for all agent delegations"
+    module: core/delegation_trace.py
+    status: operational
+
+  - name: capability-tokens
+    description: "Scoped DCT permissions for agent dispatches"
+    module: core/capability_tokens.py
+    status: operational
+
+  - name: adaptive-coordinator
+    description: "Retry/re-delegate/escalate on agent failure"
+    module: core/adaptive_coordinator.py
+    status: implemented
+
+  - name: hot-context
+    description: "Always-loaded working memory (<3000 tokens)"
+    module: memory/hot_context.py
+    status: operational
+
+  - name: cold-retrieval
+    description: "On-demand semantic + graph memory search"
+    module: memory/cold_retrieval.py
+    status: operational
+
+  - name: dual-layer-memory
+    description: "6-type memory system — working, episodic, semantic, procedural, prospective, lead"
+    module: memory/
+    status: operational
+
+  - name: onboarding-intelligence
+    description: "Intelligence initialization — company enrichment, email bootstrap, gap detection"
+    module: onboarding/
+    status: implemented
+
+  - name: video-presence
+    description: "Tavus AI avatar + Daily.co WebRTC for video conversations"
+    module: integrations/tavus_tool_executor.py
+    status: implemented
