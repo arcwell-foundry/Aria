@@ -11,6 +11,7 @@ from src.mcp_servers.lifesci.tools import (
     fda_drug_search_impl,
     pubmed_fetch_details_impl,
     pubmed_search_impl,
+    uspto_patent_search_impl,
 )
 from src.mcp_servers.middleware import enforce_dct
 
@@ -116,3 +117,26 @@ async def chembl_search(
     """
     enforce_dct("chembl_search", "read_chembl", dct)
     return await chembl_search_impl(query, search_type, max_results)
+
+
+# ---------------------------------------------------------------------------
+# USPTO
+# ---------------------------------------------------------------------------
+
+
+@lifesci_mcp.tool()
+async def uspto_patent_search(
+    query: str,
+    max_results: int = 20,
+    dct: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Search USPTO for patent application publications.
+
+    Uses the public USPTO Open Data Portal API to find patent applications
+    matching a keyword query.  Useful for tracking IP activity in therapeutic
+    areas and monitoring competitor patent filings.
+
+    Returns patent titles, applicants, filing dates, and Google Patents URLs.
+    """
+    enforce_dct("uspto_patent_search", "read_uspto", dct)
+    return await uspto_patent_search_impl(query, max_results)

@@ -1,39 +1,23 @@
 # Pipeline Funnel Visualization
 
-Generate a funnel chart showing pipeline stage distribution for user {user_id}.
+Generate a Recharts-compatible **funnel chart** specification showing the lead pipeline distribution for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `lead_memories` table filtered by `user_id = '{user_id}'` where `lifecycle_stage` is active (not CHURNED or ARCHIVED).
+The following real pipeline data was fetched from the database:
 
-Group leads by `lifecycle_stage` and count the number of leads in each stage. Also sum `deal_value` per stage.
+```json
+{visualization_data}
+```
 
-## Expected Stages (funnel order)
+## Instructions
 
-1. PROSPECT
-2. QUALIFIED
-3. ENGAGED
-4. PROPOSAL
-5. NEGOTIATION
-6. CLOSED_WON
-
-Omit stages with zero leads. Include CLOSED_LOST as a separate annotation in metadata.summary but not in the funnel data.
-
-## Data Format
-
-Each data point should have:
-- `stage`: Human-readable stage name (e.g. "Prospect", "Qualified")
-- `count`: Number of leads in this stage
-- `value`: Total deal value in this stage (numeric, USD)
-
-## Config
-
-- chart_type: "funnel"
-- xKey: "stage"
-- yKeys: one series for "count" (primary color) and one for "value" (accent1 color)
-- title: "Pipeline Distribution"
-- subtitle: Include total pipeline value and lead count
-
-## Context Data
-
-{lead_data}
+1. Map each pipeline stage to a funnel step, ordered from earliest to latest stage (e.g. Prospecting > Qualified > Proposal > Negotiation > Won).
+2. Each data point must have `stage` (string label) and `value` (numeric count).
+3. Use ARIA palette colors progressing from primary (#6366F1) at the top to success (#10B981) at the bottom.
+4. If the data includes `avg_health_score`, include it as a secondary metric in the tooltip config.
+5. Set `chart_type` to `"funnel"`.
+6. Set `config.xKey` to `"stage"` and include one yKey with key `"value"`, label `"Leads"`, color `"#6366F1"`.
+7. Populate `metadata.record_count` with the total number of leads.
+8. Set `metadata.confidence_level` based on total_leads: high if >20, moderate if 5-20, low if <5.
+9. Write a one-line `metadata.summary` describing the pipeline shape.

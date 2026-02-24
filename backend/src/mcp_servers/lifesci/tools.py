@@ -26,6 +26,8 @@ CLINICALTRIALS_API_URL = "https://clinicaltrials.gov/api/v2/studies"
 FDA_DRUG_API_URL = "https://api.fda.gov/drug/label.json"
 FDA_DEVICE_API_URL = "https://api.fda.gov/device/510k.json"
 CHEMBL_API_URL = "https://www.ebi.ac.uk/chembl/api/data"
+USPTO_SEARCH_URL = "https://developer.uspto.gov/ibd-api/v1/application/publications"
+USPTO_USER_AGENT = "ARIA-Intelligence/1.0 (support@aria-intel.com)"
 
 # ---------------------------------------------------------------------------
 # Module-level shared state
@@ -469,3 +471,114 @@ async def chembl_search_impl(
     except Exception as e:
         logger.error("ChEMBL search failed: %s", e)
         return {"error": str(e), "molecules": [], "total_count": 0}
+
+
+# ---------------------------------------------------------------------------
+# USPTO patent search
+# ---------------------------------------------------------------------------
+async def uspto_patent_search_impl(
+    query: str,
+    max_results: int = 20,
+) -> dict[str, Any]:
+    """Search USPTO for patent application publications.
+
+    Uses the USPTO Open Data Portal API (public, no auth required) to
+    find patent applications matching a keyword query.  Useful for
+    tracking IP activity in therapeutic areas and monitoring competitor
+    filings.
+
+    Args:
+        query: Search query string (e.g. ``"CAR-T cell therapy"``).
+        max_results: Maximum number of results to return (max 100).
+
+    Returns:
+        Dict with ``query``, ``total_count``, and ``patents`` list.
+        Each patent contains ``title``, ``application_number``,
+        ``publication_number``, ``applicant``, ``filed_date``,
+        ``publication_date``, ``abstract``, and ``patent_url``.
+    """
+    cache_key = f"uspto:{query}:{max_results}"
+    if cache_key in _research_cache:
+        logger.info("USPTO cache hit for query: %s", query)
+        return _research_cache[cache_key]
+
+    try:
+        client = _get_client()
+
+        params: dict[str, str | int] = {
+            "searchText": query,
+            "start": 0,
+            "rows": min(max_results, 100),
+        }
+
+        response = await client.get(
+            USPTO_SEARCH_URL,
+            params=params,
+            headers={
+                "User-Agent": USPTO_USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        raw_results: list[dict[str, Any]] = data.get("results", [])
+
+        patents: list[dict[str, Any]] = []
+        for item in raw_results:
+            # Extract first applicant name
+            applicants = item.get("applicants", [])
+            applicant = ""
+            if isinstance(applicants, list) and applicants:
+                first = applicants[0]
+                applicant = (
+                    first.get("applicantName", "")
+                    if isinstance(first, dict)
+                    else str(first)
+                )
+
+            # Abstract may be a list or string
+            abstract_raw = item.get("abstractText", "")
+            abstract = (
+                abstract_raw[0]
+                if isinstance(abstract_raw, list) and abstract_raw
+                else str(abstract_raw)
+            )
+
+            pub_number = item.get("publicationNumber", "")
+
+            patents.append(
+                {
+                    "title": item.get("inventionTitle", ""),
+                    "application_number": item.get("applicationNumber", ""),
+                    "publication_number": pub_number,
+                    "applicant": applicant,
+                    "filed_date": item.get("filingDate", ""),
+                    "publication_date": item.get("publicationDate", ""),
+                    "abstract": abstract[:500],
+                    "patent_url": f"https://patents.google.com/patent/US{pub_number}",
+                }
+            )
+
+        result: dict[str, Any] = {
+            "query": query,
+            "total_count": data.get("numFound", len(patents)),
+            "patents": patents,
+        }
+
+        _research_cache[cache_key] = result
+
+        logger.info(
+            "USPTO search found %d patents for: %s",
+            result["total_count"],
+            query,
+        )
+
+        return result
+
+    except httpx.HTTPStatusError as e:
+        logger.error("USPTO API error: %s", e)
+        return {"error": str(e), "patents": [], "total_count": 0}
+    except Exception as e:
+        logger.error("USPTO search failed: %s", e)
+        return {"error": str(e), "patents": [], "total_count": 0}

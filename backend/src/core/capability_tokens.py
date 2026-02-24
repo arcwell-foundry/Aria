@@ -57,12 +57,12 @@ AGENT_PROFILES: dict[str, dict[str, list[str]]] = {
         "denied": ["send_email", "modify_crm", "delete_anything"],
     },
     "scout": {
-        "allowed": ["read_exa", "read_news_apis", "read_fda", "read_mcp_registries"],
+        "allowed": ["read_exa", "read_news_apis", "read_fda", "read_uspto", "read_mcp_registries"],
         "denied": ["send_email", "modify_crm", "write_anything"],
     },
     "analyst": {
         "allowed": [
-            "read_pubmed", "read_clinicaltrials", "read_chembl", "read_fda",
+            "read_pubmed", "read_clinicaltrials", "read_chembl", "read_fda", "read_uspto",
             "read_memory", "evaluate_mcp_server",
         ],
         "denied": ["send_email", "modify_crm", "write_external"],

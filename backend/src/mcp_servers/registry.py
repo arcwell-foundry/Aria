@@ -37,6 +37,7 @@ TOOL_SERVER_MAP: dict[str, tuple[str, str]] = {
     "clinical_trials_search": ("lifesci", "read_clinicaltrials"),
     "fda_drug_search": ("lifesci", "read_fda"),
     "chembl_search": ("lifesci", "read_chembl"),
+    "uspto_patent_search": ("lifesci", "read_uspto"),
     # Exa Web Intelligence
     "exa_search_web": ("exa", "read_exa"),
     "exa_search_news": ("exa", "read_news_apis"),

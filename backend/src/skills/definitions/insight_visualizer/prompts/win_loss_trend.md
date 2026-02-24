@@ -1,41 +1,23 @@
 # Win/Loss Trend
 
-Generate a line chart showing win/loss rates over time from lead status changes for user {user_id}.
+Generate a Recharts-compatible **line chart** specification showing win/loss rates over time for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `lead_memories` table filtered by `user_id = '{user_id}'` where `lifecycle_stage` is CLOSED_WON or CLOSED_LOST. Use the `updated_at` timestamp to determine when the status changed.
+The following real outcome data was fetched from the database:
 
-## Aggregation
+```json
+{visualization_data}
+```
 
-Group by month (format: "Jan 2026", "Feb 2026", etc.). For each month calculate:
-- Win count (CLOSED_WON)
-- Loss count (CLOSED_LOST)
-- Win rate percentage: wins / (wins + losses) * 100
-- Total closed value (sum of deal_value for won deals)
+## Instructions
 
-Include up to 12 most recent months. Omit months with zero closings.
-
-## Data Format
-
-Each data point should have:
-- `month`: Month label (e.g. "Jan 2026")
-- `wins`: Number of wins
-- `losses`: Number of losses
-- `win_rate`: Win rate as percentage (0–100)
-- `closed_value`: Total won deal value
-
-## Config
-
-- chart_type: "line"
-- xKey: "month"
-- yKeys:
-  - "win_rate" (success color, label: "Win Rate %")
-  - "wins" (primary color, label: "Wins")
-  - "losses" (danger color, label: "Losses")
-- title: "Win/Loss Trend"
-- subtitle: Include overall win rate and total closed value for the period
-
-## Context Data
-
-{lead_data}
+1. Create a line chart with months on the x-axis and outcome counts on the y-axis.
+2. Include separate lines for wins and losses (and optionally active/in-progress).
+3. Each data point: `month` (YYYY-MM), `wins` (count), `losses` (count).
+4. Set `chart_type` to `"line"`.
+5. Set `config.xKey` to `"month"` and add yKeys: wins (#10B981 success), losses (#EF4444 danger).
+6. If a win rate can be calculated, include it as a derived percentage series.
+7. Populate `metadata.record_count` from summary.total_records.
+8. Set `metadata.confidence_level` based on the number of months with data.
+9. Write a one-line `metadata.summary` noting the trend direction and overall win rate.

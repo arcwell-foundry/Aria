@@ -1,36 +1,23 @@
 # Territory Heatmap
 
-Generate a treemap visualization of geographic coverage from lead locations for user {user_id}.
+Generate a Recharts-compatible **treemap** specification showing geographic lead distribution for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `lead_memories` table filtered by `user_id = '{user_id}'`. Extract location fields (state, region, or city) and aggregate by geography.
+The following real territory data was fetched from the database:
 
-## Aggregation
+```json
+{visualization_data}
+```
 
-Group leads by their primary geographic attribute (state or region). For each geography calculate:
-- Lead count
-- Total pipeline value
-- Average health score
+## Instructions
 
-## Data Format
-
-Each data point should have:
-- `name`: Geographic region name (e.g. "Northeast", "California")
-- `size`: Total pipeline value in that region (numeric, drives treemap cell size)
-- `count`: Number of leads
-- `health`: Average health score (0–100)
-
-Sort by `size` descending. Limit to top 50 regions.
-
-## Config
-
-- chart_type: "treemap"
-- xKey: "name"
-- yKeys: one series for "size" (primary color)
-- title: "Territory Coverage"
-- subtitle: Include total territory count and aggregate pipeline value
-
-## Context Data
-
-{lead_data}
+1. Use a treemap where each cell represents a geographic region.
+2. Cell size reflects lead count; color reflects average health score (green for healthy, red for at-risk).
+3. Each data point: `name` (location string), `size` (lead_count), `color` (health-mapped hex).
+4. Set `chart_type` to `"treemap"`.
+5. Set `config.xKey` to `"name"` and one yKey with key `"size"`, label `"Leads"`, color `"#6366F1"`.
+6. Limit to top 50 regions by lead count.
+7. Populate `metadata.record_count` with total leads across all regions.
+8. Set `metadata.confidence_level` based on data completeness.
+9. Write a one-line `metadata.summary` noting the top region and any coverage gaps.

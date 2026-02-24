@@ -1,45 +1,23 @@
-# Health Distribution
+# Health Score Distribution
 
-Generate a bar chart showing health score distribution across the portfolio for user {user_id}.
+Generate a Recharts-compatible **bar chart** specification showing health score distribution across the portfolio for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `health_score_history` table joined with `lead_memories` filtered by `user_id = '{user_id}'`. Use the most recent health score per lead.
+The following real health score data was fetched from the database:
 
-## Aggregation
+```json
+{visualization_data}
+```
 
-Bucket leads by health score ranges:
-- 0–20: "Critical" (danger color)
-- 21–40: "At Risk" (warning color)
-- 41–60: "Needs Attention" (info color)
-- 61–80: "Healthy" (success color)
-- 81–100: "Thriving" (primary color)
+## Instructions
 
-For each bucket calculate:
-- Lead count
-- Total pipeline value
-- Average deal value
-
-## Data Format
-
-Each data point should have:
-- `bucket`: Bucket label (e.g. "Critical", "At Risk")
-- `count`: Number of leads in this bucket
-- `pipeline_value`: Total pipeline value (numeric)
-- `avg_deal_value`: Average deal value (numeric)
-
-Order buckets from Critical to Thriving (ascending health).
-
-## Config
-
-- chart_type: "bar"
-- xKey: "bucket"
-- yKeys:
-  - "count" (primary color, label: "Lead Count")
-  - "pipeline_value" (accent1 color, label: "Pipeline Value")
-- title: "Portfolio Health Distribution"
-- subtitle: Include total leads, average health score, and leads needing attention (score < 41)
-
-## Context Data
-
-{health_data}
+1. Create a histogram-style bar chart with score ranges on the x-axis and lead counts on the y-axis.
+2. Use color gradient: red (#EF4444) for 0-29, warning (#F59E0B) for 30-59, success (#10B981) for 60-100.
+3. Each data point: `range` (e.g. "0-9", "10-19"), `count` (number of leads in that range).
+4. Set `chart_type` to `"bar"`.
+5. Set `config.xKey` to `"range"` and one yKey with key `"count"`, label `"Leads"`.
+6. Assign colors per bar based on the health range (danger/warning/success).
+7. Populate `metadata.record_count` from statistics.count.
+8. Set `metadata.confidence_level` based on the number of leads with scores.
+9. Write a one-line `metadata.summary` noting the mean score and distribution shape (skewed healthy, bimodal, etc.).

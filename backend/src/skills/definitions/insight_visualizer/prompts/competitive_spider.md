@@ -1,35 +1,23 @@
 # Competitive Spider Chart
 
-Generate a radar/spider chart comparing competitors across multiple axes for {competitor_names}.
+Generate a Recharts-compatible **radar chart** specification comparing competitors for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `battle_cards` table for competitors matching the provided names. Extract scores or qualitative assessments across standard competitive dimensions.
+The following real battle card data was fetched from the database:
 
-## Comparison Axes
+```json
+{visualization_data}
+```
 
-Evaluate each competitor on these dimensions (scale 0–100):
-1. **Product Strength** — feature completeness, clinical evidence, regulatory status
-2. **Market Presence** — installed base, market share, brand recognition
-3. **Pricing** — competitiveness (100 = most competitive / lowest relative price)
-4. **Service & Support** — implementation, training, customer success
-5. **Innovation** — R&D pipeline, recent launches, technology differentiation
-6. **Relationships** — KOL network, advisory boards, existing account penetration
+## Instructions
 
-## Data Format
-
-Each data point should have:
-- `axis`: Dimension name (e.g. "Product Strength")
-- One key per competitor with their score (e.g. `competitor_a: 85`)
-
-## Config
-
-- chart_type: "radar"
-- xKey: "axis"
-- yKeys: one series per competitor, each with a distinct color from the palette
-- title: "Competitive Landscape"
-- subtitle: List competitor names
-
-## Context Data
-
-{battle_card_data}
+1. Create a radar chart with one series per competitor (max 6 competitors).
+2. Each axis represents a competitive dimension (e.g. Product, Pricing, Support, Market Share, Innovation, Clinical Evidence).
+3. Values should be normalized to 0-100 scale.
+4. Set `chart_type` to `"radar"`.
+5. Set `config.xKey` to `"dimension"` and add one yKey per competitor with distinct ARIA palette colors.
+6. If no dimension_scores exist in the data, derive reasonable axes from available battle card fields.
+7. Populate `metadata.record_count` with the number of competitors analyzed.
+8. Set `metadata.confidence_level` based on data completeness.
+9. Write a one-line `metadata.summary` highlighting the strongest/weakest competitor.

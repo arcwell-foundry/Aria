@@ -1,40 +1,23 @@
 # Engagement Timeline
 
-Generate a timeline chart showing communication frequency per lead from events for user {user_id}.
+Generate a Recharts-compatible **bar chart** specification showing communication frequency per lead for user `{user_id}`.
 
-## Data Source
+## Data
 
-Query `lead_memory_events` table joined with `lead_memories` filtered by `user_id = '{user_id}'`. Extract event timestamps and types (email, call, meeting, note).
+The following real engagement data was fetched from the database:
 
-## Aggregation
+```json
+{visualization_data}
+```
 
-Group by week over the most recent 12 weeks. For each week calculate:
-- Total events across all leads
-- Events by type (email, call, meeting, note)
-- Number of unique leads contacted
+## Instructions
 
-## Data Format
-
-Each data point should have:
-- `week`: Week label (e.g. "Week of Jan 6")
-- `emails`: Email event count
-- `calls`: Call event count
-- `meetings`: Meeting event count
-- `notes`: Note event count
-- `unique_leads`: Number of distinct leads engaged
-
-## Config
-
-- chart_type: "bar"
-- xKey: "week"
-- yKeys (stacked):
-  - "emails" (info color, label: "Emails", stackId: "engagement")
-  - "calls" (success color, label: "Calls", stackId: "engagement")
-  - "meetings" (accent1 color, label: "Meetings", stackId: "engagement")
-  - "notes" (muted color, label: "Notes", stackId: "engagement")
-- title: "Engagement Activity"
-- subtitle: Include total events and average weekly unique leads
-
-## Context Data
-
-{event_data}
+1. Create a stacked bar chart with leads on the x-axis and event counts on the y-axis.
+2. Stack by event type (email_sent, email_received, meeting, call, etc.) using distinct ARIA palette colors.
+3. Limit to top 15 most-engaged leads for readability.
+4. Set `chart_type` to `"bar"`.
+5. Set `config.xKey` to `"lead"` and add one yKey per event type, each with `stackId: "engagement"`.
+6. Color mapping: email_sent (#6366F1), email_received (#3B82F6), meeting (#10B981), call (#F59E0B).
+7. Populate `metadata.record_count` from total_events.
+8. Set `metadata.confidence_level` based on total_events: high if >50, moderate if 10-50, low if <10.
+9. Write a one-line `metadata.summary` noting which leads are most/least engaged.
