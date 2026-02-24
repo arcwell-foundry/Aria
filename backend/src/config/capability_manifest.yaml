@@ -310,11 +310,12 @@ scientific_apis:
     status: operational
 
   - name: USPTO Patents
-    url: developer.uspto.gov
+    url: patents.google.com
     auth_required: false
     agent: Scout
     mcp_tool: uspto_patent_search
-    status: implemented
+    status: operational
+    note: Uses Google Patents XHR (old developer.uspto.gov IBD API retired 2025)
 
   - name: Exa Web Intelligence
     url: api.exa.ai

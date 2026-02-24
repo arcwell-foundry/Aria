@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import subprocess
 import time
 import uuid
@@ -1168,9 +1169,21 @@ class SignalRadarCapability(BaseCapability):
                         pub_number = patent_info.get("publication_number", "")
                         title = patent_info.get("title", "Untitled patent")
                         snippet = result.get("snippet", "")
-                        assignee = patent_info.get("assignee", "")
                         filing_date = patent_info.get("filing_date", "")
                         pub_date = patent_info.get("publication_date", "")
+
+                        # Strip HTML tags (Google Patents includes <b> etc.)
+                        if "<" in title:
+                            title = re.sub(r"<[^>]+>", "", title)
+                        if "<" in snippet:
+                            snippet = re.sub(r"<[^>]+>", "", snippet)
+
+                        # Assignee may be a list in the response
+                        assignee_raw = patent_info.get("assignee", "")
+                        if isinstance(assignee_raw, list):
+                            assignee = assignee_raw[0] if assignee_raw else ""
+                        else:
+                            assignee = str(assignee_raw)
 
                         if title:
                             signals.append(
