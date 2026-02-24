@@ -83,6 +83,7 @@ class GoalExecutionService:
         self._trust_service: Any = _NOT_SET
         self._trace_service: Any = _NOT_SET
         self._adaptive_coordinator: Any = _NOT_SET
+        self._tool_discovery: Any = _NOT_SET
 
     def _get_trust_service(self) -> Any:
         """Lazily initialize TrustCalibrationService."""
@@ -119,6 +120,206 @@ class GoalExecutionService:
                 logger.warning("Failed to initialize AdaptiveCoordinator: %s", e)
                 self._adaptive_coordinator = None
         return self._adaptive_coordinator
+
+    def _get_tool_discovery(self) -> Any:
+        """Lazily initialize ComposioToolDiscovery."""
+        if self._tool_discovery is _NOT_SET:
+            try:
+                from src.integrations.tool_discovery import get_tool_discovery
+
+                self._tool_discovery = get_tool_discovery()
+            except Exception as e:
+                logger.warning("Failed to initialize ComposioToolDiscovery: %s", e)
+                self._tool_discovery = None
+        return self._tool_discovery
+
+    @staticmethod
+    def _integration_types_to_toolkit_slugs(
+        active_integrations: list[str],
+    ) -> list[str]:
+        """Map user's active integration types to Composio toolkit slugs.
+
+        Uses INTEGRATION_CONFIGS from domain.py to resolve the mapping.
+
+        Args:
+            active_integrations: List of integration type strings
+                (e.g. ["gmail", "salesforce"]).
+
+        Returns:
+            List of Composio toolkit slugs (e.g. ["gmail", "salesforce"]).
+        """
+        try:
+            from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
+
+            slugs: list[str] = []
+            for int_type_str in active_integrations:
+                try:
+                    int_type = IntegrationType(int_type_str)
+                    config = INTEGRATION_CONFIGS.get(int_type)
+                    if config:
+                        slugs.append(config.composio_app_id)
+                except ValueError:
+                    # Unknown integration type — skip
+                    pass
+            return slugs
+        except Exception:
+            return []
+
+    @staticmethod
+    def _build_agent_tools_prompt(
+        discovered_tools: list[Any],
+        active_integrations: list[str],
+    ) -> str:
+        """Build dynamic agent + tools prompt section.
+
+        If tool discovery returned results, includes a Composio integration
+        tools section showing per-toolkit tools with connection status.
+        Falls back to the static agent list when discovery is empty.
+
+        Args:
+            discovered_tools: List of ComposioToolInfo from discovery.
+            active_integrations: User's connected integration type strings.
+
+        Returns:
+            Formatted prompt section string.
+        """
+        # Static agent descriptions (always present)
+        lines = [
+            "## Available Agents & Their Tools",
+            "- hunter: Lead discovery (built-in: exa_search, apollo_search)",
+            "- analyst: Scientific research (built-in: pubmed_search, fda_search, "
+            "chembl_search, clinicaltrials_search)",
+            "- strategist: Strategic planning (built-in: claude_analysis)",
+            "- scribe: Email/doc drafting (built-in: digital_twin_style, claude_drafting)",
+            "- operator: CRM & calendar actions (built-in: composio_crm, "
+            "composio_calendar, composio_email_send)",
+            "- scout: Market monitoring (built-in: exa_search, news_apis)",
+        ]
+
+        if not discovered_tools:
+            return "\n".join(lines) + "\n\n"
+
+        # Build toolkit slug -> connected mapping
+        try:
+            from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
+
+            connected_toolkit_slugs: set[str] = set()
+            for int_type_str in active_integrations:
+                try:
+                    int_type = IntegrationType(int_type_str)
+                    config = INTEGRATION_CONFIGS.get(int_type)
+                    if config:
+                        connected_toolkit_slugs.add(config.composio_app_id)
+                except ValueError:
+                    pass
+        except Exception:
+            connected_toolkit_slugs = set()
+
+        # Group tools by toolkit
+        toolkit_tools: dict[str, list[Any]] = {}
+        toolkit_names: dict[str, str] = {}
+        for tool in discovered_tools:
+            tk = tool.toolkit_slug
+            if tk not in toolkit_tools:
+                toolkit_tools[tk] = []
+                toolkit_names[tk] = tool.toolkit_name
+            toolkit_tools[tk].append(tool)
+
+        lines.append("")
+        lines.append("## Composio Integration Tools Available")
+
+        for tk_slug in sorted(toolkit_tools.keys()):
+            status = "CONNECTED" if tk_slug in connected_toolkit_slugs else "NOT CONNECTED"
+            tool_slugs = [t.slug for t in toolkit_tools[tk_slug][:10]]
+            display_name = toolkit_names.get(tk_slug, tk_slug.capitalize())
+            lines.append(
+                f"- {display_name} [{status}]: {', '.join(tool_slugs)}"
+            )
+
+        return "\n".join(lines) + "\n\n"
+
+    def _annotate_task_resources(
+        self,
+        tasks: list[dict[str, Any]],
+        active_integrations: list[str],
+        discovered_tools: list[Any],
+    ) -> tuple[int, int]:
+        """Annotate each task with resource availability metadata.
+
+        For each tool in each task's tools_needed:
+        - Built-in tools -> connected: True
+        - Composio tools found in discovery -> check toolkit auth status,
+          add display_name, description, toolkit, setup_instruction
+        - Unknown tools -> fall back to _check_tool_connected()
+
+        Args:
+            tasks: List of task dicts from the LLM plan.
+            active_integrations: User's connected integration type strings.
+            discovered_tools: ComposioToolInfo list from discovery.
+
+        Returns:
+            Tuple of (total_tools, connected_tools) for readiness calculation.
+        """
+        # Build lookup from discovered tools
+        tool_lookup: dict[str, Any] = {}
+        for t in discovered_tools:
+            tool_lookup[t.slug] = t
+            # Also index by lowercase for fuzzy matching
+            tool_lookup[t.slug.lower()] = t
+
+        # Build connected toolkit slugs set
+        connected_toolkit_slugs: set[str] = set()
+        try:
+            from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
+
+            for int_type_str in active_integrations:
+                try:
+                    int_type = IntegrationType(int_type_str)
+                    config = INTEGRATION_CONFIGS.get(int_type)
+                    if config:
+                        connected_toolkit_slugs.add(config.composio_app_id)
+                except ValueError:
+                    pass
+        except Exception:
+            pass
+
+        total_tools = 0
+        connected_tools = 0
+
+        for task in tasks:
+            task_resources: list[dict[str, Any]] = []
+            for tool in task.get("tools_needed", []):
+                total_tools += 1
+                resource: dict[str, Any] = {"tool": tool, "connected": False}
+
+                # Check if it's in Composio discovery results
+                discovered = tool_lookup.get(tool) or tool_lookup.get(tool.lower())
+                if discovered:
+                    is_connected = discovered.toolkit_slug in connected_toolkit_slugs
+                    resource["connected"] = is_connected
+                    resource["display_name"] = discovered.name
+                    resource["description"] = discovered.description
+                    resource["toolkit"] = discovered.toolkit_name
+                    if not is_connected:
+                        resource["setup_instruction"] = (
+                            f"Connect {discovered.toolkit_name} in Settings > "
+                            f"Integrations to enable this capability."
+                        )
+                    if is_connected:
+                        connected_tools += 1
+                else:
+                    # Fall back to static check
+                    is_connected = self._check_tool_connected(
+                        tool, active_integrations
+                    )
+                    resource["connected"] = is_connected
+                    if is_connected:
+                        connected_tools += 1
+
+                task_resources.append(resource)
+            task["resource_status"] = task_resources
+
+        return total_tools, connected_tools
 
     async def _record_goal_update(
         self,
@@ -2049,6 +2250,22 @@ class GoalExecutionService:
             ", ".join(active_integrations) if active_integrations else "None connected"
         )
 
+        # Discover Composio tools concurrently with summaries below
+        discovered_tools: list[Any] = []
+        tool_discovery = self._get_tool_discovery()
+        if tool_discovery:
+            toolkit_slugs = self._integration_types_to_toolkit_slugs(
+                active_integrations
+            )
+            try:
+                discovered_tools = await tool_discovery.discover_tools_for_goal(
+                    goal.get("title", ""),
+                    goal.get("description", ""),
+                    toolkit_slugs,
+                )
+            except Exception as e:
+                logger.warning("Tool discovery failed, continuing without: %s", e)
+
         # Build trust summary
         trust_summary = "New user (default trust 0.3)"
         if resources["trust_profiles"]:
@@ -2080,15 +2297,7 @@ class GoalExecutionService:
             f"Connected integrations: {integration_summary}\n\n"
             f"## Trust Levels\n{trust_summary}\n\n"
             f"## Company Knowledge\n{facts_summary}\n\n"
-            f"## Available Agents & Their Tools\n"
-            f"- hunter: Lead discovery (tools: exa_search, apollo_search)\n"
-            f"- analyst: Scientific research (tools: pubmed_search, fda_search, "
-            f"chembl_search, clinicaltrials_search)\n"
-            f"- strategist: Strategic planning (tools: claude_analysis)\n"
-            f"- scribe: Email/doc drafting (tools: digital_twin_style, claude_drafting)\n"
-            f"- operator: CRM & calendar actions (tools: composio_crm, composio_calendar, "
-            f"composio_email_send)\n"
-            f"- scout: Market monitoring (tools: exa_search, news_apis)\n\n"
+            f"{self._build_agent_tools_prompt(discovered_tools, active_integrations)}"
             f"## Instructions\n"
             f"Decompose the goal into 3-8 concrete sub-tasks. For each task, specify:\n"
             f"- Which agent handles it\n"
@@ -2177,19 +2386,9 @@ class GoalExecutionService:
         )
 
         # Annotate tasks with resource availability for this user
-        total_tools = 0
-        connected_tools = 0
-        for task in tasks_json:
-            task_resources: list[dict[str, Any]] = []
-            for tool in task.get("tools_needed", []):
-                connected = self._check_tool_connected(tool, active_integrations)
-                task_resources.append(
-                    {"tool": tool, "connected": connected}
-                )
-                total_tools += 1
-                if connected:
-                    connected_tools += 1
-            task["resource_status"] = task_resources
+        total_tools, connected_tools = self._annotate_task_resources(
+            tasks_json, active_integrations, discovered_tools
+        )
 
         readiness_score = (
             round((connected_tools / total_tools) * 100) if total_tools > 0 else 100

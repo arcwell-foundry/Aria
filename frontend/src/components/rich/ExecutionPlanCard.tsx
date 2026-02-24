@@ -13,6 +13,10 @@ import { CollapsibleCard } from '@/components/conversation/CollapsibleCard';
 interface TaskResource {
   tool: string;
   connected: boolean;
+  display_name?: string;
+  description?: string;
+  toolkit?: string;
+  setup_instruction?: string;
 }
 
 interface PlanTask {
@@ -93,27 +97,39 @@ const AUTH_TOOLS = new Set([
 ]);
 
 function ResourceBadge({ resource }: { resource: TaskResource }) {
+  const label = resource.display_name ?? resource.tool;
+
   if (resource.connected) {
     return (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-emerald-400 bg-emerald-500/10">
+      <span
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-emerald-400 bg-emerald-500/10"
+        title={resource.description}
+      >
         <Check className="w-2.5 h-2.5" />
-        {resource.tool}
+        {label}
       </span>
     );
   }
   // Distinguish "needs auth" (user can connect) from "not available"
-  if (AUTH_TOOLS.has(resource.tool)) {
+  const needsAuth = resource.setup_instruction || AUTH_TOOLS.has(resource.tool);
+  if (needsAuth) {
     return (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-amber-400 bg-amber-500/10">
+      <span
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-amber-400 bg-amber-500/10"
+        title={resource.setup_instruction ?? `Connect ${resource.toolkit ?? resource.tool} in Settings > Integrations`}
+      >
         <Link className="w-2.5 h-2.5" />
-        {resource.tool}
+        {label}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-red-400 bg-red-500/10">
+    <span
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono text-red-400 bg-red-500/10"
+      title={resource.description}
+    >
       <X className="w-2.5 h-2.5" />
-      {resource.tool}
+      {label}
     </span>
   );
 }
