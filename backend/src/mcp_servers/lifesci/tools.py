@@ -538,9 +538,8 @@ async def chembl_search_impl(
 
 # Google Patents is the most reliable free patent search since the old
 # developer.uspto.gov/ibd-api was retired and PatentsView requires an
-# API key.  We scrape Google Patents results via curl and parse the
-# structured snippets.
-_GOOGLE_PATENTS_SEARCH_URL = "https://patents.google.com/xhr/query"
+# API key.  Uses httpx with browser-like headers (Google Patents
+# requires browser User-Agent and times out plain curl).
 
 
 async def _search_google_patents(
@@ -548,6 +547,7 @@ async def _search_google_patents(
 ) -> list[dict[str, Any]]:
     """Search Google Patents via its XHR endpoint (public, no auth).
 
+    Uses httpx with browser headers (Google Patents blocks plain curl).
     Falls back gracefully if blocked.
 
     Args:
@@ -557,14 +557,30 @@ async def _search_google_patents(
     Returns:
         List of patent dicts.
     """
-    params: dict[str, str | int] = {
-        "url": f"q={query}&oq={query}&num={min(max_results, 100)}",
-        "exp": "",
-    }
     try:
-        data = await _curl_get_json(_GOOGLE_PATENTS_SEARCH_URL, params)
-    except Exception:
-        # Google Patents XHR may not return clean JSON — this is expected
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json",
+            },
+        ) as client:
+            resp = await client.get(
+                GOOGLE_PATENTS_XHR_URL,
+                params={
+                    "url": f"q={query}&oq={query}&num={min(max_results, 100)}",
+                },
+            )
+            if resp.status_code != 200:
+                logger.info("Google Patents returned %d", resp.status_code)
+                return []
+            data = resp.json()
+    except Exception as exc:
+        logger.info("Google Patents request failed: %s", exc)
         return []
 
     patents: list[dict[str, Any]] = []
