@@ -5,7 +5,7 @@
  * to view the full report or start a follow-up goal.
  */
 
-import { CheckCircle2, XCircle, ChevronRight } from 'lucide-react';
+import { CheckCircle2, XCircle, ChevronRight, Lightbulb, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
@@ -23,6 +23,9 @@ export interface GoalCompletionData {
   success_count: number;
   total_agents: number;
   agent_results: AgentResult[];
+  strategic_recommendation?: string;
+  key_findings?: string[];
+  deliverable_link?: string;
 }
 
 const AGENT_LABELS: Record<string, string> = {
@@ -43,7 +46,7 @@ export function GoalCompletionCard({ data }: { data: GoalCompletionData }) {
   const allSuccess = data.success_count === data.total_agents;
 
   const handleViewReport = () => {
-    navigate(`/goals/${data.goal_id}`);
+    navigate(data.deliverable_link ?? `/goals/${data.goal_id}`);
   };
 
   const handleWhatsNext = () => {
@@ -130,6 +133,47 @@ export function GoalCompletionCard({ data }: { data: GoalCompletionData }) {
         ))}
       </div>
 
+      {/* Key Findings */}
+      {data.key_findings && data.key_findings.length > 0 && (
+        <div className="px-4 py-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <p className="text-[11px] font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+            Key Findings
+          </p>
+          <ul className="space-y-1">
+            {data.key_findings.map((finding, i) => (
+              <li
+                key={i}
+                className="flex items-start gap-2 text-xs"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <span
+                  className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--accent)' }}
+                />
+                {finding}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Strategic Recommendation */}
+      {data.strategic_recommendation && (
+        <div className="mx-4 my-2 rounded-md px-3 py-2" style={{ backgroundColor: 'rgba(var(--accent-rgb, 99,102,241), 0.08)' }}>
+          <div className="flex items-start gap-2">
+            <Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <div>
+              <p className="text-[11px] font-medium mb-0.5" style={{ color: 'var(--accent)' }}>
+                Recommendation
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-primary)' }}>
+                {data.strategic_recommendation}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
       <div
         className="flex items-center gap-2 px-4 py-2.5"
@@ -142,7 +186,11 @@ export function GoalCompletionCard({ data }: { data: GoalCompletionData }) {
           style={{ backgroundColor: 'var(--accent)' }}
         >
           View Full Report
-          <ChevronRight className="w-3 h-3" />
+          {data.deliverable_link ? (
+            <ExternalLink className="w-3 h-3" />
+          ) : (
+            <ChevronRight className="w-3 h-3" />
+          )}
         </button>
         <button
           type="button"

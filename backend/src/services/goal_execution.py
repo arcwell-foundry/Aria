@@ -424,6 +424,19 @@ class GoalExecutionService:
 
         if agent_type:
             # Single agent goal (activation goals have one agent_type in config)
+            # Send starting message
+            try:
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                starting_msg, _, _ = presenter.present_agent_starting(
+                    agent_type=agent_type, goal_config=goal.get("config", {}),
+                )
+                if starting_msg:
+                    await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
+            except Exception:
+                logger.debug("Failed to send agent starting message", exc_info=True)
+
             result = await self._execute_agent(
                 user_id=user_id,
                 goal=goal,
@@ -473,6 +486,20 @@ class GoalExecutionService:
             agents_list = goal.get("goal_agents", [])
             for idx, agent in enumerate(agents_list):
                 a_type = agent.get("agent_type", "")
+
+                # Send starting message
+                try:
+                    from src.services.conversational_presenter import ConversationalPresenter
+
+                    presenter = ConversationalPresenter()
+                    starting_msg, _, _ = presenter.present_agent_starting(
+                        agent_type=a_type, goal_config=goal.get("config", {}),
+                    )
+                    if starting_msg:
+                        await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
+                except Exception:
+                    logger.debug("Failed to send agent starting message", exc_info=True)
+
                 result = await self._execute_agent(
                     user_id=user_id,
                     goal=goal,
@@ -707,6 +734,21 @@ class GoalExecutionService:
                 "config": task.get("config", {}),
                 "user_id": user_id,
             }
+
+            # Send starting message
+            try:
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                starting_msg, _, _ = presenter.present_agent_starting(
+                    agent_type=agent_type,
+                    task=task,
+                    goal_config=task.get("config", {}),
+                )
+                if starting_msg:
+                    await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
+            except Exception:
+                logger.debug("Failed to send agent starting message", exc_info=True)
 
             # Execute with retry logic
             max_retries = 2
@@ -1052,6 +1094,7 @@ class GoalExecutionService:
         content: dict[str, Any],
         context: dict[str, Any],
         execution_mode: str,
+        conversation_id: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
         """Verify agent output; retry or escalate on failure.
 
@@ -1095,6 +1138,9 @@ class GoalExecutionService:
         coordinator = self._get_adaptive_coordinator()
         if coordinator is None:
             # No coordinator available, escalate with original content
+            await self._send_quality_escalation(
+                user_id, agent_type, verification_result.issues, conversation_id
+            )
             vr_dict = verification_result.to_dict()
             vr_dict["reason"] = "; ".join(verification_result.issues)
             return (content, vr_dict, True)
@@ -1119,6 +1165,9 @@ class GoalExecutionService:
             decision = coordinator.evaluate_output(evaluation)
         except Exception as e:
             logger.warning("AdaptiveCoordinator evaluation failed: %s", e)
+            await self._send_quality_escalation(
+                user_id, agent_type, verification_result.issues, conversation_id
+            )
             vr_dict = verification_result.to_dict()
             vr_dict["reason"] = "; ".join(verification_result.issues)
             return (content, vr_dict, True)
@@ -1127,6 +1176,44 @@ class GoalExecutionService:
         from src.core.adaptive_coordinator import AdaptiveDecisionType
 
         if decision.decision_type == AdaptiveDecisionType.RETRY_SAME:
+            # Send quality feedback message before retrying
+            try:
+                from src.services.conversational_presenter import ConversationalPresenter
+
+                presenter = ConversationalPresenter()
+                qf_msg, _, _ = presenter.present_quality_feedback(
+                    agent_type=agent_type,
+                    issues=verification_result.issues,
+                    decision="retry",
+                )
+                if qf_msg:
+                    await ws_manager.send_aria_message(user_id=user_id, message=qf_msg)
+                    # Send step_retrying WS event
+                    await ws_manager.send_step_retrying(
+                        user_id=user_id,
+                        goal_id=goal.get("id", ""),
+                        step_id=agent_type,
+                        agent=agent_type,
+                        retry_count=1,
+                        reason="; ".join(verification_result.issues[:2]),
+                    )
+                    # Persist to conversation
+                    if conversation_id:
+                        try:
+                            from src.services.conversations import ConversationService
+
+                            conv_svc = ConversationService(self._db)
+                            await conv_svc.save_message(
+                                conversation_id=conversation_id,
+                                role="assistant",
+                                content=qf_msg,
+                                metadata={"type": "quality_feedback", "data": {"agent": agent_type, "decision": "retry"}},
+                            )
+                        except Exception:
+                            logger.debug("Failed to persist quality feedback message")
+            except Exception:
+                logger.debug("Failed to send quality feedback for retry", exc_info=True)
+
             # Inject verification feedback into context and retry
             retry_context = dict(context)
             retry_context["verification_feedback"] = "; ".join(verification_result.issues)
@@ -1152,19 +1239,63 @@ class GoalExecutionService:
                     return (retry_content, retry_vr.to_dict(), False)
 
                 # Retry also failed → escalate
+                await self._send_quality_escalation(
+                    user_id, agent_type, retry_vr.issues, conversation_id
+                )
                 retry_vr_dict = retry_vr.to_dict()
                 retry_vr_dict["reason"] = "; ".join(retry_vr.issues)
                 return (retry_content, retry_vr_dict, True)
 
             # Retry returned None → escalate with original
+            await self._send_quality_escalation(
+                user_id, agent_type, verification_result.issues, conversation_id
+            )
             vr_dict = verification_result.to_dict()
             vr_dict["reason"] = "; ".join(verification_result.issues)
             return (content, vr_dict, True)
 
         # RE_DELEGATE, ESCALATE, or anything else → escalate
+        await self._send_quality_escalation(
+            user_id, agent_type, verification_result.issues, conversation_id
+        )
         vr_dict = verification_result.to_dict()
         vr_dict["reason"] = "; ".join(verification_result.issues)
         return (content, vr_dict, True)
+
+    async def _send_quality_escalation(
+        self,
+        user_id: str,
+        agent_type: str,
+        issues: list[str],
+        conversation_id: str | None,
+    ) -> None:
+        """Send quality escalation feedback message to user. Never raises."""
+        try:
+            from src.services.conversational_presenter import ConversationalPresenter
+
+            presenter = ConversationalPresenter()
+            qf_msg, _, _ = presenter.present_quality_feedback(
+                agent_type=agent_type,
+                issues=issues,
+                decision="escalate",
+            )
+            if qf_msg:
+                await ws_manager.send_aria_message(user_id=user_id, message=qf_msg)
+                if conversation_id:
+                    try:
+                        from src.services.conversations import ConversationService
+
+                        conv_svc = ConversationService(self._db)
+                        await conv_svc.save_message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=qf_msg,
+                            metadata={"type": "quality_feedback", "data": {"agent": agent_type, "decision": "escalate"}},
+                        )
+                    except Exception:
+                        logger.debug("Failed to persist quality escalation message")
+        except Exception:
+            logger.debug("Failed to send quality escalation feedback", exc_info=True)
 
     async def _retry_agent_execution(
         self,
@@ -1246,6 +1377,7 @@ class GoalExecutionService:
         agent_type: str,
         context: dict[str, Any],
         goal_agent_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a single agent's analysis.
 
@@ -1258,6 +1390,7 @@ class GoalExecutionService:
             agent_type: The agent type (scout, analyst, hunter, etc.).
             context: Gathered execution context (enrichment data, facts, etc.).
             goal_agent_id: Optional goal_agent row ID for execution tracking.
+            conversation_id: Optional conversation ID for persisting messages.
 
         Returns:
             Dict with agent_type, success, and content.
@@ -1315,6 +1448,7 @@ class GoalExecutionService:
                 content=skill_result,
                 context=context,
                 execution_mode="skill_aware",
+                conversation_id=conversation_id,
             )
 
             # Store execution result
@@ -1478,6 +1612,7 @@ class GoalExecutionService:
                 content=content,
                 context=context,
                 execution_mode="prompt_based",
+                conversation_id=conversation_id,
             )
 
             # Store execution result
@@ -2815,7 +2950,28 @@ class GoalExecutionService:
                     ).eq("id", goal_id).execute()
             else:
                 # Sequential execution: one task at a time
-                for task in tasks:
+                prev_task_result: dict[str, Any] | None = None
+                for task_idx, task in enumerate(tasks):
+                    # Send handoff message between sequential agents
+                    if prev_task_result is not None and task_idx < len(tasks):
+                        try:
+                            from src.services.conversational_presenter import ConversationalPresenter
+
+                            presenter = ConversationalPresenter()
+                            prev_agent = prev_task_result.get("agent_type", "")
+                            next_agent = task.get("agent_type", "analyst")
+                            handoff_msg, _, _ = presenter.present_handoff(
+                                prev_agent=prev_agent,
+                                prev_result=prev_task_result,
+                                next_agent=next_agent,
+                            )
+                            if handoff_msg:
+                                await ws_manager.send_aria_message(
+                                    user_id=user_id, message=handoff_msg
+                                )
+                        except Exception:
+                            logger.debug("Failed to send handoff message", exc_info=True)
+
                     task_result = await self._execute_task_with_events(
                         task=task,
                         goal_id=goal_id,
@@ -2824,6 +2980,7 @@ class GoalExecutionService:
                         context=context,
                         conversation_id=plan_conversation_id,
                     )
+                    prev_task_result = task_result
 
                     completed_tasks += 1
                     progress = int((completed_tasks / total_tasks) * 100)
@@ -3085,12 +3242,41 @@ class GoalExecutionService:
         except Exception:
             logger.warning("Failed to send step_started WS event", extra={"goal_id": goal_id})
 
+        # Send context-aware "starting" message before agent execution
+        try:
+            from src.services.conversational_presenter import ConversationalPresenter
+
+            presenter = ConversationalPresenter()
+            starting_msg, _, _ = presenter.present_agent_starting(
+                agent_type=agent_type,
+                task=task,
+                goal_config=goal.get("config", {}),
+            )
+            if starting_msg:
+                await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
+                if conversation_id:
+                    try:
+                        from src.services.conversations import ConversationService
+
+                        conv_svc = ConversationService(self._db)
+                        await conv_svc.save_message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=starting_msg,
+                            metadata={"type": "agent_starting", "data": {"agent": agent_type, "goal_id": goal_id}},
+                        )
+                    except Exception:
+                        logger.debug("Failed to persist agent starting message")
+        except Exception:
+            logger.debug("Failed to send agent starting message", exc_info=True)
+
         try:
             result = await self._execute_agent(
                 user_id=user_id,
                 goal=goal,
                 agent_type=agent_type,
                 context=context,
+                conversation_id=conversation_id,
             )
 
             await self._handle_agent_result(

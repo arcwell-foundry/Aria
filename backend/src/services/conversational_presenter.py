@@ -71,6 +71,75 @@ _AGENT_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
+# Agent "starting" message templates — context-aware progress messages
+_AGENT_STARTING_TEMPLATES: dict[str, dict[str, str]] = {
+    "hunter": {
+        "default": "Scanning for companies matching your ICP...",
+        "with_context": "Scanning for {industry} companies{target_detail}...",
+    },
+    "analyst": {
+        "default": "Pulling from PubMed, FDA databases, and clinical trial registries...",
+        "with_context": "Pulling research on {target} from PubMed, FDA, and clinical trials...",
+    },
+    "scribe": {
+        "default": "Drafting based on your writing profile...",
+        "with_context": "Drafting {doc_type} for {recipient} based on your writing profile...",
+    },
+    "scout": {
+        "default": "Scanning news, filings, and competitor activity...",
+        "with_context": "Scanning news and filings for {target}...",
+    },
+    "strategist": {
+        "default": "Building competitive analysis...",
+        "with_context": "Building competitive analysis for {target}...",
+    },
+    "operator": {
+        "default": "Connecting to your integrations...",
+        "with_context": "Connecting to your integrations for {action}...",
+    },
+}
+
+# Handoff message templates — agent-to-agent transitions
+_HANDOFF_TEMPLATES: dict[str, dict[str, str]] = {
+    "hunter→analyst": "Found {count} matches. Qualifying the top candidates...",
+    "hunter→strategist": "Found {count} matches. Building strategy around the best fits...",
+    "analyst→strategist": "Research is in. Synthesizing into strategy...",
+    "analyst→scribe": "Research is in. Drafting the summary...",
+    "scout→strategist": "Picked up {count} signals. Building assessment...",
+    "scout→analyst": "Picked up {count} signals. Digging deeper on the most relevant...",
+    "strategist→scribe": "Strategy ready. Drafting deliverables...",
+    "strategist→operator": "Strategy ready. Setting up next steps in your CRM...",
+}
+
+# Quality feedback templates — verification failure messaging
+_QUALITY_FEEDBACK_TEMPLATES: dict[str, dict[str, str]] = {
+    "analyst": {
+        "retry": "The research data seems thin — running a deeper pass{issue_detail}.",
+        "escalate": "I've tried twice but the research isn't meeting quality standards{issue_detail}. Flagging for your review.",
+    },
+    "scribe": {
+        "retry": "The draft doesn't quite match your style — revising{issue_detail}.",
+        "escalate": "I've revised twice but the draft still needs work{issue_detail}. Want to review the current version?",
+    },
+    "hunter": {
+        "retry": "Results don't meet quality standards — refining the search{issue_detail}.",
+        "escalate": "The lead search isn't producing strong enough matches{issue_detail}. Want to adjust criteria?",
+    },
+    "strategist": {
+        "retry": "The analysis needs more depth — running another pass{issue_detail}.",
+        "escalate": "The strategic analysis isn't hitting the mark{issue_detail}. Flagging for your input.",
+    },
+    "scout": {
+        "retry": "Signal quality is below threshold — broadening the scan{issue_detail}.",
+        "escalate": "Market signals aren't meeting relevance standards{issue_detail}. Want to adjust monitoring scope?",
+    },
+    "operator": {
+        "retry": "The integration action didn't complete cleanly — retrying{issue_detail}.",
+        "escalate": "Integration action failed after retries{issue_detail}. May need manual attention.",
+    },
+}
+
+
 def _first_name(items: list[dict[str, Any]] | Any) -> str:
     """Extract name from first item in a list."""
     if not isinstance(items, list) or not items:
@@ -195,23 +264,42 @@ class ConversationalPresenter:
         total = len(results)
         agent_summaries = self._extract_agent_summaries(results)
 
-        # Try LLM for personality-infused summary
-        message = await self._generate_completion_llm(
+        # Try LLM for personality-infused summary with enriched fields
+        completion_data = await self._generate_completion_llm(
             user_id, goal_title, success_count, total, agent_summaries
         )
 
-        # Build rich_content with per-agent summaries
+        message = completion_data.get("summary", "")
+        if not message:
+            message = self._fallback_completion_message(
+                goal_title, success_count, total, agent_summaries
+            )
+
+        # Build rich_content with per-agent summaries + enriched fields
         rich_content: list[dict[str, Any]] = []
         if agent_summaries:
+            card_data: dict[str, Any] = {
+                "goal_id": goal_id,
+                "goal_title": goal_title,
+                "success_count": success_count,
+                "total_agents": total,
+                "agent_results": agent_summaries,
+            }
+
+            strategic_rec = completion_data.get("strategic_recommendation", "")
+            key_findings = completion_data.get("key_findings", [])
+
+            if strategic_rec:
+                card_data["strategic_recommendation"] = strategic_rec
+            if key_findings:
+                card_data["key_findings"] = key_findings
+
+            # Include deliverable link if goal has a report page
+            card_data["deliverable_link"] = f"/goals/{goal_id}"
+
             rich_content.append({
                 "type": "goal_completion",
-                "data": {
-                    "goal_id": goal_id,
-                    "goal_title": goal_title,
-                    "success_count": success_count,
-                    "total_agents": total,
-                    "agent_results": agent_summaries,
-                },
+                "data": card_data,
             })
 
         suggestions = [
@@ -302,6 +390,145 @@ class ConversationalPresenter:
         # Message is already generated by IntegrationRequestService — return empty
         # to let the caller decide
         return "", rich_content, suggestions
+
+    def present_agent_starting(
+        self,
+        agent_type: str,
+        task: dict[str, Any] | None = None,
+        goal_config: dict[str, Any] | None = None,
+    ) -> tuple[str, list[dict[str, Any]], list[str]]:
+        """Generate a context-aware "starting" message for an agent.
+
+        Zero LLM cost — template-based only.
+
+        Args:
+            agent_type: The agent type (hunter, analyst, etc.).
+            task: Optional task dict with title, description, config.
+            goal_config: Optional goal config with industry, target, etc.
+
+        Returns:
+            Tuple of (message_text, [], []).
+        """
+        templates = _AGENT_STARTING_TEMPLATES.get(agent_type)
+        if not templates:
+            return (f"Working on {agent_type} analysis...", [], [])
+
+        # Try context-aware template first
+        config = goal_config or {}
+        task_data = task or {}
+        task_config = task_data.get("config", {})
+
+        target = (
+            config.get("target")
+            or config.get("company")
+            or task_data.get("description", "")[:60]
+        )
+        industry = config.get("industry", "")
+        recipient = config.get("recipient") or task_config.get("recipient", "")
+        doc_type = config.get("doc_type") or task_config.get("doc_type", "email")
+        action = task_data.get("title") or task_data.get("description", "")
+        target_detail = f" near {target}" if target else ""
+
+        if target or industry or recipient:
+            try:
+                message = templates["with_context"].format(
+                    target=target or "your focus areas",
+                    industry=industry or "target",
+                    recipient=recipient or "your contact",
+                    doc_type=doc_type,
+                    action=action[:80] if action else "the requested action",
+                    target_detail=target_detail,
+                )
+                return (message, [], [])
+            except (KeyError, IndexError):
+                pass
+
+        return (templates["default"], [], [])
+
+    def present_handoff(
+        self,
+        prev_agent: str,
+        prev_result: dict[str, Any],
+        next_agent: str,
+    ) -> tuple[str, list[dict[str, Any]], list[str]]:
+        """Generate a handoff message when one agent passes to the next.
+
+        Zero LLM cost — template-based only.
+
+        Args:
+            prev_agent: The agent that just completed.
+            prev_result: The previous agent's result dict.
+            next_agent: The agent about to start.
+
+        Returns:
+            Tuple of (message_text, [], []) or ("", [], []) if no template.
+        """
+        key = f"{prev_agent}→{next_agent}"
+        template = _HANDOFF_TEMPLATES.get(key)
+        if not template:
+            return ("", [], [])
+
+        # Extract counts from previous result
+        content = prev_result.get("content", {})
+        if isinstance(content, str):
+            content = {}
+
+        count = 0
+        if prev_agent == "hunter":
+            count = len(content.get("leads", content.get("companies", [])))
+        elif prev_agent == "scout":
+            count = len(content.get("signals", content.get("items", [])))
+        elif prev_agent == "analyst":
+            count = len(content.get("findings", content.get("results", [])))
+
+        try:
+            message = template.format(count=count or "several")
+        except (KeyError, IndexError):
+            message = template.replace("{count}", str(count or "several"))
+
+        return (message, [], [])
+
+    def present_quality_feedback(
+        self,
+        agent_type: str,
+        issues: list[str],
+        decision: str,
+        retry_count: int = 1,
+    ) -> tuple[str, list[dict[str, Any]], list[str]]:
+        """Generate conversational quality feedback on verification failure.
+
+        Zero LLM cost — template-based only.
+
+        Args:
+            agent_type: The agent whose output failed verification.
+            issues: List of verification issue strings.
+            decision: "retry" or "escalate".
+            retry_count: How many retries have been attempted.
+
+        Returns:
+            Tuple of (message_text, [], []).
+        """
+        templates = _QUALITY_FEEDBACK_TEMPLATES.get(agent_type)
+        if not templates:
+            if decision == "retry":
+                return ("Quality check flagged some issues — running another pass.", [], [])
+            return ("Quality check flagged issues after retries. Flagging for your review.", [], [])
+
+        template = templates.get(decision, templates.get("retry", ""))
+
+        # Build concise issue detail
+        issue_detail = ""
+        if issues:
+            # Take first issue, keep it short
+            first_issue = issues[0][:100]
+            issue_detail = f" ({first_issue})"
+
+        try:
+            message = template.format(issue_detail=issue_detail)
+        except (KeyError, IndexError):
+            message = template.replace("{issue_detail}", issue_detail)
+
+        return (message, [], [])
 
     # -------------------------------------------------------------------------
     # Private helpers
@@ -399,11 +626,15 @@ class ConversationalPresenter:
         success_count: int,
         total: int,
         agent_summaries: list[dict[str, Any]],
-    ) -> str:
-        """Generate personality-infused goal completion message via LLM.
+    ) -> dict[str, Any]:
+        """Generate personality-infused goal completion data via LLM.
 
-        Budget-checked via CostGovernor. Falls back to template on failure.
+        Returns a dict with 'summary', 'strategic_recommendation', and
+        'key_findings' fields. Budget-checked via CostGovernor. Falls back
+        to template on failure.
         """
+        import json as _json
+
         # Build summary lines for the prompt
         summary_lines = []
         for s in agent_summaries:
@@ -411,7 +642,14 @@ class ConversationalPresenter:
             summary_lines.append(f"- {s['agent_type'].title()}: {status} — {s['summary']}")
         summary_text = "\n".join(summary_lines) if summary_lines else "No details available."
 
-        fallback = self._fallback_completion_message(goal_title, success_count, total, agent_summaries)
+        fallback_msg = self._fallback_completion_message(
+            goal_title, success_count, total, agent_summaries
+        )
+        fallback: dict[str, Any] = {
+            "summary": fallback_msg,
+            "strategic_recommendation": "",
+            "key_findings": [],
+        }
 
         try:
             from src.core.cost_governor import CostGovernor
@@ -425,28 +663,51 @@ class ConversationalPresenter:
 
             llm = LLMClient()
             prompt = (
-                "You are ARIA, an AI Department Director. Write a 1-2 sentence "
-                "conversational summary of a completed goal. Be direct and specific.\n\n"
+                "You are ARIA, an AI Department Director. Summarize a completed goal.\n\n"
                 f"Goal: {goal_title}\n"
                 f"Results: {success_count}/{total} agents succeeded\n"
                 f"Agent results:\n{summary_text}\n\n"
+                "Respond with a JSON object containing exactly these fields:\n"
+                '- "summary": 1-2 sentence conversational summary. Reference specific '
+                "results (numbers, names, findings). Sound like a confident colleague "
+                "reporting back. End with what they should look at first.\n"
+                '- "strategic_recommendation": 1 sentence actionable recommendation '
+                "based on the results. What should the user do next?\n"
+                '- "key_findings": array of 2-4 short bullet strings (most important findings).\n\n'
                 "Rules:\n"
-                "- Reference specific results (numbers, names, findings)\n"
-                "- Sound like a confident colleague reporting back\n"
                 "- Do NOT use emojis or 'As an AI'\n"
-                "- End with what they should look at first"
+                "- Be direct and specific\n"
+                "- Return valid JSON only, no markdown wrapping"
             )
 
             response = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=150,
+                max_tokens=250,
                 temperature=0.7,
                 user_id=None,
             )
 
             await governor.record_usage(user_id, getattr(response, "usage", None))
-            result = response.strip() if isinstance(response, str) else str(response).strip()
-            return result if result else fallback
+            raw = response.strip() if isinstance(response, str) else str(response).strip()
+
+            if not raw:
+                return fallback
+
+            # Parse structured JSON
+            try:
+                parsed = _json.loads(raw)
+                return {
+                    "summary": parsed.get("summary", fallback_msg),
+                    "strategic_recommendation": parsed.get("strategic_recommendation", ""),
+                    "key_findings": parsed.get("key_findings", []),
+                }
+            except _json.JSONDecodeError:
+                # LLM returned plain text — use as summary
+                return {
+                    "summary": raw,
+                    "strategic_recommendation": "",
+                    "key_findings": [],
+                }
         except Exception:
             logger.debug("LLM goal completion generation failed", exc_info=True)
             return fallback
