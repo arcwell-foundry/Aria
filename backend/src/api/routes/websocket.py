@@ -560,6 +560,111 @@ async def _handle_user_message(
                     "Failed to auto-approve plan via chat: %s", approve_err
                 )
 
+        # --- Intent detection: auto-create goal if message implies one ---
+        # Skip if user already has a pending plan or just approved one
+        if not pending_plan_goal_id and not plan_approved_via_chat:
+            import asyncio
+
+            async def _detect_and_create_goal() -> None:
+                """Background task: detect goal intent and create goal + plan."""
+                try:
+                    from src.core.llm import LLMClient
+                    from src.models.goal import GoalCreate, GoalType
+                    from src.services.goal_execution import GoalExecutionService
+                    from src.services.goal_service import GoalService
+
+                    intent_prompt = (
+                        "Analyze this user message and determine if it implies a goal "
+                        "or task that ARIA should plan and execute autonomously.\n\n"
+                        f'User message: "{message_text}"\n\n'
+                        "A message implies a goal if the user wants ARIA to:\n"
+                        "- Research, analyze, or investigate something\n"
+                        "- Find, compare, or evaluate options\n"
+                        "- Monitor, track, or watch for changes\n"
+                        "- Create, draft, prepare, or write something\n"
+                        "- Schedule, plan, or organize something\n"
+                        "- Build a strategy, report, or recommendation\n\n"
+                        "Do NOT classify as a goal if the message is:\n"
+                        "- Casual conversation, greetings, or small talk\n"
+                        "- A simple factual question (what is X, who is Y)\n"
+                        "- Feedback on a previous response\n"
+                        "- A request to explain or clarify something\n"
+                        "- A single-step task that doesn't need planning\n\n"
+                        "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+                        "{\n"
+                        '  "is_goal": true or false,\n'
+                        '  "goal_title": "concise title if is_goal is true, else null",\n'
+                        '  "goal_type": "research|analysis|lead_gen|competitive_intel'
+                        '|outreach|meeting_prep|territory|custom",\n'
+                        '  "goal_description": "1-2 sentence description if is_goal '
+                        'is true, else null"\n'
+                        "}"
+                    )
+
+                    llm = LLMClient()
+                    intent_raw = await llm.generate_response(
+                        messages=[{"role": "user", "content": intent_prompt}],
+                        max_tokens=256,
+                        temperature=0.1,
+                        user_id=user_id,
+                    )
+
+                    # Strip markdown fences if present
+                    cleaned = intent_raw.strip()
+                    if cleaned.startswith("```"):
+                        cleaned = cleaned.split("\n", 1)[-1]
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned.rsplit("```", 1)[0]
+                    cleaned = cleaned.strip()
+
+                    intent = json.loads(cleaned)
+
+                    if not intent.get("is_goal"):
+                        return
+
+                    # Map goal_type to enum
+                    goal_type_str = intent.get("goal_type", "research")
+                    try:
+                        goal_type = GoalType(goal_type_str)
+                    except ValueError:
+                        goal_type = GoalType.RESEARCH
+
+                    goal_data = GoalCreate(
+                        title=intent.get("goal_title", message_text[:100]),
+                        description=intent.get(
+                            "goal_description", message_text
+                        ),
+                        goal_type=goal_type,
+                    )
+
+                    goal_svc = GoalService()
+                    goal = await goal_svc.create_goal(user_id, goal_data)
+
+                    logger.info(
+                        "Goal auto-created from chat intent",
+                        extra={
+                            "goal_id": goal["id"],
+                            "user_id": user_id,
+                            "title": goal_data.title,
+                        },
+                    )
+
+                    # Generate execution plan — this sends the plan card
+                    # via WebSocket and persists it to the messages table
+                    exec_svc = GoalExecutionService()
+                    await exec_svc.plan_goal(goal["id"], user_id)
+
+                except json.JSONDecodeError:
+                    logger.debug(
+                        "Intent detection JSON parse failed, skipping goal creation"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Intent detection/goal creation failed: %s", e
+                    )
+
+            asyncio.create_task(_detect_and_create_goal())
+
     except Exception as chat_err:
         logger.exception("WebSocket chat error: %s", chat_err)
         await websocket.send_json(

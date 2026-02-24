@@ -33,8 +33,15 @@ class WSEvent(BaseModel):
     type: WSEventType
 
     def to_ws_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON WebSocket transmission."""
-        return self.model_dump(mode="json")
+        """Serialize to {type, payload} envelope for JSON WebSocket transmission.
+
+        The frontend WebSocketManager expects all messages in
+        ``{type: string, payload: unknown}`` format.  Extracts ``type``
+        from the model and wraps all other fields as the ``payload``.
+        """
+        data = self.model_dump(mode="json")
+        event_type = data.pop("type")
+        return {"type": event_type, "payload": data}
 
 
 class AriaMessageEvent(WSEvent):
@@ -51,6 +58,7 @@ class ThinkingEvent(WSEvent):
     """ARIA is processing/thinking indicator."""
 
     type: WSEventType = WSEventType.THINKING
+    is_thinking: bool = True
 
 
 class AriaSpeakingEvent(WSEvent):
