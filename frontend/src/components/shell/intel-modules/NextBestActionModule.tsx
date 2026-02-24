@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Zap, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useIntelligenceInsights } from '@/hooks/useIntelPanelData';
 import { useRecommendationsStore } from '@/stores/recommendationsStore';
 
@@ -39,8 +40,8 @@ export interface NextBestActionModuleProps {
 export function NextBestActionModule({ action: propAction }: NextBestActionModuleProps) {
   const navigate = useNavigate();
   const { data: insights, isLoading } = useIntelligenceInsights({ limit: 5 });
-  const liveRecommendations = useRecommendationsStore((s) =>
-    s.items.filter((r) => !r.dismissed),
+  const liveRecommendations = useRecommendationsStore(
+    useShallow((s) => s.items.filter((r) => !r.dismissed)),
   );
   const dismiss = useRecommendationsStore((s) => s.dismiss);
 
