@@ -545,8 +545,7 @@ class VideoSessionService:
             f"[{entry['speaker']}]: {entry['content']}" for entry in transcript_data
         )
 
-        system_prompt = """You are an AI assistant that analyzes video conversation transcripts.
-Extract structured insights from the conversation transcript.
+        system_prompt = """You are ARIA's transcript analysis module. Analyze video conversation transcripts and extract structured insights.
 
 You must respond with a valid JSON object containing:
 - key_topics: list of main topics discussed (strings)

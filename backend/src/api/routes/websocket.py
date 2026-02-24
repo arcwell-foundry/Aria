@@ -469,17 +469,38 @@ async def _handle_user_message(
         # Query active goals and digital twin calibration for prompt injection
         active_goals = await service._get_active_goals(user_id)
         digital_twin_calibration = await service._get_digital_twin_calibration(user_id)
+        capability_context = await service._get_capability_context(user_id)
 
-        # Build system prompt
-        system_prompt = service._build_system_prompt(
-            memories,
-            load_state,
-            proactive_insights,
-            personality,
-            style_guidelines,
-            priming_context,
-            active_goals=active_goals,
-            digital_twin_calibration=digital_twin_calibration,
+        # Build system prompt — use PersonaBuilder (v2) for full ARIA identity
+        if service._use_persona_builder:
+            system_prompt = await service._build_system_prompt_v2(
+                user_id,
+                memories,
+                load_state,
+                proactive_insights,
+                priming_context,
+                companion_context=None,
+                active_goals=active_goals,
+                digital_twin_calibration=digital_twin_calibration,
+                capability_context=capability_context,
+            )
+        else:
+            system_prompt = service._build_system_prompt(
+                memories,
+                load_state,
+                proactive_insights,
+                personality,
+                style_guidelines,
+                priming_context,
+                active_goals=active_goals,
+                digital_twin_calibration=digital_twin_calibration,
+                capability_context=capability_context,
+            )
+
+        # Debug: log system prompt to verify ARIA identity
+        logger.info(
+            "WS_SYSTEM_PROMPT_DEBUG_START\n%s\nWS_SYSTEM_PROMPT_DEBUG_END",
+            system_prompt[:2000],
         )
 
         # Append pending plan context if available

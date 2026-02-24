@@ -216,8 +216,8 @@ Format your response as JSON:
 }}"""
 
         _fallback_prompt = (
-            "You are ARIA, an AI assistant helping a life sciences "
-            "professional think through scenarios."
+            "You are ARIA's scenario simulation module, analyzing "
+            "business scenarios for a life sciences commercial team."
         )
 
         # Primary: PersonaBuilder
