@@ -1,6 +1,5 @@
 """Chat API routes for memory-integrated conversations."""
 
-import asyncio
 import json
 import logging
 import time
@@ -18,150 +17,6 @@ from src.services.conversations import ConversationService
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Background intent detection → goal creation
-# ---------------------------------------------------------------------------
-
-
-async def _detect_and_create_goal(
-    message_text: str, user_id: str, conversation_id: str
-) -> None:
-    """Background task: detect goal intent in a chat message, create a goal + plan.
-
-    This runs fire-and-forget after the main chat response is sent.
-    Errors are logged but never propagated to the caller.
-    """
-    logger.warning(
-        "INTENT_DETECT START: msg='%.80s' user=%s conv=%s",
-        message_text, user_id, conversation_id,
-    )
-    try:
-        from src.core.llm import LLMClient
-        from src.models.goal import GoalCreate, GoalType
-        from src.services.goal_execution import GoalExecutionService
-        from src.services.goal_service import GoalService
-
-        # Guard: skip if user already has a pending plan_ready goal
-        db = get_supabase_client()
-        plan_ready = (
-            db.table("goals")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("status", "plan_ready")
-            .limit(1)
-            .execute()
-        )
-        if plan_ready.data:
-            logger.warning(
-                "INTENT_DETECT: skipping — user has plan_ready goal %s",
-                plan_ready.data[0]["id"],
-            )
-            return
-
-        intent_prompt = (
-            "Analyze this user message and determine if it implies a goal "
-            "or task that ARIA should plan and execute autonomously.\n\n"
-            f'User message: "{message_text}"\n\n'
-            "A message implies a goal if the user wants ARIA to:\n"
-            "- Research, analyze, or investigate something\n"
-            "- Find, compare, or evaluate options\n"
-            "- Monitor, track, or watch for changes\n"
-            "- Create, draft, prepare, or write something\n"
-            "- Schedule, plan, or organize something\n"
-            "- Build a strategy, report, or recommendation\n\n"
-            "Do NOT classify as a goal if the message is:\n"
-            "- Casual conversation, greetings, or small talk\n"
-            "- A simple factual question (what is X, who is Y)\n"
-            "- Feedback on a previous response\n"
-            "- A request to explain or clarify something\n"
-            "- A single-step task that doesn't need planning\n\n"
-            "Respond with ONLY valid JSON (no markdown, no backticks):\n"
-            "{\n"
-            '  "is_goal": true or false,\n'
-            '  "goal_title": "concise title if is_goal is true, else null",\n'
-            '  "goal_type": "research|analysis|lead_gen|competitive_intel'
-            '|outreach|meeting_prep|territory|custom",\n'
-            '  "goal_description": "1-2 sentence description if is_goal '
-            'is true, else null"\n'
-            "}"
-        )
-
-        logger.warning("INTENT_DETECT: calling LLM for classification...")
-        llm = LLMClient()
-        intent_raw = await llm.generate_response(
-            messages=[{"role": "user", "content": intent_prompt}],
-            max_tokens=256,
-            temperature=0.1,
-            user_id=user_id,
-        )
-        logger.warning("INTENT_DETECT: LLM raw response = %.500s", intent_raw)
-
-        # Strip markdown fences if present
-        cleaned = intent_raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1]
-        if cleaned.endswith("```"):
-            cleaned = cleaned.rsplit("```", 1)[0]
-        cleaned = cleaned.strip()
-
-        intent = json.loads(cleaned)
-        logger.warning("INTENT_DETECT: parsed JSON = %s", intent)
-
-        if not intent.get("is_goal"):
-            logger.warning("INTENT_DETECT: is_goal=False, skipping")
-            return
-
-        # Map goal_type to enum
-        goal_type_str = intent.get("goal_type", "research")
-        try:
-            goal_type = GoalType(goal_type_str)
-        except ValueError:
-            goal_type = GoalType.RESEARCH
-
-        goal_data = GoalCreate(
-            title=intent.get("goal_title", message_text[:100]),
-            description=intent.get("goal_description", message_text),
-            goal_type=goal_type,
-        )
-
-        logger.warning(
-            "INTENT_DETECT: creating goal '%s' type=%s",
-            goal_data.title, goal_data.goal_type,
-        )
-        goal_svc = GoalService()
-        goal = await goal_svc.create_goal(user_id, goal_data)
-
-        logger.info(
-            "Goal auto-created from chat intent",
-            extra={
-                "goal_id": goal["id"],
-                "user_id": user_id,
-                "title": goal_data.title,
-            },
-        )
-
-        # Generate execution plan — sends plan card via WebSocket + persists
-        logger.warning(
-            "INTENT_DETECT: goal created id=%s, calling plan_goal()...",
-            goal["id"],
-        )
-        exec_svc = GoalExecutionService()
-        await exec_svc.plan_goal(goal["id"], user_id)
-        logger.warning(
-            "INTENT_DETECT: plan_goal() completed for goal=%s", goal["id"]
-        )
-
-    except json.JSONDecodeError as je:
-        logger.error(
-            "INTENT_DETECT FAILED: JSON parse error: %s | raw='%.300s'",
-            je, locals().get("cleaned", "N/A"),
-        )
-    except Exception as e:
-        logger.error(
-            "INTENT_DETECT FAILED: %s: %s", type(e).__name__, e,
-            exc_info=True,
-        )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -242,6 +97,7 @@ class ChatResponse(BaseModel):
     suggestions: list[str] = []
     timing: Timing | None = None
     cognitive_load: CognitiveLoadInfo | None = None
+    intent_detected: str | None = None
 
 
 class ConversationListResponse(BaseModel):
@@ -330,13 +186,6 @@ async def chat(
             [],
         )
 
-    # Fire-and-forget intent detection
-    asyncio.create_task(
-        _detect_and_create_goal(
-            request.message, current_user.id, conversation_id
-        )
-    )
-
     return ChatResponse(
         message=result["message"],
         citations=[Citation(**c) for c in result.get("citations", [])],
@@ -348,6 +197,7 @@ async def chat(
         cognitive_load=CognitiveLoadInfo(**result["cognitive_load"])
         if result.get("cognitive_load")
         else None,
+        intent_detected=result.get("intent_detected"),
     )
 
 
@@ -402,6 +252,49 @@ async def chat_stream(
             recent_messages=recent_messages,
             session_id=conversation_id,
         )
+
+        # --- Inline Intent Detection (before building system prompt) ---
+        intent_result = await service._classify_intent(current_user.id, request.message)
+
+        if intent_result and intent_result.get("is_goal"):
+            # Short-circuit: emit goal plan instead of streaming a chat response
+            metadata = {
+                "type": "metadata",
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+            }
+            yield f"data: {json.dumps(metadata)}\n\n"
+
+            # Handle goal creation + planning
+            goal_response = await service._handle_goal_intent(
+                user_id=current_user.id,
+                conversation_id=conversation_id,
+                message=request.message,
+                intent=intent_result,
+                working_memory=working_memory,
+                conversation_messages=conversation_messages,
+                load_state=load_state,
+            )
+
+            # Emit the brief ARIA text as token events
+            for token_chunk in [goal_response["message"]]:
+                event = {"type": "token", "content": token_chunk}
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # Emit completion with rich_content containing the execution plan
+            complete_event = {
+                "type": "complete",
+                "rich_content": goal_response.get("rich_content", []),
+                "ui_commands": [],
+                "suggestions": goal_response.get("suggestions", []),
+                "intent_detected": "goal",
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+
+            yield "data: [DONE]\n\n"
+            return
+
+        # --- Normal conversational streaming path ---
 
         # Get proactive insights
         proactive_insights = await service._get_proactive_insights(
@@ -514,13 +407,6 @@ async def chat_stream(
         yield f"data: {json.dumps(complete_event)}\n\n"
 
         yield "data: [DONE]\n\n"
-
-        # Fire-and-forget intent detection after streaming completes
-        asyncio.create_task(
-            _detect_and_create_goal(
-                request.message, current_user.id, conversation_id
-            )
-        )
 
     return StreamingResponse(
         event_stream(),

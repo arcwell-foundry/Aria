@@ -435,6 +435,37 @@ async def _handle_user_message(
             pending_plan_goal_id, user_id,
         )
 
+        # --- Inline Intent Detection (before building system prompt) ---
+        if not pending_plan_goal_id:
+            intent_result = await service._classify_intent(user_id, message_text)
+            if intent_result and intent_result.get("is_goal"):
+                logger.info(
+                    "WS intent classified as GOAL, routing to plan",
+                    extra={"user_id": user_id, "goal_title": intent_result.get("goal_title")},
+                )
+                goal_response = await service._handle_goal_intent(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message_text,
+                    intent=intent_result,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                    load_state=load_state,
+                )
+                # Send the goal response via WebSocket
+                await websocket.send_json(
+                    {
+                        "type": "aria.message",
+                        "message": goal_response["message"],
+                        "rich_content": goal_response.get("rich_content", []),
+                        "ui_commands": [],
+                        "suggestions": goal_response.get("suggestions", []),
+                        "conversation_id": conversation_id,
+                        "intent_detected": "goal",
+                    }
+                )
+                return
+
         # Query active goals and digital twin calibration for prompt injection
         active_goals = await service._get_active_goals(user_id)
         digital_twin_calibration = await service._get_digital_twin_calibration(user_id)
@@ -576,24 +607,7 @@ async def _handle_user_message(
                     "Failed to auto-approve plan via chat: %s", approve_err
                 )
 
-        # --- Intent detection: auto-create goal if message implies one ---
-        # Skip if user already has a pending plan or just approved one
-        logger.warning(
-            "INTENT_GATE: pending_plan_goal_id=%s, plan_approved_via_chat=%s → %s",
-            pending_plan_goal_id,
-            plan_approved_via_chat,
-            "SKIPPING" if (pending_plan_goal_id or plan_approved_via_chat) else "PROCEEDING",
-        )
-        if not pending_plan_goal_id and not plan_approved_via_chat:
-            import asyncio
-
-            from src.api.routes.chat import _detect_and_create_goal
-
-            logger.warning("INTENT_DETECT: creating asyncio task now (WS path)...")
-            task = asyncio.create_task(
-                _detect_and_create_goal(message_text, user_id, conversation_id)
-            )
-            logger.warning("INTENT_DETECT: asyncio task created: %s", task)
+        # Intent detection is now handled inline before streaming (see above)
 
     except Exception as chat_err:
         logger.exception("WebSocket chat error: %s", chat_err)

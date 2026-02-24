@@ -820,6 +820,198 @@ class ChatService:
                 logger.warning("Failed to initialize TrustCalibrationService: %s", e)
         return self._trust_service
 
+    # ------------------------------------------------------------------
+    # Inline Intent Detection
+    # ------------------------------------------------------------------
+
+    async def _classify_intent(self, user_id: str, message: str) -> dict[str, Any] | None:
+        """Classify whether a user message implies a goal ARIA should plan.
+
+        Uses a fast LLM call (max_tokens=256, temperature=0.1) to determine
+        if the message is a goal request.  Returns the parsed intent dict on
+        success, or ``None`` when intent detection should be skipped or fails.
+
+        Guard: if the user already has a ``plan_ready`` goal we skip
+        classification to avoid creating duplicate plans.
+        """
+        try:
+            # Guard: skip if user already has a pending plan_ready goal
+            db = get_supabase_client()
+            plan_ready = (
+                db.table("goals")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("status", "plan_ready")
+                .limit(1)
+                .execute()
+            )
+            if plan_ready.data:
+                logger.info(
+                    "Intent classification skipped — user has plan_ready goal %s",
+                    plan_ready.data[0]["id"],
+                )
+                return None
+
+            intent_prompt = (
+                "Analyze this user message and determine if it implies a goal "
+                "or task that ARIA should plan and execute autonomously.\n\n"
+                f'User message: "{message}"\n\n'
+                "A message implies a goal if the user wants ARIA to:\n"
+                "- Research, analyze, or investigate something\n"
+                "- Find, compare, or evaluate options\n"
+                "- Monitor, track, or watch for changes\n"
+                "- Create, draft, prepare, or write something\n"
+                "- Schedule, plan, or organize something\n"
+                "- Build a strategy, report, or recommendation\n\n"
+                "Do NOT classify as a goal if the message is:\n"
+                "- Casual conversation, greetings, or small talk\n"
+                "- A simple factual question (what is X, who is Y)\n"
+                "- Feedback on a previous response\n"
+                "- A request to explain or clarify something\n"
+                "- A single-step task that doesn't need planning\n\n"
+                "Respond with ONLY valid JSON (no markdown, no backticks):\n"
+                "{\n"
+                '  "is_goal": true or false,\n'
+                '  "goal_title": "concise title if is_goal is true, else null",\n'
+                '  "goal_type": "research|analysis|lead_gen|competitive_intel'
+                '|outreach|meeting_prep|territory|custom",\n'
+                '  "goal_description": "1-2 sentence description if is_goal '
+                'is true, else null"\n'
+                "}"
+            )
+
+            llm = LLMClient()
+            intent_raw = await llm.generate_response(
+                messages=[{"role": "user", "content": intent_prompt}],
+                max_tokens=256,
+                temperature=0.1,
+                user_id=user_id,
+            )
+
+            # Strip markdown fences if present
+            cleaned = intent_raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            cleaned = cleaned.strip()
+
+            intent = json.loads(cleaned)
+            logger.info("Intent classification result: %s", intent)
+            return intent
+
+        except json.JSONDecodeError as je:
+            logger.warning("Intent classification JSON parse error: %s", je)
+            return None
+        except Exception as e:
+            logger.warning("Intent classification failed (fall-through to conversation): %s", e)
+            return None
+
+    async def _handle_goal_intent(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        intent: dict[str, Any],
+        working_memory: Any,
+        conversation_messages: list,
+        load_state: Any,
+    ) -> dict[str, Any]:
+        """Handle a message classified as a goal intent.
+
+        Creates the goal, generates an execution plan, persists the turn,
+        and returns the response dict with ``execution_plan`` rich content.
+        """
+        from src.models.goal import GoalCreate, GoalType
+        from src.services.goal_execution import GoalExecutionService
+        from src.services.goal_service import GoalService
+
+        # Map goal_type string to enum
+        goal_type_str = intent.get("goal_type", "research")
+        try:
+            goal_type = GoalType(goal_type_str)
+        except ValueError:
+            goal_type = GoalType.RESEARCH
+
+        goal_data = GoalCreate(
+            title=intent.get("goal_title", message[:100]),
+            description=intent.get("goal_description", message),
+            goal_type=goal_type,
+        )
+
+        goal_svc = GoalService()
+        goal = await goal_svc.create_goal(user_id, goal_data)
+        goal_id = goal["id"]
+        logger.info(
+            "Goal created from inline intent detection",
+            extra={"goal_id": goal_id, "user_id": user_id, "title": goal_data.title},
+        )
+
+        # Generate execution plan (also emits via WebSocket + persists plan message)
+        exec_svc = GoalExecutionService()
+        plan_result = await exec_svc.plan_goal(goal_id, user_id)
+
+        # Build brief ARIA response text
+        title = intent.get("goal_title", goal_data.title)
+        response_text = (
+            f"Let me break this down. Here's my proposed plan for **{title}**:"
+        )
+
+        # Add to working memory
+        working_memory.add_message("assistant", response_text)
+
+        # Persist the turn
+        await self.persist_turn(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message,
+            assistant_message=response_text,
+            assistant_metadata={"intent_detected": "goal", "goal_id": goal_id},
+            conversation_context=conversation_messages[-2:],
+        )
+
+        # Build rich_content from the plan result
+        rich_content: list[dict[str, Any]] = [
+            {
+                "type": "execution_plan",
+                "data": {
+                    "goal_id": goal_id,
+                    "title": title,
+                    "tasks": plan_result.get("tasks", []),
+                    "missing_integrations": plan_result.get("missing_integrations", []),
+                    "approval_points": plan_result.get("approval_points", []),
+                    "estimated_total_minutes": plan_result.get("estimated_total_minutes", 0),
+                    "readiness_score": plan_result.get("readiness_score", 100),
+                    "connected_integrations": plan_result.get("connected_integrations", []),
+                },
+            }
+        ]
+
+        return {
+            "message": response_text,
+            "citations": [],
+            "conversation_id": conversation_id,
+            "rich_content": rich_content,
+            "ui_commands": [],
+            "suggestions": [
+                "Approve the plan",
+                "Tell me more about this approach",
+                "Modify the plan",
+            ],
+            "timing": {
+                "memory_query_ms": 0,
+                "llm_response_ms": 0,
+                "total_ms": 0,
+            },
+            "cognitive_load": {
+                "level": load_state.level.value,
+                "score": round(load_state.score, 3),
+                "recommendation": load_state.recommendation,
+            },
+            "proactive_insights": [],
+            "intent_detected": "goal",
+        }
+
     async def _get_skill_registry(self) -> Any:
         """Lazily initialize and return the SkillRegistry.
 
@@ -1574,6 +1766,30 @@ class ChatService:
                 },
                 "proactive_insights": [],
             }
+
+        # --- Inline Intent Detection: route goals before conversational LLM ---
+        intent_start = time.perf_counter()
+        intent_result = await self._classify_intent(user_id, message)
+        intent_ms = (time.perf_counter() - intent_start) * 1000
+
+        if intent_result and intent_result.get("is_goal"):
+            logger.info(
+                "Intent classified as GOAL, short-circuiting to plan",
+                extra={
+                    "user_id": user_id,
+                    "intent_ms": round(intent_ms, 2),
+                    "goal_title": intent_result.get("goal_title"),
+                },
+            )
+            return await self._handle_goal_intent(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message=message,
+                intent=intent_result,
+                working_memory=working_memory,
+                conversation_messages=conversation_messages,
+                load_state=load_state,
+            )
 
         # Build companion context (replaces personality calibration + style guidelines)
         companion_ctx = None
