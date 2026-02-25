@@ -54,6 +54,15 @@ class EmailSummary(BaseModel):
 
 logger = logging.getLogger(__name__)
 
+# Calendar integration types and Composio action mappings
+_CALENDAR_INTEGRATION_TYPES = ("google_calendar", "outlook_calendar", "outlook")
+
+_CALENDAR_READ_ACTIONS: dict[str, str] = {
+    "google_calendar": "GOOGLECALENDAR_FIND_EVENT",
+    "outlook_calendar": "OUTLOOK_CALENDAR_FIND_EVENTS",
+    "outlook": "OUTLOOK_CALENDAR_FIND_EVENTS",
+}
+
 
 class BriefingService:
     """Service for generating and managing daily briefings."""
@@ -66,6 +75,20 @@ class BriefingService:
         self._activity_service = ActivityService()
         # Lazy init for Exa provider
         self._exa_provider: Any = None
+        # Lazy init for OAuth client (calendar integration)
+        self._oauth_client: Any = None
+
+    def _get_oauth_client(self) -> Any:
+        """Lazily initialize and return the ComposioOAuthClient."""
+        if self._oauth_client is None:
+            try:
+                from src.integrations.oauth import get_oauth_client
+
+                self._oauth_client = get_oauth_client()
+                logger.info("BriefingService: ComposioOAuthClient initialized")
+            except Exception as e:
+                logger.warning("BriefingService: Failed to initialize ComposioOAuthClient: %s", e)
+        return self._oauth_client
 
     def _get_exa_provider(self) -> Any:
         """Lazily initialize and return the ExaEnrichmentProvider."""
@@ -603,6 +626,9 @@ class BriefingService:
     ) -> dict[str, Any]:
         """Get calendar events for the day.
 
+        Checks for active calendar integration and fetches events via Composio.
+        Returns empty structure if no integration is connected or on error.
+
         Args:
             user_id: The user's ID.
             briefing_date: The date to get calendar for.
@@ -610,16 +636,24 @@ class BriefingService:
         Returns:
             Dict with meeting_count and key_meetings.
         """
-        # Check if user has calendar integration
-        integration_result = (
-            self._db.table("user_integrations")
-            .select("id, provider, status")
-            .eq("user_id", user_id)
-            .eq("provider", "google_calendar")
-            .eq("status", "active")
-            .maybe_single()
-            .execute()
-        )
+        # Check if user has calendar integration (any of the supported types)
+        try:
+            integration_result = (
+                self._db.table("user_integrations")
+                .select("id, integration_type, status, composio_connection_id")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .in_("integration_type", list(_CALENDAR_INTEGRATION_TYPES))
+                .limit(1)
+                .execute()
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to query user_integrations for calendar",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            return {"meeting_count": 0, "key_meetings": []}
 
         if not integration_result or not integration_result.data:
             logger.debug(
@@ -628,14 +662,121 @@ class BriefingService:
             )
             return {"meeting_count": 0, "key_meetings": []}
 
-        # TODO: Implement Composio calendar fetch when available
-        # For now, return empty structure as calendar integration
-        # requires external OAuth flow completion
-        logger.info(
-            "Calendar integration found but fetch not yet implemented",
-            extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
-        )
-        return {"meeting_count": 0, "key_meetings": []}
+        integration = integration_result.data[0]
+        provider = integration.get("integration_type")
+        connection_id = integration.get("composio_connection_id")
+
+        if not connection_id:
+            logger.warning(
+                "Calendar integration found but missing connection_id",
+                extra={"user_id": user_id, "provider": provider},
+            )
+            return {"meeting_count": 0, "key_meetings": []}
+
+        # Get the Composio action slug for this provider
+        action_slug = _CALENDAR_READ_ACTIONS.get(provider)
+        if not action_slug:
+            logger.warning(
+                "No calendar read action mapped for provider",
+                extra={"user_id": user_id, "provider": provider},
+            )
+            return {"meeting_count": 0, "key_meetings": []}
+
+        # Fetch events via Composio
+        try:
+            oauth_client = self._get_oauth_client()
+            if oauth_client is None:
+                logger.warning(
+                    "OAuth client not available for calendar fetch",
+                    extra={"user_id": user_id},
+                )
+                return {"meeting_count": 0, "key_meetings": []}
+
+            # Build time range for the briefing date
+            time_min = f"{briefing_date.isoformat()}T00:00:00Z"
+            time_max = f"{briefing_date.isoformat()}T23:59:59Z"
+
+            result = await oauth_client.execute_action(
+                connection_id=connection_id,
+                action=action_slug,
+                params={"timeMin": time_min, "timeMax": time_max},
+                user_id=user_id,
+            )
+
+            if not result.get("successful"):
+                logger.warning(
+                    "Calendar fetch via Composio failed",
+                    extra={
+                        "user_id": user_id,
+                        "provider": provider,
+                        "error": result.get("error"),
+                    },
+                )
+                return {"meeting_count": 0, "key_meetings": []}
+
+            # Normalize events from various Composio response formats
+            data = result.get("data", {})
+            events = data.get("events", data.get("items", data.get("value", [])))
+            if not isinstance(events, list):
+                events = [events] if events else []
+
+            # Format events into key_meetings structure
+            key_meetings = []
+            for event in events[:10]:  # Limit to 10 meetings for briefing
+                if not isinstance(event, dict):
+                    continue
+
+                # Extract time - handle various field names
+                start_time = event.get("start", {})
+                if isinstance(start_time, dict):
+                    time_str = start_time.get("dateTime", start_time.get("date", ""))
+                else:
+                    time_str = str(start_time)
+
+                # Extract attendees
+                attendees_raw = event.get("attendees", event.get("requiredAttendees", []))
+                attendees = []
+                if isinstance(attendees_raw, list):
+                    for att in attendees_raw[:5]:  # Limit to 5 attendees
+                        if isinstance(att, dict):
+                            email = att.get("emailAddress", {}).get("address", "") if isinstance(att.get("emailAddress"), dict) else att.get("email", att.get("address", ""))
+                            name = att.get("emailAddress", {}).get("name", "") if isinstance(att.get("emailAddress"), dict) else att.get("name", "")
+                            attendees.append({"email": email, "name": name})
+
+                key_meetings.append({
+                    "id": event.get("id", ""),
+                    "title": event.get("summary", event.get("subject", "Untitled Meeting")),
+                    "time": time_str,
+                    "attendees": attendees,
+                    "company": None,  # Would need additional enrichment
+                    "has_brief": False,  # Would need meeting prep integration
+                })
+
+            logger.info(
+                "Calendar events fetched successfully",
+                extra={
+                    "user_id": user_id,
+                    "briefing_date": briefing_date.isoformat(),
+                    "meeting_count": len(key_meetings),
+                    "provider": provider,
+                },
+            )
+
+            return {
+                "meeting_count": len(key_meetings),
+                "key_meetings": key_meetings,
+            }
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch calendar events",
+                extra={
+                    "user_id": user_id,
+                    "briefing_date": briefing_date.isoformat(),
+                },
+                exc_info=True,
+            )
+            return {"meeting_count": 0, "key_meetings": []}
 
     async def _get_lead_data(self, user_id: str) -> dict[str, Any]:
         """Get lead status summary from lead_memories.
