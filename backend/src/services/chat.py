@@ -792,6 +792,10 @@ class ChatService:
         # Trust Calibration Service — lazily initialized
         self._trust_service: Any = None
 
+        # Causal Reasoning + User Mental Model — lazily initialized
+        self._causal_reasoning: Any = None
+        self._user_model_service: Any = None
+
     def _get_friction_engine(self) -> Any:
         """Lazily initialize CognitiveFrictionEngine."""
         if self._friction_engine is None:
@@ -2223,6 +2227,60 @@ class ChatService:
         )
         proactive_ms = (time.perf_counter() - proactive_start) * 1000
 
+        # --- Causal Reasoning + User Mental Model (fail-open) ---
+        causal_actions: list[Any] = []
+        causal_ms = 0.0
+        user_mental_model: Any = None
+        user_model_ms = 0.0
+        try:
+            import asyncio
+
+            causal_start = time.perf_counter()
+
+            # Lazy init causal reasoning engine
+            if self._causal_reasoning is None:
+                from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+
+                self._causal_reasoning = SalesCausalReasoningEngine(
+                    db_client=get_supabase_client()
+                )
+
+            # Lazy init user model service
+            if self._user_model_service is None:
+                from src.intelligence.user_model import UserMentalModelService
+
+                self._user_model_service = UserMentalModelService(
+                    db_client=get_supabase_client()
+                )
+
+            # Run both in parallel
+            causal_task = asyncio.create_task(
+                self._causal_reasoning.analyze_recent_signals(user_id, limit=3, hours_back=24)
+            )
+            model_task = asyncio.create_task(
+                self._user_model_service.get_model(user_id)
+            )
+
+            causal_result, user_mental_model = await asyncio.gather(
+                causal_task, model_task, return_exceptions=True
+            )
+
+            causal_ms = (time.perf_counter() - causal_start) * 1000
+
+            if isinstance(causal_result, Exception):
+                logger.warning("Causal reasoning failed (fail-open): %s", causal_result)
+                causal_actions = []
+            else:
+                causal_actions = causal_result.actions if causal_result else []
+
+            if isinstance(user_mental_model, Exception):
+                logger.warning("User model failed (fail-open): %s", user_mental_model)
+                user_mental_model = None
+
+            user_model_ms = causal_ms  # combined timing
+        except Exception as e:
+            logger.warning("Causal reasoning / user model init failed (fail-open): %s", e)
+
         # --- Cognitive Friction: evaluate before any action routing ---
         friction_ms = 0.0
         friction_decision: FrictionDecision | None = None
@@ -2391,6 +2449,8 @@ class ChatService:
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+                causal_actions=causal_actions,
+                user_mental_model=user_mental_model,
             )
         else:
             system_prompt = self._build_system_prompt(
@@ -2772,6 +2832,8 @@ class ChatService:
                 "web_grounding_ms": round(web_grounding_ms, 2),
                 "email_check_ms": round(email_check_ms, 2),
                 "friction_ms": round(friction_ms, 2),
+                "causal_reasoning_ms": round(causal_ms, 2),
+                "user_model_ms": round(user_model_ms, 2),
                 "skill_detection_ms": round(skill_ms, 2),
                 "whatif_simulation_ms": round(whatif_ms, 2),
                 "temporal_analysis_ms": round(temporal_ms, 2),
@@ -3272,6 +3334,8 @@ class ChatService:
         active_goals: list[dict[str, Any]] | None = None,
         digital_twin_calibration: dict[str, Any] | None = None,
         capability_context: str | None = None,
+        causal_actions: list[Any] | None = None,
+        user_mental_model: Any = None,
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
@@ -3289,6 +3353,9 @@ class ChatService:
             companion_context: Optional CompanionContext.
             active_goals: Optional list of active goal dicts.
             digital_twin_calibration: Optional personality calibration trait values.
+            capability_context: Optional capability awareness context.
+            causal_actions: Optional list of SalesAction objects from causal reasoning.
+            user_mental_model: Optional UserMentalModel for behavioral profile.
 
         Returns:
             Formatted system prompt string.
@@ -3349,6 +3416,36 @@ class ChatService:
                 prompt += "\n\n" + CAPABILITY_CONTEXT_TEMPLATE.format(
                     capability_context=capability_context
                 )
+
+            # Add causal sales intelligence section
+            if causal_actions:
+                action_lines = []
+                for action in causal_actions[:5]:
+                    urgency_label = getattr(action, "urgency", "monitor")
+                    action_lines.append(
+                        f"- [{urgency_label.upper()}] Signal: {getattr(action, 'signal', '')[:120]}\n"
+                        f"  Causal chain: {getattr(action, 'causal_narrative', '')[:200]}\n"
+                        f"  Recommended action: {getattr(action, 'recommended_action', '')}\n"
+                        f"  Timing: {getattr(action, 'timing', 'Unknown')}"
+                    )
+                prompt += (
+                    "\n\n## Sales Intelligence — Causal Insights\n"
+                    "Recent market signals analyzed through causal reasoning:\n"
+                    + "\n".join(action_lines)
+                    + "\n\nReference these insights when relevant to the user's questions."
+                )
+
+            # Add user behavioral profile section
+            if user_mental_model and not isinstance(user_mental_model, Exception):
+                try:
+                    profile_text = user_mental_model.to_prompt_section()
+                    prompt += (
+                        "\n\n## User Behavioral Profile\n"
+                        + profile_text
+                        + "\n\nAdapt response depth and style to match these preferences."
+                    )
+                except Exception:
+                    pass  # fail-open
 
             return prompt
 

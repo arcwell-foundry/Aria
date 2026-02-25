@@ -8,6 +8,11 @@ from src.intelligence.causal import (
     CausalTraversalRequest,
     CausalTraversalResponse,
 )
+from src.intelligence.causal_reasoning import (
+    CausalReasoningResult,
+    SalesAction,
+    SalesCausalReasoningEngine,
+)
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.orchestrator import JarvisOrchestrator, create_orchestrator
 from src.intelligence.proactive_memory import ProactiveMemoryService
@@ -22,6 +27,7 @@ from src.intelligence.simulation import (
     SimulationResult,
     SimulationScenario,
 )
+from src.intelligence.user_model import UserMentalModel, UserMentalModelService
 
 __all__ = [
     "CognitiveLoadMonitor",
@@ -46,4 +52,11 @@ __all__ = [
     # Phase 7: Intelligence Orchestrator (US-710)
     "JarvisOrchestrator",
     "create_orchestrator",
+    # Sales Causal Reasoning
+    "SalesCausalReasoningEngine",
+    "SalesAction",
+    "CausalReasoningResult",
+    # User Mental Model
+    "UserMentalModelService",
+    "UserMentalModel",
 ]

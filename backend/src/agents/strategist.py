@@ -311,6 +311,29 @@ class StrategistAgent(SkillAwareAgent):
                 query=f"{target_company} {goal_title}",
             )
 
+            # 1b. Gather causal reasoning context (fail-open)
+            causal_context_str = ""
+            try:
+                from src.db.supabase import get_supabase_client
+                from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+
+                causal_engine = SalesCausalReasoningEngine(db_client=get_supabase_client())
+                causal_actions = await causal_engine.analyze_signal(
+                    self.user_id, f"Account analysis for {target_company}: {goal_title}"
+                )
+                if causal_actions:
+                    causal_lines = []
+                    for action in causal_actions[:3]:
+                        causal_lines.append(
+                            f"- [{action.urgency}] {action.recommended_action} "
+                            f"(timing: {action.timing})"
+                        )
+                    causal_context_str = (
+                        "Causal Intelligence:\n" + "\n".join(causal_lines)
+                    )
+            except Exception as e:
+                logger.debug("Causal reasoning unavailable for account analysis: %s", e)
+
             # 2. Build system prompt via PersonaBuilder (or fall back to hardcoded)
             system_prompt = await self._get_persona_system_prompt(
                 task_description=(
@@ -335,6 +358,8 @@ class StrategistAgent(SkillAwareAgent):
             context_sections = [
                 f"Goal: {json.dumps(goal, default=str)}",
             ]
+            if causal_context_str:
+                context_sections.append(causal_context_str)
             if competitive_landscape:
                 context_sections.append(
                     f"Competitive Landscape: {json.dumps(competitive_landscape, default=str)}"
@@ -624,6 +649,28 @@ class StrategistAgent(SkillAwareAgent):
                     "Return only valid JSON. No markdown, no explanation."
                 )
 
+            # 1b. Gather user model context for strategy presentation (fail-open)
+            user_model_context = ""
+            try:
+                from src.db.supabase import get_supabase_client as _get_db
+                from src.intelligence.user_model import UserMentalModelService
+
+                model_service = UserMentalModelService(db_client=_get_db())
+                user_model = await model_service.get_model(self.user_id)
+                user_model_context = (
+                    f"\n\nUser Profile:\n"
+                    f"- Decision style: {user_model.decision_style}\n"
+                    f"- Preferred depth: {user_model.preferred_depth}\n"
+                    f"- Active goals: {user_model.active_goal_count} "
+                    f"({user_model.overdue_goal_count} overdue)\n"
+                    f"- Stress trend: {user_model.stress_trend}\n"
+                    f"Adapt the strategy's level of detail and presentation "
+                    f"to match the user's {user_model.preferred_depth} preference "
+                    f"and {user_model.decision_style} decision style."
+                )
+            except Exception as e:
+                logger.debug("User model unavailable for strategy generation: %s", e)
+
             # 2. Build user prompt
             user_prompt = (
                 f"Generate a pursuit strategy for the following goal.\n\n"
@@ -631,7 +678,8 @@ class StrategistAgent(SkillAwareAgent):
                 f"Account Analysis: {json.dumps(analysis, default=str)}\n\n"
                 f"Resources: {json.dumps(resources, default=str)}\n\n"
                 f"Constraints: {json.dumps(constraints, default=str)}\n\n"
-                f"Provide ONLY a JSON object with these fields:\n"
+                + (user_model_context + "\n\n" if user_model_context else "")
+                + f"Provide ONLY a JSON object with these fields:\n"
                 '{"phases": [{"phase_number": 1, "name": "string", '
                 '"description": "string", "duration_pct": 0.0-1.0, '
                 '"objectives": ["obj1", ...]}], '
