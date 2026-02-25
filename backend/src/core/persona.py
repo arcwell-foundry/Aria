@@ -1,10 +1,11 @@
 """Centralized persona and system prompt assembly for ARIA.
 
-PersonaBuilder assembles 6 layers of persona context for every LLM call:
+PersonaBuilder assembles 7 layers of persona context for every LLM call:
   L1 - Core Identity (static)
   L2 - Personality Traits (static)
   L3 - Anti-Patterns (static)
   L4 - User Context (cached 5min) — calibration, writing style, ARIA config, overrides
+  L4.5 - Team Intelligence (opt-in) — shared insights from team members about accounts
   L5 - Agent Context (per-call) — agent name, role, task description
   L6 - Relationship Context (per-call, opt-in) — lead/account/recipient history
 
@@ -74,6 +75,11 @@ class PersonaRequest:
     Required:
         user_id: The user to build persona for.
 
+    Layer 4.5 (team intelligence, opt-in):
+        include_team_intelligence: Set True to include shared team insights.
+        company_id: Company ID for team intelligence lookup.
+        team_intelligence_account: Optional account filter for team intelligence.
+
     Layer 5 (agent context):
         agent_name: Which agent is calling (e.g. "strategist", "scribe").
         agent_role_description: One-line role for the agent.
@@ -96,6 +102,10 @@ class PersonaRequest:
     """
 
     user_id: str
+    # Layer 4.5 - Team Intelligence
+    include_team_intelligence: bool = False
+    company_id: str | None = None
+    team_intelligence_account: str | None = None
     # Layer 5
     agent_name: str | None = None
     agent_role_description: str | None = None
@@ -117,7 +127,7 @@ class PersonaRequest:
 
 @dataclass
 class PersonaContext:
-    """Assembled persona context with all 6 layers.
+    """Assembled persona context with all 7 layers.
 
     Each layer is a string (may be empty). ``to_system_prompt()`` joins
     all non-empty layers with double newlines.
@@ -127,6 +137,7 @@ class PersonaContext:
     personality_traits: str = ""  # L2
     anti_patterns: str = ""       # L3
     user_context: str = ""        # L4
+    team_intelligence: str = ""   # L4.5 - Shared team insights
     agent_context: str = ""       # L5
     relationship_context: str = ""  # L6
     user_id: str = ""
@@ -140,6 +151,7 @@ class PersonaContext:
             self.personality_traits,
             self.anti_patterns,
             self.user_context,
+            self.team_intelligence,
             self.agent_context,
             self.relationship_context,
         ]
@@ -152,6 +164,7 @@ class PersonaContext:
             "traits": "Direct, Confident, Opinionated, Honest, Contextual, Human-like",
             "adaptations": self.user_context[:200] if self.user_context else "No user-specific adaptations yet",
             "current_agent": self.agent_context[:100] if self.agent_context else "General",
+            "team_intelligence": self.team_intelligence[:100] if self.team_intelligence else "Not enabled",
         }
 
 
@@ -160,10 +173,10 @@ class PersonaContext:
 # ---------------------------------------------------------------------------
 
 class PersonaBuilder:
-    """Assembles system prompts from 6 persona layers.
+    """Assembles system prompts from 7 persona layers.
 
     Caches Layer 4 (user context) for 5 minutes to avoid repeated DB queries.
-    Layers 1-3 are compile-time constants. Layers 5-6 are per-call.
+    Layers 1-3 are compile-time constants. Layers 4.5-6 are per-call.
     """
 
     def __init__(self) -> None:
@@ -176,12 +189,17 @@ class PersonaBuilder:
             request: PersonaRequest with user_id and optional agent/relationship info.
 
         Returns:
-            PersonaContext with all 6 layers populated.
+            PersonaContext with all 7 layers populated.
         """
         start = time.perf_counter()
 
         # L4: User context (cached)
         user_context, cache_hit = await self._build_user_context(request.user_id)
+
+        # L4.5: Team Intelligence (opt-in, async)
+        team_intelligence = ""
+        if request.include_team_intelligence and request.company_id:
+            team_intelligence = await self._build_team_intelligence(request)
 
         # L5: Agent context (synchronous)
         agent_context = self._build_agent_context(request)
@@ -198,6 +216,7 @@ class PersonaBuilder:
             personality_traits=LAYER_2_PERSONALITY_TRAITS,
             anti_patterns=LAYER_3_ANTI_PATTERNS,
             user_context=user_context,
+            team_intelligence=team_intelligence,
             agent_context=agent_context,
             relationship_context=relationship_context,
             user_id=request.user_id,
@@ -621,6 +640,45 @@ class PersonaBuilder:
             parts.append(f"Output format: {request.output_format}")
 
         return "\n".join(parts)
+
+    async def _build_team_intelligence(self, request: PersonaRequest) -> str:
+        """Build Layer 4.5: team intelligence context from shared insights.
+
+        Queries SharedIntelligenceService for team-contributed facts about
+        accounts and contacts. Only included if user has opted in.
+
+        Args:
+            request: PersonaRequest with team intelligence fields.
+
+        Returns:
+            Formatted team intelligence string (may be empty).
+        """
+        if not request.include_team_intelligence or not request.company_id:
+            return ""
+
+        try:
+            from src.memory.shared_intelligence import get_shared_intelligence_service
+
+            service = get_shared_intelligence_service()
+
+            # Get formatted team context for the company/account
+            team_context = await service.get_formatted_team_context(
+                company_id=request.company_id,
+                account_name=request.team_intelligence_account or request.account_name,
+                lead_id=request.lead_id,
+                user_id=request.user_id,
+                max_facts=10,
+            )
+
+            return team_context
+
+        except Exception as e:
+            logger.debug(
+                "Team intelligence unavailable for %s: %s",
+                request.user_id,
+                e,
+            )
+            return ""
 
     async def _build_relationship_context(self, request: PersonaRequest) -> str:
         """Build Layer 6: relationship context from memory.

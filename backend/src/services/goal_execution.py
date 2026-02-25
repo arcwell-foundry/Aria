@@ -3737,6 +3737,32 @@ class GoalExecutionService:
         except Exception as e:
             logger.debug("Failed to process goal completion learning: %s", e)
 
+        # Extract shareable intelligence for team sharing (if opted in)
+        try:
+            from src.services.intelligence_contribution import get_intelligence_contribution_service
+
+            intel_service = get_intelligence_contribution_service()
+            # Get goal results for intelligence extraction
+            goal_data = (
+                self._db.table("goals")
+                .select("title, metadata, context")
+                .eq("id", goal_id)
+                .maybe_single()
+                .execute()
+            )
+            if goal_data and goal_data.data:
+                goal_title = goal_data.data.get("title", "")
+                goal_results = goal_data.data.get("metadata", {}).get("agent_results", {})
+                await intel_service.process_goal_completion(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    goal_title=goal_title,
+                    goal_results=goal_results,
+                    retrospective=retro,
+                )
+        except Exception as e:
+            logger.debug("Failed to contribute shared intelligence: %s", e)
+
         # Publish completion event
         event_bus = EventBus.get_instance()
         await event_bus.publish(

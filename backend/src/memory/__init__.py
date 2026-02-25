@@ -9,6 +9,7 @@ This module implements ARIA's cognitive memory architecture:
 - Lead: Sales pursuit tracking (Graphiti + Supabase)
 - Digital Twin: User writing style fingerprinting (Graphiti)
 - Corporate: Company-level shared knowledge (Graphiti + Supabase)
+- Shared Intelligence: Team-level insights about accounts (Supabase)
 """
 
 from src.memory.audit import (
@@ -90,6 +91,13 @@ from src.memory.retroactive_enrichment import (
 )
 from src.memory.salience import SalienceService
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
+from src.memory.shared_intelligence import (
+    IntelligenceSource,
+    SharedFact,
+    SharedIntelligenceService,
+    UserOptInStatus,
+    get_shared_intelligence_service,
+)
 from src.memory.working import (
     WorkingMemory,
     WorkingMemoryManager,
@@ -124,6 +132,12 @@ __all__ = [
     "FactSource",
     "SemanticFact",
     "SemanticMemory",
+    # Shared Intelligence (Team-level insights)
+    "IntelligenceSource",
+    "SharedFact",
+    "SharedIntelligenceService",
+    "UserOptInStatus",
+    "get_shared_intelligence_service",
     # Procedural Memory
     "ProceduralMemory",
     "Workflow",
@@ -190,4 +204,10 @@ __all__ = [
     "ColdMemoryRetriever",
     "EntityContext",
     "MemorySource",
+    # Shared Intelligence (Team-level insights)
+    "IntelligenceSource",
+    "SharedFact",
+    "SharedIntelligenceService",
+    "UserOptInStatus",
+    "get_shared_intelligence_service",
 ]
