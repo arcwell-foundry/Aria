@@ -260,7 +260,7 @@ class BriefingService:
         content["ui_commands"] = briefing_ui_commands
         content["suggestions"] = briefing_suggestions
 
-        # Store briefing
+        # Store briefing (ws_delivered=False until WebSocket delivery occurs)
         try:
             self._db.table("daily_briefings").upsert(
                 {
@@ -268,6 +268,7 @@ class BriefingService:
                     "briefing_date": briefing_date.isoformat(),
                     "content": content,
                     "generated_at": datetime.now(UTC).isoformat(),
+                    "ws_delivered": False,
                 }
             ).execute()
         except Exception:
