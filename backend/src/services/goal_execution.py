@@ -28,6 +28,11 @@ from src.db.supabase import SupabaseClient
 from src.services.activity_service import ActivityService
 
 try:
+    from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+except ImportError:
+    SalesCausalReasoningEngine = None  # type: ignore[assignment,misc]
+
+try:
     from src.agents.verifier import (
         VERIFICATION_POLICIES,
         VerificationResult,
@@ -132,6 +137,19 @@ class GoalExecutionService:
                 logger.warning("Failed to initialize ComposioToolDiscovery: %s", e)
                 self._tool_discovery = None
         return self._tool_discovery
+
+    def _get_causal_engine(self) -> Any:
+        """Lazily initialize SalesCausalReasoningEngine."""
+        if not SalesCausalReasoningEngine:
+            return None
+        try:
+            return SalesCausalReasoningEngine(
+                db_client=self._db,
+                llm_client=self._llm,
+            )
+        except Exception as e:
+            logger.warning("Failed to initialize SalesCausalReasoningEngine: %s", e)
+            return None
 
     @staticmethod
     def _integration_types_to_toolkit_slugs(
@@ -2550,6 +2568,35 @@ class GoalExecutionService:
             ]
             facts_summary = "\n".join(fact_lines)
 
+        # Fetch causal reasoning intelligence for market-aware planning
+        causal_intelligence_section = ""
+        try:
+            causal_engine = self._get_causal_engine()
+            if causal_engine:
+                causal_result = await causal_engine.analyze_recent_signals(
+                    user_id=user_id, limit=5
+                )
+                if causal_result and causal_result.actions:
+                    # Format top 3 actions as market intelligence context
+                    action_lines = []
+                    for action in causal_result.actions[:3]:
+                        action_lines.append(
+                            f"  - [{action.urgency.upper()}] {action.recommended_action}\n"
+                            f"    Why: {action.causal_narrative}\n"
+                            f"    Timing: {action.timing}"
+                        )
+                    if action_lines:
+                        causal_intelligence_section = (
+                            f"## Recent Market Intelligence\n"
+                            f"The following signals should inform your planning:\n"
+                            + "\n".join(action_lines)
+                            + "\n\n"
+                        )
+        except Exception as e:
+            logger.debug(
+                "Causal reasoning failed for goal planning, continuing without: %s", e
+            )
+
         prompt = (
             f"Create a detailed execution plan for this goal.\n\n"
             f"## Goal\n"
@@ -2562,6 +2609,7 @@ class GoalExecutionService:
             f"Connected integrations: {integration_summary}\n\n"
             f"## Trust Levels\n{trust_summary}\n\n"
             f"## Company Knowledge\n{facts_summary}\n\n"
+            f"{causal_intelligence_section}"
             f"{self._build_agent_tools_prompt(discovered_tools, active_integrations)}"
             f"## Instructions\n"
             f"Decompose the goal into 3-8 concrete sub-tasks. For each task, specify:\n"
@@ -3762,6 +3810,36 @@ class GoalExecutionService:
                 )
         except Exception as e:
             logger.debug("Failed to contribute shared intelligence: %s", e)
+
+        # Analyze signals for accounts/leads discovered during goal execution
+        try:
+            causal_engine = self._get_causal_engine()
+            if causal_engine and goal_data and goal_data.data:
+                # Extract accounts/leads from goal context
+                goal_context = goal_data.data.get("context", {}) or {}
+                goal_metadata = goal_data.data.get("metadata", {}) or {}
+
+                # Look for account names or lead IDs in context/metadata
+                accounts = goal_context.get("accounts", []) or goal_metadata.get("accounts", [])
+                leads = goal_context.get("leads", []) or goal_metadata.get("leads", [])
+
+                # If specific accounts/leads were involved, analyze related signals
+                if accounts or leads:
+                    entities = list(accounts)[:3] + [l.get("company", "") for l in leads[:3] if isinstance(l, dict)]
+                    for entity in entities:
+                        if entity and isinstance(entity, str):
+                            # Analyze any signals mentioning this entity
+                            try:
+                                await causal_engine.analyze_signal(
+                                    user_id=user_id,
+                                    signal=f"Post-goal analysis for {entity}",
+                                )
+                            except Exception:
+                                pass  # Fail silently per design
+        except Exception as e:
+            logger.debug(
+                "Causal signal analysis failed for goal completion, continuing: %s", e
+            )
 
         # Publish completion event
         event_bus = EventBus.get_instance()
