@@ -658,6 +658,9 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
     exists in the DB but hasn't been delivered via WebSocket yet.  If found,
     sends it as an ARIA message with rich_content and goal cards.
 
+    If no stored message exists, generates fresh on-demand (ensures the first
+    conversation is always delivered even if the background pipeline failed).
+
     Returns True if the first conversation was delivered (caller should skip
     the generic return greeting).
     """
@@ -675,10 +678,18 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
             .execute()
         )
         if not onboarding.data or not onboarding.data.get("completed_at"):
+            logger.debug(
+                "First conversation skipped: onboarding not complete (user=%s)",
+                user_id,
+            )
             return False
 
         ob_metadata = onboarding.data.get("metadata") or {}
         if ob_metadata.get("first_conversation_ws_delivered"):
+            logger.debug(
+                "First conversation already delivered (user=%s)",
+                user_id,
+            )
             return False
 
         # 2. Look for stored first_conversation message
@@ -715,9 +726,19 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
                 rich_content = msg_meta.get("rich_content", [])
                 ui_commands = msg_meta.get("ui_commands", [])
                 suggestions = msg_meta.get("suggestions", [])
+                logger.info(
+                    "Found stored first conversation message (user=%s, content_len=%d)",
+                    user_id,
+                    len(content),
+                )
 
-        # 3. If no stored message, generate fresh (background pipeline may not have run)
+        # 3. If no stored message, generate fresh on-demand
+        # This ensures first conversation is delivered even if background pipeline failed
         if not content:
+            logger.info(
+                "No stored first conversation found, generating on-demand (user=%s)",
+                user_id,
+            )
             try:
                 from src.onboarding.first_conversation import FirstConversationGenerator
 
@@ -727,12 +748,25 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
                 rich_content = msg.rich_content
                 ui_commands = msg.ui_commands
                 suggestions = msg.suggestions
+                logger.info(
+                    "First conversation generated on-demand (user=%s, facts=%d)",
+                    user_id,
+                    msg.facts_referenced,
+                )
             except Exception as gen_err:
-                logger.debug("First conversation generation failed: %s", gen_err)
-                return False
-
-        if not content:
-            return False
+                logger.error(
+                    "First conversation on-demand generation failed (user=%s): %s",
+                    user_id,
+                    gen_err,
+                    exc_info=True,
+                )
+                # Fall back to a simple personalized greeting
+                content = await _generate_fallback_first_conversation(user_id, db)
+                if not content:
+                    return False
+                rich_content = []
+                ui_commands = []
+                suggestions = ["What can you help me with?", "Tell me about my pipeline"]
 
         # 4. Deliver via WebSocket
         await ws_manager.send_aria_message(
@@ -749,16 +783,75 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
             {"metadata": new_metadata}
         ).eq("user_id", user_id).execute()
 
-        logger.info("First conversation delivered via WS", extra={"user_id": user_id})
+        logger.info(
+            "First conversation delivered via WebSocket (user=%s)",
+            user_id,
+        )
         return True
 
-    except Exception:
-        logger.debug(
-            "First conversation delivery failed for user %s",
+    except Exception as e:
+        logger.error(
+            "First conversation delivery failed (user=%s): %s",
             user_id,
+            e,
             exc_info=True,
         )
         return False
+
+
+async def _generate_fallback_first_conversation(user_id: str, db: Any) -> str | None:
+    """Generate a simple fallback first conversation when full generation fails.
+
+    This ensures users always get a personalized greeting even if the full
+    intelligence-demonstrating first conversation generator fails.
+
+    Args:
+        user_id: The user's ID.
+        db: Supabase client instance.
+
+    Returns:
+        A simple personalized greeting, or None if profile lookup fails.
+    """
+    try:
+        # Get user profile
+        profile = (
+            db.table("user_profiles")
+            .select("full_name, title, companies(name)")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not profile or not profile.data:
+            return None
+
+        user_name = (profile.data.get("full_name") or "").split()[0]
+        title = profile.data.get("title", "")
+        company = profile.data.get("companies", {})
+        company_name = company.get("name", "") if company else ""
+
+        greeting = f"Hi {user_name}," if user_name else "Hi,"
+        body = f" I'm ARIA, your AI colleague. I've set up your workspace"
+
+        if company_name:
+            body += f" for {company_name}"
+
+        body += ". I'm ready to help you accelerate your pipeline and stay on top of your accounts."
+
+        if title:
+            body += f" As a {title}, I'll focus on what matters most for your role."
+
+        body += " What would you like to work on first?"
+
+        return greeting + body
+
+    except Exception as e:
+        logger.warning(
+            "Fallback first conversation generation failed (user=%s): %s",
+            user_id,
+            e,
+        )
+        return None
 
 
 async def _maybe_deliver_morning_briefing(user_id: str) -> bool:

@@ -710,6 +710,9 @@ class OnboardingCompletionOrchestrator:
         2. Generate first conversation (intelligence-demonstrating message)
         3. Generate first briefing (dashboard content)
 
+        NOTE: If this pipeline fails, the WebSocket handler will generate the
+        first conversation on-demand via _maybe_deliver_first_conversation().
+
         Args:
             user_id: The user's ID.
 
@@ -717,8 +720,8 @@ class OnboardingCompletionOrchestrator:
             Dict with pipeline execution results.
         """
         logger.info(
-            "Starting post-activation pipeline",
-            extra={"user_id": user_id},
+            "[POST_ACTIVATION] Starting pipeline for user=%s",
+            user_id,
         )
 
         pipeline_result: dict[str, Any] = {
@@ -739,21 +742,22 @@ class OnboardingCompletionOrchestrator:
                 "succeeded": sum(1 for r in execution_results if r.get("status") == "complete"),
             }
             logger.info(
-                "Activation goals executed",
-                extra={
-                    "user_id": user_id,
-                    "total": len(execution_results),
-                    "succeeded": pipeline_result["goal_execution"]["succeeded"],
-                },
+                "[POST_ACTIVATION] Goals executed: %d/%d succeeded (user=%s)",
+                pipeline_result["goal_execution"]["succeeded"],
+                len(execution_results),
+                user_id,
             )
         except Exception as e:
             logger.error(
-                "Goal execution failed in pipeline",
-                extra={"user_id": user_id, "error": str(e)},
+                "[POST_ACTIVATION] Goal execution FAILED (user=%s): %s",
+                user_id,
+                e,
+                exc_info=True,
             )
             pipeline_result["goal_execution"] = {"error": str(e)}
 
         # Step 2: Generate first conversation
+        # This is CRITICAL - if it fails, WebSocket handler will retry on-demand
         try:
             from src.onboarding.first_conversation import FirstConversationGenerator
 
@@ -762,18 +766,22 @@ class OnboardingCompletionOrchestrator:
             pipeline_result["first_conversation"] = {
                 "facts_referenced": first_msg.facts_referenced,
                 "confidence_level": first_msg.confidence_level,
+                "content_length": len(first_msg.content),
+                "rich_content_count": len(first_msg.rich_content),
             }
             logger.info(
-                "First conversation generated",
-                extra={
-                    "user_id": user_id,
-                    "facts_referenced": first_msg.facts_referenced,
-                },
+                "[POST_ACTIVATION] First conversation generated: %d facts, %s confidence, %d chars (user=%s)",
+                first_msg.facts_referenced,
+                first_msg.confidence_level,
+                len(first_msg.content),
+                user_id,
             )
         except Exception as e:
             logger.error(
-                "First conversation generation failed",
-                extra={"user_id": user_id, "error": str(e)},
+                "[POST_ACTIVATION] First conversation FAILED (user=%s): %s — WebSocket will retry on-demand",
+                user_id,
+                e,
+                exc_info=True,
             )
             pipeline_result["first_conversation"] = {"error": str(e)}
 
@@ -782,20 +790,35 @@ class OnboardingCompletionOrchestrator:
             await self._generate_first_briefing(user_id)
             pipeline_result["first_briefing"] = {"generated": True}
             logger.info(
-                "First briefing generated",
-                extra={"user_id": user_id},
+                "[POST_ACTIVATION] First briefing generated (user=%s)",
+                user_id,
             )
         except Exception as e:
             logger.error(
-                "First briefing generation failed",
-                extra={"user_id": user_id, "error": str(e)},
+                "[POST_ACTIVATION] First briefing FAILED (user=%s): %s",
+                user_id,
+                e,
+                exc_info=True,
             )
             pipeline_result["first_briefing"] = {"error": str(e)}
 
-        logger.info(
-            "Post-activation pipeline complete",
-            extra={"user_id": user_id, "result": pipeline_result},
+        # Log final pipeline status
+        has_errors = any(
+            isinstance(v, dict) and "error" in v
+            for v in pipeline_result.values()
+            if v is not None
         )
+        if has_errors:
+            logger.warning(
+                "[POST_ACTIVATION] Pipeline completed WITH ERRORS (user=%s): %s",
+                user_id,
+                pipeline_result,
+            )
+        else:
+            logger.info(
+                "[POST_ACTIVATION] Pipeline completed successfully (user=%s)",
+                user_id,
+            )
 
         return pipeline_result
 
