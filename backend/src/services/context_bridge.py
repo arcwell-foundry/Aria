@@ -26,6 +26,11 @@ from src.memory.prospective import (
 )
 from src.memory.working import WorkingMemoryManager
 
+try:
+    from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+except ImportError:
+    SalesCausalReasoningEngine = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 # Maximum chat messages to include in video context
@@ -60,6 +65,7 @@ class ContextBridgeService:
         self._llm_client: LLMClient | None = None
         self._working_memory: WorkingMemoryManager | None = None
         self._prospective: ProspectiveMemory | None = None
+        self._causal_engine: Any = None
 
     # -- lazy properties --------------------------------------------------
 
@@ -80,6 +86,21 @@ class ContextBridgeService:
         if self._prospective is None:
             self._prospective = ProspectiveMemory()
         return self._prospective
+
+    @property
+    def causal_engine(self) -> Any:
+        """Lazily initialize SalesCausalReasoningEngine."""
+        if self._causal_engine is None and SalesCausalReasoningEngine:
+            try:
+                from src.db.supabase import get_supabase_client
+
+                self._causal_engine = SalesCausalReasoningEngine(
+                    db_client=get_supabase_client(),
+                    llm_client=self.llm,
+                )
+            except Exception as e:
+                logger.warning("Failed to initialize SalesCausalReasoningEngine: %s", e)
+        return self._causal_engine
 
     # -- public API -------------------------------------------------------
 
@@ -138,6 +159,26 @@ class ContextBridgeService:
                 parts.append(f"Active goals: {', '.join(titles)}")
         except Exception:
             logger.debug("Could not load goals for context bridge", exc_info=True)
+
+        # 4. Causal reasoning intelligence for market-aware video conversations
+        try:
+            engine = self.causal_engine
+            if engine:
+                causal_result = await engine.analyze_recent_signals(
+                    user_id=user_id, limit=3
+                )
+                if causal_result and causal_result.actions:
+                    action_summaries = []
+                    for action in causal_result.actions[:3]:
+                        action_summaries.append(
+                            f"{action.recommended_action} (timing: {action.timing})"
+                        )
+                    if action_summaries:
+                        parts.append(f"Market signals: {'; '.join(action_summaries)}")
+        except Exception:
+            logger.debug(
+                "Causal reasoning failed for context bridge, continuing without", exc_info=True
+            )
 
         return "\n".join(parts) if parts else ""
 
