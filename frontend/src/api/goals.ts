@@ -290,3 +290,29 @@ export async function createGoalPlan(goalId: string): Promise<ExecutionPlanRespo
   const response = await apiClient.post<ExecutionPlanResponse>(`/goals/${goalId}/plan`);
   return response.data;
 }
+
+// --- Goal Feedback ---
+
+export interface GoalFeedbackRequest {
+  rating: 'up' | 'down';
+  comment?: string;
+}
+
+export interface GoalFeedbackResponse {
+  id: string;
+  goal_id: string;
+  rating: string;
+  comment: string | null;
+  created_at: string;
+}
+
+export async function submitGoalFeedback(
+  goalId: string,
+  data: GoalFeedbackRequest
+): Promise<GoalFeedbackResponse> {
+  const response = await apiClient.post<GoalFeedbackResponse>(
+    `/goals/${goalId}/feedback`,
+    data
+  );
+  return response.data;
+}

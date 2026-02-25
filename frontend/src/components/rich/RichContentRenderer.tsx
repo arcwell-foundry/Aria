@@ -20,6 +20,7 @@ import type { ExecutionProgressData } from '@/types/execution';
 import { ChallengeCard, type ChallengeCardProps } from '@/components/friction';
 import { IntegrationRequestCard, type IntegrationRequestData } from './IntegrationRequestCard';
 import { GoalCompletionCard, type GoalCompletionData } from './GoalCompletionCard';
+import { ExecutionSummaryCard, type ExecutionSummaryData } from './ExecutionSummaryCard';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -129,6 +130,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <IntegrationRequestCard data={item.data as unknown as IntegrationRequestData} />;
     case 'goal_completion':
       return <GoalCompletionCard data={item.data as unknown as GoalCompletionData} />;
+    case 'execution_summary':
+      return <ExecutionSummaryCard data={item.data as unknown as ExecutionSummaryData} />;
     case 'plan_approved': {
       const pa = item.data as Record<string, unknown>;
       return (
