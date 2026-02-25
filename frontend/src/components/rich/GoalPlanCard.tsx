@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Check,
   Clock,
   Loader2,
   MessageSquare,
   Pencil,
+  Plug,
   Search,
   Send,
   FlaskConical,
@@ -21,11 +23,21 @@ import { CollapsibleCard } from '@/components/conversation/CollapsibleCard';
 
 // --- Types ---
 
+export interface ResourceStatus {
+  tool: string;
+  connected: boolean;
+  display_name?: string;
+  description?: string;
+  toolkit?: string;
+  setup_instruction?: string;
+}
+
 export interface GoalPlanPhase {
   name: string;
   description: string;
   agent: string;
   deliverable?: string;
+  resource_status?: ResourceStatus[];
 }
 
 export interface GoalPlanData {
@@ -58,6 +70,31 @@ function PhaseIcon({ name, color }: { name: string; color: string }) {
   if (lower.includes('draft') || lower.includes('action') || lower.includes('write') || lower.includes('outreach'))
     return <Pencil className={cls} style={style} />;
   return <Target className={cls} style={style} />;
+}
+
+/** Render tool connection status indicator. */
+function ToolStatusIndicator({ resource }: { resource: ResourceStatus }) {
+  const displayName = resource.display_name || resource.tool;
+  const isConnected = resource.connected;
+
+  return (
+    <div className="flex items-center gap-1 text-[10px]">
+      {isConnected ? (
+        <>
+          <Check className="w-2.5 h-2.5 text-emerald-400" />
+          <span className="text-emerald-400">{displayName}</span>
+        </>
+      ) : (
+        <>
+          <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+          <span className="text-amber-400">{displayName}</span>
+          <span className="text-[var(--text-secondary)] opacity-70 ml-1">
+            Connect in Settings
+          </span>
+        </>
+      )}
+    </div>
+  );
 }
 
 // --- Component ---
@@ -317,6 +354,15 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
                         <p className="text-[10px] font-mono text-[var(--text-secondary)] mt-1 opacity-70">
                           Deliverable: {phase.deliverable}
                         </p>
+                      )}
+                      {/* Tool connection status */}
+                      {phase.resource_status && phase.resource_status.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1.5 pt-1.5 border-t border-[var(--border)]/50">
+                          <Plug className="w-2.5 h-2.5 text-[var(--text-secondary)] opacity-50" />
+                          {phase.resource_status.map((resource) => (
+                            <ToolStatusIndicator key={resource.tool} resource={resource} />
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
