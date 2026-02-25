@@ -911,6 +911,9 @@ class TavusClient:
         - LAYER 2: Personality Traits (static)
         - LAYER 3: Anti-Patterns (static)
         - LAYER 4: User Context (dynamic, cached)
+        - LAYER 4.5: Team Intelligence (shared company insights)
+        - LAYER 7: Causal Sales Intelligence (market signals)
+        - LAYER 8: User Mental Model (behavioral profile)
         - Capability Context: What ARIA can do
 
         Plus the spoken-mode adaptation for avatar context.
@@ -926,6 +929,79 @@ class TavusClient:
 
         parts: list[str] = []
 
+        # Pre-fetch enrichment data (all wrapped in try/except for fault tolerance)
+        team_intelligence_text: str | None = None
+        causal_actions_text: str | None = None
+        user_mental_model_text: str | None = None
+
+        # Fetch team intelligence
+        try:
+            from src.db.supabase import get_supabase_client
+            from src.memory.shared_intelligence import SharedIntelligenceService
+
+            db_client = get_supabase_client()
+            # Get user's company_id for team intelligence lookup
+            user_result = (
+                db_client.table("users")
+                .select("company_id")
+                .eq("id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if user_result.data:
+                company_id = user_result.data[0].get("company_id")
+                if company_id:
+                    shared_intel = SharedIntelligenceService(db_client)
+                    team_intelligence_text = await shared_intel.get_formatted_team_context(
+                        company_id=company_id,
+                        user_id=user_id,
+                        max_facts=5,  # Keep it small for avatar context
+                    )
+        except Exception as e:
+            logger.debug(
+                "Team intelligence fetch failed for Tavus context: %s", e
+            )
+
+        # Fetch causal reasoning (lightweight)
+        try:
+            causal_engine = self._get_causal_engine()
+            if causal_engine:
+                causal_result = await causal_engine.analyze_recent_signals(
+                    user_id=user_id, limit=3
+                )
+                if causal_result and causal_result.actions:
+                    # Format actions as conversational intelligence
+                    action_summaries = []
+                    for action in causal_result.actions[:3]:
+                        action_summaries.append(
+                            f"- {action.recommended_action} "
+                            f"(timing: {action.timing}, urgency: {action.urgency})"
+                        )
+                    if action_summaries:
+                        causal_actions_text = (
+                            "## Recent Market Intelligence\n"
+                            "Key signals you should be aware of:\n"
+                            + "\n".join(action_summaries)
+                        )
+        except Exception as e:
+            logger.debug(
+                "Causal reasoning failed for Tavus context: %s", e
+            )
+
+        # Fetch user mental model
+        try:
+            from src.db.supabase import get_supabase_client
+            from src.intelligence.user_model import UserMentalModelService
+
+            db_client = get_supabase_client()
+            mental_model_service = UserMentalModelService(db_client)
+            mental_model = await mental_model_service.get_model(user_id)
+            user_mental_model_text = mental_model.to_prompt_section()
+        except Exception as e:
+            logger.debug(
+                "User mental model fetch failed for Tavus context: %s", e
+            )
+
         # Build persona using the same pipeline as chat
         try:
             builder = PersonaBuilder()
@@ -933,9 +1009,13 @@ class TavusClient:
                 user_id=user_id,
                 agent_name="aria",
                 agent_role_description="Department Director of Commercial Intelligence",
+                # Pass enrichment data to PersonaBuilder
+                team_intelligence=team_intelligence_text,
+                causal_actions=causal_actions_text,
+                user_mental_model=user_mental_model_text,
             )
             ctx = await builder.build(request)
-            # Get L1-L4 from PersonaBuilder
+            # Get L1-L8 from PersonaBuilder
             persona_prompt = ctx.to_system_prompt()
             if persona_prompt:
                 parts.append(persona_prompt)
@@ -953,6 +1033,13 @@ class TavusClient:
             parts.append(LAYER_1_CORE_IDENTITY)
             parts.append(LAYER_2_PERSONALITY_TRAITS)
             parts.append(LAYER_3_ANTI_PATTERNS)
+            # Try to append enrichment data even in fallback mode
+            if team_intelligence_text:
+                parts.append(team_intelligence_text)
+            if causal_actions_text:
+                parts.append(causal_actions_text)
+            if user_mental_model_text:
+                parts.append("## User Context\n" + user_mental_model_text)
 
         # Add capability context so ARIA knows her capabilities
         try:
@@ -965,33 +1052,6 @@ class TavusClient:
             logger.debug(
                 "Failed to get capability context",
                 extra={"user_id": user_id, "error": str(e)},
-            )
-
-        # Add causal reasoning intelligence for market-aware conversations
-        try:
-            causal_engine = self._get_causal_engine()
-            if causal_engine:
-                causal_result = await causal_engine.analyze_recent_signals(
-                    user_id=user_id, limit=3
-                )
-                if causal_result and causal_result.actions:
-                    # Format actions as conversational intelligence
-                    action_summaries = []
-                    for action in causal_result.actions[:3]:
-                        action_summaries.append(
-                            f"- {action.recommended_action} "
-                            f"(timing: {action.timing}, urgency: {action.urgency})"
-                        )
-                    if action_summaries:
-                        causal_section = (
-                            "## Recent Market Intelligence\n"
-                            "Key signals you should be aware of:\n"
-                            + "\n".join(action_summaries)
-                        )
-                        parts.append(causal_section)
-        except Exception as e:
-            logger.debug(
-                "Causal reasoning failed for Tavus context, continuing without: %s", e
             )
 
         # Add spoken-mode adaptation (the ONLY difference from chat)

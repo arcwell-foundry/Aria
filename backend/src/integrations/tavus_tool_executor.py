@@ -67,6 +67,32 @@ class VideoToolExecutor:
         return self._db
 
     # ------------------------------------------------------------------
+    # Persona preamble helper
+    # ------------------------------------------------------------------
+
+    async def _get_persona_preamble(self) -> str:
+        """Get a lightweight persona preamble for LLM-generated spoken responses.
+
+        Uses only LAYER 1 + LAYER 2 (core identity + personality traits)
+        to ensure ARIA sounds like herself when generating spoken text.
+
+        Returns:
+            Persona preamble string, or empty string on failure.
+        """
+        try:
+            from src.core.persona import (
+                LAYER_1_CORE_IDENTITY,
+                LAYER_2_PERSONALITY_TRAITS,
+            )
+
+            return f"{LAYER_1_CORE_IDENTITY}\n\n{LAYER_2_PERSONALITY_TRAITS}"
+        except Exception as e:
+            logger.debug(
+                "Failed to get persona preamble for video tool: %s", e
+            )
+            return ""
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
@@ -1329,13 +1355,18 @@ class VideoToolExecutor:
         action_items = []
         if not action_items_text and summary:
             try:
+                # Get persona preamble so ARIA sounds like herself
+                persona_preamble = await self._get_persona_preamble()
                 extraction_prompt = (
                     f"Extract action items from this meeting debrief. Return as JSON array:\n\n"
                     f"Debrief: {summary}\n\n"
                     f'Return format: {{"action_items": [{{"task": "...", "priority": "high|medium|low"}}]}}'
                 )
+                messages = [{"role": "user", "content": extraction_prompt}]
+                if persona_preamble:
+                    messages.insert(0, {"role": "system", "content": persona_preamble})
                 raw = await self.llm.generate_response(
-                    messages=[{"role": "user", "content": extraction_prompt}],
+                    messages=messages,
                     max_tokens=512,
                     temperature=0.2,
                 )
