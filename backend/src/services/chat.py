@@ -3339,8 +3339,9 @@ class ChatService:
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
-        Delegates all prompt assembly to PersonaBuilder.build_chat_system_prompt().
-        Appends active goals and personality traits after PersonaBuilder output.
+        Delegates ALL prompt assembly to PersonaBuilder.build_chat_system_prompt().
+        Causal reasoning, user mental model, and team intelligence are passed as
+        pre-rendered strings into PersonaRequest so PersonaBuilder owns all layers.
         Falls back to _build_system_prompt if PersonaBuilder fails.
 
         Args:
@@ -3368,6 +3369,62 @@ class ChatService:
 
             from src.core.persona import PersonaRequest
 
+            # Pre-render causal actions into text for PersonaBuilder L7
+            causal_text: str | None = None
+            if causal_actions:
+                action_lines = []
+                for action in causal_actions[:5]:
+                    urgency_label = getattr(action, "urgency", "monitor")
+                    action_lines.append(
+                        f"- [{urgency_label.upper()}] Signal: {getattr(action, 'signal', '')[:120]}\n"
+                        f"  Causal chain: {getattr(action, 'causal_narrative', '')[:200]}\n"
+                        f"  Recommended action: {getattr(action, 'recommended_action', '')}\n"
+                        f"  Timing: {getattr(action, 'timing', 'Unknown')}"
+                    )
+                if action_lines:
+                    causal_text = "\n".join(action_lines)
+
+            # Pre-render user mental model into text for PersonaBuilder L8
+            mental_model_text: str | None = None
+            if user_mental_model and not isinstance(user_mental_model, Exception):
+                try:
+                    mental_model_text = user_mental_model.to_prompt_section()
+                except Exception:
+                    pass  # fail-open
+
+            # Auto-fetch team intelligence for PersonaBuilder L4.5
+            team_intelligence_text: str | None = None
+            try:
+                from src.memory.shared_intelligence import get_shared_intelligence_service
+
+                # Resolve user's company_id from profile
+                _company_id: str | None = None
+                try:
+                    db = get_supabase_client()
+                    _profile = (
+                        db.table("user_profiles")
+                        .select("company_id")
+                        .eq("id", user_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    if _profile and _profile.data:
+                        _company_id = _profile.data.get("company_id")
+                except Exception:
+                    pass  # fail-open — no company means no team intelligence
+
+                if _company_id:
+                    shared_intel = get_shared_intelligence_service()
+                    team_intelligence_text = await shared_intel.get_formatted_team_context(
+                        company_id=_company_id,
+                        user_id=user_id,
+                        max_facts=10,
+                    )
+                    if not team_intelligence_text or not team_intelligence_text.strip():
+                        team_intelligence_text = None
+            except Exception as e:
+                logger.debug("Team intelligence fetch failed (fail-open): %s", e)
+
             request = PersonaRequest(
                 user_id=user_id,
                 memories=memories,
@@ -3376,6 +3433,9 @@ class ChatService:
                 load_state=load_state,
                 proactive_insights=proactive_insights,
                 web_context=web_context,
+                causal_actions=causal_text,
+                user_mental_model=mental_model_text,
+                team_intelligence=team_intelligence_text,
             )
             prompt = await self._persona_builder.build_chat_system_prompt(request)
 
@@ -3416,36 +3476,6 @@ class ChatService:
                 prompt += "\n\n" + CAPABILITY_CONTEXT_TEMPLATE.format(
                     capability_context=capability_context
                 )
-
-            # Add causal sales intelligence section
-            if causal_actions:
-                action_lines = []
-                for action in causal_actions[:5]:
-                    urgency_label = getattr(action, "urgency", "monitor")
-                    action_lines.append(
-                        f"- [{urgency_label.upper()}] Signal: {getattr(action, 'signal', '')[:120]}\n"
-                        f"  Causal chain: {getattr(action, 'causal_narrative', '')[:200]}\n"
-                        f"  Recommended action: {getattr(action, 'recommended_action', '')}\n"
-                        f"  Timing: {getattr(action, 'timing', 'Unknown')}"
-                    )
-                prompt += (
-                    "\n\n## Sales Intelligence — Causal Insights\n"
-                    "Recent market signals analyzed through causal reasoning:\n"
-                    + "\n".join(action_lines)
-                    + "\n\nReference these insights when relevant to the user's questions."
-                )
-
-            # Add user behavioral profile section
-            if user_mental_model and not isinstance(user_mental_model, Exception):
-                try:
-                    profile_text = user_mental_model.to_prompt_section()
-                    prompt += (
-                        "\n\n## User Behavioral Profile\n"
-                        + profile_text
-                        + "\n\nAdapt response depth and style to match these preferences."
-                    )
-                except Exception:
-                    pass  # fail-open
 
             return prompt
 

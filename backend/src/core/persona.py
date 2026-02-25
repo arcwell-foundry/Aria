@@ -1,6 +1,6 @@
 """Centralized persona and system prompt assembly for ARIA.
 
-PersonaBuilder assembles 7 layers of persona context for every LLM call:
+PersonaBuilder assembles 9 layers of persona context for every LLM call:
   L1 - Core Identity (static)
   L2 - Personality Traits (static)
   L3 - Anti-Patterns (static)
@@ -8,6 +8,8 @@ PersonaBuilder assembles 7 layers of persona context for every LLM call:
   L4.5 - Team Intelligence (opt-in) — shared insights from team members about accounts
   L5 - Agent Context (per-call) — agent name, role, task description
   L6 - Relationship Context (per-call, opt-in) — lead/account/recipient history
+  L7 - Causal Sales Intelligence (per-call, opt-in) — causal reasoning insights
+  L8 - User Behavioral Model (per-call, opt-in) — user mental model / behavioral profile
 
 Usage:
     builder = get_persona_builder()
@@ -92,6 +94,16 @@ class PersonaRequest:
         account_name: Account name for relationship context.
         recipient_name: Recipient name for relationship context.
 
+    Layer 7 (causal sales intelligence, opt-in):
+        causal_actions: Pre-rendered causal reasoning text or list of SalesAction objects.
+        user_mental_model: Pre-rendered mental model text or UserMentalModel object.
+
+    Layer 4.5 / team_intelligence (opt-in):
+        include_team_intelligence: Set True to include shared team insights.
+        company_id: Company ID for team intelligence lookup.
+        team_intelligence_account: Optional account filter for team intelligence.
+        team_intelligence: Pre-rendered team intelligence text (alternative to lookup).
+
     Chat-specific (only for build_chat_system_prompt):
         memories: Pre-queried memory results.
         priming_context: ConversationContext from priming service.
@@ -106,6 +118,7 @@ class PersonaRequest:
     include_team_intelligence: bool = False
     company_id: str | None = None
     team_intelligence_account: str | None = None
+    team_intelligence: str | None = None  # Pre-rendered team intelligence text
     # Layer 5
     agent_name: str | None = None
     agent_role_description: str | None = None
@@ -116,6 +129,10 @@ class PersonaRequest:
     lead_id: str | None = None
     account_name: str | None = None
     recipient_name: str | None = None
+    # Layer 7 - Causal Sales Intelligence
+    causal_actions: str | None = None  # Pre-rendered causal reasoning text
+    # Layer 8 - User Behavioral Model
+    user_mental_model: str | None = None  # Pre-rendered mental model text
     # Chat-specific
     memories: list[dict[str, Any]] | None = None
     priming_context: Any = None
@@ -127,7 +144,7 @@ class PersonaRequest:
 
 @dataclass
 class PersonaContext:
-    """Assembled persona context with all 7 layers.
+    """Assembled persona context with all 9 layers.
 
     Each layer is a string (may be empty). ``to_system_prompt()`` joins
     all non-empty layers with double newlines.
@@ -140,6 +157,8 @@ class PersonaContext:
     team_intelligence: str = ""   # L4.5 - Shared team insights
     agent_context: str = ""       # L5
     relationship_context: str = ""  # L6
+    causal_intelligence: str = ""  # L7 - Causal sales intelligence
+    user_behavioral_model: str = ""  # L8 - User behavioral profile
     user_id: str = ""
     cached_layers_hit: bool = False
     build_time_ms: float = 0.0
@@ -154,6 +173,8 @@ class PersonaContext:
             self.team_intelligence,
             self.agent_context,
             self.relationship_context,
+            self.causal_intelligence,
+            self.user_behavioral_model,
         ]
         return "\n\n".join(layer for layer in layers if layer.strip())
 
@@ -165,6 +186,8 @@ class PersonaContext:
             "adaptations": self.user_context[:200] if self.user_context else "No user-specific adaptations yet",
             "current_agent": self.agent_context[:100] if self.agent_context else "General",
             "team_intelligence": self.team_intelligence[:100] if self.team_intelligence else "Not enabled",
+            "causal_intelligence": self.causal_intelligence[:100] if self.causal_intelligence else "Not active",
+            "user_behavioral_model": self.user_behavioral_model[:100] if self.user_behavioral_model else "Not active",
         }
 
 
@@ -173,10 +196,10 @@ class PersonaContext:
 # ---------------------------------------------------------------------------
 
 class PersonaBuilder:
-    """Assembles system prompts from 7 persona layers.
+    """Assembles system prompts from 9 persona layers.
 
     Caches Layer 4 (user context) for 5 minutes to avoid repeated DB queries.
-    Layers 1-3 are compile-time constants. Layers 4.5-6 are per-call.
+    Layers 1-3 are compile-time constants. Layers 4.5-8 are per-call.
     """
 
     def __init__(self) -> None:
@@ -189,7 +212,7 @@ class PersonaBuilder:
             request: PersonaRequest with user_id and optional agent/relationship info.
 
         Returns:
-            PersonaContext with all 7 layers populated.
+            PersonaContext with all 9 layers populated.
         """
         start = time.perf_counter()
 
@@ -198,7 +221,10 @@ class PersonaBuilder:
 
         # L4.5: Team Intelligence (opt-in, async)
         team_intelligence = ""
-        if request.include_team_intelligence and request.company_id:
+        if request.team_intelligence:
+            # Pre-rendered team intelligence text takes priority
+            team_intelligence = request.team_intelligence
+        elif request.include_team_intelligence and request.company_id:
             team_intelligence = await self._build_team_intelligence(request)
 
         # L5: Agent context (synchronous)
@@ -208,6 +234,25 @@ class PersonaBuilder:
         relationship_context = ""
         if request.include_relationship_context:
             relationship_context = await self._build_relationship_context(request)
+
+        # L7: Causal Sales Intelligence (opt-in)
+        causal_intelligence = ""
+        if request.causal_actions:
+            causal_intelligence = (
+                "## Sales Intelligence — Causal Insights\n"
+                "Recent market signals analyzed through causal reasoning:\n"
+                + request.causal_actions
+                + "\n\nReference these insights when relevant to the user's questions."
+            )
+
+        # L8: User Behavioral Model (opt-in)
+        user_behavioral_model = ""
+        if request.user_mental_model:
+            user_behavioral_model = (
+                "## User Behavioral Profile\n"
+                + request.user_mental_model
+                + "\n\nAdapt response depth and style to match these preferences."
+            )
 
         build_time = (time.perf_counter() - start) * 1000
 
@@ -219,6 +264,8 @@ class PersonaBuilder:
             team_intelligence=team_intelligence,
             agent_context=agent_context,
             relationship_context=relationship_context,
+            causal_intelligence=causal_intelligence,
+            user_behavioral_model=user_behavioral_model,
             user_id=request.user_id,
             cached_layers_hit=cache_hit,
             build_time_ms=build_time,
