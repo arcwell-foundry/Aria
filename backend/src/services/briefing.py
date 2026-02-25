@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from src.core.cache import cached
 from src.core.llm import LLMClient
+from src.core.persona import PersonaBuilder, PersonaRequest
 from src.db.supabase import SupabaseClient
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
@@ -84,6 +85,14 @@ class BriefingService:
         self._oauth_client: Any = None
         # Lazy init for causal reasoning engine
         self._causal_engine: Any = None
+        # Lazy init for PersonaBuilder
+        self._persona_builder: PersonaBuilder | None = None
+
+    def _get_persona_builder(self) -> PersonaBuilder:
+        """Lazily initialize and return the PersonaBuilder."""
+        if self._persona_builder is None:
+            self._persona_builder = PersonaBuilder()
+        return self._persona_builder
 
     def _get_oauth_client(self) -> Any:
         """Lazily initialize and return the ComposioOAuthClient."""
@@ -295,8 +304,9 @@ class BriefingService:
                 exc_info=True,
             )
 
-        # Generate summary using LLM
+        # Generate summary using LLM with PersonaBuilder
         summary = await self._generate_summary(
+            user_id,
             calendar_data,
             lead_data,
             signal_data,
@@ -1131,6 +1141,7 @@ class BriefingService:
 
     async def _generate_summary(
         self,
+        user_id: str,
         calendar: dict[str, Any],
         leads: dict[str, Any],
         signals: dict[str, Any],
@@ -1140,9 +1151,10 @@ class BriefingService:
         queued_insights: list[dict[str, Any]] | None = None,
         causal_actions: list[dict[str, Any]] | None = None,
     ) -> str:
-        """Generate executive summary using LLM.
+        """Generate executive summary using LLM with PersonaBuilder.
 
         Args:
+            user_id: The user's ID for persona context.
             calendar: Calendar data dict.
             leads: Lead data dict.
             signals: Signal data dict.
@@ -1241,10 +1253,52 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
         if tone_guidance:
             prompt = f"TONE: {tone_guidance}\n\n{prompt}"
 
-        return await self._llm.generate_response(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-        )
+        # Build system prompt using PersonaBuilder for personality consistency
+        system_prompt = ""
+        try:
+            builder = self._get_persona_builder()
+            # Format causal actions as pre-rendered text for PersonaBuilder Layer 7
+            causal_actions_text = ""
+            if causal_actions:
+                causal_lines = []
+                for action in causal_actions[:3]:
+                    causal_lines.append(
+                        f"- {action.get('recommended_action', '')} "
+                        f"(urgency: {action.get('urgency', 'normal')})"
+                    )
+                if causal_lines:
+                    causal_actions_text = "Market Intelligence Actions:\n" + "\n".join(causal_lines)
+
+            request = PersonaRequest(
+                user_id=user_id,
+                agent_name="briefing",
+                agent_role_description="Morning briefing generator providing daily intelligence summary",
+                task_description="Generate a concise, actionable morning briefing",
+                causal_actions=causal_actions_text if causal_actions_text else None,
+            )
+            ctx = await builder.build(request)
+            system_prompt = ctx.to_system_prompt()
+        except Exception as e:
+            logger.warning(
+                "Failed to build PersonaBuilder context for briefing, using fallback",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
+        if system_prompt:
+            return await self._llm.generate_response(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=200,
+            )
+        else:
+            # Fallback without PersonaBuilder
+            return await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+            )
 
     async def _get_email_data(self, user_id: str) -> dict[str, Any]:
         """Get email intelligence summary from overnight processing.
