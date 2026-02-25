@@ -186,6 +186,9 @@ class HunterAgent(SkillAwareAgent):
 
         logger.info("Hunter agent starting lead discovery task")
 
+        # Extract team intelligence for LLM enrichment (optional, fail-open)
+        self._team_intelligence: str = task.get("team_intelligence", "")
+
         # Extract task parameters
         icp = task["icp"]
         target_count = task["target_count"]
@@ -317,6 +320,17 @@ class HunterAgent(SkillAwareAgent):
         Raises:
             Exception: If LLM call or JSON parsing fails.
         """
+        # Build team intelligence context if available
+        team_context = ""
+        try:
+            if getattr(self, "_team_intelligence", ""):
+                team_context = (
+                    f"\n\nConsider the following shared team knowledge when identifying targets:\n"
+                    f"{self._team_intelligence}\n"
+                )
+        except Exception:
+            pass
+
         prompt = (
             f"Identify up to {limit} real companies in the '{query}' industry "
             f"that would be relevant targets for a life sciences commercial team. "
@@ -324,6 +338,7 @@ class HunterAgent(SkillAwareAgent):
             f'"name", "domain", "description", "industry", "size", "geography", "website". '
             f"For size use categories like: Startup (1-50), Mid-market (100-500), Enterprise (500+). "
             f"For geography use regions like: North America, Europe, Asia-Pacific. "
+            f"{team_context}"
             f"Return ONLY the JSON array, no other text."
         )
 
@@ -688,6 +703,17 @@ class HunterAgent(SkillAwareAgent):
         if roles:
             roles_instruction = f"Focus only on these roles: {', '.join(roles)}. "
 
+        # Build team intelligence context if available
+        team_context = ""
+        try:
+            if getattr(self, "_team_intelligence", ""):
+                team_context = (
+                    f"\n\nShared team knowledge about accounts and contacts:\n"
+                    f"{self._team_intelligence}\n"
+                )
+        except Exception:
+            pass
+
         prompt = (
             f"For a life sciences company called '{company_name}', suggest the most relevant "
             f"executive/leadership contacts to reach out to for a commercial partnership. "
@@ -697,6 +723,7 @@ class HunterAgent(SkillAwareAgent):
             f'"seniority" (e.g. C-Level, VP-Level, Director-Level), '
             f'"suggested_outreach" (1-sentence outreach angle). '
             f"Do NOT include fake names or email addresses. "
+            f"{team_context}"
             f"Return 3-5 contacts. Return ONLY the JSON array."
         )
 

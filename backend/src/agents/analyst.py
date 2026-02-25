@@ -165,6 +165,7 @@ class AnalystAgent(SkillAwareAgent):
             _task: Task specification with:
                 - query: Research question (required)
                 - depth: Research depth - "quick", "standard", or "comprehensive" (optional)
+                - team_intelligence: Optional shared team knowledge context
 
         Returns:
             AgentResult with structured research report.
@@ -175,6 +176,9 @@ class AnalystAgent(SkillAwareAgent):
         from datetime import datetime
 
         from src.agents.base import AgentResult
+
+        # Extract team intelligence (optional enrichment for report context)
+        self._team_intelligence: str = _task.get("team_intelligence", "")
 
         query = _task["query"]
         depth = _task.get("depth", "standard")
@@ -213,6 +217,10 @@ class AnalystAgent(SkillAwareAgent):
             # ChEMBL for molecule data
             chembl_result = await self._chembl_search(query=query)
             report["chembl_molecules"] = chembl_result
+
+        # Include team intelligence context in report if available
+        if self._team_intelligence:
+            report["team_intelligence_context"] = self._team_intelligence
 
         return AgentResult(success=True, data=report)
 

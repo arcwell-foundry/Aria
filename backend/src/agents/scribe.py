@@ -268,6 +268,9 @@ class ScribeAgent(SkillAwareAgent):
         # OODA ACT: Log skill consideration before native execution
         await self._log_skill_consideration()
 
+        # Extract team intelligence for LLM enrichment (optional, fail-open)
+        self._team_intelligence: str = task.get("team_intelligence", "")
+
         comm_type = task["communication_type"]
         recipient = task.get("recipient")
         context = task.get("context", "")
@@ -492,13 +495,23 @@ class ScribeAgent(SkillAwareAgent):
             if style_parts:
                 style_hints = "\n\nWriting style preferences:\n" + "\n".join(style_parts)
 
+        # Build team intelligence section if available (fail-open)
+        team_intel_section = ""
+        try:
+            team_intel = getattr(self, "_team_intelligence", "")
+            if team_intel:
+                team_intel_section = f"\n\n{team_intel}\n"
+        except Exception:
+            pass
+
         prompt = (
             f"Draft a professional email for a life sciences commercial team member.\n\n"
             f"Recipient:\n{recipient_info}\n\n"
             f"Context: {context}\n\n"
             f"Goal: {goal}\n\n"
             f"Tone: {tone}\n"
-            f"{style_hints}\n\n"
+            f"{style_hints}"
+            f"{team_intel_section}\n\n"
             f"Requirements:\n"
             f"- Keep the email concise and professional\n"
             f"- Include a clear call to action\n"

@@ -200,6 +200,9 @@ class ScoutAgent(SkillAwareAgent):
 
         logger.info("Scout agent starting intelligence gathering task")
 
+        # Extract team intelligence for LLM enrichment (optional, fail-open)
+        self._team_intelligence: str = task.get("team_intelligence", "")
+
         # Extract task parameters
         entities = task["entities"]
         signal_types = task.get("signal_types")
@@ -279,10 +282,22 @@ class ScoutAgent(SkillAwareAgent):
 
         # LLM fallback: ask Claude to generate intelligence results
         try:
+            # Include team intelligence context if available (fail-open)
+            team_context = ""
+            try:
+                if getattr(self, "_team_intelligence", ""):
+                    team_context = (
+                        f"\n\nConsider this shared team knowledge for context:\n"
+                        f"{self._team_intelligence}\n"
+                    )
+            except Exception:
+                pass
+
             prompt = (
                 f'Generate {limit} realistic web search results for the query: "{query}"\n\n'
                 "Based on your training knowledge, provide results that would be relevant "
                 "for a life sciences commercial intelligence analyst.\n\n"
+                f"{team_context}"
                 "Return ONLY a JSON array with objects containing:\n"
                 '- "title": article/page title\n'
                 '- "url": realistic URL\n'

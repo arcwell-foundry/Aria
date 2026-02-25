@@ -214,6 +214,9 @@ class StrategistAgent(SkillAwareAgent):
         # OODA ACT: Log skill consideration before native execution
         await self._log_skill_consideration()
 
+        # Extract team intelligence for LLM enrichment (optional, fail-open)
+        self._team_intelligence: str = task.get("team_intelligence", "")
+
         # Extract task components
         goal = task.get("goal", {})
         resources = task.get("resources", {})
@@ -372,6 +375,14 @@ class StrategistAgent(SkillAwareAgent):
                 context_sections.append(
                     f"Memory Context: {json.dumps(cold_memory[:5], default=str)}"
                 )
+
+            # Inject team intelligence if available (fail-open)
+            try:
+                team_intel = getattr(self, "_team_intelligence", "")
+                if team_intel:
+                    context_sections.append(team_intel)
+            except Exception:
+                pass
 
             user_prompt = (
                 f"Analyze the following account for a '{goal_type}' pursuit "
@@ -671,7 +682,16 @@ class StrategistAgent(SkillAwareAgent):
             except Exception as e:
                 logger.debug("User model unavailable for strategy generation: %s", e)
 
-            # 2. Build user prompt
+            # 2. Gather team intelligence if available (fail-open)
+            team_intel_section = ""
+            try:
+                team_intel = getattr(self, "_team_intelligence", "")
+                if team_intel:
+                    team_intel_section = f"\n\n{team_intel}\n"
+            except Exception:
+                pass
+
+            # 3. Build user prompt
             user_prompt = (
                 f"Generate a pursuit strategy for the following goal.\n\n"
                 f"Goal: {json.dumps(goal, default=str)}\n\n"
@@ -679,6 +699,7 @@ class StrategistAgent(SkillAwareAgent):
                 f"Resources: {json.dumps(resources, default=str)}\n\n"
                 f"Constraints: {json.dumps(constraints, default=str)}\n\n"
                 + (user_model_context + "\n\n" if user_model_context else "")
+                + (team_intel_section if team_intel_section else "")
                 + f"Provide ONLY a JSON object with these fields:\n"
                 '{"phases": [{"phase_number": 1, "name": "string", '
                 '"description": "string", "duration_pct": 0.0-1.0, '
@@ -700,7 +721,7 @@ class StrategistAgent(SkillAwareAgent):
                 "Return ONLY the JSON object, no other text."
             )
 
-            # 3. Call LLM with user_id for CostGovernor budget checks
+            # 4. Call LLM with user_id for CostGovernor budget checks
             llm_response = await self.llm.generate_response(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,

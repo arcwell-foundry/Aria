@@ -482,6 +482,25 @@ class GoalExecutionService:
         # Gather context for agent execution
         context = await self._gather_execution_context(user_id)
 
+        # Fetch team intelligence once for all agents (fail-open)
+        try:
+            from src.memory.shared_intelligence import SharedIntelligenceService
+
+            shared_intel = SharedIntelligenceService()
+            company_id = context.get("profile", {}).get("company_id")
+            if company_id:
+                context["team_intelligence"] = (
+                    await shared_intel.get_formatted_team_context(
+                        company_id=company_id,
+                        user_id=user_id,
+                    )
+                )
+            else:
+                context["team_intelligence"] = ""
+        except Exception as e:
+            logger.debug("Team intelligence fetch failed, proceeding without: %s", e)
+            context["team_intelligence"] = ""
+
         # Execute each assigned agent
         agent_type = goal.get("config", {}).get("agent_type", "")
         results: list[dict[str, Any]] = []
@@ -1039,9 +1058,12 @@ class GoalExecutionService:
         config = goal.get("config", {})
         facts = context.get("facts", [])
         company_name = context.get("company_name", "")
+        team_intelligence = context.get("team_intelligence", "")
+
+        task: dict[str, Any] | None = None
 
         if agent_type == "hunter":
-            return {
+            task = {
                 "icp": {
                     "industry": config.get("industry", "Life Sciences"),
                     "size": config.get("company_size", ""),
@@ -1051,12 +1073,12 @@ class GoalExecutionService:
                 "exclusions": config.get("exclusions", []),
             }
         elif agent_type == "analyst":
-            return {
+            task = {
                 "query": goal.get("title", company_name),
                 "depth": config.get("depth", "standard"),
             }
         elif agent_type == "strategist":
-            return {
+            task = {
                 "goal": {
                     "title": goal.get("title", ""),
                     "type": config.get("goal_type", "research"),
@@ -1073,14 +1095,14 @@ class GoalExecutionService:
                 },
             }
         elif agent_type == "scribe":
-            return {
+            task = {
                 "communication_type": config.get("communication_type", "email"),
                 "goal": goal.get("title", f"Follow up for {company_name}"),
                 "context": "; ".join(facts[:5]) if facts else "",
                 "tone": config.get("tone", "formal"),
             }
         elif agent_type == "operator":
-            return {
+            task = {
                 "operation_type": config.get("operation_type", "crm_read"),
                 "parameters": config.get("parameters", {"record_type": "accounts"}),
             }
@@ -1088,19 +1110,23 @@ class GoalExecutionService:
             entities = config.get("entities", [])
             if not entities and company_name:
                 entities = [company_name]
-            return {
+            task = {
                 "entities": entities if entities else ["Unknown"],
                 "signal_types": config.get("signal_types"),
             }
         elif agent_type == "executor":
-            return {
+            task = {
                 "task_description": config.get("task_description", goal.get("title", "")),
                 "url": config.get("url", ""),
                 "url_approved": config.get("url_approved", False),
                 "steps": config.get("steps"),
             }
 
-        return None
+        # Inject team intelligence into every agent task (agents that don't use it ignore it)
+        if task is not None and team_intelligence:
+            task["team_intelligence"] = team_intelligence
+
+        return task
 
     async def _try_skill_execution(
         self,
@@ -3074,6 +3100,25 @@ class GoalExecutionService:
             )
             goal = goal_result.data or {"id": goal_id, "title": "Unknown", "config": {}}
             context = await self._gather_execution_context(user_id)
+
+            # Fetch team intelligence once for all agents (fail-open)
+            try:
+                from src.memory.shared_intelligence import SharedIntelligenceService
+
+                shared_intel = SharedIntelligenceService()
+                company_id = context.get("profile", {}).get("company_id")
+                if company_id:
+                    context["team_intelligence"] = (
+                        await shared_intel.get_formatted_team_context(
+                            company_id=company_id,
+                            user_id=user_id,
+                        )
+                    )
+                else:
+                    context["team_intelligence"] = ""
+            except Exception as e:
+                logger.debug("Team intelligence fetch failed, proceeding without: %s", e)
+                context["team_intelligence"] = ""
 
             # Extract conversation_id from plan row for persisting progress messages
             plan_conversation_id = (
