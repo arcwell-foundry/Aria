@@ -8,6 +8,11 @@ import httpx
 from src.core.config import settings
 from src.core.resilience import tavus_circuit_breaker
 
+try:
+    from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+except ImportError:
+    SalesCausalReasoningEngine = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 # Spoken-mode adaptation for avatar ARIA (the ONLY difference from chat)
@@ -61,6 +66,22 @@ class TavusClient:
             "x-api-key": self.api_key.get_secret_value() if self.api_key else "",
             "Content-Type": "application/json",
         }
+        self._causal_engine: Any = None  # Lazy initialization
+
+    def _get_causal_engine(self) -> Any:
+        """Lazily initialize SalesCausalReasoningEngine."""
+        if self._causal_engine is None and SalesCausalReasoningEngine:
+            try:
+                from src.db.supabase import get_supabase_client
+                from src.core.llm import LLMClient
+
+                self._causal_engine = SalesCausalReasoningEngine(
+                    db_client=get_supabase_client(),
+                    llm_client=LLMClient(),
+                )
+            except Exception as e:
+                logger.warning("Failed to initialize SalesCausalReasoningEngine: %s", e)
+        return self._causal_engine
 
     def _handle_http_error(self, error: httpx.HTTPStatusError) -> None:
         """Handle HTTP errors and raise appropriate Tavus exceptions.
@@ -944,6 +965,33 @@ class TavusClient:
             logger.debug(
                 "Failed to get capability context",
                 extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # Add causal reasoning intelligence for market-aware conversations
+        try:
+            causal_engine = self._get_causal_engine()
+            if causal_engine:
+                causal_result = await causal_engine.analyze_recent_signals(
+                    user_id=user_id, limit=3
+                )
+                if causal_result and causal_result.actions:
+                    # Format actions as conversational intelligence
+                    action_summaries = []
+                    for action in causal_result.actions[:3]:
+                        action_summaries.append(
+                            f"- {action.recommended_action} "
+                            f"(timing: {action.timing}, urgency: {action.urgency})"
+                        )
+                    if action_summaries:
+                        causal_section = (
+                            "## Recent Market Intelligence\n"
+                            "Key signals you should be aware of:\n"
+                            + "\n".join(action_summaries)
+                        )
+                        parts.append(causal_section)
+        except Exception as e:
+            logger.debug(
+                "Causal reasoning failed for Tavus context, continuing without: %s", e
             )
 
         # Add spoken-mode adaptation (the ONLY difference from chat)
