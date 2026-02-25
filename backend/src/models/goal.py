@@ -188,3 +188,20 @@ class RetrospectiveResponse(BaseModel):
     learnings: list[str]
     created_at: datetime
     updated_at: datetime
+
+
+class GoalFeedbackRequest(BaseModel):
+    """Request model for submitting goal feedback."""
+
+    rating: str = Field(..., pattern="^(up|down)$", description="'up' or 'down'")
+    comment: str | None = None
+
+
+class GoalFeedbackResponse(BaseModel):
+    """Response model for goal feedback."""
+
+    id: str
+    goal_id: str
+    rating: str
+    comment: str | None
+    created_at: datetime

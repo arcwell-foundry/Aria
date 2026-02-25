@@ -2356,7 +2356,91 @@ class GoalExecutionService:
         if not goal:
             return {"goal_id": goal_id, "error": "Goal not found", "tasks": []}
 
-        # Try procedural memory first for matching workflows
+        # Try playbook matching first (semantic, LLM-scored)
+        try:
+            from src.services.goal_learning import GoalLearningService
+
+            learning = GoalLearningService()
+            playbook_match = await learning.find_matching_playbook(
+                user_id,
+                goal.get("title", ""),
+                goal.get("description", ""),
+                goal.get("goal_type", ""),
+            )
+            if playbook_match:
+                pb = playbook_match["playbook"]
+                template = pb.get("plan_template", [])
+                warnings = pb.get("negative_patterns", [])
+
+                tasks: list[dict[str, Any]] = []
+                for i, step in enumerate(template):
+                    tasks.append(
+                        {
+                            "title": step.get("title", f"Step {i + 1}"),
+                            "description": step.get("description", ""),
+                            "agent": step.get("agent", "analyst"),
+                            "dependencies": step.get("depends_on", []),
+                            "tools_needed": step.get("tools_needed", []),
+                            "auth_required": step.get("auth_required", []),
+                            "risk_level": step.get("risk_level", "LOW"),
+                            "estimated_minutes": step.get(
+                                "estimated_minutes", 30
+                            ),
+                            "auto_executable": step.get("auto_executable", True),
+                        }
+                    )
+
+                # Build warnings from negative patterns
+                warning_notes: list[str] = []
+                for neg in warnings[-3:]:  # Last 3 warnings
+                    w = neg.get("warning", "")
+                    if w:
+                        warning_notes.append(w)
+
+                plan: dict[str, Any] = {
+                    "goal_id": goal_id,
+                    "tasks": tasks,
+                    "execution_mode": "playbook",
+                    "missing_integrations": [],
+                    "approval_points": [],
+                    "estimated_total_minutes": sum(
+                        t.get("estimated_minutes", 30) for t in tasks
+                    ),
+                    "reasoning": (
+                        f"Reused playbook '{pb.get('playbook_name', '')}' "
+                        f"(confidence: {playbook_match['confidence']:.0%}, "
+                        f"succeeded {pb.get('times_succeeded', 0)}x). "
+                        f"{playbook_match.get('reasoning', '')}"
+                    ),
+                    "playbook_id": pb["id"],
+                    "adaptation_notes": playbook_match.get("adaptation_notes", ""),
+                    "warnings": warning_notes,
+                }
+                self._db.table("goal_execution_plans").upsert(
+                    {
+                        "goal_id": goal_id,
+                        "user_id": user_id,
+                        "plan": json.dumps(plan),
+                        "playbook_id": pb["id"],
+                        "created_at": datetime.now(UTC).isoformat(),
+                    }
+                ).execute()
+
+                # Increment times_used
+                self._db.table("goal_playbooks").update(
+                    {
+                        "times_used": pb.get("times_used", 0) + 1,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                ).eq("id", pb["id"]).execute()
+
+                return plan
+        except Exception as e:
+            logger.debug(
+                "Playbook matching failed, falling back to procedural memory: %s", e
+            )
+
+        # Try procedural memory for matching workflows
         try:
             from src.memory.procedural import ProceduralMemory
 
@@ -3121,6 +3205,15 @@ class GoalExecutionService:
             except Exception:
                 logger.warning("Failed to send execution_complete WS event", extra={"goal_id": goal_id})
 
+            # Learn from goal failure — generate failure retrospective
+            try:
+                from src.services.goal_learning import GoalLearningService
+
+                learning = GoalLearningService()
+                await learning.process_goal_failure(user_id, goal_id, str(e))
+            except Exception as learn_err:
+                logger.debug("Failed to process goal failure learning: %s", learn_err)
+
     async def _handle_agent_result(
         self,
         user_id: str,
@@ -3635,62 +3728,14 @@ class GoalExecutionService:
         except Exception as e:
             logger.warning("Failed to generate retrospective: %s", e)
 
-        # Store executed plan as procedural memory workflow
+        # Learn from goal completion — extract or update playbooks
         try:
-            import uuid as uuid_mod
+            from src.services.goal_learning import GoalLearningService
 
-            from src.memory.procedural import ProceduralMemory, Workflow
-
-            procedural = ProceduralMemory()
-            # Get the execution plan for this goal
-            plan_result = (
-                self._db.table("goal_execution_plans")
-                .select("plan, tasks")
-                .eq("goal_id", goal_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .maybe_single()
-                .execute()
-            )
-            if plan_result and plan_result.data:
-                # Try 'plan' column first, then 'tasks' column
-                plan_raw = plan_result.data.get("plan") or plan_result.data.get("tasks", "[]")
-                plan_data = json.loads(plan_raw) if isinstance(plan_raw, str) else plan_raw
-
-                # Extract tasks list — could be in plan_data.tasks or plan_data itself
-                steps = (
-                    plan_data.get("tasks", plan_data) if isinstance(plan_data, dict) else plan_data
-                )
-
-                # Fetch goal info for trigger conditions
-                goal_result = (
-                    self._db.table("goals")
-                    .select("goal_type, title")
-                    .eq("id", goal_id)
-                    .maybe_single()
-                    .execute()
-                )
-                goal_info = goal_result.data if goal_result and goal_result.data else {}
-
-                workflow = Workflow(
-                    id=str(uuid_mod.uuid4()),
-                    user_id=user_id,
-                    workflow_name=f"Workflow for goal: {goal_id}",
-                    description=goal_info.get("title", ""),
-                    trigger_conditions={
-                        "goal_type": goal_info.get("goal_type", ""),
-                    },
-                    steps=steps if isinstance(steps, list) else [],
-                    success_count=1,
-                    failure_count=0,
-                    is_shared=False,
-                    version=1,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                await procedural.create_workflow(workflow)
+            learning = GoalLearningService()
+            await learning.process_goal_completion(user_id, goal_id, retro or {})
         except Exception as e:
-            logger.debug("Failed to store procedural memory: %s", e)
+            logger.debug("Failed to process goal completion learning: %s", e)
 
         # Publish completion event
         event_bus = EventBus.get_instance()
@@ -3736,6 +3781,7 @@ class GoalExecutionService:
                     "data": {
                         "goal_id": goal_id,
                         "retrospective": retro,
+                        "feedback_affordance": True,
                     },
                 })
 
@@ -3773,10 +3819,11 @@ class GoalExecutionService:
                 logger.debug("Failed to build goal_completion card", exc_info=True)
 
             # Enhanced suggestions based on retrospective content
-            retro_suggestions = ["Show details", "What's next?"]
+            retro_suggestions = ["Show details", "Rate this goal", "What's next?"]
             if retro and retro.get("next_steps"):
                 retro_suggestions = [
                     "Show details",
+                    "Rate this goal",
                     "Start a follow-up goal",
                     "What's next?",
                 ]

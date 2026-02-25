@@ -20,6 +20,7 @@ from src.api.deps import CurrentUser
 from src.models.goal import (
     CreateWithARIARequest,
     GoalCreate,
+    GoalFeedbackRequest,
     GoalStatus,
     GoalUpdate,
     MilestoneCreate,
@@ -1078,6 +1079,25 @@ async def generate_retrospective(
 
         raise HTTPException(status_code=404, detail="Goal not found")
     return retro
+
+
+@router.post("/{goal_id}/feedback")
+async def submit_goal_feedback(
+    goal_id: str,
+    data: GoalFeedbackRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Submit feedback (thumbs up/down) on a completed goal.
+
+    Records the feedback and updates linked playbook metrics.
+    """
+    from src.services.goal_learning import GoalLearningService
+
+    learning = GoalLearningService()
+    feedback = await learning.record_goal_feedback(
+        current_user.id, goal_id, data.rating, data.comment
+    )
+    return feedback
 
 
 # ── Temporary debug endpoint: test intent detection pipeline ──────────────
