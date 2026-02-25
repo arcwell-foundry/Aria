@@ -10,6 +10,13 @@ from src.core.resilience import tavus_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
+# Spoken-mode adaptation for avatar ARIA (the ONLY difference from chat)
+SPOKEN_MODE_ADAPTATION = """
+
+## Spoken Mode
+
+You are speaking aloud, not typing. Keep responses conversational and concise. No bullet points, numbered lists, or markdown formatting — you're talking. Use natural speech patterns with brief pauses for emphasis when needed. Reference specific data naturally: "Lonza's stock is up 12% this quarter" not "according to my research, a competitor is performing well." """
+
 
 class TavusAPIError(Exception):
     """Raised when Tavus API returns an error response."""
@@ -134,9 +141,9 @@ class TavusClient:
         """Create a new Tavus conversation and return conversation details.
 
         Args:
-            user_id: The user's ID for tracking
+            user_id: The user's ID for tracking and persona personalization
             conversation_name: Name for the conversation
-            context: Optional conversational context
+            context: Optional additional conversational context (merged with base persona)
             custom_greeting: Optional custom greeting message
             properties: Optional additional properties
             replica_id: Optional replica ID (defaults to configured replica)
@@ -155,10 +162,20 @@ class TavusClient:
             TavusConnectionError: If unable to connect to the API
         """
         self._check_circuit()
+
+        # Build full ARIA persona context (same pipeline as chat)
+        base_persona = await self._build_full_persona_context(user_id)
+
+        # Merge with any user-provided context
+        if context:
+            full_context = f"{base_persona}\n\n## Session Context\n\n{context}"
+        else:
+            full_context = base_persona
+
         payload: dict[str, Any] = {
             "persona_id": self.persona_id,
             "conversation_name": conversation_name,
-            "conversational_context": context or self._default_context(),
+            "conversational_context": full_context,
             "properties": {
                 "user_id": user_id,
                 **(properties or {}),
@@ -865,11 +882,82 @@ class TavusClient:
         except Exception:
             return False
 
-    def _default_context(self) -> str:
-        """Default conversational context for ARIA.
+    async def _build_full_persona_context(self, user_id: str) -> str:
+        """Build full ARIA persona context using the same pipeline as chat.
+
+        This ensures avatar-ARIA has the same identity as chat-ARIA:
+        - LAYER 1: Core Identity (static)
+        - LAYER 2: Personality Traits (static)
+        - LAYER 3: Anti-Patterns (static)
+        - LAYER 4: User Context (dynamic, cached)
+        - Capability Context: What ARIA can do
+
+        Plus the spoken-mode adaptation for avatar context.
+
+        Args:
+            user_id: The user's UUID for personalized context.
 
         Returns:
-            Default context string for ARIA conversations
+            Full persona context string for Tavus conversations.
+        """
+        from src.core.persona import PersonaBuilder, PersonaRequest
+        from src.services.capability_registry import get_capability_registry
+
+        parts: list[str] = []
+
+        # Build persona using the same pipeline as chat
+        try:
+            builder = PersonaBuilder()
+            request = PersonaRequest(
+                user_id=user_id,
+                agent_name="aria",
+                agent_role_description="Department Director of Commercial Intelligence",
+            )
+            ctx = await builder.build(request)
+            # Get L1-L4 from PersonaBuilder
+            persona_prompt = ctx.to_system_prompt()
+            if persona_prompt:
+                parts.append(persona_prompt)
+        except Exception as e:
+            logger.warning(
+                "Failed to build persona context, using fallback",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            # Fallback to static layers only
+            from src.core.persona import (
+                LAYER_1_CORE_IDENTITY,
+                LAYER_2_PERSONALITY_TRAITS,
+                LAYER_3_ANTI_PATTERNS,
+            )
+            parts.append(LAYER_1_CORE_IDENTITY)
+            parts.append(LAYER_2_PERSONALITY_TRAITS)
+            parts.append(LAYER_3_ANTI_PATTERNS)
+
+        # Add capability context so ARIA knows her capabilities
+        try:
+            registry = get_capability_registry()
+            snapshot = await registry.get_full_snapshot(user_id)
+            capability_context = registry.render_for_cognitive_context(snapshot)
+            if capability_context:
+                parts.append(capability_context)
+        except Exception as e:
+            logger.debug(
+                "Failed to get capability context",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # Add spoken-mode adaptation (the ONLY difference from chat)
+        parts.append(SPOKEN_MODE_ADAPTATION)
+
+        return "\n\n".join(parts)
+
+    def _default_context(self) -> str:
+        """Fallback context when user_id is unavailable.
+
+        This should rarely be used - the full persona pipeline is preferred.
+
+        Returns:
+            Minimal context string for ARIA conversations
         """
         return """You are ARIA, the Department Director of Commercial Intelligence for a life sciences sales team. You are not an assistant — you are a sharp, experienced colleague who leads conversations and has opinions on every deal. Keep responses concise and direct. Never open with filler affirmations or end with deferential questions."""
 

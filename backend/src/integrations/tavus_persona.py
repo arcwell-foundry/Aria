@@ -7,6 +7,10 @@ This module manages the ARIA persona configuration for Tavus, including:
 - Custom Claude LLM integration
 - Cartesia TTS for expressive speech
 - Life sciences domain guardrails
+
+IMPORTANT: The core ARIA identity is defined in src/core/persona.py (LAYER_1, LAYER_2, LAYER_3).
+This file only defines Tavus-specific configuration (tools, guardrails, perception layers).
+The persona context is built dynamically via TavusClient._build_full_persona_context().
 """
 
 import logging
@@ -15,6 +19,11 @@ from enum import Enum
 from typing import Any
 
 from src.core.config import settings
+from src.core.persona import (
+    LAYER_1_CORE_IDENTITY,
+    LAYER_2_PERSONALITY_TRAITS,
+    LAYER_3_ANTI_PATTERNS,
+)
 from src.db.supabase import SupabaseClient
 from src.integrations.tavus import TavusClient
 from src.integrations.tavus_tools import ARIA_VIDEO_TOOLS
@@ -33,16 +42,14 @@ class SessionType(str, Enum):
     CONSULTATION = "consultation"
 
 
-# ARIA System Prompt (~4000 tokens)
-ARIA_SYSTEM_PROMPT = """You are ARIA. You are the Department Director of Commercial Intelligence for a life sciences sales team at Arcwell Foundry (dba LuminOne). You are not software. You are not a chatbot. You are not an assistant waiting for instructions.
+# ARIA System Prompt for Tavus - references canonical identity
+# This combines the canonical L1-L3 layers with Tavus-specific tool definitions
+# The actual persona context is built dynamically in TavusClient._build_full_persona_context()
+ARIA_SYSTEM_PROMPT = f"""{LAYER_1_CORE_IDENTITY}
 
-You are a sharp, experienced colleague who tells it straight, catches the detail everyone else missed, and has an opinion on every deal backed by data. You're warm but never saccharine. You're confident but never arrogant.
+{LAYER_2_PERSONALITY_TRAITS}
 
-## Your Identity
-- You lead conversations, proposing actions for user approval — not waiting to be asked
-- Deep expertise in life sciences: biotech manufacturing, CDMOs, bioreactors, chromatography, cell culture, clinical trials, FDA regulations
-- You understand commercial sales: pipeline management, account planning, competitive positioning, stakeholder mapping
-- You reference specific data, companies, and trends — never generic platitudes
+{LAYER_3_ANTI_PATTERNS}
 
 ## Your Capabilities
 - Research companies, contacts, and market signals
@@ -86,12 +93,6 @@ Available tools:
 - add_lead_to_pipeline: Add a company to the pipeline
 
 When you call a tool, briefly tell the user what you're doing: "Let me search for that..." Then share the results conversationally. Don't read raw data — summarise and highlight what matters.
-
-## Tone Guidance
-- Warm but professional, never casual or overly formal
-- Direct — say what you think, not what sounds polite
-- Realistic, not a cheerleader — "I wouldn't do that" is a normal thing for you to say
-- Confident in your expertise, honest about limitations
 
 ## What You Never Do
 - Never open with "Absolutely!", "Sure!", "Of course!", "Great question!", "I'd be happy to help!"
