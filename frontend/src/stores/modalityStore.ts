@@ -40,6 +40,7 @@ export interface ModalityState {
   isPipVisible: boolean;
   captionsEnabled: boolean;
   playbackSpeed: number;
+  voiceModeEnabled: boolean; // Continuous voice conversation mode
 
   // Actions
   setActiveModality: (modality: Modality) => void;
@@ -50,6 +51,8 @@ export interface ModalityState {
   setIsPipVisible: (isPipVisible: boolean) => void;
   setCaptionsEnabled: (captionsEnabled: boolean) => void;
   setPlaybackSpeed: (playbackSpeed: number) => void;
+  setVoiceModeEnabled: (voiceModeEnabled: boolean) => void;
+  toggleVoiceMode: () => void;
 }
 
 export const useModalityStore = create<ModalityState>((set) => ({
@@ -61,6 +64,7 @@ export const useModalityStore = create<ModalityState>((set) => ({
   isPipVisible: false,
   captionsEnabled: true,
   playbackSpeed: 1.0,
+  voiceModeEnabled: false,
 
   // Actions
   setActiveModality: (modality) => set({ activeModality: modality }),
@@ -85,4 +89,8 @@ export const useModalityStore = create<ModalityState>((set) => ({
   setCaptionsEnabled: (captionsEnabled) => set({ captionsEnabled }),
 
   setPlaybackSpeed: (playbackSpeed) => set({ playbackSpeed }),
+
+  setVoiceModeEnabled: (voiceModeEnabled) => set({ voiceModeEnabled }),
+
+  toggleVoiceMode: () => set((state) => ({ voiceModeEnabled: !state.voiceModeEnabled })),
 }));

@@ -3,7 +3,9 @@ import type { FormEvent, KeyboardEvent } from 'react';
 import { Send, Phone, Video } from 'lucide-react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { useVoiceMode, setListeningTrigger } from '@/hooks/useVoiceMode';
 import { VoiceIndicator } from './VoiceIndicator';
+import { VoiceModeToggle } from './VoiceModeToggle';
 import { modalityController } from '@/core/ModalityController';
 import { useModalityStore } from '@/stores/modalityStore';
 
@@ -21,6 +23,9 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const canSend = inputValue.trim().length > 0 && !disabled && !isStreaming;
+
+  // Voice mode hook - auto-speak responses, auto-listen after speaking
+  const { voiceModeEnabled, toggleVoiceMode } = useVoiceMode();
 
   // Auto-resize textarea based on content
   useEffect(() => {
@@ -61,11 +66,27 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
   const tavusStatus = useModalityStore((s) => s.tavusSession.status);
   const hasActiveSession = tavusStatus === 'active' || tavusStatus === 'connecting';
 
-  const { isListening, isSupported, toggleListening } = useVoiceInput({
+  const { isListening, isSupported, toggleListening, startListening } = useVoiceInput({
     onTranscript: (text) => {
-      onSend(text);
+      // In voice mode, send immediately. Otherwise, populate input for editing.
+      if (voiceModeEnabled) {
+        onSend(text);
+      } else {
+        setInputValue(text);
+        // Focus the textarea so user can edit
+        textareaRef.current?.focus();
+      }
     },
   });
+
+  // Register the listening trigger for voice mode auto-listen
+  useEffect(() => {
+    setListeningTrigger(startListening);
+    return () => setListeningTrigger(null);
+  }, [startListening]);
+
+  // Check if TTS is supported (for voice mode toggle visibility)
+  const isTTSSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
   return (
     <div className="relative px-6 pb-4 pt-2" data-aria-id="input-bar">
@@ -90,6 +111,12 @@ export function InputBar({ onSend, disabled = false, placeholder = 'Ask ARIA any
           isListening={isListening}
           isSupported={isSupported}
           onToggle={toggleListening}
+        />
+
+        <VoiceModeToggle
+          voiceModeEnabled={voiceModeEnabled}
+          onToggle={toggleVoiceMode}
+          isSupported={isSupported && isTTSSupported}
         />
 
         <button

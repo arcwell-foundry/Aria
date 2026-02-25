@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/types/chat';
 import { MessageAvatar } from './MessageAvatar';
 import { RichContentRenderer } from '@/components/rich/RichContentRenderer';
+import { SpeakButton } from './SpeakButton';
+import { useMessageSpeech } from '@/hooks/useMessageSpeech';
 
 interface MessageBubbleProps {
   message: Message;
@@ -68,6 +70,18 @@ const markdownComponents = {
 export const MessageBubble = memo(function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleProps) {
   const isAria = message.role === 'aria';
 
+  const {
+    speakMessage,
+    stopSpeaking,
+    togglePause,
+    isThisMessageSpeaking,
+    isThisMessagePaused,
+    isSupported: isTTSSupported,
+  } = useMessageSpeech();
+
+  const isSpeaking = isThisMessageSpeaking(message.id);
+  const isPaused = isThisMessagePaused(message.id);
+
   if (isAria) {
     return (
       <div
@@ -93,6 +107,19 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
           {message.rich_content.length > 0 && (
             <RichContentRenderer items={message.rich_content} />
           )}
+
+          {/* Message actions: speak button + timestamp */}
+          <div className="flex items-center gap-2 mt-1">
+            <SpeakButton
+              text={message.content}
+              isSpeaking={isSpeaking}
+              isPaused={isPaused}
+              onSpeak={(text) => speakMessage(message.id, text)}
+              onStop={stopSpeaking}
+              onResume={togglePause}
+              isSupported={isTTSSupported && !message.isStreaming}
+            />
+          </div>
 
           {/* Hover timestamp tooltip */}
           <span className="absolute -bottom-5 left-4 hidden group-hover:block font-mono text-[11px] text-[#555770] bg-[#111318] px-2 py-1 rounded whitespace-nowrap z-10">
