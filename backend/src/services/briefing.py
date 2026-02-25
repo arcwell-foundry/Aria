@@ -22,6 +22,11 @@ from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
 from src.services.activity_service import ActivityService
 
+try:
+    from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+except ImportError:
+    SalesCausalReasoningEngine = None  # type: ignore[assignment,misc]
+
 
 class NeedsAttentionItem(BaseModel):
     """A single email that needs attention with draft details."""
@@ -77,6 +82,8 @@ class BriefingService:
         self._exa_provider: Any = None
         # Lazy init for OAuth client (calendar integration)
         self._oauth_client: Any = None
+        # Lazy init for causal reasoning engine
+        self._causal_engine: Any = None
 
     def _get_oauth_client(self) -> Any:
         """Lazily initialize and return the ComposioOAuthClient."""
@@ -103,6 +110,19 @@ class BriefingService:
             except Exception as e:
                 logger.warning("BriefingService: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    def _get_causal_engine(self) -> Any:
+        """Lazily initialize and return the SalesCausalReasoningEngine."""
+        if self._causal_engine is None and SalesCausalReasoningEngine:
+            try:
+                self._causal_engine = SalesCausalReasoningEngine(
+                    db_client=self._db,
+                    llm_client=self._llm,
+                )
+                logger.info("BriefingService: SalesCausalReasoningEngine initialized")
+            except Exception as e:
+                logger.warning("BriefingService: Failed to initialize SalesCausalReasoningEngine: %s", e)
+        return self._causal_engine
 
     async def generate_briefing(
         self,
@@ -210,6 +230,33 @@ class BriefingService:
             logger.warning("Failed to gather email data", extra={"user_id": user_id}, exc_info=True)
             email_data = empty_email
 
+        # Gather causal reasoning intelligence for market-aware briefing
+        causal_actions: list[dict[str, Any]] = []
+        try:
+            causal_engine = self._get_causal_engine()
+            if causal_engine:
+                causal_result = await causal_engine.analyze_recent_signals(
+                    user_id=user_id, limit=5
+                )
+                if causal_result and causal_result.actions:
+                    causal_actions = [
+                        {
+                            "recommended_action": action.recommended_action,
+                            "causal_narrative": action.causal_narrative,
+                            "timing": action.timing,
+                            "urgency": action.urgency,
+                            "confidence": action.confidence,
+                            "affected_lead_ids": action.affected_lead_ids,
+                        }
+                        for action in causal_result.actions[:5]
+                    ]
+        except Exception:
+            logger.warning(
+                "Failed to gather causal reasoning intelligence",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
         # Get personality calibration for tone-matched briefing
         try:
             calibration = await self._personality_calibrator.get_calibration(user_id)
@@ -257,6 +304,7 @@ class BriefingService:
             email_data,
             tone_guidance=tone_guidance,
             queued_insights=queued_insights,
+            causal_actions=causal_actions,
         )
 
         content: dict[str, Any] = {
@@ -267,6 +315,7 @@ class BriefingService:
             "tasks": task_data,
             "email_summary": email_data,
             "intelligence_insights": jarvis_insights,
+            "causal_actions": causal_actions,
             "queued_insights": queued_insights or [],
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -1089,6 +1138,7 @@ class BriefingService:
         email_data: dict[str, Any],
         tone_guidance: str = "",
         queued_insights: list[dict[str, Any]] | None = None,
+        causal_actions: list[dict[str, Any]] | None = None,
     ) -> str:
         """Generate executive summary using LLM.
 
@@ -1100,6 +1150,7 @@ class BriefingService:
             email_data: Email data dict.
             tone_guidance: Personality-calibrated tone guidance.
             queued_insights: Optional queued insights from briefing_queue.
+            causal_actions: Optional causal reasoning actions from market signals.
 
         Returns:
             Generated summary string.
@@ -1123,6 +1174,22 @@ class BriefingService:
             greeting = "Good afternoon"
         else:
             greeting = "Good evening"
+
+        # Format causal actions for the prompt
+        causal_note = ""
+        if causal_actions:
+            causal_lines = []
+            for action in causal_actions[:3]:
+                causal_lines.append(
+                    f"- {action.get('recommended_action', '')} "
+                    f"(urgency: {action.get('urgency', 'normal')}, timing: {action.get('timing', 'flexible')})"
+                )
+            if causal_lines:
+                causal_note = (
+                    "\n\nMarket intelligence actions recommended:\n"
+                    + "\n".join(causal_lines)
+                    + "\nWeave the most urgent action into your summary if relevant."
+                )
 
         if total_activity == 0:
             prompt = (
@@ -1165,7 +1232,7 @@ Leads needing attention: {attention_count}
 New signals: {signal_count}
 Overdue tasks: {overdue_count}
 Emails received: {email_count}
-Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_note}
+Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_note}{causal_note}
 
 Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
 """
@@ -1609,6 +1676,18 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 headline = intel.get("headline", "")
                 if headline:
                     script_parts.append(f"Competitive intel on {company}: {headline}.")
+
+        # Causal reasoning actions (market intelligence recommendations)
+        causal_actions = briefing.get("causal_actions", [])
+        if causal_actions:
+            urgent_actions = [a for a in causal_actions if a.get("urgency") == "high"][:2]
+            if urgent_actions:
+                script_parts.append("Based on recent market signals, I recommend:")
+                for action in urgent_actions:
+                    rec = action.get("recommended_action", "")
+                    timing = action.get("timing", "flexible")
+                    if rec:
+                        script_parts.append(f"{rec}. Timing: {timing}.")
 
         # Tasks due
         tasks = briefing.get("tasks", {})
