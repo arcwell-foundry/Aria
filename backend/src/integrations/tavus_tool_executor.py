@@ -17,7 +17,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.integrations.tavus_tools import TOOL_AGENT_MAP, VALID_TOOL_NAMES
@@ -1020,6 +1020,501 @@ class VideoToolExecutor:
                     "processing it right now. I'll keep monitoring it in the background."
                 )
             )
+
+    async def _handle_create_goal_from_video(self, args: dict[str, Any]) -> ToolResult:
+        """Create a goal from video conversation and generate a plan."""
+        from src.core.ws import ws_manager
+        from src.models.goal import GoalCreate, GoalType
+        from src.services.goal_execution import GoalExecutionService
+
+        goal_title = args.get("goal_title", "")
+        goal_description = args.get("goal_description", goal_title)
+        goal_type_str = args.get("goal_type", "task")
+
+        # Map goal_type string to enum
+        type_mapping = {
+            "research": GoalType.RESEARCH,
+            "outreach": GoalType.OUTREACH,
+            "analysis": GoalType.ANALYSIS,
+            "meeting_prep": GoalType.MEETING_PREP,
+            "content_creation": GoalType.CONTENT_CREATION,
+            "task": GoalType.TASK,
+        }
+        goal_type = type_mapping.get(goal_type_str.lower(), GoalType.TASK)
+
+        try:
+            # Create the goal
+            from src.services.goal_service import GoalService
+
+            goal_service = GoalService()
+            goal = await goal_service.create_goal(
+                user_id=self._user_id,
+                data=GoalCreate(
+                    title=goal_title,
+                    description=goal_description,
+                    goal_type=goal_type,
+                    config={"source": "video_conversation"},
+                ),
+            )
+            goal_id = goal["id"]
+
+            # Generate plan using GoalExecutionService
+            execution_service = GoalExecutionService()
+            plan_result = await execution_service.plan_goal(
+                user_id=self._user_id,
+                goal_id=goal_id,
+            )
+
+            # Extract plan details for spoken text
+            plan = plan_result.get("plan", {})
+            phases = plan.get("phases", [])
+            agents = plan.get("agents", [])
+            timeline = plan.get("timeline", "a few days")
+
+            parts = [f"I've put together a plan for '{goal_title}'."]
+            if phases:
+                parts.append(f"The plan has {len(phases)} phases.")
+            if agents:
+                agent_names = [a.replace("_", " ").title() for a in agents[:3]]
+                parts.append(f"I'll use the {', '.join(agent_names)} agent{'s' if len(agents) > 1 else ''}.")
+            parts.append(f"Estimated timeline: {timeline}.")
+            parts.append("Check the chat panel for details. Would you like me to start executing this plan?")
+
+            # Send WebSocket event to show GoalPlanCard in chat panel
+            rich_content = {
+                "type": "goal_plan",
+                "data": {
+                    "id": goal_id,
+                    "title": goal_title,
+                    "rationale": goal_description,
+                    "approach": plan.get("approach", ""),
+                    "phases": phases,
+                    "agents": agents,
+                    "timeline": timeline,
+                    "goal_type": goal_type_str,
+                    "status": "proposed",
+                },
+            }
+
+            # Emit to frontend via WebSocket
+            await ws_manager.send_aria_message(
+                user_id=self._user_id,
+                message="",
+                rich_content=[rich_content],
+                suggestions=["Approve plan", "Modify plan", "Discuss approach"],
+            )
+
+            return ToolResult(
+                spoken_text=" ".join(parts),
+                rich_content=rich_content,
+            )
+
+        except Exception:
+            logger.exception("Failed to create goal from video")
+            return ToolResult(
+                spoken_text=(
+                    f"I'd like to help with '{goal_title}', but I ran into an issue "
+                    "creating the plan. Let me try a different approach."
+                )
+            )
+
+    async def _handle_get_capabilities(self, args: dict[str, Any]) -> ToolResult:
+        """Get ARIA's capabilities and integration status."""
+        detail_level = args.get("detail_level", "brief")
+
+        # Get integration status
+        integrations_result = (
+            self.db.table("user_integrations")
+            .select("integration_type, status")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        connected = [i["integration_type"] for i in (integrations_result.data or []) if i.get("status") == "active"]
+
+        # Build capability summary
+        if detail_level == "full":
+            capabilities = [
+                "I can search for companies and discover new leads using the Hunter agent.",
+                "I can research scientific publications and clinical trials through the Analyst agent.",
+                "I can draft emails and documents with the Scribe agent.",
+                "I can schedule meetings and manage your calendar via the Operator agent.",
+                "I can monitor market signals and news through the Scout agent.",
+                "I can create goals and plans, and work on them autonomously.",
+                "I can prepare meeting briefs with attendee profiles and talking points.",
+                "I can manage your pipeline and track lead health scores.",
+            ]
+            parts = ["Here's what I can do for you:"] + capabilities
+
+            if connected:
+                parts.append(f"\nYour connected integrations: {', '.join(connected)}.")
+            else:
+                parts.append("\nNo integrations are currently connected. You can connect Google Calendar, Gmail, or Outlook in Settings.")
+        else:
+            # Brief summary
+            parts = [
+                "I can help you find leads, research companies and science, draft emails, "
+                "schedule meetings, monitor market signals, and work on goals autonomously."
+            ]
+            if connected:
+                integration_names = {
+                    "gmail": "email", "google_calendar": "calendar", "outlook": "Outlook"
+                }
+                connected_friendly = [integration_names.get(i, i) for i in connected[:3]]
+                parts.append(f"I have access to your {', '.join(connected_friendly)}.")
+            else:
+                parts.append("Connect your calendar or email in Settings to unlock more capabilities.")
+
+        return ToolResult(spoken_text=" ".join(parts))
+
+    async def _handle_get_meeting_prep(self, args: dict[str, Any]) -> ToolResult:
+        """Get comprehensive meeting preparation."""
+        from src.services.briefing import BriefingService
+
+        meeting_id = args.get("meeting_id")
+
+        if meeting_id:
+            result = (
+                self.db.table("meeting_briefs")
+                .select("*")
+                .eq("user_id", self._user_id)
+                .eq("calendar_event_id", meeting_id)
+                .limit(1)
+                .execute()
+            )
+        else:
+            # Get next upcoming meeting brief
+            now = datetime.now(UTC).isoformat()
+            result = (
+                self.db.table("meeting_briefs")
+                .select("*")
+                .eq("user_id", self._user_id)
+                .gte("meeting_time", now)
+                .order("meeting_time")
+                .limit(1)
+                .execute()
+            )
+
+        if not result.data:
+            # No meeting brief - check if there's a calendar event
+            calendar_result = (
+                self.db.table("calendar_events")
+                .select("id, title, start_time, attendees")
+                .eq("user_id", self._user_id)
+                .gte("start_time", datetime.now(UTC).isoformat())
+                .order("start_time")
+                .limit(1)
+                .execute()
+            )
+
+            if not calendar_result.data:
+                return ToolResult(
+                    spoken_text="You don't have any upcoming meetings on your calendar. Would you like me to help you schedule one?"
+                )
+
+            # Generate prep from calendar event
+            event = calendar_result.data[0]
+            title = event.get("title", "your meeting")
+            attendees = event.get("attendees", [])
+            start_time = event.get("start_time", "")
+
+            parts = [f"Here's prep for {title}."]
+            if start_time:
+                parts.append(f"Starting at {start_time[:16].replace('T', ' at ')}.")
+            if attendees:
+                names = [a.get("displayName", a.get("email", "Unknown")) for a in attendees[:4]]
+                parts.append(f"Attendees: {', '.join(names)}.")
+
+            # Try to get company signals for attendees
+            try:
+                briefing_service = BriefingService()
+                signals = await briefing_service._get_signal_data(self._user_id)
+                company_news = signals.get("company_news", [])[:2]
+                if company_news:
+                    parts.append("Recent signals:")
+                    for news in company_news:
+                        parts.append(f"{news.get('company_name')}: {news.get('headline', '')[:60]}.")
+            except Exception:
+                pass
+
+            parts.append("Would you like me to generate a full briefing for this meeting?")
+
+            return ToolResult(spoken_text=" ".join(parts))
+
+        # Use existing meeting brief
+        brief = result.data[0]
+        title = brief.get("meeting_title", "your meeting")
+        meeting_time = brief.get("meeting_time", "")
+        attendees = brief.get("attendees", [])
+        content = brief.get("brief_content", {})
+
+        parts = [f"Here's your prep for {title}."]
+
+        if meeting_time:
+            parts.append(f"Starting at {meeting_time[:16].replace('T', ' at ')}.")
+
+        if attendees:
+            names = attendees if isinstance(attendees, list) else [attendees]
+            parts.append(f"Attendees: {', '.join(str(a) for a in names[:4])}.")
+
+        if isinstance(content, dict):
+            summary = content.get("summary") or content.get("key_points")
+            if summary:
+                text = summary if isinstance(summary, str) else ". ".join(str(s) for s in summary[:3])
+                parts.append(text[:200])
+
+            talking_points = content.get("talking_points", [])
+            if talking_points:
+                points = talking_points if isinstance(talking_points, list) else [talking_points]
+                parts.append(f"Suggested talking points: {', '.join(str(p) for p in points[:3])}.")
+
+            objections = content.get("potential_objections", [])
+            if objections:
+                parts.append("Watch for potential objections around their budget and timeline.")
+
+        parts.append("Would you like me to go deeper on any of these points?")
+
+        # Build rich content for side panel
+        rich_content = {
+            "type": "meeting_prep",
+            "data": {
+                "meeting_id": brief.get("calendar_event_id"),
+                "title": title,
+                "meeting_time": meeting_time,
+                "attendees": attendees,
+                "brief_content": content,
+            },
+        }
+
+        return ToolResult(spoken_text=" ".join(parts), rich_content=rich_content)
+
+    async def _handle_debrief_meeting(self, args: dict[str, Any]) -> ToolResult:
+        """Record a post-meeting debrief and extract action items."""
+        meeting_id = args.get("meeting_id")
+        summary = args.get("summary", "")
+        action_items_text = args.get("action_items", "")
+        next_steps_text = args.get("next_steps", "")
+
+        # Find the meeting
+        if meeting_id:
+            result = (
+                self.db.table("meeting_briefs")
+                .select("id, calendar_event_id, meeting_title, attendees")
+                .eq("user_id", self._user_id)
+                .eq("calendar_event_id", meeting_id)
+                .limit(1)
+                .execute()
+            )
+        else:
+            # Get most recent past meeting
+            now = datetime.now(UTC).isoformat()
+            result = (
+                self.db.table("meeting_briefs")
+                .select("id, calendar_event_id, meeting_title, attendees")
+                .eq("user_id", self._user_id)
+                .lt("meeting_time", now)
+                .order("meeting_time", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+        if not result.data:
+            return ToolResult(
+                spoken_text="I don't see a recent meeting to debrief. Which meeting would you like to discuss?"
+            )
+
+        meeting = result.data[0]
+        meeting_title = meeting.get("meeting_title", "the meeting")
+
+        # Extract action items via LLM if not explicitly provided
+        action_items = []
+        if not action_items_text and summary:
+            try:
+                extraction_prompt = (
+                    f"Extract action items from this meeting debrief. Return as JSON array:\n\n"
+                    f"Debrief: {summary}\n\n"
+                    f'Return format: {{"action_items": [{{"task": "...", "priority": "high|medium|low"}}]}}'
+                )
+                raw = await self.llm.generate_response(
+                    messages=[{"role": "user", "content": extraction_prompt}],
+                    max_tokens=512,
+                    temperature=0.2,
+                )
+
+                extracted = json.loads(raw)
+                action_items = extracted.get("action_items", [])
+            except Exception:
+                # Fallback: treat summary as a single action item
+                action_items = [{"task": summary[:100], "priority": "medium"}]
+        elif action_items_text:
+            action_items = [{"task": action_items_text, "priority": "medium"}]
+
+        # Create prospective memory tasks for action items
+        tasks_created = 0
+        try:
+            from src.memory.prospective import ProspectiveMemory, ProspectiveTask, TaskPriority, TaskStatus, TriggerType
+
+            prospective = ProspectiveMemory()
+            for item in action_items[:5]:
+                priority_str = item.get("priority", "medium")
+                try:
+                    priority = TaskPriority(priority_str)
+                except ValueError:
+                    priority = TaskPriority.MEDIUM
+
+                task = ProspectiveTask(
+                    id=str(uuid.uuid4()),
+                    user_id=self._user_id,
+                    task=item.get("task", "Follow up from meeting"),
+                    description=f"From meeting: {meeting_title}",
+                    trigger_type=TriggerType.TIME,
+                    trigger_config={},
+                    status=TaskStatus.PENDING,
+                    priority=priority,
+                    created_at=datetime.now(UTC),
+                )
+                await prospective.create_task(task)
+                tasks_created += 1
+        except Exception:
+            logger.debug("Failed to create prospective tasks from debrief", exc_info=True)
+
+        # Update meeting brief with debrief notes
+        try:
+            self.db.table("meeting_briefs").update({
+                "debrief_notes": {
+                    "summary": summary,
+                    "action_items": action_items,
+                    "next_steps": next_steps_text,
+                    "debriefed_at": datetime.now(UTC).isoformat(),
+                }
+            }).eq("id", meeting["id"]).execute()
+        except Exception:
+            logger.debug("Failed to update meeting brief with debrief", exc_info=True)
+
+        # Build response
+        parts = [f"Got it. I've captured your debrief for {meeting_title}."]
+
+        if tasks_created > 0:
+            parts.append(f"I created {tasks_created} follow-up task{'s' if tasks_created > 1 else ''} for you.")
+            for item in action_items[:3]:
+                parts.append(f"- {item.get('task', 'Action item')[:80]}")
+
+        if next_steps_text:
+            parts.append(f"Next steps: {next_steps_text[:100]}.")
+
+        parts.append("Anything else you'd like to add or adjust?")
+
+        # Build rich content
+        rich_content = {
+            "type": "meeting_debrief",
+            "data": {
+                "meeting_id": meeting.get("calendar_event_id"),
+                "meeting_title": meeting_title,
+                "action_items": action_items,
+                "next_steps": next_steps_text,
+                "tasks_created": tasks_created,
+            },
+        }
+
+        return ToolResult(spoken_text=" ".join(parts), rich_content=rich_content)
+
+    async def _handle_get_recent_work(self, args: dict[str, Any]) -> ToolResult:
+        """Get a summary of recent ARIA activity."""
+        from datetime import timedelta
+
+        timeframe = args.get("timeframe", "recent")
+
+        # Determine time window
+        if timeframe == "today":
+            since = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        elif timeframe == "this_week":
+            since = datetime.now(UTC) - timedelta(days=7)
+        else:
+            since = datetime.now(UTC) - timedelta(days=3)
+
+        since_iso = since.isoformat()
+
+        # Get recent activity
+        activity_result = (
+            self.db.table("aria_activity")
+            .select("agent, activity_type, title, created_at, confidence")
+            .eq("user_id", self._user_id)
+            .gte("created_at", since_iso)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        # Get goal progress
+        goals_result = (
+            self.db.table("goals")
+            .select("id, title, status, progress, updated_at")
+            .eq("user_id", self._user_id)
+            .in_("status", ["active", "plan_ready"])
+            .order("updated_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        activities = activity_result.data or []
+        goals = goals_result.data or []
+
+        if not activities and not goals:
+            return ToolResult(
+                spoken_text="I haven't been working on anything specific recently. "
+                "Would you like me to start on a goal or research something for you?"
+            )
+
+        parts = ["Here's what I've been working on."]
+
+        # Summarize recent activity by type
+        if activities:
+            agent_counts: dict[str, int] = {}
+            recent_titles: list[str] = []
+            for activity in activities[:8]:
+                agent = activity.get("agent", "aria")
+                agent_counts[agent] = agent_counts.get(agent, 0) + 1
+                if activity.get("title"):
+                    recent_titles.append(activity["title"])
+
+            # Agent activity summary
+            agent_names = {
+                "hunter": "lead discovery",
+                "analyst": "research",
+                "strategist": "strategy",
+                "scribe": "drafting",
+                "operator": "operations",
+                "scout": "monitoring",
+                "aria": "general tasks",
+            }
+            for agent, count in list(agent_counts.items())[:3]:
+                friendly_name = agent_names.get(agent, agent)
+                parts.append(f"{count} {friendly_name} task{'s' if count > 1 else ''}.")
+
+            # Recent highlights
+            if recent_titles:
+                parts.append(f"Most recently: {recent_titles[0][:80]}.")
+
+        # Goal progress
+        if goals:
+            parts.append(f"\nYou have {len(goals)} active goal{'s' if len(goals) > 1 else ''}.")
+            for goal in goals[:2]:
+                title = goal.get("title", "a goal")
+                progress = goal.get("progress", 0)
+                parts.append(f"{title} is at {progress}% progress.")
+
+        parts.append("Want me to continue on any of these, or start something new?")
+
+        # Build rich content
+        rich_content = {
+            "type": "recent_activity",
+            "data": {
+                "activities": activities[:8],
+                "goals": goals[:5],
+                "timeframe": timeframe,
+            },
+        }
+
+        return ToolResult(spoken_text=" ".join(parts), rich_content=rich_content)
 
     # ------------------------------------------------------------------
     # Activity logging

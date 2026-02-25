@@ -360,6 +360,129 @@ ARIA_VIDEO_TOOLS: list[dict[str, Any]] = [
         },
         required=["goal_description"],
     ),
+
+    # ── 14. create_goal_from_video (Goal Creation) ─────────────────────
+    _tool(
+        name="create_goal_from_video",
+        description=(
+            "Create a new goal from the video conversation. Use when the user "
+            "states a clear objective or task they want ARIA to work on, like "
+            "'I want to research...', 'help me with...', 'create a plan for...', "
+            "or 'I need to accomplish...'. Creates the goal, generates an "
+            "execution plan, and displays it in the chat panel for approval."
+        ),
+        properties={
+            "goal_title": {
+                "type": "string",
+                "description": (
+                    "Concise title for the goal, e.g. 'Research BioGenix pipeline' "
+                    "or 'Draft follow-up to Lonza'"
+                ),
+            },
+            "goal_description": {
+                "type": "string",
+                "description": (
+                    "More detailed description of what the user wants to accomplish"
+                ),
+            },
+            "goal_type": {
+                "type": "string",
+                "description": (
+                    "Type of goal: research, outreach, analysis, meeting_prep, "
+                    "content_creation, or task"
+                ),
+            },
+        },
+        required=["goal_title"],
+    ),
+
+    # ── 15. get_capabilities (Self-Awareness) ───────────────────────────
+    _tool(
+        name="get_capabilities",
+        description=(
+            "Get information about ARIA's capabilities and current integrations. "
+            "Use when the user asks what you can do, what tools you have, "
+            "what you're able to help with, or wants to know which integrations "
+            "are connected. Returns a conversational summary of capabilities."
+        ),
+        properties={
+            "detail_level": {
+                "type": "string",
+                "description": "Amount of detail: 'brief' for quick summary, 'full' for complete list",
+            },
+        },
+        required=[],
+    ),
+
+    # ── 16. get_meeting_prep (Meeting Preparation) ─────────────────────
+    _tool(
+        name="get_meeting_prep",
+        description=(
+            "Get comprehensive preparation for an upcoming meeting. Use when "
+            "the user is about to go into a meeting and wants a briefing, "
+            "or asks 'prep me for my meeting', 'what should I know about...', "
+            "or 'give me a quick prep'. Returns attendees, company background, "
+            "recent signals, and suggested talking points."
+        ),
+        properties={
+            "meeting_id": {
+                "type": "string",
+                "description": (
+                    "Optional meeting ID. If not provided, preps for the next "
+                    "upcoming meeting."
+                ),
+            },
+        },
+        required=[],
+    ),
+
+    # ── 17. debrief_meeting (Post-Meeting) ─────────────────────────────
+    _tool(
+        name="debrief_meeting",
+        description=(
+            "Record a post-meeting debrief. Use after a meeting when the user "
+            "wants to share how it went, capture action items, or log key outcomes. "
+            "ARIA will prompt with 'How did the meeting with {attendees} go?' "
+            "This extracts action items and creates follow-up tasks automatically."
+        ),
+        properties={
+            "meeting_id": {
+                "type": "string",
+                "description": "Optional meeting ID. If not provided, uses the most recent past meeting",
+            },
+            "summary": {
+                "type": "string",
+                "description": "User's summary of how the meeting went",
+            },
+            "action_items": {
+                "type": "string",
+                "description": "Any specific action items mentioned (optional, can be extracted from summary)",
+            },
+            "next_steps": {
+                "type": "string",
+                "description": "Agreed next steps or follow-ups (optional)",
+            },
+        },
+        required=["summary"],
+    ),
+
+    # ── 18. get_recent_work (Context Awareness) ────────────────────────
+    _tool(
+        name="get_recent_work",
+        description=(
+            "Get a summary of what ARIA has been working on recently. Use when "
+            "the user asks 'what have you been up to?', 'what's the status?', "
+            "'catch me up', or wants to know about recent activity. Returns "
+            "recent agent executions, goal progress, and pending tasks."
+        ),
+        properties={
+            "timeframe": {
+                "type": "string",
+                "description": "Time window: 'today', 'this_week', or 'recent' (default)",
+            },
+        },
+        required=[],
+    ),
 ]
 
 # Tool name → agent mapping for routing
@@ -377,6 +500,11 @@ TOOL_AGENT_MAP: dict[str, str] = {
     "get_market_signals": "scout",
     "add_lead_to_pipeline": "service",
     "trigger_goal_action": "ooda",
+    "create_goal_from_video": "service",
+    "get_capabilities": "service",
+    "get_meeting_prep": "service",
+    "debrief_meeting": "service",
+    "get_recent_work": "service",
 }
 
 VALID_TOOL_NAMES: frozenset[str] = frozenset(TOOL_AGENT_MAP.keys())
