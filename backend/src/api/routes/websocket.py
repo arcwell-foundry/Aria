@@ -105,6 +105,9 @@ async def websocket_endpoint(
         # Generate proactive return greeting if user was away > 1 hour
         await _send_return_greeting(user_id)
 
+    # Deliver any pending proactive goal proposals queued while offline
+    await _maybe_deliver_pending_proposals(user_id)
+
     # Message loop
     try:
         while True:
@@ -146,6 +149,9 @@ async def websocket_endpoint(
 
             elif msg_type == "user.approve_proposal":
                 await _handle_proposal_approval(websocket, data, user_id)
+
+            elif msg_type == "user.dismiss_proposal":
+                await _handle_proposal_dismissal(websocket, data, user_id)
 
             elif msg_type == "modality.change":
                 payload = data.get("payload", {})
@@ -963,6 +969,95 @@ async def _maybe_deliver_morning_briefing(user_id: str) -> bool:
         return False
 
 
+async def _maybe_deliver_pending_proposals(user_id: str) -> None:
+    """Deliver pending proactive goal proposals on WebSocket connect.
+
+    When ARIA generates goal proposals while the user is offline, they
+    are stored in proactive_proposals with status='proposed'. On next
+    login, deliver them as ARIA messages with GoalPlanCards.
+
+    Only delivers proposals from the last 48 hours (older ones expire).
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Expire old proposals (> 48h)
+        expiry_cutoff = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
+        try:
+            db.table("proactive_proposals").update(
+                {"status": "expired", "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("user_id", user_id).eq("status", "proposed").lt(
+                "created_at", expiry_cutoff
+            ).execute()
+        except Exception:
+            pass
+
+        # Fetch pending proposals (max 3, newest first)
+        result = (
+            db.table("proactive_proposals")
+            .select("id, goal_title, proposal_data, source_signal_id")
+            .eq("user_id", user_id)
+            .eq("status", "proposed")
+            .order("created_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+
+        proposals = result.data or []
+        if not proposals:
+            return
+
+        logger.info(
+            "Delivering %d pending proposals on connect",
+            len(proposals),
+            extra={"user_id": user_id},
+        )
+
+        for row in proposals:
+            proposal_id = row["id"]
+            proposal_data = row.get("proposal_data") or {}
+            rich_content = [
+                {
+                    "type": "goal_plan",
+                    "data": {
+                        "id": f"signal-proposal-{proposal_id}",
+                        "title": row.get("goal_title", "Proposed Goal"),
+                        "rationale": proposal_data.get("rationale", ""),
+                        "approach": proposal_data.get("approach", ""),
+                        "agents": proposal_data.get("agents", []),
+                        "timeline": proposal_data.get("timeline", ""),
+                        "goal_type": proposal_data.get("goal_type", "custom"),
+                        "status": "proposed",
+                        "source_signal_id": row.get("source_signal_id"),
+                        "proposal_id": proposal_id,
+                    },
+                }
+            ]
+
+            message = proposal_data.get(
+                "message",
+                f"I have a recommendation: {row.get('goal_title', 'New opportunity')}",
+            )
+
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=message,
+                rich_content=rich_content,
+                suggestions=["Tell me more", "Create this goal", "Dismiss"],
+            )
+
+    except Exception:
+        logger.debug(
+            "Pending proposal delivery failed for user %s",
+            user_id,
+            exc_info=True,
+        )
+
+
 async def _handle_proposal_approval(
     websocket: WebSocket,
     data: dict[str, Any],
@@ -1051,6 +1146,47 @@ async def _handle_proposal_approval(
         )
     except Exception as e:
         logger.warning("Proposal approval failed: %s", e)
+
+
+async def _handle_proposal_dismissal(
+    websocket: WebSocket,
+    data: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Handle a user.dismiss_proposal event — dismiss a proactive goal proposal.
+
+    The dismissal is tracked and contributes to raising the relevance
+    threshold for future proposals from this user (adaptive frequency).
+
+    Expected payload keys:
+    - ``proposal_id``: UUID of the proactive_proposals row
+    """
+    payload = data.get("payload", {})
+    proposal_id = payload.get("proposal_id")
+    if not proposal_id:
+        return
+
+    try:
+        from src.services.proactive_goal_proposer import ProactiveGoalProposer
+
+        proposer = ProactiveGoalProposer()
+        dismissed = await proposer.dismiss_proposal(user_id, proposal_id)
+        if dismissed:
+            await websocket.send_json(
+                {
+                    "type": "aria.message",
+                    "message": "Got it — I'll calibrate what I surface to you.",
+                    "rich_content": [],
+                    "ui_commands": [],
+                    "suggestions": [],
+                }
+            )
+        logger.info(
+            "Proposal dismissal handled",
+            extra={"proposal_id": proposal_id, "user_id": user_id, "dismissed": dismissed},
+        )
+    except Exception as e:
+        logger.warning("Proposal dismissal failed: %s", e)
 
 
 async def _handle_action_approval(

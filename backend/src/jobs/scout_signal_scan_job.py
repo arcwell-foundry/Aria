@@ -4,6 +4,10 @@ Runs every 15 minutes. For each active user, instantiates the ScoutAgent
 to detect new market signals for tracked competitors and active leads.
 New signals are stored in ``intelligence_signals`` and routed through
 the ProactiveRouter based on relevance score.
+
+High-relevance signals (>= 0.8) are additionally evaluated by the
+ProactiveGoalProposer to generate actionable goal proposals delivered
+via WebSocket (or queued for next login).
 """
 
 import logging
@@ -14,6 +18,9 @@ from src.db.supabase import SupabaseClient
 from src.services.proactive_router import InsightCategory, InsightPriority, ProactiveRouter
 
 logger = logging.getLogger(__name__)
+
+# Minimum relevance score to trigger a goal proposal (not just a notification)
+_GOAL_PROPOSAL_THRESHOLD = 0.8
 
 
 async def run_scout_signal_scan_job() -> dict[str, Any]:
@@ -35,6 +42,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
         "signals_routed_high": 0,
         "signals_routed_medium": 0,
         "signals_routed_low": 0,
+        "goal_proposals_generated": 0,
         "errors": 0,
     }
 
@@ -90,10 +98,11 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 if await _signal_exists(db, user_id, headline):
                     continue
 
-                # Store in intelligence_signals
+                # Store in intelligence_signals and capture the row ID
                 relevance = float(signal.get("relevance_score", 0.5))
+                signal_id: str | None = None
                 try:
-                    db.table("intelligence_signals").insert(
+                    insert_result = db.table("intelligence_signals").insert(
                         {
                             "user_id": user_id,
                             "signal_type": signal.get("signal_type", "news"),
@@ -105,6 +114,8 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                             "status": "active",
                         }
                     ).execute()
+                    if insert_result.data:
+                        signal_id = insert_result.data[0].get("id")
                 except Exception:
                     logger.debug("Failed to store signal: %s", headline[:80])
                     continue
@@ -112,7 +123,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 stats["signals_detected"] += 1
 
                 # Route based on relevance
-                if relevance >= 0.8:
+                if relevance >= _GOAL_PROPOSAL_THRESHOLD:
                     priority = InsightPriority.HIGH
                     stats["signals_routed_high"] += 1
                 elif relevance >= 0.6:
@@ -122,6 +133,21 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                     priority = InsightPriority.LOW
                     stats["signals_routed_low"] += 1
 
+                # For HIGH signals: generate a goal proposal with GoalPlanCard
+                if relevance >= _GOAL_PROPOSAL_THRESHOLD and signal_id:
+                    proposed = await _maybe_propose_goal(
+                        user_id=user_id,
+                        signal_id=signal_id,
+                        signal=signal,
+                        relevance=relevance,
+                    )
+                    if proposed:
+                        stats["goal_proposals_generated"] += 1
+                        # Goal proposer already handles WebSocket/login delivery,
+                        # so skip the plain ProactiveRouter notification
+                        continue
+
+                # Fallback: route as a plain notification (no goal card)
                 await router.route(
                     user_id=user_id,
                     priority=priority,
@@ -200,4 +226,60 @@ async def _signal_exists(db: Any, user_id: str, headline: str) -> bool:
         )
         return bool(result.data)
     except Exception:
+        return False
+
+
+async def _maybe_propose_goal(
+    user_id: str,
+    signal_id: str,
+    signal: dict[str, Any],
+    relevance: float,
+) -> bool:
+    """Evaluate a high-relevance signal and generate a goal proposal.
+
+    Calls ProactiveGoalProposer.evaluate_signal() which handles:
+    - LLM-based goal proposal generation
+    - Deduplication (won't re-propose for same signal)
+    - Storage in proactive_proposals table
+    - WebSocket delivery (or login queue if offline)
+    - Rich GoalPlanCard rendering
+
+    Args:
+        user_id: Target user UUID.
+        signal_id: UUID of the stored intelligence_signals row.
+        signal: Raw signal dict from Scout agent.
+        relevance: Relevance score (0-1).
+
+    Returns:
+        True if a proposal was generated and routed.
+    """
+    try:
+        from src.services.proactive_goal_proposer import ProactiveGoalProposer
+
+        proposer = ProactiveGoalProposer()
+        proposed = await proposer.evaluate_signal(
+            user_id=user_id,
+            signal_id=signal_id,
+            signal_type=signal.get("signal_type", "news"),
+            headline=signal.get("headline", ""),
+            summary=signal.get("summary"),
+            relevance_score=relevance,
+            company_name=signal.get("company_name"),
+        )
+        if proposed:
+            logger.info(
+                "Goal proposal generated from signal",
+                extra={
+                    "user_id": user_id,
+                    "signal_id": signal_id,
+                    "headline": signal.get("headline", "")[:80],
+                },
+            )
+        return proposed
+    except Exception:
+        logger.debug(
+            "Goal proposal generation failed for signal %s",
+            signal_id,
+            exc_info=True,
+        )
         return False

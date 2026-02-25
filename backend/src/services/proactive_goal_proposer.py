@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 # Minimum relevance score for a signal to trigger a proposal
 _MIN_RELEVANCE_SCORE = 0.7
 
+# Maximum proposals per user per day (don't overwhelm)
+_MAX_PROPOSALS_PER_DAY = 3
+
+# How much to raise the relevance threshold per recent dismissal
+_DISMISSAL_THRESHOLD_BUMP = 0.05
+
 # Maximum proposals generated per OODA orient cycle
 _MAX_PROPOSALS_PER_ORIENT = 2
 
@@ -52,6 +58,11 @@ class ProactiveGoalProposer:
     ) -> bool:
         """Evaluate a market signal and optionally propose a goal.
 
+        Applies three filters before generating a proposal:
+        1. Relevance threshold (raised by recent dismissals)
+        2. Daily frequency cap (max 3 per day)
+        3. Signal-level deduplication
+
         Args:
             user_id: Owner of the signal.
             signal_id: UUID of the stored signal row.
@@ -64,7 +75,23 @@ class ProactiveGoalProposer:
         Returns:
             True if a proposal was generated and routed, False otherwise.
         """
-        if relevance_score < _MIN_RELEVANCE_SCORE:
+        # Adaptive threshold: raise minimum score based on recent dismissals
+        effective_threshold = await self._get_effective_threshold(user_id)
+        if relevance_score < effective_threshold:
+            logger.debug(
+                "Signal below effective threshold (%.2f < %.2f) for user %s",
+                relevance_score,
+                effective_threshold,
+                user_id,
+            )
+            return False
+
+        # Frequency cap: max N proposals per day
+        if await self._daily_limit_reached(user_id):
+            logger.debug(
+                "Daily proposal limit reached for user %s",
+                user_id,
+            )
             return False
 
         # Dedup: skip if we already proposed for this signal
@@ -269,6 +296,106 @@ class ProactiveGoalProposer:
             return result.count or 0
         except Exception:
             return 0
+
+    async def _daily_limit_reached(self, user_id: str) -> bool:
+        """Check if the user has hit the daily proposal limit.
+
+        Counts proposals created today (any status) to prevent
+        overwhelming users with too many proactive suggestions.
+
+        Args:
+            user_id: User UUID.
+
+        Returns:
+            True if limit reached.
+        """
+        try:
+            today_start = datetime.now(UTC).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).isoformat()
+            result = (
+                self._db.table("proactive_proposals")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .gte("created_at", today_start)
+                .execute()
+            )
+            count = result.count or 0
+            return count >= _MAX_PROPOSALS_PER_DAY
+        except Exception:
+            # If we can't check, allow the proposal (fail open)
+            return False
+
+    async def _get_effective_threshold(self, user_id: str) -> float:
+        """Calculate the effective relevance threshold for a user.
+
+        Starts at _MIN_RELEVANCE_SCORE and increases by
+        _DISMISSAL_THRESHOLD_BUMP for each proposal dismissed in the
+        last 7 days. This means users who frequently dismiss proposals
+        will only see higher-confidence ones.
+
+        The threshold is capped at 0.95 to ensure truly critical
+        signals (FDA actions, etc.) always get through.
+
+        Args:
+            user_id: User UUID.
+
+        Returns:
+            Effective threshold (float between _MIN_RELEVANCE_SCORE and 0.95).
+        """
+        try:
+            from datetime import timedelta
+
+            cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+            result = (
+                self._db.table("proactive_proposals")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .eq("status", "dismissed")
+                .gte("updated_at", cutoff)
+                .execute()
+            )
+            dismissed_count = result.count or 0
+            threshold = _MIN_RELEVANCE_SCORE + (dismissed_count * _DISMISSAL_THRESHOLD_BUMP)
+            return min(threshold, 0.95)
+        except Exception:
+            return _MIN_RELEVANCE_SCORE
+
+    async def dismiss_proposal(self, user_id: str, proposal_id: str) -> bool:
+        """Mark a proposal as dismissed by the user.
+
+        This prevents re-proposal for the same signal and contributes
+        to raising the user's effective threshold for future proposals.
+
+        Args:
+            user_id: User UUID.
+            proposal_id: UUID of the proposal to dismiss.
+
+        Returns:
+            True if successfully dismissed.
+        """
+        try:
+            result = (
+                self._db.table("proactive_proposals")
+                .update({
+                    "status": "dismissed",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                })
+                .eq("id", proposal_id)
+                .eq("user_id", user_id)
+                .eq("status", "proposed")
+                .execute()
+            )
+            dismissed = bool(result.data)
+            if dismissed:
+                logger.info(
+                    "Proposal dismissed",
+                    extra={"user_id": user_id, "proposal_id": proposal_id},
+                )
+            return dismissed
+        except Exception as e:
+            logger.debug("Failed to dismiss proposal %s: %s", proposal_id, e)
+            return False
 
     async def _store_and_route_proposal(
         self,
