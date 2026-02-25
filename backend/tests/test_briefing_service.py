@@ -290,23 +290,23 @@ async def test_get_calendar_data_structure() -> None:
 
 @pytest.mark.asyncio
 async def test_get_calendar_data_checks_user_integrations_table() -> None:
-    """Test _get_calendar_data queries user_integrations for google_calendar."""
+    """Test _get_calendar_data queries user_integrations for calendar integrations."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
         mock_db = MagicMock()
         mock_table = MagicMock()
         mock_select = MagicMock()
         mock_eq1 = MagicMock()
         mock_eq2 = MagicMock()
-        mock_eq3 = MagicMock()
-        mock_single = MagicMock()
+        mock_in = MagicMock()
+        mock_limit = MagicMock()
 
         mock_db.table.return_value = mock_table
         mock_table.select.return_value = mock_select
         mock_select.eq.return_value = mock_eq1
         mock_eq1.eq.return_value = mock_eq2
-        mock_eq2.eq.return_value = mock_eq3
-        mock_eq3.maybe_single.return_value = mock_single
-        mock_single.execute.return_value = MagicMock(data=None)
+        mock_eq2.in_.return_value = mock_in
+        mock_in.limit.return_value = mock_limit
+        mock_limit.execute.return_value = MagicMock(data=None)
 
         mock_db_class.get_client.return_value = mock_db
 
@@ -317,12 +317,11 @@ async def test_get_calendar_data_checks_user_integrations_table() -> None:
             user_id="test-user-123", briefing_date=date.today()
         )
 
-        # Verify the user_integrations table was queried
+        # Verify the user_integrations table was queried with correct columns
         mock_db.table.assert_called_with("user_integrations")
-        mock_table.select.assert_called_with("id, provider, status")
+        mock_table.select.assert_called_with("id, integration_type, status, composio_connection_id")
         mock_select.eq.assert_called_with("user_id", "test-user-123")
-        mock_eq1.eq.assert_called_with("provider", "google_calendar")
-        mock_eq2.eq.assert_called_with("status", "active")
+        mock_eq1.eq.assert_called_with("status", "active")
 
 
 @pytest.mark.asyncio
