@@ -404,6 +404,98 @@ class TestGoalExecutionServiceHelpers:
         assert total == 1
         assert connected == 1  # gmail is connected, composio_email_send maps to it
 
+    def test_annotate_task_resources_auth_required_connected(self) -> None:
+        """Test that auth_required integrations are annotated when connected."""
+        svc = self._make_service()
+
+        tasks = [
+            {
+                "title": "Sync with Salesforce",
+                "tools_needed": [],
+                "auth_required": ["salesforce"],
+            }
+        ]
+
+        # User has Salesforce connected
+        total, connected = svc._annotate_task_resources(
+            tasks, ["salesforce"], []
+        )
+        assert total == 1
+        assert connected == 1
+
+        resource = tasks[0]["resource_status"][0]
+        assert resource["connected"] is True
+        assert resource["tool"] == "salesforce"
+        assert resource["display_name"] == "Salesforce"
+        assert "setup_instruction" not in resource
+
+    def test_annotate_task_resources_auth_required_not_connected(self) -> None:
+        """Test that auth_required integrations show setup instruction when not connected."""
+        svc = self._make_service()
+
+        tasks = [
+            {
+                "title": "Sync with HubSpot",
+                "tools_needed": [],
+                "auth_required": ["hubspot"],
+            }
+        ]
+
+        # User does NOT have hubspot connected
+        total, connected = svc._annotate_task_resources(
+            tasks, ["gmail"], []
+        )
+        assert total == 1
+        assert connected == 0
+
+        resource = tasks[0]["resource_status"][0]
+        assert resource["connected"] is False
+        assert resource["tool"] == "hubspot"
+        assert resource["display_name"] == "HubSpot"
+        assert "setup_instruction" in resource
+        assert "HubSpot" in resource["setup_instruction"]
+
+    def test_annotate_task_resources_auth_required_and_tools_needed(self) -> None:
+        """Test that both auth_required and tools_needed are processed."""
+        svc = self._make_service()
+
+        tasks = [
+            {
+                "title": "Research and sync",
+                "tools_needed": ["exa_search"],  # built-in
+                "auth_required": ["salesforce"],  # needs integration
+            }
+        ]
+
+        total, connected = svc._annotate_task_resources(
+            tasks, ["salesforce"], []
+        )
+        assert total == 2  # exa_search + salesforce
+        assert connected == 2  # both connected
+
+        # Check both resources are present
+        tools = [r["tool"] for r in tasks[0]["resource_status"]]
+        assert "exa_search" in tools
+        assert "salesforce" in tools
+
+    def test_annotate_task_resources_auth_required_no_duplicate(self) -> None:
+        """Test that auth_required doesn't duplicate tools_needed entries."""
+        svc = self._make_service()
+
+        tasks = [
+            {
+                "title": "CRM work",
+                "tools_needed": ["salesforce"],
+                "auth_required": ["salesforce"],  # Same as tools_needed
+            }
+        ]
+
+        total, connected = svc._annotate_task_resources(
+            tasks, ["salesforce"], []
+        )
+        assert total == 1  # Only one entry, not two
+        assert connected == 1
+
 
 # ---------------------------------------------------------------------------
 # Singleton test

@@ -246,11 +246,11 @@ class GoalExecutionService:
     ) -> tuple[int, int]:
         """Annotate each task with resource availability metadata.
 
-        For each tool in each task's tools_needed:
+        For each tool in each task's tools_needed AND auth_required:
         - Built-in tools -> connected: True
         - Composio tools found in discovery -> check toolkit auth status,
           add display_name, description, toolkit, setup_instruction
-        - Unknown tools -> fall back to _check_tool_connected()
+        - Integration names in auth_required -> check against active_integrations
 
         Args:
             tasks: List of task dicts from the LLM plan.
@@ -283,11 +283,24 @@ class GoalExecutionService:
         except Exception:
             pass
 
+        # Integration display names for better UI
+        integration_display_names: dict[str, str] = {
+            "salesforce": "Salesforce",
+            "hubspot": "HubSpot",
+            "google_calendar": "Google Calendar",
+            "outlook_calendar": "Outlook Calendar",
+            "outlook": "Outlook",
+            "gmail": "Gmail",
+            "outlook_email": "Outlook Email",
+        }
+
         total_tools = 0
         connected_tools = 0
 
         for task in tasks:
             task_resources: list[dict[str, Any]] = []
+
+            # Process tools_needed (technical tool identifiers)
             for tool in task.get("tools_needed", []):
                 total_tools += 1
                 resource: dict[str, Any] = {"tool": tool, "connected": False}
@@ -317,6 +330,39 @@ class GoalExecutionService:
                         connected_tools += 1
 
                 task_resources.append(resource)
+
+            # Process auth_required (integration names like "salesforce", "hubspot")
+            # This ensures tasks show tool status even when LLM only specifies auth_required
+            for integration in task.get("auth_required", []):
+                # Skip if already processed via tools_needed
+                if any(r.get("tool") == integration for r in task_resources):
+                    continue
+
+                total_tools += 1
+                int_lower = integration.lower()
+                is_connected = int_lower in [i.lower() for i in active_integrations]
+
+                resource: dict[str, Any] = {
+                    "tool": integration,
+                    "connected": is_connected,
+                    "display_name": integration_display_names.get(
+                        int_lower, integration.capitalize()
+                    ),
+                    "toolkit": integration_display_names.get(
+                        int_lower, integration.capitalize()
+                    ),
+                }
+
+                if not is_connected:
+                    resource["setup_instruction"] = (
+                        f"Connect {resource['display_name']} in Settings > "
+                        f"Integrations to enable this capability."
+                    )
+                else:
+                    connected_tools += 1
+
+                task_resources.append(resource)
+
             task["resource_status"] = task_resources
 
         return total_tools, connected_tools
