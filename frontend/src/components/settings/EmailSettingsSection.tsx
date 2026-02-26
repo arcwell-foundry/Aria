@@ -6,6 +6,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Mail,
   Clock,
@@ -17,6 +18,7 @@ import {
   Plus,
   X,
   AlertCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import {
@@ -158,6 +160,7 @@ function EmailListEditor({
 }
 
 export function EmailSettingsSection() {
+  const navigate = useNavigate();
   const { data: settings, isLoading, error } = useEmailIntelligenceSettings();
   const updateMutation = useUpdateEmailIntelligenceSettings();
 
@@ -377,6 +380,26 @@ export function EmailSettingsSection() {
                     {settings.email_provider === 'gmail' ? 'Gmail' : 'Outlook'} connected
                   </span>
                 </div>
+              </div>
+            ) : settings.email_status && settings.email_provider ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle
+                    className="w-3.5 h-3.5"
+                    style={{ color: 'var(--warning, #f59e0b)' }}
+                  />
+                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                    {settings.email_provider === 'gmail' ? 'Gmail' : 'Outlook'} disconnected
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/settings/integrations')}
+                  className="text-xs font-medium hover:opacity-80 transition-opacity"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Reconnect in Integrations &rarr;
+                </button>
               </div>
             ) : (
               <div className="flex items-center gap-2">

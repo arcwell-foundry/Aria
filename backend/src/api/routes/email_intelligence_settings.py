@@ -51,6 +51,7 @@ class EmailIntelligenceSettingsResponse(BaseModel):
     learning_mode_day: int | None = None
     email_provider: str | None = None
     email_connected: bool = False
+    email_status: str | None = None
 
 
 class EmailIntelligenceSettingsService:
@@ -122,6 +123,7 @@ class EmailIntelligenceSettingsService:
             email_connected = False
 
             # Check user_integrations for email connection
+            email_status: str | None = None
             try:
                 int_result = (
                     self._db.table("user_integrations")
@@ -135,7 +137,13 @@ class EmailIntelligenceSettingsService:
                         if row.get("status") == "active":
                             email_provider = row["integration_type"]
                             email_connected = True
+                            email_status = "active"
                             break
+                    # If no active row found, surface the first non-active row
+                    if not email_connected and int_result.data:
+                        row = int_result.data[0]
+                        email_provider = row["integration_type"]
+                        email_status = row.get("status", "disconnected")
             except Exception as e:
                 logger.warning(
                     "Failed to check email connection: %s", e
@@ -150,6 +158,7 @@ class EmailIntelligenceSettingsService:
                 "learning_mode_day": learning_mode_day,
                 "email_provider": email_provider,
                 "email_connected": email_connected,
+                "email_status": email_status,
             }
 
         except Exception:

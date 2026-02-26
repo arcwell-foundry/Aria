@@ -11,6 +11,7 @@ export interface EmailIntelligenceSettings {
   learning_mode_day: number | null;
   email_provider: string | null;
   email_connected: boolean;
+  email_status: string | null;
 }
 
 export interface UpdateEmailIntelligenceSettingsRequest {

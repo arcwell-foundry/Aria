@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   connectIntegration,
   disconnectIntegration,
+  getAuthUrl,
   listAvailableIntegrations,
   listIntegrations,
   type ConnectIntegrationRequest,
@@ -48,6 +49,19 @@ export function useConnectIntegration() {
       queryClient.invalidateQueries({ queryKey: integrationKeys.lists() });
       queryClient.invalidateQueries({ queryKey: integrationKeys.available() });
     },
+  });
+}
+
+// Get OAuth auth URL mutation
+export function useGetAuthUrl() {
+  return useMutation({
+    mutationFn: ({
+      integrationType,
+      redirectUri,
+    }: {
+      integrationType: IntegrationType;
+      redirectUri: string;
+    }) => getAuthUrl(integrationType, redirectUri),
   });
 }
 

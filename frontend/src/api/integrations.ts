@@ -33,11 +33,13 @@ export interface AvailableIntegration {
   description: string;
   icon: string;
   is_connected: boolean;
+  status: string | null;
 }
 
 export interface AuthUrlResponse {
-  auth_url: string;
-  state: string;
+  authorization_url: string;
+  integration_type: string;
+  display_name: string;
 }
 
 export interface ConnectIntegrationRequest {
