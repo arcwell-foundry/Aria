@@ -48,6 +48,28 @@ apiClient.interceptors.request.use((config) => {
 // Flag to prevent concurrent token refresh attempts
 let isRefreshing = false;
 
+// Queue for requests waiting on an in-flight token refresh
+let refreshSubscribers: Array<{
+  resolve: (token: string) => void;
+  reject: (err: unknown) => void;
+}> = [];
+
+function subscribeToRefresh(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    refreshSubscribers.push({ resolve, reject });
+  });
+}
+
+function onRefreshSuccess(token: string): void {
+  refreshSubscribers.forEach(({ resolve }) => resolve(token));
+  refreshSubscribers = [];
+}
+
+function onRefreshFailure(err: unknown): void {
+  refreshSubscribers.forEach(({ reject }) => reject(err));
+  refreshSubscribers = [];
+}
+
 // Response interceptor for token refresh and retry logic
 apiClient.interceptors.response.use(
   (response) => response,
@@ -63,10 +85,12 @@ apiClient.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      // If another request is already refreshing, wait for it rather than
-      // firing a second refresh call.
+      // If another request is already refreshing, queue this request
+      // and retry it once the refresh completes.
       if (isRefreshing) {
-        return Promise.reject(error);
+        const newToken = await subscribeToRefresh();
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return apiClient(originalRequest);
       }
 
       const refreshToken = localStorage.getItem("refresh_token");
@@ -82,10 +106,13 @@ apiClient.interceptors.response.use(
           localStorage.setItem("access_token", access_token);
           localStorage.setItem("refresh_token", newRefreshToken);
 
+          onRefreshSuccess(access_token);
+
           originalRequest.headers.Authorization = `Bearer ${access_token}`;
           return apiClient(originalRequest);
-        } catch {
-          // Refresh failed — clear tokens and redirect
+        } catch (refreshError) {
+          // Refresh failed — reject all queued requests, clear tokens, redirect
+          onRefreshFailure(refreshError);
           showError("auth", "Session expired", "Please log in again to continue.");
           redirectToLogin();
         } finally {

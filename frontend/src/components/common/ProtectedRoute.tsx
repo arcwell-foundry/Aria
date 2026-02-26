@@ -8,7 +8,7 @@ export interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { data: routingDecision, isLoading: routingLoading } = useRoutingDecision();
+  const { data: routingDecision, isLoading: routingLoading } = useRoutingDecision(!authLoading && isAuthenticated);
   const location = useLocation();
 
   // Show loading spinner while checking auth or routing

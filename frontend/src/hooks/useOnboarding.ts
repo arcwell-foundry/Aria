@@ -106,13 +106,10 @@ export function useSkipStep() {
 }
 
 export function useRoutingDecision(enabled = true) {
-  // Only run if user is authenticated (token exists)
-  const isAuthenticated = typeof window !== "undefined" && !!localStorage.getItem("access_token");
-
   return useQuery({
     queryKey: onboardingKeys.routing(),
     queryFn: getRoutingDecision,
-    enabled: enabled && isAuthenticated,
+    enabled,
     retry: (failureCount, error) => {
       // Don't retry on 401 - auth issue needs user action
       if (error instanceof Error && error.message.includes("401")) {
