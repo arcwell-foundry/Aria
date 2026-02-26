@@ -15,6 +15,7 @@ from typing import Any
 
 from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
+from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,19 @@ class ProactiveGoalProposer:
 
     def __init__(self) -> None:
         self._db = SupabaseClient.get_client()
+        # Lazily initialized causal reasoning engine
+        self._causal_engine: SalesCausalReasoningEngine | None = None
+
+    def _get_causal_engine(self) -> SalesCausalReasoningEngine | None:
+        """Lazily initialize the causal reasoning engine."""
+        if self._causal_engine is None:
+            try:
+                self._causal_engine = SalesCausalReasoningEngine(
+                    db_client=self._db,
+                )
+            except Exception as e:
+                logger.warning("Failed to initialize SalesCausalReasoningEngine: %s", e)
+        return self._causal_engine
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -204,6 +218,32 @@ class ProactiveGoalProposer:
 
             llm = LLMClient()
 
+            # Build causal context using SalesCausalReasoningEngine
+            # This enriches proposals with timing and causal reasoning
+            causal_context = ""
+            try:
+                causal_engine = self._get_causal_engine()
+                if causal_engine:
+                    # Construct signal text for causal analysis
+                    signal_text = f"{headline}"
+                    if summary and summary != headline:
+                        signal_text += f" - {summary}"
+                    if company_name:
+                        signal_text += f" (Company: {company_name})"
+
+                    actions = await causal_engine.analyze_signal(user_id, signal_text)
+                    if actions:
+                        top_action = actions[0]
+                        causal_context = (
+                            f"\n\nCausal analysis: {top_action.causal_narrative} "
+                            f"Recommended timing: {top_action.timing}. "
+                            f"Urgency: {top_action.urgency}."
+                        )
+            except Exception as e:
+                # Causal reasoning failure must NEVER prevent proposal creation
+                logger.warning("Causal reasoning failed for proposal: %s", e)
+                causal_context = ""
+
             affected_note = ""
             if affected_count > 0:
                 affected_note = f"\nThis affects {affected_count} lead(s) in the user's pipeline."
@@ -216,7 +256,8 @@ class ProactiveGoalProposer:
                 f"Company: {company_name or 'Unknown'}\n"
                 f"Headline: {headline}\n"
                 f"Summary: {summary}\n"
-                f"{affected_note}\n\n"
+                f"{affected_note}"
+                f"{causal_context}\n\n"
                 "Based on this signal, propose ONE actionable goal for the user. "
                 "Return a JSON object with these keys:\n"
                 '- "message": a brief, direct message to the user (1-2 sentences, '
