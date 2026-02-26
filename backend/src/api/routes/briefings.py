@@ -313,15 +313,33 @@ async def generate_briefing(
     if request and request.briefing_date:
         briefing_date = date.fromisoformat(request.briefing_date)
 
-    service = BriefingService()
-    content = await service.generate_briefing(current_user.id, briefing_date)
+    try:
+        service = BriefingService()
+        content = await service.generate_briefing(current_user.id, briefing_date)
 
-    logger.info(
-        "Briefing generated",
-        extra={"user_id": current_user.id, "briefing_date": str(briefing_date)},
-    )
+        logger.info(
+            "Briefing generated",
+            extra={"user_id": current_user.id, "briefing_date": str(briefing_date)},
+        )
 
-    return BriefingContent(**content)
+        return BriefingContent(**content)
+    except Exception:
+        logger.exception(
+            "Briefing generation failed, returning minimal briefing",
+            extra={"user_id": current_user.id, "briefing_date": str(briefing_date)},
+        )
+        # Return a minimal but valid briefing so the frontend doesn't crash
+        from datetime import UTC
+        from datetime import datetime as dt
+
+        return BriefingContent(
+            summary="Your briefing is being prepared. Please try refreshing in a moment.",
+            calendar={"meeting_count": 0, "key_meetings": []},
+            leads={"hot_leads": [], "needs_attention": [], "recently_active": []},
+            signals={"company_news": [], "market_trends": [], "competitive_intel": []},
+            tasks={"overdue": [], "due_today": []},
+            generated_at=dt.now(UTC).isoformat(),
+        )
 
 
 @router.post("/regenerate", response_model=BriefingContent)
@@ -333,15 +351,33 @@ async def regenerate_briefing(
     Forces regeneration of today's briefing, useful when
     underlying data has changed (new leads, signals, etc.).
     """
-    service = BriefingService()
-    content = await service.generate_briefing(current_user.id)
+    try:
+        service = BriefingService()
+        content = await service.generate_briefing(current_user.id)
 
-    logger.info(
-        "Briefing regenerated",
-        extra={"user_id": current_user.id},
-    )
+        logger.info(
+            "Briefing regenerated",
+            extra={"user_id": current_user.id},
+        )
 
-    return BriefingContent(**content)
+        return BriefingContent(**content)
+    except Exception:
+        logger.exception(
+            "Briefing regeneration failed, returning minimal briefing",
+            extra={"user_id": current_user.id},
+        )
+        # Return a minimal but valid briefing so the frontend doesn't crash
+        from datetime import UTC
+        from datetime import datetime as dt
+
+        return BriefingContent(
+            summary="Your briefing is being prepared. Please try refreshing in a moment.",
+            calendar={"meeting_count": 0, "key_meetings": []},
+            leads={"hot_leads": [], "needs_attention": [], "recently_active": []},
+            signals={"company_news": [], "market_trends": [], "competitive_intel": []},
+            tasks={"overdue": [], "due_today": []},
+            generated_at=dt.now(UTC).isoformat(),
+        )
 
 
 @router.post("/deliver")
@@ -354,22 +390,33 @@ async def deliver_briefing(
     WebSocket connection as an AriaMessageEvent with rich content
     cards, UI commands, and suggestions.
     """
-    service = BriefingService()
-    content = await service.generate_briefing(current_user.id)
-
     try:
-        from src.core.ws import ws_manager
-        from src.models.ws_events import AriaMessageEvent
+        service = BriefingService()
+        content = await service.generate_briefing(current_user.id)
 
-        event = AriaMessageEvent(
-            message=content.get("summary", ""),
-            rich_content=content.get("rich_content", []),
-            ui_commands=content.get("ui_commands", []),
-            suggestions=content.get("suggestions", []),
+        try:
+            from src.core.ws import ws_manager
+            from src.models.ws_events import AriaMessageEvent
+
+            event = AriaMessageEvent(
+                message=content.get("summary", ""),
+                rich_content=content.get("rich_content", []),
+                ui_commands=content.get("ui_commands", []),
+                suggestions=content.get("suggestions", []),
+            )
+            await ws_manager.send_to_user(current_user.id, event)
+            logger.info("Briefing delivered via WebSocket", extra={"user_id": current_user.id})
+            return {"briefing": content, "status": "delivered"}
+        except Exception as e:
+            logger.warning(f"WebSocket briefing delivery failed: {e}")
+            return {"briefing": content, "status": "generated_not_delivered"}
+    except Exception:
+        logger.exception(
+            "Briefing delivery failed",
+            extra={"user_id": current_user.id},
         )
-        await ws_manager.send_to_user(current_user.id, event)
-        logger.info("Briefing delivered via WebSocket", extra={"user_id": current_user.id})
-        return {"briefing": content, "status": "delivered"}
-    except Exception as e:
-        logger.warning(f"WebSocket briefing delivery failed: {e}")
-        return {"briefing": content, "status": "generated_not_delivered"}
+        return {
+            "briefing": None,
+            "status": "failed",
+            "error": "Briefing generation failed. Please try again.",
+        }

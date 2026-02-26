@@ -1285,20 +1285,34 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 exc_info=True,
             )
 
-        if system_prompt:
-            return await self._llm.generate_response(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=200,
+        # Call LLM with defensive error handling
+        try:
+            if system_prompt:
+                return await self._llm.generate_response(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=200,
+                )
+            else:
+                # Fallback without PersonaBuilder
+                return await self._llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
+                )
+        except Exception as llm_error:
+            logger.error(
+                "LLM call failed during briefing summary generation, using fallback",
+                extra={"user_id": user_id, "error": str(llm_error)},
+                exc_info=True,
             )
-        else:
-            # Fallback without PersonaBuilder
-            return await self._llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-            )
+            # Return a minimal but valid summary so the briefing doesn't crash
+            meeting_count = calendar.get("meeting_count", 0)
+            if meeting_count > 0:
+                return f"{greeting}. You have {meeting_count} meetings today."
+            else:
+                return f"{greeting}. Your daily briefing is ready."
 
     async def _get_email_data(self, user_id: str) -> dict[str, Any]:
         """Get email intelligence summary from overnight processing.

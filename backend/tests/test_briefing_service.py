@@ -424,13 +424,14 @@ async def test_generate_summary_calls_llm_with_context(
         from src.services.briefing import BriefingService
 
         service = BriefingService()
+        user_id = "test-user-123"
         calendar = {"meeting_count": 3}
         leads = {"needs_attention": ["lead-1", "lead-2"]}
         signals = {"company_news": ["news-1"]}
         tasks = {"overdue": ["task-1"]}
         email_data = {"total_received": 5, "drafts_waiting": 2}
 
-        result = await service._generate_summary(calendar, leads, signals, tasks, email_data)
+        result = await service._generate_summary(user_id, calendar, leads, signals, tasks, email_data)
 
         # Verify LLM was called
         mock_llm_class.return_value.generate_response.assert_called_once()
