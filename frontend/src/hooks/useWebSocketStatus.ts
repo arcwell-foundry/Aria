@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { wsManager, type ConnectionState, type TransportType } from '@/core/WebSocketManager';
+import { useIsMounted } from '@/hooks/useIsMounted';
 
 interface WebSocketStatus {
   isConnected: boolean;
@@ -37,20 +38,23 @@ export function useWebSocketStatus(): WebSocketStatus {
     () => wsManager.connectionState,
   );
   const [transport, setTransport] = useState<TransportType>(() => wsManager.transport);
+  const isMounted = useIsMounted();
 
   const handleStateChanged = useCallback((payload: unknown) => {
     const p = payload as StateChangedPayload;
+    if (!isMounted()) return;
     setConnectionState(p.state);
     if (p.transport) {
       setTransport(p.transport);
     }
-  }, []);
+  }, [isMounted]);
 
   const handleEstablished = useCallback((payload: unknown) => {
     const p = payload as EstablishedPayload;
+    if (!isMounted()) return;
     setConnectionState('connected');
     setTransport(p.transport);
-  }, []);
+  }, [isMounted]);
 
   const handleError = useCallback(() => {
     // Don't immediately set to disconnected - let state_changed handle it
@@ -64,6 +68,8 @@ export function useWebSocketStatus(): WebSocketStatus {
     // Poll periodically as a safety net — the wsManager may update state
     // without emitting an event in some edge cases.
     const interval = setInterval(() => {
+      // Guard against setState on unmounted component (React error #300)
+      if (!isMounted()) return;
       setConnectionState(wsManager.connectionState);
       setTransport(wsManager.transport);
     }, 5_000);
@@ -74,7 +80,7 @@ export function useWebSocketStatus(): WebSocketStatus {
       wsManager.off('connection.state_changed', handleStateChanged);
       clearInterval(interval);
     };
-  }, [handleEstablished, handleError, handleStateChanged]);
+  }, [handleEstablished, handleError, handleStateChanged, isMounted]);
 
   const isConnected = connectionState === 'connected';
   const isReconnecting = connectionState === 'reconnecting';

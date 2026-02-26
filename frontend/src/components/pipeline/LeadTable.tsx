@@ -23,6 +23,7 @@ import { SortableHeader } from '@/components/common/SortableHeader';
 import { HealthBar } from './HealthBar';
 import { Avatar } from '@/components/primitives/Avatar';
 import { ConversionScoreBadge } from '@/components/leads/ConversionScoreBadge';
+import { isValidLeadId } from '@/utils/routeValidation';
 import type { Lead, Stakeholder } from '@/api/leads';
 
 // Constants
@@ -295,6 +296,11 @@ export function LeadTable({
 
   // Handle row click
   const handleRowClick = (lead: Lead) => {
+    // Validate lead ID before navigation to prevent malformed URLs
+    if (!isValidLeadId(lead.id)) {
+      console.warn('[LeadTable] Invalid lead ID, navigation blocked:', lead.id);
+      return;
+    }
     navigate(`/pipeline/leads/${lead.id}`);
   };
 

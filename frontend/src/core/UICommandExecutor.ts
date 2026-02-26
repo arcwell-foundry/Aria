@@ -12,6 +12,7 @@ import type { UICommand, HighlightEffect } from '@/api/chat';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { modalityController } from './ModalityController';
+import { isValidRoute } from '@/utils/routeValidation';
 
 type NavigateFunction = (to: string) => void;
 
@@ -87,6 +88,13 @@ class UICommandExecutorImpl {
 
   private handleNavigate(cmd: UICommand): void {
     if (!cmd.route || !this.navigateFn) return;
+
+    // Validate route before navigation to prevent malformed URLs
+    if (!isValidRoute(cmd.route)) {
+      console.warn('[UICommandExecutor] Rejected invalid route:', cmd.route);
+      return;
+    }
+
     console.debug(`[UICommandExecutor] Navigating to: ${cmd.route}`);
     this.navigateFn(cmd.route);
     useNavigationStore.getState().setCurrentRoute(cmd.route);

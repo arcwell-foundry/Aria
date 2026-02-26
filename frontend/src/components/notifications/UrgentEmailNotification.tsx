@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Mail, X } from 'lucide-react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS, type AriaMessagePayload } from '@/types/chat';
+import { useIsMounted } from '@/hooks/useIsMounted';
 
 interface UrgentEmail {
   id: string;
@@ -126,6 +127,7 @@ function UrgentEmailItem({
 
 export function UrgentEmailNotification() {
   const [emails, setEmails] = useState<UrgentEmail[]>([]);
+  const isMounted = useIsMounted();
 
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
@@ -152,6 +154,9 @@ export function UrgentEmailNotification() {
           timestamp: String(raw.timestamp ?? new Date().toISOString()),
         };
 
+        // Guard against setState on unmounted component (React error #300)
+        if (!isMounted()) return;
+
         setEmails((prev) => {
           // Deduplicate by email_id
           if (prev.some((e) => e.email_id === urgentEmail.email_id)) return prev;
@@ -166,7 +171,7 @@ export function UrgentEmailNotification() {
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage as (p: unknown) => void);
     };
-  }, []);
+  }, [isMounted]);
 
   const handleDismiss = useCallback((id: string) => {
     setEmails((prev) => prev.filter((e) => e.id !== id));
