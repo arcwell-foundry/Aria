@@ -96,6 +96,7 @@ class HunterAgent(SkillAwareAgent):
         """
         self._company_cache: dict[str, Any] = {}
         self._exa_provider: Any = None
+        self._resource_status: list[dict[str, Any]] = []  # Tool connectivity status
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
@@ -119,6 +120,31 @@ class HunterAgent(SkillAwareAgent):
             except Exception as e:
                 logger.warning("HunterAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    def _check_tool_connected(
+        self,
+        resource_status: list[dict[str, Any]],
+        tool_name: str,
+    ) -> bool:
+        """Check if a specific tool is connected based on resource_status.
+
+        Args:
+            resource_status: List of resource status dicts from the task.
+            tool_name: Name of the tool to check (e.g., "exa", "apollo").
+
+        Returns:
+            True if the tool is connected, False otherwise.
+        """
+        if not resource_status:
+            return False
+
+        tool_lower = tool_name.lower()
+        for resource in resource_status:
+            tool = resource.get("tool", "").lower()
+            if tool == tool_lower and resource.get("connected", False):
+                return True
+
+        return False
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate Hunter agent task input.
@@ -189,6 +215,13 @@ class HunterAgent(SkillAwareAgent):
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
 
+        # Extract resource_status for graceful degradation
+        resource_status = task.get("resource_status", [])
+        self._resource_status = resource_status
+
+        # Check if Exa (our primary search tool) is available
+        exa_available = settings.EXA_API_KEY or self._check_tool_connected(resource_status, "exa")
+
         # Extract task parameters
         icp = task["icp"]
         target_count = task["target_count"]
@@ -249,7 +282,19 @@ class HunterAgent(SkillAwareAgent):
             extra={"lead_count": len(leads)},
         )
 
-        return AgentResult(success=True, data=leads)
+        # Return leads directly for backward compatibility
+        # Add advisory as metadata if needed (consumers can check result.data for advisory key)
+        result = AgentResult(success=True, data=leads)
+
+        # Add advisory to result data if tools were degraded
+        if not exa_available and leads:
+            # Include an advisory message in the first lead's metadata
+            leads[0]["_advisory"] = (
+                "Lead discovery used LLM knowledge instead of real-time web search. "
+                "Connect Exa in Settings > Integrations for live company data."
+            )
+
+        return result
 
     async def _search_companies_via_exa(
         self,

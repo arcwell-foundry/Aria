@@ -204,9 +204,10 @@ class OperatorAgent(SkillAwareAgent):
         """Execute the operator agent's primary task.
 
         Dispatches to the appropriate tool based on operation_type.
+        Checks resource_status first to gracefully handle disconnected integrations.
 
         Args:
-            task: Task specification with operation_type and parameters.
+            task: Task specification with operation_type, parameters, and optional resource_status.
 
         Returns:
             AgentResult with success status and output data.
@@ -216,29 +217,127 @@ class OperatorAgent(SkillAwareAgent):
 
         operation_type = task["operation_type"]
         parameters = task["parameters"]
+        resource_status = task.get("resource_status", [])
 
         logger.info(
             f"Operator agent executing: {operation_type}",
             extra={"user_id": self.user_id, "operation_type": operation_type},
         )
 
-        # Dispatch to appropriate tool
-        if operation_type == "calendar_read":
-            result_data = await self._calendar_read(**parameters)
-        elif operation_type == "calendar_write":
-            result_data = await self._calendar_write(**parameters)
-        elif operation_type == "crm_read":
-            result_data = await self._crm_read(**parameters)
-        elif operation_type == "crm_write":
-            result_data = await self._crm_write(**parameters)
-        else:
+        # Check resource_status upfront to avoid attempting disconnected tools
+        required_category = "calendar" if "calendar" in operation_type else "crm" if "crm" in operation_type else None
+        if required_category and resource_status:
+            # Check if any tool for this category is connected
+            category_connected = self._check_category_connected(resource_status, required_category)
+            if not category_connected:
+                # Determine friendly names for the required tools
+                tool_names = self._get_tool_names_for_category(required_category)
+                advisory = (
+                    f"Skipped {operation_type} — {tool_names} not connected. "
+                    f"Connect it in Settings > Integrations."
+                )
+                logger.warning(
+                    "Operator skipping operation due to disconnected integration: %s",
+                    operation_type,
+                    extra={"user_id": self.user_id, "category": required_category},
+                )
+                return AgentResult(
+                    success=True,  # Partial success - operation was intentionally skipped
+                    data={
+                        "skipped": True,
+                        "operation_type": operation_type,
+                        "advisory": advisory,
+                        "connected": False,
+                        "message": advisory,
+                    },
+                )
+
+        # Dispatch to appropriate tool (with internal fallback check for safety)
+        try:
+            if operation_type == "calendar_read":
+                result_data = await self._calendar_read(**parameters)
+            elif operation_type == "calendar_write":
+                result_data = await self._calendar_write(**parameters)
+            elif operation_type == "crm_read":
+                result_data = await self._crm_read(**parameters)
+            elif operation_type == "crm_write":
+                result_data = await self._crm_write(**parameters)
+            else:
+                return AgentResult(
+                    success=False,
+                    data=None,
+                    error=f"Unknown operation_type: {operation_type}",
+                )
+
+            # Check if the tool indicated it wasn't connected
+            if isinstance(result_data, dict) and result_data.get("connected") is False:
+                # Tool returned a graceful "not connected" response
+                return AgentResult(
+                    success=True,  # Partial success
+                    data={
+                        "skipped": True,
+                        "operation_type": operation_type,
+                        "advisory": result_data.get("message", "Integration not connected."),
+                        **result_data,
+                    },
+                )
+
+            return AgentResult(success=True, data=result_data)
+
+        except Exception as e:
+            logger.error(
+                "Operator agent execution failed: %s",
+                e,
+                exc_info=True,
+                extra={"user_id": self.user_id, "operation_type": operation_type},
+            )
             return AgentResult(
                 success=False,
-                data=None,
-                error=f"Unknown operation_type: {operation_type}",
+                data={"operation_type": operation_type, "error": str(e)},
+                error=f"Operation failed: {e}",
             )
 
-        return AgentResult(success=True, data=result_data)
+    def _check_category_connected(
+        self,
+        resource_status: list[dict[str, Any]],
+        category: str,
+    ) -> bool:
+        """Check if any tool in the given category is connected.
+
+        Args:
+            resource_status: List of resource status dicts from the task.
+            category: "calendar" or "crm".
+
+        Returns:
+            True if at least one tool in the category is connected.
+        """
+        category_tools = {
+            "calendar": _CALENDAR_INTEGRATION_TYPES,
+            "crm": _CRM_INTEGRATION_TYPES,
+        }
+        allowed_tools = category_tools.get(category, ())
+
+        for resource in resource_status:
+            tool = resource.get("tool", "").lower()
+            if tool in allowed_tools and resource.get("connected", False):
+                return True
+
+        return False
+
+    def _get_tool_names_for_category(self, category: str) -> str:
+        """Get a friendly display name for tools in a category.
+
+        Args:
+            category: "calendar" or "crm".
+
+        Returns:
+            Human-readable tool name(s).
+        """
+        names = {
+            "calendar": "Google Calendar or Outlook",
+            "crm": "Salesforce or HubSpot",
+        }
+        return names.get(category, category.title())
 
     # ------------------------------------------------------------------
     # Integration status helper

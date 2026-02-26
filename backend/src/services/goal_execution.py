@@ -1042,6 +1042,7 @@ class GoalExecutionService:
         agent_type: str,
         goal: dict[str, Any],
         context: dict[str, Any],
+        resource_status: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         """Build a task dict compatible with an agent's execute() method.
 
@@ -1051,6 +1052,7 @@ class GoalExecutionService:
             agent_type: The agent type string.
             goal: The goal dict.
             context: Gathered execution context.
+            resource_status: List of resource status dicts from the task.
 
         Returns:
             Task dict or None if the agent type isn't supported.
@@ -1126,6 +1128,10 @@ class GoalExecutionService:
         if task is not None and team_intelligence:
             task["team_intelligence"] = team_intelligence
 
+        # Inject resource_status so agents can check tool connectivity
+        if task is not None and resource_status:
+            task["resource_status"] = resource_status
+
         return task
 
     async def _try_skill_execution(
@@ -1134,6 +1140,7 @@ class GoalExecutionService:
         goal: dict[str, Any],
         agent_type: str,
         context: dict[str, Any],
+        resource_status: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         """Execute using the agent's native execute() method with optional skill augmentation.
 
@@ -1148,6 +1155,7 @@ class GoalExecutionService:
             goal: The goal dict.
             agent_type: The agent type string.
             context: Gathered execution context.
+            resource_status: List of resource status dicts from the task.
 
         Returns:
             Result data dict if agent execution succeeded, None otherwise.
@@ -1157,7 +1165,7 @@ class GoalExecutionService:
             if agent is None:
                 return None
 
-            task = self._build_agent_task(agent_type, goal, context)
+            task = self._build_agent_task(agent_type, goal, context, resource_status)
             if task is None:
                 return None
 
@@ -1468,6 +1476,7 @@ class GoalExecutionService:
         context: dict[str, Any],
         goal_agent_id: str | None = None,
         conversation_id: str | None = None,
+        resource_status: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Execute a single agent's analysis.
 
@@ -1522,6 +1531,7 @@ class GoalExecutionService:
             goal=goal,
             agent_type=agent_type,
             context=context,
+            resource_status=resource_status,
         )
 
         if skill_result is not None:
@@ -3514,12 +3524,15 @@ class GoalExecutionService:
             logger.debug("Failed to send agent starting message", exc_info=True)
 
         try:
+            # Extract resource_status from the task to pass to agent for graceful degradation
+            resource_status = task.get("resource_status", [])
             result = await self._execute_agent(
                 user_id=user_id,
                 goal=goal,
                 agent_type=agent_type,
                 context=context,
                 conversation_id=conversation_id,
+                resource_status=resource_status,
             )
 
             await self._handle_agent_result(

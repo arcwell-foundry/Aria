@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
+from src.core.config import settings
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -133,6 +134,7 @@ class ScribeAgent(SkillAwareAgent):
         """
         self._templates: dict[str, str] = self._get_builtin_templates()
         self._exa_provider: Any = None
+        self._resource_status: list[dict[str, Any]] = []  # Tool connectivity status
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
@@ -155,6 +157,31 @@ class ScribeAgent(SkillAwareAgent):
             except Exception as e:
                 logger.warning("ScribeAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    def _check_tool_connected(
+        self,
+        resource_status: list[dict[str, Any]],
+        tool_name: str,
+    ) -> bool:
+        """Check if a specific tool is connected based on resource_status.
+
+        Args:
+            resource_status: List of resource status dicts from the task.
+            tool_name: Name of the tool to check (e.g., "exa").
+
+        Returns:
+            True if the tool is connected, False otherwise.
+        """
+        if not resource_status:
+            return False
+
+        tool_lower = tool_name.lower()
+        for resource in resource_status:
+            tool = resource.get("tool", "").lower()
+            if tool == tool_lower and resource.get("connected", False):
+                return True
+
+        return False
 
     def _get_builtin_templates(self) -> dict[str, str]:
         """Get built-in communication templates.
@@ -271,6 +298,13 @@ class ScribeAgent(SkillAwareAgent):
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
 
+        # Extract resource_status for graceful degradation
+        resource_status = task.get("resource_status", [])
+        self._resource_status = resource_status
+
+        # Check if Exa (for optional recipient research) is available
+        exa_available = settings.EXA_API_KEY or self._check_tool_connected(resource_status, "exa")
+
         comm_type = task["communication_type"]
         recipient = task.get("recipient")
         context = task.get("context", "")
@@ -286,6 +320,7 @@ class ScribeAgent(SkillAwareAgent):
                 "tone": tone,
                 "has_template": template_name is not None,
                 "has_style": style is not None,
+                "exa_available": exa_available,
             },
         )
 
@@ -363,6 +398,14 @@ class ScribeAgent(SkillAwareAgent):
                 content["body"] = await self._personalize(content["body"], style)
                 style_applied = "custom"
 
+            # Build advisories for any degraded capabilities
+            advisories = []
+            if not exa_available and recipient:
+                advisories.append(
+                    "Recipient research skipped — Exa web search not connected. "
+                    "Connect Exa in Settings > Integrations for personalized recipient insights."
+                )
+
             result_data = {
                 "draft_type": draft_type,
                 "content": content,
@@ -371,6 +414,8 @@ class ScribeAgent(SkillAwareAgent):
                 "template_used": template_used,
                 "ready_for_review": True,
             }
+            if advisories:
+                result_data["advisories"] = advisories
 
             logger.info(
                 f"Draft complete: {draft_type}",
