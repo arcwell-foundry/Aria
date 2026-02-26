@@ -7,3 +7,4 @@ export { DialogueHeader } from './DialogueHeader';
 export { DialogueMode } from './DialogueMode';
 export { CompactAvatar } from './CompactAvatar';
 export { ChatContextSection } from './ChatContextSection';
+export { GoalPlanSidePanel } from './GoalPlanSidePanel';

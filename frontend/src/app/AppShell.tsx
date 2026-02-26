@@ -16,7 +16,7 @@ import { useEffect, useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/shell/Sidebar';
 import { IntelPanel } from '@/components/shell/IntelPanel';
-import { CompactAvatar } from '@/components/avatar';
+import { CompactAvatar, GoalPlanSidePanel } from '@/components/avatar';
 import { useNavigationStore, type NavigationState } from '@/stores/navigationStore';
 import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
@@ -25,6 +25,7 @@ import { UrgentEmailNotification } from '@/components/notifications/UrgentEmailN
 import { useDashboardEvents } from '@/hooks/useDashboardEvents';
 import { useExecutionProgress } from '@/hooks/useExecutionProgress';
 import { useUICommands } from '@/hooks/useUICommands';
+import { useGoalPlanSidePanel } from '@/hooks/useGoalPlanSidePanel';
 import { UndoToastContainer } from '@/components/execution/UndoToast';
 import { wsManager } from '@/core/WebSocketManager';
 import { useSession } from '@/contexts/SessionContext';
@@ -70,6 +71,8 @@ export function AppShell() {
   useExecutionProgress();
   // Wire UI commands from ARIA messages to UICommandExecutor
   useUICommands();
+  // Wire goal plan side panel for avatar mode
+  useGoalPlanSidePanel();
 
   useEffect(() => {
     modalityController.setNavigate(navigate);
@@ -116,6 +119,9 @@ export function AppShell() {
 
       {/* Undo toast — persists across all routes */}
       <UndoToastContainer />
+
+      {/* Goal plan side panel — shows in avatar mode */}
+      <GoalPlanSidePanel />
 
       {/* Floating PiP avatar — portaled to document.body */}
       <CompactAvatar />
