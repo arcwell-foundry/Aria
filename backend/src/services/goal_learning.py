@@ -13,6 +13,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from src.core.persona import LAYER_1_CORE_IDENTITY
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,9 +156,8 @@ class GoalLearningService:
 
         tasks = plan.get("tasks", []) if isinstance(plan, dict) else []
 
-        prompt = (
-            "You are ARIA's learning system. Analyze this completed goal and its "
-            "execution plan to extract a reusable playbook template.\n\n"
+        task_prompt = (
+            "Analyze this completed goal and its execution plan to extract a reusable playbook template.\n\n"
             f"Goal title: {goal.get('title', '')}\n"
             f"Goal description: {goal.get('description', '')}\n"
             f"Goal type: {goal.get('goal_type', '')}\n"
@@ -183,8 +184,14 @@ class GoalLearningService:
 
         llm = LLMClient()
         try:
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             raw = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 max_tokens=2048,
                 temperature=0.3,
             )
@@ -260,8 +267,8 @@ class GoalLearningService:
         plan_data = self._fetch_plan(goal_id)
 
         # Generate failure retrospective
-        prompt = (
-            "You are ARIA's learning system. Analyze this failed goal execution.\n\n"
+        task_prompt = (
+            "Analyze this failed goal execution.\n\n"
             f"Goal title: {goal.get('title', '')}\n"
             f"Goal description: {goal.get('description', '')}\n"
             f"Goal type: {goal.get('goal_type', '')}\n"
@@ -282,8 +289,14 @@ class GoalLearningService:
 
         llm = LLMClient()
         try:
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             raw = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 max_tokens=1024,
                 temperature=0.3,
             )
@@ -504,8 +517,8 @@ class GoalLearningService:
                 f"failed {pb.get('times_failed', 0)}x)"
             )
 
-        prompt = (
-            "You are ARIA's planning system. Match a goal to the best playbook.\n\n"
+        task_prompt = (
+            "Match a goal to the best playbook.\n\n"
             f"New goal title: {goal_title}\n"
             f"New goal description: {goal_description or 'None'}\n"
             f"Goal type: {goal_type}\n\n"
@@ -524,8 +537,14 @@ class GoalLearningService:
 
         llm = LLMClient()
         try:
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             raw = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 max_tokens=512,
                 temperature=0.1,
             )

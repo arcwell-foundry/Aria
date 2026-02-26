@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from src.core.persona import LAYER_1_CORE_IDENTITY
 from src.services.email_analyzer import _strip_html
 
 logger = logging.getLogger(__name__)
@@ -839,7 +840,9 @@ class EmailContextGatherer:
                 for m in messages[-5:]
             )
 
-            prompt = f"""Summarize this email conversation in 2-3 sentences. Focus on the main topic, any decisions made, and what action might be expected next.
+            # Build prompt with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+            task_prompt = f"""Summarize this email conversation in 2-3 sentences. Focus on the main topic, any decisions made, and what action might be expected next.
 
 Email thread:
 {thread_text}
@@ -847,7 +850,10 @@ Email thread:
 Summary:"""
 
             summary = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 temperature=0.3,
             )
 
@@ -1981,7 +1987,7 @@ Summary:"""
             )
 
             contact = sender_name or sender_email
-            prompt = f"""Analyze this email thread and extract ALL commitments, \
+            task_prompt = f"""Analyze this email thread and extract ALL commitments, \
 promises, action items, and follow-up needs.
 
 For each commitment found, provide:
@@ -2003,8 +2009,14 @@ Example:
 
 Return ONLY the JSON array, nothing else."""
 
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             result = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 max_tokens=1500,
                 temperature=0.0,
             )

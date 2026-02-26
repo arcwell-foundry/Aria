@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.persona import LAYER_1_CORE_IDENTITY
 from src.db.supabase import SupabaseClient
 from src.memory.lead_memory import LeadMemoryService
 from src.memory.lead_memory_events import LeadEventService
@@ -184,15 +185,21 @@ class EmailLeadIntelligence:
         if not body.strip() and not subject.strip():
             return []
 
-        prompt = _SIGNAL_EXTRACTION_PROMPT.format(
+        task_prompt = _SIGNAL_EXTRACTION_PROMPT.format(
             subject=subject,
             body=body,
             thread_context=thread_context or "(none)",
         )
 
         try:
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             result = await self._llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 temperature=0.0,
                 max_tokens=1024,
                 user_id=user_id,

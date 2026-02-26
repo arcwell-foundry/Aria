@@ -10,6 +10,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from src.core.persona import PersonaBuilder, PersonaRequest
+
 logger = logging.getLogger(__name__)
 
 # Minimum absence to trigger a return greeting (seconds)
@@ -76,8 +78,8 @@ class ReturnGreetingService:
         # Build contextual suggestions based on what happened
         suggestions = self._build_suggestions(context)
 
-        # Generate greeting via Claude API
-        greeting_text = await self._generate_greeting_llm(user_name, absence_seconds, context)
+        # Generate greeting via Claude API with full persona context
+        greeting_text = await self._generate_greeting_llm(user_name, absence_seconds, context, user_id)
 
         return {
             "message": greeting_text,
@@ -376,6 +378,7 @@ class ReturnGreetingService:
         user_name: str,
         absence_seconds: float,
         context: dict[str, Any],
+        user_id: str | None = None,
     ) -> str:
         """Generate personalized greeting via Claude API.
 
@@ -383,6 +386,7 @@ class ReturnGreetingService:
             user_name: User's first name.
             absence_seconds: Duration of absence.
             context: Activity context from _gather_away_context.
+            user_id: The user's ID for PersonaBuilder personalization.
 
         Returns:
             Generated greeting string.
@@ -442,10 +446,7 @@ class ReturnGreetingService:
 
         activity_summary = "\n".join(activity_lines) if activity_lines else "Nothing notable."
 
-        prompt = (
-            "You are ARIA, an AI Department Director. Generate a brief, warm return "
-            "greeting for your user who just came back online. Be direct and "
-            "conversational — like a colleague updating them.\n\n"
+        task_prompt = (
             f"User name: {user_name or 'there'}\n"
             f"Time away: {time_description}\n"
             f"Current hour: {datetime.now(UTC).hour} UTC\n\n"
@@ -463,8 +464,42 @@ class ReturnGreetingService:
 
         try:
             llm = self._get_llm()
+
+            # Build full persona context for user-facing greeting
+            system_prompt = None
+            try:
+                if user_id:
+                    builder = PersonaBuilder()
+                    persona_ctx = await builder.build(
+                        PersonaRequest(
+                            user_id=user_id,
+                            agent_name="return_greeting",
+                            agent_role_description="Generates personalized return greetings",
+                            task_description="Greeting a returning user with a summary of what happened while away",
+                        )
+                    )
+                    system_prompt = persona_ctx.to_system_prompt()
+            except Exception as e:
+                logger.warning("PersonaBuilder failed for return greeting, using fallback: %s", e)
+
+            # Fallback to minimal persona if PersonaBuilder fails
+            if not system_prompt:
+                from src.core.persona import (
+                    LAYER_1_CORE_IDENTITY,
+                    LAYER_2_PERSONALITY_TRAITS,
+                    LAYER_3_ANTI_PATTERNS,
+                )
+                system_prompt = "\n\n".join([
+                    LAYER_1_CORE_IDENTITY,
+                    LAYER_2_PERSONALITY_TRAITS,
+                    LAYER_3_ANTI_PATTERNS,
+                ])
+
             greeting = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 max_tokens=256,
                 temperature=0.7,
                 user_id=None,  # Don't track this small call against user budget

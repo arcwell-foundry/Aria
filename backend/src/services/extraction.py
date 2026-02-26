@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.persona import LAYER_1_CORE_IDENTITY
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 
 logger = logging.getLogger(__name__)
@@ -64,11 +65,17 @@ class ExtractionService:
         """
         conv_text = "\n".join(f"{msg['role'].upper()}: {msg['content']}" for msg in conversation)
 
-        prompt = EXTRACTION_PROMPT.format(conversation=conv_text)
+        task_prompt = EXTRACTION_PROMPT.format(conversation=conv_text)
 
         try:
+            # Build with ARIA identity for voice consistency
+            system_prompt = LAYER_1_CORE_IDENTITY
+
             response = await self._llm_client.generate_response(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task_prompt},
+                ],
                 temperature=0.3,
             )
 
