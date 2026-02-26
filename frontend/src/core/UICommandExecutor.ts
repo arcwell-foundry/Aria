@@ -87,6 +87,7 @@ class UICommandExecutorImpl {
 
   private handleNavigate(cmd: UICommand): void {
     if (!cmd.route || !this.navigateFn) return;
+    console.debug(`[UICommandExecutor] Navigating to: ${cmd.route}`);
     this.navigateFn(cmd.route);
     useNavigationStore.getState().setCurrentRoute(cmd.route);
   }

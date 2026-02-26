@@ -281,7 +281,7 @@ async def _handle_user_message(
     persistence) and sends back thinking indicators, token events, and a
     final AriaMessageEvent.
     """
-    from src.api.routes.chat import _analyze_ui_commands, _generate_suggestions
+    from src.api.routes.chat import _generate_suggestions
     from src.db.supabase import get_supabase_client
     from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
 
@@ -596,7 +596,7 @@ async def _handle_user_message(
             display_content = full_content.replace("[PLAN_APPROVED]", "").strip()
 
         # Send complete response
-        ui_commands = _analyze_ui_commands(display_content)
+        ui_commands: list[dict] = []
         suggestions = _generate_suggestions(display_content, conversation_messages[-4:])
 
         response_event = AriaMessageEvent(

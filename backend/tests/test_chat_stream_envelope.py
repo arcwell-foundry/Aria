@@ -1,32 +1,6 @@
 """Tests for chat stream envelope fields (rich_content, ui_commands, suggestions)."""
 
-from src.api.routes.chat import _analyze_ui_commands, _generate_suggestions
-
-
-def test_analyze_ui_commands_navigation():
-    """Detect navigation intent in ARIA response."""
-    response = "Let me show you the pipeline for Lonza. Here's what I found."
-    commands = _analyze_ui_commands(response)
-    assert isinstance(commands, list)
-    assert len(commands) == 1
-    assert commands[0]["action"] == "navigate"
-    assert commands[0]["route"] == "/pipeline"
-
-
-def test_analyze_ui_commands_empty_for_plain():
-    """No UI commands for plain conversational response."""
-    response = "Good morning! How can I help you today?"
-    commands = _analyze_ui_commands(response)
-    assert commands == []
-
-
-def test_analyze_ui_commands_battle_card():
-    """Detect battle card navigation intent."""
-    response = "Here's the battle card for Catalent with their latest positioning."
-    commands = _analyze_ui_commands(response)
-    assert len(commands) == 2
-    assert commands[0]["route"] == "/intelligence/battle-cards"
-    assert commands[1]["action"] == "update_intel_panel"
+from src.api.routes.chat import _generate_suggestions
 
 
 def test_generate_suggestions_returns_list():

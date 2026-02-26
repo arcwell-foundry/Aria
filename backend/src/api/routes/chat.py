@@ -174,11 +174,8 @@ async def chat(
         },
     )
 
-    # Extract ui_commands from response text if not provided by service
     raw_rich = result.get("rich_content", [])
     raw_ui = result.get("ui_commands", [])
-    if not raw_ui:
-        raw_ui = _analyze_ui_commands(result["message"])
     raw_suggestions = result.get("suggestions", [])
     if not raw_suggestions:
         raw_suggestions = _generate_suggestions(
@@ -473,7 +470,7 @@ async def chat_stream(
                 rich_content.append({"type": "goal_plan", "data": insight_dict})
 
         # Emit completion metadata with envelope fields
-        ui_commands = _analyze_ui_commands(full_content)
+        ui_commands: list[dict] = []
         suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
 
         complete_event = {
@@ -700,95 +697,6 @@ async def delete_conversation(
 
 
 # --- Envelope field generators ---
-
-# Navigation keywords mapped to routes
-_ROUTE_KEYWORDS: dict[str, str] = {
-    "pipeline": "/pipeline",
-    "intelligence": "/intelligence",
-    "battle card": "/intelligence",
-    "communication": "/communications",
-    "action": "/actions",
-    "briefing": "/briefing",
-    "settings": "/settings",
-}
-
-# Keywords that indicate an entity should be highlighted in the Intel Panel
-_HIGHLIGHT_KEYWORDS: list[tuple[str, str]] = [
-    ("deal", "deal-card"),
-    ("lead", "lead-card"),
-    ("opportunity", "deal-card"),
-    ("contact", "contact-card"),
-    ("account", "account-card"),
-]
-
-# Keywords indicating Intel Panel should update with contextual modules
-_INTEL_PANEL_TRIGGERS: dict[str, dict] = {
-    "battle card": {"module": "battle_card", "title": "Competitive Intelligence"},
-    "competitor": {"module": "competitive_landscape", "title": "Competitive Landscape"},
-    "forecast": {"module": "forecast", "title": "Pipeline Forecast"},
-    "risk": {"module": "risk_assessment", "title": "Risk Assessment"},
-    "goal": {"module": "goal_tracker", "title": "Goal Progress"},
-    "meeting": {"module": "meeting_prep", "title": "Meeting Preparation"},
-    "signal": {"module": "signals", "title": "Intelligence Signals"},
-}
-
-
-def _analyze_ui_commands(response: str) -> list[dict]:
-    """Analyze ARIA's response for UI navigation, highlight, and panel intents.
-
-    Scans for route-related keywords and generates navigate, highlight,
-    update_intel_panel, and show_notification commands. This is a heuristic
-    approach; the LLM can also produce explicit ui_commands in structured
-    responses.
-
-    Args:
-        response: The assistant's text response.
-
-    Returns:
-        List of UICommand dicts.
-    """
-    commands: list[dict] = []
-    response_lower = response.lower()
-
-    # Navigation: at most one per response
-    for keyword, route in _ROUTE_KEYWORDS.items():
-        if keyword in response_lower:
-            commands.append({"action": "navigate", "route": route})
-            break
-
-    # Intel Panel update: surface contextual modules
-    for keyword, panel_info in _INTEL_PANEL_TRIGGERS.items():
-        if keyword in response_lower:
-            commands.append({
-                "action": "update_intel_panel",
-                "content": {
-                    "module": panel_info["module"],
-                    "title": panel_info["title"],
-                    "source": "conversation",
-                },
-            })
-            break  # One panel update per response
-
-    # Highlight: pulse entities mentioned in the response
-    for keyword, element_id in _HIGHLIGHT_KEYWORDS:
-        if keyword in response_lower:
-            commands.append({
-                "action": "highlight",
-                "element": element_id,
-                "effect": "pulse",
-                "duration": 3000,
-            })
-            break  # One highlight per response
-
-    # Notification for urgent/critical items
-    if "urgent" in response_lower or "critical" in response_lower:
-        commands.append({
-            "action": "show_notification",
-            "notification_type": "alert",
-            "notification_message": "ARIA flagged items requiring attention",
-        })
-
-    return commands
 
 
 def _generate_suggestions(
