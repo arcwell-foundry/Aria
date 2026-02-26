@@ -3389,8 +3389,8 @@ class ChatService:
             if user_mental_model and not isinstance(user_mental_model, Exception):
                 try:
                     mental_model_text = user_mental_model.to_prompt_section()
-                except Exception:
-                    pass  # fail-open
+                except Exception as e:
+                    logger.warning("User mental model render failed (fail-open): %s", e)
 
             # Auto-fetch team intelligence for PersonaBuilder L4.5
             team_intelligence_text: str | None = None
@@ -3410,8 +3410,8 @@ class ChatService:
                     )
                     if _profile and _profile.data:
                         _company_id = _profile.data.get("company_id")
-                except Exception:
-                    pass  # fail-open — no company means no team intelligence
+                except Exception as e:
+                    logger.warning("Team intelligence company_id lookup failed (fail-open): %s", e)
 
                 if _company_id:
                     shared_intel = get_shared_intelligence_service()
@@ -3423,7 +3423,7 @@ class ChatService:
                     if not team_intelligence_text or not team_intelligence_text.strip():
                         team_intelligence_text = None
             except Exception as e:
-                logger.debug("Team intelligence fetch failed (fail-open): %s", e)
+                logger.warning("Team intelligence fetch failed (fail-open): %s", e)
 
             request = PersonaRequest(
                 user_id=user_id,
@@ -3480,17 +3480,23 @@ class ChatService:
             return prompt
 
         except Exception as e:
-            logger.warning("PersonaBuilder v2 prompt failed, falling back: %s", e)
-            # Fallback to existing method
-            personality = await self._get_personality_calibration(user_id)
-            style_guidelines = await self._get_style_guidelines(user_id)
-            return self._build_system_prompt(
-                memories, load_state, proactive_insights,
-                personality, style_guidelines, priming_context,
-                web_context, companion_context=companion_context,
-                active_goals=active_goals,
-                digital_twin_calibration=digital_twin_calibration,
-                capability_context=capability_context,
+            logger.error(
+                "PersonaBuilder v2 prompt failed — using static L1+L3 fallback: %s",
+                e,
+                exc_info=True,
+            )
+            # Fallback: LAYER_1 (identity) + LAYER_3 (anti-patterns) are static
+            # strings that need no DB queries, so ARIA keeps her personality
+            # even when PersonaBuilder crashes entirely.
+            from src.core.persona import LAYER_1_CORE_IDENTITY, LAYER_3_ANTI_PATTERNS
+
+            return (
+                LAYER_1_CORE_IDENTITY
+                + "\n\n"
+                + LAYER_3_ANTI_PATTERNS
+                + "\n\nNote: User-specific context is temporarily unavailable. "
+                "Respond naturally as ARIA using your core identity. "
+                "Do not mention that context is missing."
             )
 
     def _build_citations(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -216,6 +216,22 @@ class PersonaBuilder:
         """
         start = time.perf_counter()
 
+        # Guard: if user_id is missing, return static layers only (L1-L3)
+        if not request.user_id:
+            logger.error(
+                "PersonaBuilder.build() called with empty user_id — "
+                "returning static L1-L3 only (no user context)"
+            )
+            build_time = (time.perf_counter() - start) * 1000
+            return PersonaContext(
+                core_identity=LAYER_1_CORE_IDENTITY,
+                personality_traits=LAYER_2_PERSONALITY_TRAITS,
+                anti_patterns=LAYER_3_ANTI_PATTERNS,
+                user_id=request.user_id or "",
+                cached_layers_hit=False,
+                build_time_ms=build_time,
+            )
+
         # L4: User context (cached)
         user_context, cache_hit = await self._build_user_context(request.user_id)
 
@@ -446,7 +462,7 @@ class PersonaBuilder:
                 parts.append("## User Profile\n\n" + "\n".join(user_info_parts))
 
         except Exception as e:
-            logger.debug("User profile unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 user profile failed for %s: %s", user_id, e, exc_info=True)
 
         # 0.5. Key facts from semantic memory about the user
         try:
@@ -492,7 +508,7 @@ class PersonaBuilder:
             if fact_lines:
                 parts.append("## Known Facts About User\n\n" + "\n".join(fact_lines[:15]))
         except Exception as e:
-            logger.debug("Semantic memory unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 semantic memory failed for %s: %s", user_id, e, exc_info=True)
 
         # 0.6. Recent conversation episodes for continuity
         try:
@@ -537,7 +553,7 @@ class PersonaBuilder:
                         + "\n".join(episode_lines)
                     )
         except Exception as e:
-            logger.debug("Conversation episodes unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 conversation episodes failed for %s: %s", user_id, e, exc_info=True)
 
         # 0.7. Active goals the user is pursuing
         try:
@@ -572,7 +588,7 @@ class PersonaBuilder:
                         + "\n".join(goal_lines)
                     )
         except Exception as e:
-            logger.debug("Active goals unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 active goals failed for %s: %s", user_id, e, exc_info=True)
 
         # 1. PersonalityCalibration
         try:
@@ -586,7 +602,7 @@ class PersonaBuilder:
                     examples = "\n".join(f"- {ex}" for ex in calibration.example_adjustments)
                     parts.append(f"Examples:\n{examples}")
         except Exception as e:
-            logger.debug("PersonalityCalibration unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 personality calibration failed for %s: %s", user_id, e, exc_info=True)
 
         # 2. DigitalTwin writing style
         try:
@@ -599,7 +615,7 @@ class PersonaBuilder:
                 if guidelines:
                     parts.append(f"## Writing Style Fingerprint\n\n{guidelines}")
         except Exception as e:
-            logger.debug("DigitalTwin unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 digital twin failed for %s: %s", user_id, e, exc_info=True)
 
         # 3. ARIA Config (role, domain focus)
         try:
@@ -629,7 +645,7 @@ class PersonaBuilder:
                 if config_parts:
                     parts.append("## User Configuration\n\n" + "\n".join(config_parts))
         except Exception as e:
-            logger.debug("ARIAConfig unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 ARIA config failed for %s: %s", user_id, e, exc_info=True)
 
         # 4. Persona overrides from feedback
         try:
@@ -657,7 +673,7 @@ class PersonaBuilder:
                     if override_parts:
                         parts.append("## User Persona Overrides\n\n" + "\n".join(override_parts))
         except Exception as e:
-            logger.debug("Persona overrides unavailable for %s: %s", user_id, e)
+            logger.error("PersonaBuilder L4 persona overrides failed for %s: %s", user_id, e, exc_info=True)
 
         return "\n\n".join(parts)
 
@@ -790,7 +806,7 @@ class PersonaBuilder:
                 )
 
         except Exception as e:
-            logger.debug("Relationship context unavailable: %s", e)
+            logger.error("PersonaBuilder L6 relationship context failed: %s", e, exc_info=True)
 
         return "\n\n".join(parts)
 

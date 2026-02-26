@@ -847,7 +847,7 @@ async def _generate_fallback_first_conversation(user_id: str, db: Any) -> str | 
         if title:
             body += f" As a {title}, I'll focus on what matters most for your role."
 
-        body += " What would you like to work on first?"
+        body += " I've pulled up your pipeline and accounts — let me know what needs attention, or I'll start with what I'm seeing."
 
         return greeting + body
 
