@@ -27,13 +27,13 @@ def _sample_action(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": "act-123",
         "user_id": "user-456",
-        "agent": "scout",
+        "agent": "analyst",
         "action_type": "research",
         "title": "Research BioGenix pipeline",
         "description": "Gather competitive intelligence",
         "risk_level": "low",
         "status": "auto_approved",
-        "payload": {},
+        "payload": {"query": "BioGenix clinical trials"},
         "reasoning": "New trial results published",
         "result": {},
     }

@@ -1,6 +1,6 @@
 """Tavus CVI tool definitions for ARIA's video persona.
 
-Defines OpenAI function-calling schemas for 12 tools that ARIA can invoke
+Defines OpenAI function-calling schemas for 18 tools that ARIA can invoke
 during live video conversations via Tavus CVI. When the LLM triggers a
 tool call, Tavus sends a ``conversation.tool_call`` event through Daily's
 WebRTC data channel. The frontend listens for this event, calls
@@ -14,6 +14,8 @@ Each tool maps to an existing ARIA agent or service:
 - Operator: schedule_meeting
 - Scout: get_market_signals
 - Services: get_lead_details, get_battle_card, get_pipeline_summary, get_meeting_brief
+- Goal Planning: show_goal_plan_card, update_goal_plan_milestone, get_goal_plan_status
+- Dashboard: show_resource_status, navigate_to_panel, highlight_element
 """
 
 from typing import Any

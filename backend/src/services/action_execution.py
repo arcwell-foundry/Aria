@@ -456,26 +456,111 @@ class ActionExecutionService:
     async def _dispatch_agent_work(self, action: dict[str, Any]) -> dict[str, Any]:
         """Dispatch to the appropriate agent for actual execution.
 
-        Currently a placeholder that returns a success result.
-        Will be wired to GoalExecutionService or direct agent calls.
+        Routes actions to their corresponding agents based on agent type
+        and action type. Each agent handles its specific operations.
 
         Args:
-            action: The full action record dict.
+            action: The full action record dict with keys:
+                - agent: The agent name (e.g., "scribe", "operator", "hunter")
+                - action_type: The action type (e.g., "email_draft", "crm_update")
+                - payload: The task payload for the agent
+                - user_id: The user's UUID
 
         Returns:
-            Execution result dict.
+            Execution result dict with status and any output.
         """
+        agent_type = action.get("agent", "")
         action_type = action.get("action_type", "")
-        agent = action.get("agent", "")
+        payload = action.get("payload", {})
+        user_id = action.get("user_id", "")
 
-        # For now, return structured result. Real implementation will
-        # dispatch to agents via GoalExecutionService.
-        return {
-            "executed": True,
-            "agent": agent,
-            "action_type": action_type,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
+        try:
+            # Lazy import LLMClient to avoid circular dependencies
+            from src.core.llm import LLMClient
+
+            llm_client = LLMClient()
+
+            if agent_type == "scribe" and action_type in ("email_draft", "email_send"):
+                from src.agents.scribe import ScribeAgent
+
+                agent = ScribeAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            elif agent_type == "operator" and action_type in ("crm_update", "calendar_create", "meeting_schedule"):
+                from src.agents.operator import OperatorAgent
+
+                agent = OperatorAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            elif agent_type == "hunter" and action_type in ("lead_research", "lead_enrich"):
+                from src.agents.hunter import HunterAgent
+
+                agent = HunterAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            elif agent_type == "analyst" and action_type in ("research", "analysis"):
+                from src.agents.analyst import AnalystAgent
+
+                agent = AnalystAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            elif agent_type == "scout" and action_type in ("monitor", "signal_scan"):
+                from src.agents.scout import ScoutAgent
+
+                agent = ScoutAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            elif agent_type == "strategist":
+                from src.agents.strategist import StrategistAgent
+
+                agent = StrategistAgent(llm_client=llm_client, user_id=user_id)
+                result = await agent.execute(payload)
+
+            else:
+                logger.warning(
+                    "Unknown agent/action combination: %s/%s",
+                    agent_type,
+                    action_type,
+                )
+                return {
+                    "executed": False,
+                    "agent": agent_type,
+                    "action_type": action_type,
+                    "error": f"No handler for {agent_type}/{action_type}",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+
+            # Convert AgentResult to dict if needed
+            if hasattr(result, "to_dict"):
+                result_dict = result.to_dict()
+            elif isinstance(result, dict):
+                result_dict = result
+            else:
+                result_dict = {"output": str(result)}
+
+            return {
+                "executed": True,
+                "agent": agent_type,
+                "action_type": action_type,
+                "result": result_dict,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Agent dispatch failed for %s/%s: %s",
+                agent_type,
+                action_type,
+                e,
+                exc_info=True,
+            )
+            return {
+                "executed": False,
+                "agent": agent_type,
+                "action_type": action_type,
+                "error": str(e),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
     async def _reverse_action(
         self, action: dict[str, Any], undo_entry: dict[str, Any]  # noqa: ARG002
