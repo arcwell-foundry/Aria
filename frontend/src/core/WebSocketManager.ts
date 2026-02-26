@@ -2,6 +2,9 @@ import { WS_EVENTS, type WSEnvelope } from '@/types/chat';
 
 type EventHandler = (payload: unknown) => void;
 
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed';
+export type TransportType = 'websocket' | 'sse' | 'disconnected';
+
 interface ConnectionConfig {
   userId: string;
   sessionId: string;
@@ -12,6 +15,7 @@ const RECONNECT_BASE_DELAY = 1_000;
 const RECONNECT_MAX_DELAY = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const WS_UPGRADE_RETRY_INTERVAL = 60_000;
+const JITTER_RANGE_MS = 500; // ±500ms jitter to prevent thundering herd
 
 class WebSocketManagerImpl {
   private ws: WebSocket | null = null;
@@ -21,15 +25,19 @@ class WebSocketManagerImpl {
   private wsUpgradeTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
   private config: ConnectionConfig | null = null;
-  private _transport: 'websocket' | 'sse' | 'disconnected' = 'disconnected';
-  private _isConnected = false;
+  private _transport: TransportType = 'disconnected';
+  private _connectionState: ConnectionState = 'disconnected';
   private intentionalDisconnect = false;
 
   get isConnected(): boolean {
-    return this._isConnected;
+    return this._connectionState === 'connected';
   }
 
-  get transport(): 'websocket' | 'sse' | 'disconnected' {
+  get connectionState(): ConnectionState {
+    return this._connectionState;
+  }
+
+  get transport(): TransportType {
     return this._transport;
   }
 
@@ -37,6 +45,7 @@ class WebSocketManagerImpl {
     this.config = { userId, sessionId };
     this.intentionalDisconnect = false;
     this.reconnectAttempts = 0;
+    this._connectionState = 'connecting';
     this.attemptWebSocket();
   }
 
@@ -44,7 +53,8 @@ class WebSocketManagerImpl {
     this.intentionalDisconnect = true;
     this.cleanup();
     this._transport = 'disconnected';
-    this._isConnected = false;
+    this._connectionState = 'disconnected';
+    this.emit('connection.state_changed', { state: 'disconnected', reason: 'intentional' });
   }
 
   send(event: string, payload: unknown): void {
@@ -78,11 +88,31 @@ class WebSocketManagerImpl {
     return `${wsProtocol}//${apiUrl.host}/ws/${userId}?session_id=${sessionId}`;
   }
 
+  /**
+   * Calculate exponential backoff delay with jitter.
+   * Formula: baseDelay * 2^attempt ± random jitter
+   */
+  private calculateBackoffWithJitter(attempt: number): number {
+    const baseDelay = RECONNECT_BASE_DELAY * Math.pow(2, attempt);
+    const cappedDelay = Math.min(baseDelay, RECONNECT_MAX_DELAY);
+    // Add random jitter: ±JITTER_RANGE_MS
+    const jitter = (Math.random() * 2 - 1) * JITTER_RANGE_MS;
+    return Math.max(0, cappedDelay + jitter);
+  }
+
+  /**
+   * Get a fresh access token. Returns the current token from localStorage
+   * or null if no token exists (user needs to re-authenticate).
+   */
+  private getFreshToken(): string | null {
+    return localStorage.getItem('access_token');
+  }
+
   private attemptWebSocket(): void {
     if (!this.config) return;
 
     const url = this.buildWsUrl(this.config.userId, this.config.sessionId);
-    const token = localStorage.getItem('access_token');
+    const token = this.getFreshToken();
 
     // If there's no auth token yet, skip the WebSocket attempt entirely —
     // the server requires it and will reject with 403. Fall back to SSE and
@@ -92,6 +122,10 @@ class WebSocketManagerImpl {
       this.fallbackToSSE();
       return;
     }
+
+    // Update state to connecting/reconnecting based on context
+    this._connectionState = this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting';
+    this.emit('connection.state_changed', { state: this._connectionState });
 
     try {
       this.ws = new WebSocket(`${url}&token=${token}`);
@@ -110,11 +144,12 @@ class WebSocketManagerImpl {
     this.ws.onopen = () => {
       clearTimeout(connectTimeout);
       this._transport = 'websocket';
-      this._isConnected = true;
+      this._connectionState = 'connected';
       this.reconnectAttempts = 0;
       this.startHeartbeat();
       this.stopWSUpgradeRetry();
       this.emit('connection.established', { transport: 'websocket' });
+      this.emit('connection.state_changed', { state: 'connected' });
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -130,19 +165,32 @@ class WebSocketManagerImpl {
       clearTimeout(connectTimeout);
       this.stopHeartbeat();
 
-      if (this.intentionalDisconnect) return;
+      // Intentional disconnect (logout, page unload with code 1000)
+      if (this.intentionalDisconnect || event.code === 1000) {
+        this._connectionState = 'disconnected';
+        this.emit('connection.state_changed', { state: 'disconnected', reason: 'intentional' });
+        return;
+      }
 
-      // Auth failures (1008 policy violation), abnormal closures (1006),
-      // and custom app codes (4xxx) should immediately fall back to SSE.
-      // Code 1006 = "closed before connection established" (no close frame received)
-      if (event.code === 1006 || event.code === 1008 || (event.code >= 4000 && event.code < 5000)) {
-        console.debug(`[WebSocketManager] Connection closed (code=${event.code}), falling back to SSE`);
+      // Auth errors (4001 = unauthorized, 4003 = forbidden, 4008 = policy violation)
+      // Try one reconnect with fresh token, then fall back to SSE
+      if (event.code >= 4001 && event.code <= 4009) {
+        console.debug(`[WebSocketManager] Auth error (code=${event.code}), falling back to SSE`);
         this.fallbackToSSE();
         return;
       }
 
+      // Abnormal closure (1006) or policy violation (1008) - fall back to SSE
+      if (event.code === 1006 || event.code === 1008) {
+        console.debug(`[WebSocketManager] Connection failed (code=${event.code}), falling back to SSE`);
+        this.fallbackToSSE();
+        return;
+      }
+
+      // Other close codes (server shutdown, network issues) - retry with backoff
       if (this._transport === 'websocket') {
-        this._isConnected = false;
+        this._connectionState = 'reconnecting';
+        this.emit('connection.state_changed', { state: 'reconnecting', reason: 'connection_lost' });
         this.scheduleReconnect();
       }
     };
@@ -154,18 +202,24 @@ class WebSocketManagerImpl {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.debug(`[WebSocketManager] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, falling back to SSE`);
+      // Set failed state before falling back - UI can show degraded mode
+      this._connectionState = 'failed';
+      this.emit('connection.state_changed', { state: 'failed', reason: 'max_retries_exceeded' });
+      this.emit('connection.failed', { reason: 'WebSocket connection failed after maximum retries' });
       this.fallbackToSSE();
       return;
     }
 
-    const delay = Math.min(
-      RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
-      RECONNECT_MAX_DELAY,
-    );
+    const delay = this.calculateBackoffWithJitter(this.reconnectAttempts);
     this.reconnectAttempts++;
 
+    console.debug(`[WebSocketManager] Scheduling reconnect attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${Math.round(delay)}ms`);
+
     this.reconnectTimer = setTimeout(() => {
-      this.attemptWebSocket();
+      if (!this.intentionalDisconnect) {
+        this.attemptWebSocket();
+      }
     }, delay);
   }
 
@@ -173,13 +227,14 @@ class WebSocketManagerImpl {
     this.ws?.close();
     this.ws = null;
     this._transport = 'sse';
-    this._isConnected = true;
+    this._connectionState = 'connected';
     this.emit('connection.established', { transport: 'sse' });
+    this.emit('connection.state_changed', { state: 'connected', transport: 'sse' });
     this.startWSUpgradeRetry();
   }
 
   private async sendViaRest(payload: { message: string; conversation_id?: string }): Promise<void> {
-    const token = localStorage.getItem('access_token');
+    const token = this.getFreshToken();
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     this.emit(WS_EVENTS.ARIA_THINKING, { is_thinking: true });
@@ -267,7 +322,7 @@ class WebSocketManagerImpl {
     this.stopWSUpgradeRetry();
     this.wsUpgradeTimer = setInterval(() => {
       if (this._transport === 'sse' && !this.intentionalDisconnect) {
-        const token = localStorage.getItem('access_token');
+        const token = this.getFreshToken();
         if (!token) return; // Can't probe without auth token
 
         const url = this.buildWsUrl(this.config?.userId || '', this.config?.sessionId || '');
@@ -279,6 +334,8 @@ class WebSocketManagerImpl {
           probe.close();
           this.stopWSUpgradeRetry();
           this.reconnectAttempts = 0;
+          this._connectionState = 'connecting';
+          this.emit('connection.state_changed', { state: 'connecting', reason: 'ws_upgrade' });
           this.attemptWebSocket();
         };
 

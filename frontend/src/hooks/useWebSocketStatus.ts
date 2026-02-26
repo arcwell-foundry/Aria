@@ -2,44 +2,89 @@
  * useWebSocketStatus — Reactive hook for WebSocket connection state
  *
  * Subscribes to connection lifecycle events emitted by the singleton
- * WebSocketManager and exposes a reactive { isConnected } value.
+ * WebSocketManager and exposes reactive connection state values.
  *
- * The WebSocketManager emits 'connection.established' on successful
- * connect (both WebSocket and SSE fallback) and 'connection.error'
- * on failures. The underlying _isConnected flag is also toggled on
- * close events. This hook captures those transitions by listening
- * for the relevant events and polling the getter as a sync fallback.
+ * The WebSocketManager emits:
+ * - 'connection.established' on successful connect (both WebSocket and SSE fallback)
+ * - 'connection.error' on failures
+ * - 'connection.state_changed' on state transitions
+ * - 'connection.failed' when max retries are exceeded
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { wsManager } from '@/core/WebSocketManager';
+import { wsManager, type ConnectionState, type TransportType } from '@/core/WebSocketManager';
 
 interface WebSocketStatus {
   isConnected: boolean;
+  connectionState: ConnectionState;
+  transport: TransportType;
+  isReconnecting: boolean;
+  isFailed: boolean;
+}
+
+interface StateChangedPayload {
+  state: ConnectionState;
+  transport?: TransportType;
+  reason?: string;
+}
+
+interface EstablishedPayload {
+  transport: TransportType;
 }
 
 export function useWebSocketStatus(): WebSocketStatus {
-  const [isConnected, setIsConnected] = useState<boolean>(() => wsManager.isConnected);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    () => wsManager.connectionState,
+  );
+  const [transport, setTransport] = useState<TransportType>(() => wsManager.transport);
 
-  const handleEstablished = useCallback(() => setIsConnected(true), []);
-  const handleError = useCallback(() => setIsConnected(false), []);
+  const handleStateChanged = useCallback((payload: unknown) => {
+    const p = payload as StateChangedPayload;
+    setConnectionState(p.state);
+    if (p.transport) {
+      setTransport(p.transport);
+    }
+  }, []);
+
+  const handleEstablished = useCallback((payload: unknown) => {
+    const p = payload as EstablishedPayload;
+    setConnectionState('connected');
+    setTransport(p.transport);
+  }, []);
+
+  const handleError = useCallback(() => {
+    // Don't immediately set to disconnected - let state_changed handle it
+  }, []);
 
   useEffect(() => {
     wsManager.on('connection.established', handleEstablished);
     wsManager.on('connection.error', handleError);
+    wsManager.on('connection.state_changed', handleStateChanged);
 
-    // Poll periodically as a safety net — the wsManager mutates _isConnected
-    // on close/disconnect without emitting a dedicated event.
+    // Poll periodically as a safety net — the wsManager may update state
+    // without emitting an event in some edge cases.
     const interval = setInterval(() => {
-      setIsConnected(wsManager.isConnected);
-    }, 3_000);
+      setConnectionState(wsManager.connectionState);
+      setTransport(wsManager.transport);
+    }, 5_000);
 
     return () => {
       wsManager.off('connection.established', handleEstablished);
       wsManager.off('connection.error', handleError);
+      wsManager.off('connection.state_changed', handleStateChanged);
       clearInterval(interval);
     };
-  }, [handleEstablished, handleError]);
+  }, [handleEstablished, handleError, handleStateChanged]);
 
-  return { isConnected };
+  const isConnected = connectionState === 'connected';
+  const isReconnecting = connectionState === 'reconnecting';
+  const isFailed = connectionState === 'failed';
+
+  return {
+    isConnected,
+    connectionState,
+    transport,
+    isReconnecting,
+    isFailed,
+  };
 }
