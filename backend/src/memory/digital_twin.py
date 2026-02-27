@@ -550,6 +550,139 @@ class DigitalTwin:
 
         return None
 
+    async def _get_full_fingerprint_from_db(
+        self, user_id: str
+    ) -> dict[str, Any] | None:
+        """Read the full WritingStyleFingerprint from user_settings.
+
+        The writing analysis service stores the complete Pydantic model
+        (21 fields) in ``user_settings.preferences.digital_twin.writing_style``.
+        This is the richest source of style data.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            Fingerprint dict with all fields, or None.
+        """
+        from src.db.supabase import SupabaseClient
+
+        try:
+            db = SupabaseClient.get_client()
+            result = (
+                db.table("user_settings")
+                .select("preferences")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if not result or not result.data:
+                return None
+            prefs = result.data.get("preferences") or {}
+            dt = prefs.get("digital_twin") or {}
+            fp = dt.get("writing_style")
+            if fp and isinstance(fp, dict) and fp.get("confidence", 0) > 0:
+                return fp
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] Failed to read fingerprint from user_settings "
+                "for user %s: %s",
+                user_id,
+                e,
+            )
+        return None
+
+    def _build_full_style_guidelines(self, fp: dict[str, Any]) -> str:
+        """Build comprehensive style guidelines from a full WritingStyleFingerprint.
+
+        Converts the stored fingerprint dict into actionable LLM instructions
+        covering structure, vocabulary, punctuation, tone, and communication
+        patterns.
+
+        Args:
+            fp: Dict from user_settings.preferences.digital_twin.writing_style.
+
+        Returns:
+            Multi-line style guidelines string.
+        """
+        lines = ["WRITING STYLE FINGERPRINT:"]
+
+        # Structure
+        avg_sl = fp.get("avg_sentence_length", 0)
+        sl_var = fp.get("sentence_length_variance", 0)
+        if avg_sl:
+            lines.append(
+                f"- Sentence length: avg {avg_sl:.0f} words (variance: {sl_var:.1f})"
+            )
+        para = fp.get("paragraph_style", "")
+        if para and para != "medium":
+            lines.append(f"- Paragraph style: {para.replace('_', ' ')}")
+
+        # Vocabulary
+        formality = fp.get("formality_index", 0.5)
+        lines.append(f"- Formality: {formality:.0%} formal")
+        vocab = fp.get("vocabulary_sophistication", "moderate")
+        if vocab and vocab != "moderate":
+            lines.append(f"- Vocabulary level: {vocab}")
+
+        # Communication patterns
+        opening = fp.get("opening_style", "")
+        if opening:
+            lines.append(f"- Opens emails with: '{opening}'")
+        closing = fp.get("closing_style", "")
+        if closing:
+            lines.append(f"- Closes emails with: '{closing}'")
+
+        # Punctuation
+        if fp.get("uses_em_dashes"):
+            lines.append("- Uses em-dashes: yes")
+        if fp.get("uses_semicolons"):
+            lines.append("- Uses semicolons: yes")
+        exc = fp.get("exclamation_frequency", "rare")
+        if exc and exc not in ("rare", "never"):
+            lines.append(f"- Exclamation marks: {exc}")
+        if fp.get("ellipsis_usage"):
+            lines.append("- Uses ellipses: yes")
+
+        # Tone dimensions
+        directness = fp.get("directness", 0.5)
+        warmth = fp.get("warmth", 0.5)
+        assertiveness = fp.get("assertiveness", 0.5)
+        tone_parts: list[str] = []
+        if directness >= 0.7:
+            tone_parts.append("direct")
+        elif directness <= 0.3:
+            tone_parts.append("indirect")
+        if warmth >= 0.7:
+            tone_parts.append("warm")
+        elif warmth <= 0.3:
+            tone_parts.append("clinical")
+        if assertiveness >= 0.7:
+            tone_parts.append("assertive")
+        elif assertiveness <= 0.3:
+            tone_parts.append("tentative")
+        if tone_parts:
+            lines.append(f"- Tone: {', '.join(tone_parts)}")
+        if fp.get("data_driven"):
+            lines.append("- Frequently references data and numbers")
+
+        # Habits
+        hedging = fp.get("hedging_frequency", "moderate")
+        if hedging and hedging != "moderate":
+            lines.append(f"- Hedging frequency: {hedging}")
+        emoji = fp.get("emoji_usage", "never")
+        lines.append(f"- Emoji usage: {emoji}")
+        rhetorical = fp.get("rhetorical_style", "balanced")
+        if rhetorical and rhetorical != "balanced":
+            lines.append(f"- Rhetorical style: {rhetorical}")
+
+        # Summary
+        summary = fp.get("style_summary", "")
+        if summary:
+            lines.append(f"- Style summary: {summary}")
+
+        return "\n".join(lines)
+
     def _build_fingerprint_body(self, fingerprint: WritingStyleFingerprint) -> str:
         """Build a structured fingerprint body string for storage.
 
@@ -859,9 +992,11 @@ class DigitalTwin:
     async def get_style_guidelines(self, user_id: str) -> str:
         """Get prompt-ready style instructions for the user.
 
-        Returns a multi-line string with style instructions that can
-        be included in LLM prompts to generate style-matched content.
-        Falls back to DB-backed profiles when Graphiti is unavailable.
+        Tries sources in order of richness:
+        1. Full fingerprint from user_settings (21 fields from WritingAnalysisService)
+        2. Graphiti knowledge graph (13-field dataclass)
+        3. digital_twin_profiles table (3 fields)
+        4. Default guidelines
 
         Args:
             user_id: The user ID.
@@ -869,6 +1004,20 @@ class DigitalTwin:
         Returns:
             Style guidelines string (never raises).
         """
+        # 1. Try full fingerprint from user_settings (richest source)
+        try:
+            fp = await self._get_full_fingerprint_from_db(user_id)
+            if fp:
+                return self._build_full_style_guidelines(fp)
+        except Exception as e:
+            logger.warning(
+                "[EMAIL_PIPELINE] Failed to build full style guidelines "
+                "for user %s: %s",
+                user_id,
+                e,
+            )
+
+        # 2. Try Graphiti (partial fingerprint)
         fingerprint = None
         try:
             fingerprint = await self.get_fingerprint(user_id)
@@ -879,30 +1028,42 @@ class DigitalTwin:
                 user_id,
                 e,
             )
-            # Try DB fallback
-            db_guidelines = await self._get_style_guidelines_from_db(user_id)
-            if db_guidelines:
-                return db_guidelines
-            return self._DEFAULT_STYLE_GUIDELINES
 
-        if not fingerprint:
-            # No Graphiti data — try DB fallback before returning defaults
-            db_guidelines = await self._get_style_guidelines_from_db(user_id)
-            if db_guidelines:
-                return db_guidelines
-            return self._DEFAULT_STYLE_GUIDELINES
+        if fingerprint:
+            return self._build_graphiti_style_guidelines(fingerprint)
 
+        # 3. Try digital_twin_profiles table
+        db_guidelines = await self._get_style_guidelines_from_db(user_id)
+        if db_guidelines:
+            return db_guidelines
+
+        return self._DEFAULT_STYLE_GUIDELINES
+
+    def _build_graphiti_style_guidelines(
+        self, fingerprint: WritingStyleFingerprint
+    ) -> str:
+        """Build style guidelines from Graphiti-backed fingerprint.
+
+        Uses the 13-field dataclass stored in the knowledge graph.
+
+        Args:
+            fingerprint: Graphiti WritingStyleFingerprint dataclass.
+
+        Returns:
+            Style guidelines string.
+        """
         lines = []
 
-        # Greeting style
         if fingerprint.greeting_style:
-            lines.append(f"Start messages with greetings like '{fingerprint.greeting_style}'.")
+            lines.append(
+                f"Start messages with greetings like '{fingerprint.greeting_style}'."
+            )
 
-        # Sign-off style
         if fingerprint.sign_off_style:
-            lines.append(f"End messages with sign-offs like '{fingerprint.sign_off_style}'.")
+            lines.append(
+                f"End messages with sign-offs like '{fingerprint.sign_off_style}'."
+            )
 
-        # Vocabulary level
         if fingerprint.vocabulary_level == "simple":
             lines.append("Use simple, everyday language.")
         elif fingerprint.vocabulary_level == "advanced":
@@ -910,7 +1071,6 @@ class DigitalTwin:
         else:
             lines.append("Use moderate vocabulary - neither too simple nor too complex.")
 
-        # Formality
         if fingerprint.formality_score < 0.4:
             lines.append("Keep a casual, informal tone.")
         elif fingerprint.formality_score > 0.7:
@@ -918,7 +1078,6 @@ class DigitalTwin:
         else:
             lines.append("Use a balanced, semi-formal tone.")
 
-        # Sentence length
         if fingerprint.average_sentence_length < 10:
             lines.append("Keep sentences short and punchy.")
         elif fingerprint.average_sentence_length > 20:
@@ -926,13 +1085,11 @@ class DigitalTwin:
         else:
             lines.append("Use medium-length sentences.")
 
-        # Emoji usage
         if fingerprint.emoji_usage:
             lines.append("Include relevant emojis when appropriate.")
         else:
             lines.append("Do not use emojis.")
 
-        # Common phrases
         if fingerprint.common_phrases:
             phrases = ", ".join(f"'{p}'" for p in fingerprint.common_phrases[:3])
             lines.append(f"Consider using phrases like: {phrases}.")

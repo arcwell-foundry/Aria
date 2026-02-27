@@ -181,9 +181,9 @@ class WritingAnalysisService:
                 confidence=0.0,
             )
 
-        # Combine samples for analysis (cap at 10 samples, 6000 chars)
-        combined = "\n\n---SAMPLE BREAK---\n\n".join(samples[:10])
-        prompt = _ANALYSIS_PROMPT.format(samples=combined[:6000])
+        # Combine samples for analysis (cap at 30 samples, 15000 chars)
+        combined = "\n\n---SAMPLE BREAK---\n\n".join(samples[:30])
+        prompt = _ANALYSIS_PROMPT.format(samples=combined[:15000])
 
         fingerprint = await self._run_analysis(prompt)
 
