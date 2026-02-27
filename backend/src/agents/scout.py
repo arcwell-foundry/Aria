@@ -466,7 +466,7 @@ class ScoutAgent(SkillAwareAgent):
                 ),
                 temperature=0.3,
                 user_id=self.user_id,
-                task=TaskType.SCOUT_FILTER,
+                task=TaskType.SCOUT_SUMMARIZE,
                 agent_id="scout",
             )
 
@@ -592,7 +592,7 @@ class ScoutAgent(SkillAwareAgent):
                 ),
                 temperature=0.3,
                 user_id=self.user_id,
-                task=TaskType.SCOUT_SUMMARIZE,
+                task=TaskType.SCOUT_FILTER,
                 agent_id="scout",
             )
 
@@ -694,7 +694,7 @@ class ScoutAgent(SkillAwareAgent):
                     ),
                     temperature=0.2,
                     user_id=self.user_id,
-                    task=TaskType.SCOUT_SUMMARIZE,
+                    task=TaskType.SCOUT_FILTER,
                     agent_id="scout",
                 )
 

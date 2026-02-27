@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.models.goal import GoalCreate, GoalStatus, GoalUpdate
 
@@ -436,6 +437,7 @@ class GoalService:
         try:
             raw = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
+                task=TaskType.STRATEGIST_PLAN,
                 max_tokens=1024,
                 temperature=0.4,
             )
@@ -673,6 +675,7 @@ class GoalService:
         try:
             raw = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
+                task=TaskType.MEMORY_SUMMARIZE,
                 max_tokens=1024,
                 temperature=0.3,
             )

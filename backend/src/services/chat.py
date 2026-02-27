@@ -883,6 +883,7 @@ class ChatService:
                 max_tokens=256,
                 temperature=0.1,
                 user_id=user_id,
+                task=TaskType.CHAT_RESPONSE,
             )
 
             # Strip markdown fences if present
@@ -977,6 +978,7 @@ class ChatService:
                 max_tokens=64,
                 temperature=0.1,
                 user_id=user_id,
+                task=TaskType.CHAT_RESPONSE,
             )
 
             cleaned = raw.strip()
@@ -1059,6 +1061,7 @@ class ChatService:
             max_tokens=4096,
             temperature=0.2,
             user_id=user_id,
+            task=TaskType.CHAT_RESPONSE,
         )
 
         cleaned = raw.strip()
@@ -1729,6 +1732,7 @@ class ChatService:
                 ),
                 temperature=0.0,
                 max_tokens=100,
+                task=TaskType.CHAT_RESPONSE,
             )
 
             parsed = json.loads(response)
@@ -2709,6 +2713,7 @@ class ChatService:
             response_text = await self._llm_client.generate_response(
                 messages=conversation_messages,
                 system_prompt=system_prompt,
+                task=TaskType.CHAT_RESPONSE,
             )
 
         llm_ms = (time.perf_counter() - llm_start) * 1000
@@ -2961,6 +2966,7 @@ class ChatService:
         final_response = await self._llm_client.generate_response(
             messages=current_messages,
             system_prompt=system_prompt,
+            task=TaskType.CHAT_RESPONSE,
         )
         return final_response
 

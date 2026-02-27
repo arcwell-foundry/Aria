@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
 from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
@@ -300,6 +301,7 @@ class ProactiveGoalProposer:
                 system_prompt=system_prompt,
                 max_tokens=600,
                 temperature=0.5,
+                task=TaskType.STRATEGIST_PLAN,
             )
 
             await governor.record_usage(user_id, getattr(llm, "_last_usage", None))

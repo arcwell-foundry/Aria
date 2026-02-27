@@ -20,6 +20,7 @@ from io import BytesIO
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -563,6 +564,7 @@ class DocumentIngestionService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
                 temperature=0.2,
+                task=TaskType.ENTITY_EXTRACT,
             )
             return json.loads(response)
         except (json.JSONDecodeError, Exception) as e:
@@ -635,6 +637,7 @@ class DocumentIngestionService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=10,
                 temperature=0.1,
+                task=TaskType.ENTITY_EXTRACT,
             )
             return float(response.strip())
         except (ValueError, Exception):
@@ -669,6 +672,7 @@ class DocumentIngestionService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=2000,
                 temperature=0.3,
+                task=TaskType.ENTITY_EXTRACT,
             )
             facts: list[dict[str, Any]] = json.loads(response)
             for fact in facts:
@@ -725,6 +729,7 @@ class DocumentIngestionService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1000,
                 temperature=0.5,
+                task=TaskType.ENTITY_EXTRACT,
             )
             hypotheses: list[dict[str, Any]] = json.loads(response)
             for h in hypotheses:

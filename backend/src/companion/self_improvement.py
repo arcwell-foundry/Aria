@@ -19,6 +19,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
+from src.core.task_types import TaskType
+
 logger = logging.getLogger(__name__)
 
 
@@ -558,6 +560,7 @@ Identify 3-5 specific capability gaps with priorities. Output ONLY valid JSON:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.GENERAL,
             )
 
             content = self._extract_json(response)
@@ -604,6 +607,7 @@ Generate a concise report. Output ONLY valid JSON:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.GENERAL,
             )
 
             content = self._extract_json(response)

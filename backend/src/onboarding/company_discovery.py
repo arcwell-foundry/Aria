@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.episodic import Episode, EpisodicMemory
 
@@ -110,6 +111,7 @@ Respond in JSON format:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
                 temperature=0.3,
+                task=TaskType.ONBOARD_ENRICH,
             )
             # Parse JSON from response
             result = json.loads(response)

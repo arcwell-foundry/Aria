@@ -161,7 +161,7 @@ class DomainIntelligenceWorkflow(BaseWorkflow):
                 system_prompt=_DIFF_ANALYSIS_PROMPT,
                 max_tokens=2048,
                 temperature=0.3,
-                task=TaskType.SKILL_EXECUTE,
+                task=TaskType.SCOUT_SUMMARIZE,
                 agent_id="domain_intelligence",
             )
 

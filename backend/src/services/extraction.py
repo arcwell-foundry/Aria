@@ -12,6 +12,7 @@ from typing import Any
 
 from src.core.llm import LLMClient
 from src.core.persona import LAYER_1_CORE_IDENTITY
+from src.core.task_types import TaskType
 from src.memory.semantic import FactSource, SemanticFact, SemanticMemory
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class ExtractionService:
                     {"role": "user", "content": task_prompt},
                 ],
                 temperature=0.3,
+                task=TaskType.ENTITY_EXTRACT,
             )
 
             facts: list[dict[str, Any]] = json.loads(response.strip())

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ class AccountPlanningService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=2048,
                 temperature=0.4,
+                task=TaskType.STRATEGIST_PLAN,
             )
             plan_data = json.loads(raw)
         except (json.JSONDecodeError, Exception) as exc:

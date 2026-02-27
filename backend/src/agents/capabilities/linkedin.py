@@ -221,7 +221,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.1,
                 max_tokens=1000,
-                task=TaskType.ENTITY_EXTRACT,
+                task=TaskType.HUNTER_ENRICH,
                 agent_id="linkedin",
             )
 
@@ -329,7 +329,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.2,
                 max_tokens=800,
-                task=TaskType.ENTITY_EXTRACT,
+                task=TaskType.SCOUT_FILTER,
                 agent_id="linkedin",
             )
 
@@ -422,7 +422,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.7,
                 max_tokens=600,
-                task=TaskType.ENTITY_EXTRACT,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
                 agent_id="linkedin",
             )
 
@@ -571,7 +571,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.7,
                 max_tokens=2000,
-                task=TaskType.ENTITY_EXTRACT,
+                task=TaskType.STRATEGIST_PLAN,
                 agent_id="linkedin",
             )
 

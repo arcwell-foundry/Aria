@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.models.prediction import (
     PredictionCreate,
@@ -493,6 +494,7 @@ JSON array only, no explanation:"""
                 ],
                 temperature=0.0,
                 max_tokens=1000,
+                task=TaskType.ANALYST_RESEARCH,
             )
 
             # Parse JSON response

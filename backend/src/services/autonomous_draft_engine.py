@@ -23,6 +23,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -1328,6 +1329,7 @@ Example of well-formatted output:
             temperature=0.4,
             max_tokens=1200,
             user_id=user_id,
+            task=TaskType.SCRIBE_DRAFT_EMAIL,
         )
 
         # Parse JSON response (strip markdown code fences if present)

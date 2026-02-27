@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.persona import LAYER_1_CORE_IDENTITY
+from src.core.task_types import TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ class GoalLearningService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": task_prompt},
                 ],
+                task=TaskType.MEMORY_SUMMARIZE,
                 max_tokens=2048,
                 temperature=0.3,
             )
@@ -297,6 +299,7 @@ class GoalLearningService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": task_prompt},
                 ],
+                task=TaskType.MEMORY_SUMMARIZE,
                 max_tokens=1024,
                 temperature=0.3,
             )
@@ -545,6 +548,7 @@ class GoalLearningService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": task_prompt},
                 ],
+                task=TaskType.MEMORY_SUMMARIZE,
                 max_tokens=512,
                 temperature=0.1,
             )

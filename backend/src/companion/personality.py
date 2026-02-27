@@ -19,6 +19,7 @@ from enum import IntEnum
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.episodic import EpisodicMemory
 from src.memory.semantic import SemanticMemory
@@ -283,6 +284,7 @@ Output ONLY valid JSON with this structure:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
+                task=TaskType.ONBOARD_PERSONALITY,
             )
 
             # Parse JSON response
@@ -377,6 +379,7 @@ Output ONLY the pushback message, no JSON or formatting."""
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.6,
                 max_tokens=200,
+                task=TaskType.GENERAL,
             )
 
             return pushback.strip()

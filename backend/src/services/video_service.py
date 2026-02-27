@@ -20,6 +20,7 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.integrations.tavus import get_tavus_client
 from src.memory.episodic import Episode, EpisodicMemory
@@ -573,6 +574,7 @@ Respond with only valid JSON."""
                 messages=[{"role": "user", "content": user_message}],
                 system_prompt=system_prompt,
                 temperature=0.3,
+                task=TaskType.MEMORY_SUMMARIZE,
             )
 
             # Parse JSON response

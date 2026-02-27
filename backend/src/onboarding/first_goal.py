@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 from src.memory.episodic import Episode, EpisodicMemory
@@ -382,6 +383,7 @@ class FirstGoalService:
                 system_prompt=system_prompt,
                 max_tokens=1024,
                 temperature=0.4,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
 
             result = json.loads(response)
@@ -626,6 +628,7 @@ Respond ONLY with the JSON object."""
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
                 temperature=0.3,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
 
             result = json.loads(response)
@@ -909,6 +912,7 @@ Respond ONLY with the JSON object."""
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1024,
                 temperature=0.3,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
             result = json.loads(raw)
 

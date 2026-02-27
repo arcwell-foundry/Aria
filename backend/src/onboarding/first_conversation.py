@@ -24,6 +24,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 
@@ -190,6 +191,7 @@ class FirstConversationGenerator:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
                 temperature=0.3,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
             return response.strip() if response else None
         except Exception as e:
@@ -309,6 +311,7 @@ class FirstConversationGenerator:
                 system_prompt=system_prompt,
                 max_tokens=500,
                 temperature=0.7,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
         except Exception as e:
             logger.error(f"LLM generation failed for first conversation: {e}")
@@ -396,6 +399,7 @@ class FirstConversationGenerator:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1500,
                 temperature=0.7,
+                task=TaskType.ONBOARD_FIRST_CONVO,
             )
 
             # Parse JSON from response (handle markdown code blocks)

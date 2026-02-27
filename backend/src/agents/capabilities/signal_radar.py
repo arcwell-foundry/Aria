@@ -481,7 +481,7 @@ class SignalRadarCapability(BaseCapability):
                 ),
                 max_tokens=2048,
                 temperature=0.4,
-                task=TaskType.SIGNAL_CLASSIFY,
+                task=TaskType.SCOUT_FILTER,
                 agent_id="signal_radar",
             )
 

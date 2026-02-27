@@ -23,6 +23,7 @@ from typing import Any
 
 from src.core.event_bus import EventBus, GoalEvent
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
 from src.services.activity_service import ActivityService
@@ -1457,6 +1458,7 @@ class GoalExecutionService:
                 ),
                 max_tokens=2048,
                 temperature=0.3,
+                task=TaskType.STRATEGIST_PLAN,
             )
 
             try:
@@ -1696,6 +1698,7 @@ class GoalExecutionService:
                 ),
                 max_tokens=2048,
                 temperature=0.4,
+                task=TaskType.STRATEGIST_PLAN,
             )
 
             # Parse the JSON response
@@ -2295,6 +2298,7 @@ class GoalExecutionService:
             ),
             max_tokens=2048,
             temperature=0.4,
+            task=TaskType.STRATEGIST_PLAN,
         )
 
         try:
@@ -2692,6 +2696,7 @@ class GoalExecutionService:
             max_tokens=4096,
             temperature=0.3,
             user_id=user_id,
+            task=TaskType.STRATEGIST_PLAN,
         )
 
         # Strip markdown fences if present
@@ -3785,6 +3790,7 @@ class GoalExecutionService:
             ),
             max_tokens=1024,
             temperature=0.3,
+            task=TaskType.STRATEGIST_PLAN,
         )
 
         try:

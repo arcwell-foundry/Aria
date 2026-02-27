@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.security.trust_levels import SkillTrustLevel
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,7 @@ Return ONLY a JSON array of skill IDs (strings), no additional text. Example: ["
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
                 temperature=0.3,
+                task=TaskType.ONBOARD_ENRICH,
             )
             skill_ids = json.loads(response)
             if isinstance(skill_ids, list) and all(isinstance(s, str) for s in skill_ids):

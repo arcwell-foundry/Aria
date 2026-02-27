@@ -417,7 +417,7 @@ class ImplicationAwareSkillTrigger:
                 ),
                 max_tokens=3000,
                 temperature=0.4,
-                task=TaskType.SIGNAL_CLASSIFY,
+                task=TaskType.ANALYST_RESEARCH,
                 agent_id="implication_trigger",
             )
 

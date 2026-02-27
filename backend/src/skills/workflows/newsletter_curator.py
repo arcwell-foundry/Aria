@@ -153,7 +153,7 @@ class NewsletterCuratorWorkflow(BaseWorkflow):
                 system_prompt=curation_system_prompt,
                 max_tokens=2048,
                 temperature=0.3,
-                task=TaskType.SKILL_EXECUTE,
+                task=TaskType.SCOUT_SUMMARIZE,
                 agent_id="newsletter_curator",
             )
 

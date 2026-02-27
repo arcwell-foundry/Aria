@@ -16,6 +16,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.audit import MemoryOperation, MemoryType, log_memory_operation
 from src.memory.episodic import Episode, EpisodicMemory
@@ -224,6 +225,7 @@ class WritingAnalysisService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1000,
                 temperature=0.3,
+                task=TaskType.ONBOARD_PERSONALITY,
             )
 
             # Strip markdown code fences if present
@@ -463,6 +465,7 @@ class WritingAnalysisService:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
                 temperature=0.3,
+                task=TaskType.ONBOARD_PERSONALITY,
             )
 
             # Strip markdown fences
