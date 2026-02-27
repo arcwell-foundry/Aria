@@ -318,7 +318,25 @@ class LLMClient:
         self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
         # LiteLLM model string for standard calls
         self._litellm_model = f"anthropic/{model}"
-        self._usage_logger = usage_logger
+        if usage_logger is not None:
+            self._usage_logger = usage_logger
+        else:
+            self._usage_logger = self._create_default_usage_logger()
+
+    @staticmethod
+    def _create_default_usage_logger() -> UsageLogger | None:
+        """Auto-create UsageLogger with the Supabase singleton.
+
+        Returns None (disabling logging) if Supabase is unavailable,
+        e.g. in unit tests without DB configuration.
+        """
+        try:
+            from src.core.usage_logger import UsageLogger as _UL
+            from src.db.supabase import SupabaseClient
+            return _UL(SupabaseClient.get_client())
+        except Exception:
+            logger.debug("UsageLogger auto-creation skipped (no Supabase client)")
+            return None
 
     def _fire_usage_log(self, **kwargs: Any) -> None:
         """Fire-and-forget usage logging. Errors are suppressed."""
