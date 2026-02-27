@@ -308,7 +308,11 @@ class IntegrationService:
                         "display_name": config.display_name,
                         "description": config.description,
                         "icon": config.icon,
-                        "is_connected": integration_type.value in connected_types,
+                        "is_connected": (
+                            user_integration.get("status") == IntegrationStatus.ACTIVE.value
+                            if user_integration
+                            else False
+                        ),
                         "status": user_integration.get("status") if user_integration else None,
                     }
                 )

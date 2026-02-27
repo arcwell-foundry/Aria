@@ -158,10 +158,13 @@ class EmailIntegrationService:
         if result and result.data:
             # Type ignore: Supabase returns Any but we know it's a dict at runtime
             data: dict[str, Any] = result.data  # type: ignore[assignment]
+            # Check if status is actually "active", not just that a row exists
+            is_active = data.get("status") == "active"
             return {
-                "connected": True,
+                "connected": is_active,
                 "provider": provider,
-                "connected_at": data.get("created_at"),
+                "connected_at": data.get("created_at") if is_active else None,
+                "status": data.get("status"),
             }
 
         # Not in local DB — check Composio for active connections
