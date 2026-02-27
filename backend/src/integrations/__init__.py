@@ -26,6 +26,11 @@ from src.integrations.domain import (
 from src.integrations.oauth import ComposioOAuthClient, get_oauth_client
 from src.integrations.service import IntegrationService, get_integration_service
 from src.integrations.tavus import TavusClient, get_tavus_client
+from src.integrations.validators import (
+    IntegrationHealth,
+    check_integration_health,
+    get_user_email_integration,
+)
 
 __all__ = [
     "TavusClient",
@@ -49,4 +54,8 @@ __all__ = [
     "SyncConfig",
     "SyncDirection",
     "DeepSyncResult",
+    # Centralized integration validators
+    "IntegrationHealth",
+    "check_integration_health",
+    "get_user_email_integration",
 ]
