@@ -112,7 +112,14 @@ def _prepend_system_message(
     """
     if not system_prompt:
         return list(messages)
-    return [{"role": "system", "content": system_prompt}, *messages]
+    return [
+        {
+            "role": "system",
+            "content": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        },
+        *messages,
+    ]
 
 
 def _translate_messages_for_litellm(
@@ -127,7 +134,11 @@ def _translate_messages_for_litellm(
     translated: list[dict[str, Any]] = []
 
     if system_prompt:
-        translated.append({"role": "system", "content": system_prompt})
+        translated.append({
+            "role": "system",
+            "content": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        })
 
     for msg in messages:
         role = msg.get("role", "user")
