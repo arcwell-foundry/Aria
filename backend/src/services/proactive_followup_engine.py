@@ -20,7 +20,8 @@ from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
-from src.services.email_client_writer import EmailClientWriter
+from src.core.ws import ws_manager
+from src.models.ws_events import ActionPendingEvent
 from src.services.email_context_gatherer import DraftContext, EmailContextGatherer
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,6 @@ class ProactiveFollowupEngine:
         self._context_gatherer = EmailContextGatherer()
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
-        self._client_writer = EmailClientWriter()
 
     async def check_and_draft_followups(self, user_id: str) -> list[dict[str, Any]]:
         """Check for overdue email commitments and draft follow-ups.
@@ -225,7 +225,7 @@ class ProactiveFollowupEngine:
             "style_match_score": 0.0,
             "confidence_level": confidence_level,
             "aria_notes": aria_notes,
-            "status": "draft",
+            "status": "pending_review",
             "draft_type": "proactive_followup",
             "source_commitment_id": commitment_id,
             "confidence_tier": confidence_tier,
@@ -247,12 +247,32 @@ class ProactiveFollowupEngine:
             )
             return None
 
-        # Save to email client (non-fatal)
+        # Notify user for review (no auto-save to client)
         try:
-            await self._client_writer.save_draft_to_client(user_id, draft_id)
+            await ws_manager.send_to_user(
+                user_id,
+                ActionPendingEvent(
+                    action_id=draft_id,
+                    title="Email Draft Review",
+                    agent="scribe",
+                    risk_level="HIGH",
+                    description=f"Follow-up draft to {sender_name or sender_email}: {subject}",
+                    payload={
+                        "action_type": "email_draft_review",
+                        "draft_id": draft_id,
+                        "subject": subject,
+                        "recipient_name": sender_name or None,
+                        "recipient_email": sender_email,
+                        "confidence": confidence_level,
+                        "style_match": 0.0,
+                        "preview": draft_body[:200],
+                        "aria_notes": aria_notes,
+                    },
+                ),
+            )
         except Exception as e:
             logger.warning(
-                "PROACTIVE_FOLLOWUP: Client save failed (non-fatal) for draft %s: %s",
+                "PROACTIVE_FOLLOWUP: WS notification failed (non-fatal) for draft %s: %s",
                 draft_id,
                 e,
             )

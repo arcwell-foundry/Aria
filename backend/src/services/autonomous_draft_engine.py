@@ -29,7 +29,8 @@ from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services.activity_service import ActivityService
 from src.services.email_analyzer import EmailAnalyzer
-from src.services.email_client_writer import DraftSaveError, EmailClientWriter
+from src.core.ws import ws_manager
+from src.models.ws_events import ActionPendingEvent
 from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
@@ -174,7 +175,6 @@ Do not include any text outside the JSON object."""
         self._context_gatherer = EmailContextGatherer()
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
-        self._client_writer = EmailClientWriter()
         self._learning_mode = get_learning_mode_service()
         self._activity_service = ActivityService()
         self._lead_intelligence = EmailLeadIntelligence()
@@ -592,18 +592,31 @@ Do not include any text outside the JSON object."""
             if context.id:
                 await self._context_gatherer.update_draft_id(context.id, draft_id)
 
-            # i. Save to email client (non-fatal)
-            saved_to_client = False
+            # i. Notify user for review (HIGH risk — no auto-save to client)
             try:
-                client_result = await self._client_writer.save_draft_to_client(
-                    user_id=user_id,
-                    draft_id=draft_id,
-                )
-                saved_to_client = bool(
-                    client_result.get("success") and not client_result.get("already_saved")
+                await ws_manager.send_to_user(
+                    user_id,
+                    ActionPendingEvent(
+                        action_id=draft_id,
+                        title="Email Draft Review",
+                        agent="scribe",
+                        risk_level="HIGH",
+                        description=f"Draft reply to {email.sender_name or email.sender_email}: {draft_content.subject}",
+                        payload={
+                            "action_type": "email_draft_review",
+                            "draft_id": draft_id,
+                            "subject": draft_content.subject,
+                            "recipient_name": email.sender_name,
+                            "recipient_email": email.sender_email,
+                            "confidence": confidence,
+                            "style_match": style_score,
+                            "preview": draft_content.body[:200],
+                            "aria_notes": aria_notes,
+                        },
+                    ),
                 )
             except Exception as e:
-                logger.warning("ON_DEMAND_DRAFT: Client save failed (non-fatal): %s", e)
+                logger.warning("ON_DEMAND_DRAFT: WS notification failed (non-fatal): %s", e)
 
             # j. Log activity
             try:
@@ -630,11 +643,6 @@ Do not include any text outside the JSON object."""
                 logger.warning("ON_DEMAND_DRAFT: Activity log failed: %s", e)
 
             sender_label = email.sender_name or email.sender_email
-            client_msg = (
-                "saved it to your drafts folder"
-                if saved_to_client
-                else "saved it in ARIA"
-            )
             return {
                 "draft_id": draft_id,
                 "to": email.sender_email,
@@ -644,10 +652,10 @@ Do not include any text outside the JSON object."""
                 "aria_notes": aria_notes,
                 "confidence": confidence,
                 "style_match": style_score,
-                "saved_to_client": saved_to_client,
+                "saved_to_client": False,
                 "message": (
                     f"I've drafted a reply to {sender_label}'s email "
-                    f'about "{email.subject}" and {client_msg}.'
+                    f'about "{email.subject}" — it\'s ready for your review.'
                 ),
             }
 
@@ -965,50 +973,34 @@ Do not include any text outside the JSON object."""
                 email.email_id,
             )
 
-            # i. Auto-save to email client (Gmail/Outlook)
-            # Non-fatal: draft stays in ARIA database even if client save fails
+            # i. Notify user draft is pending review (no auto-save to client)
             try:
-                logger.info(
-                    "[EMAIL_PIPELINE] Stage: saving_to_client_attempt | draft_id=%s | user_id=%s",
-                    draft_id,
+                await ws_manager.send_to_user(
                     user_id,
-                )
-                client_result = await self._client_writer.save_draft_to_client(
-                    user_id=user_id,
-                    draft_id=draft_id,
-                )
-                if client_result.get("success") and not client_result.get("already_saved"):
-                    logger.info(
-                        "[EMAIL_PIPELINE] Stage: saved_to_client_success | draft_id=%s | provider=%s | client_draft_id=%s",
-                        draft_id,
-                        client_result.get("provider"),
-                        client_result.get("client_draft_id"),
-                    )
-                elif client_result.get("already_saved"):
-                    logger.info(
-                        "[EMAIL_PIPELINE] Stage: client_save_skipped_already_saved | draft_id=%s",
-                        draft_id,
-                    )
-                else:
-                    logger.warning(
-                        "[EMAIL_PIPELINE] Stage: client_save_returned_failure | draft_id=%s | result=%s",
-                        draft_id,
-                        client_result,
-                    )
-            except DraftSaveError as e:
-                logger.error(
-                    "[EMAIL_PIPELINE] Stage: client_save_failed | draft_id=%s | error=%s | provider=%s",
-                    draft_id,
-                    e,
-                    getattr(e, "provider", "unknown"),
-                    exc_info=True,
+                    ActionPendingEvent(
+                        action_id=draft_id,
+                        title="Email Draft Review",
+                        agent="scribe",
+                        risk_level="HIGH",
+                        description=f"Draft reply to {email.sender_name or email.sender_email}: {draft_content.subject}",
+                        payload={
+                            "action_type": "email_draft_review",
+                            "draft_id": draft_id,
+                            "subject": draft_content.subject,
+                            "recipient_name": email.sender_name,
+                            "recipient_email": email.sender_email,
+                            "confidence": confidence,
+                            "style_match": style_score,
+                            "preview": draft_content.body[:200],
+                            "aria_notes": aria_notes,
+                        },
+                    ),
                 )
             except Exception as e:
-                logger.error(
-                    "[EMAIL_PIPELINE] Stage: client_save_unexpected_error | draft_id=%s | error=%s",
+                logger.warning(
+                    "[EMAIL_PIPELINE] Stage: ws_notification_failed | draft_id=%s | error=%s",
                     draft_id,
                     e,
-                    exc_info=True,
                 )
 
             logger.info(
@@ -2029,7 +2021,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
             "style_match_score": style_match_score,
             "confidence_level": confidence_level,
             "aria_notes": aria_notes,
-            "status": "draft",
+            "status": "pending_review",
             "learning_mode_draft": learning_mode_draft,
             "processing_run_id": processing_run_id,
             "confidence_tier": confidence_tier or "LOW",

@@ -5,8 +5,7 @@ WebSocket notifications to active users.
 
 This service bridges:
 - EmailAnalyzer: Detects urgent emails
-- AutonomousDraftEngine: Generates reply drafts
-- EmailClientWriter: Saves drafts to Gmail/Outlook
+- AutonomousDraftEngine: Generates reply drafts (pending user approval)
 - WebSocket ConnectionManager: Pushes real-time notifications
 
 If user is active (WebSocket connected): immediate notification
@@ -21,7 +20,6 @@ from typing import Any
 from src.core.ws import ws_manager
 from src.services.autonomous_draft_engine import AutonomousDraftEngine, DraftResult
 from src.services.email_analyzer import EmailCategory
-from src.services.email_client_writer import get_email_client_writer
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +63,12 @@ class RealtimeEmailNotifier:
     def __init__(self) -> None:
         """Initialize with lazy-loaded dependencies."""
         self._draft_engine: AutonomousDraftEngine | None = None
-        self._client_writer = None
 
     def _get_draft_engine(self) -> AutonomousDraftEngine:
         """Lazily initialize and return the AutonomousDraftEngine."""
         if self._draft_engine is None:
             self._draft_engine = AutonomousDraftEngine()
         return self._draft_engine
-
-    def _get_client_writer(self) -> Any:
-        """Lazily initialize and return the EmailClientWriter."""
-        if self._client_writer is None:
-            self._client_writer = get_email_client_writer()
-        return self._client_writer
 
     async def process_and_notify(
         self,
@@ -186,25 +177,6 @@ class RealtimeEmailNotifier:
 
                 if draft_result and draft_result.success:
                     draft_id = draft_result.draft_id
-
-                    # Save draft to email client
-                    try:
-                        client_writer = self._get_client_writer()
-                        save_result = await client_writer.save_draft_to_client(
-                            user_id=user_id,
-                            draft_id=draft_id,
-                        )
-                        draft_saved = save_result.get("success", False)
-                        logger.info(
-                            "REALTIME_NOTIFIER: Draft %s saved to %s",
-                            draft_id,
-                            save_result.get("provider", "unknown"),
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "REALTIME_NOTIFIER: Failed to save draft to client: %s",
-                            e,
-                        )
 
             except Exception as e:
                 logger.warning(
