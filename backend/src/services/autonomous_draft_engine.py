@@ -536,14 +536,13 @@ Do not include any text outside the JSON object."""
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # c. Get personality calibration
+            # c. Get personality calibration (full object for traits)
             calibration = await self._personality_calibrator.get_calibration(user_id)
-            tone_guidance = calibration.tone_guidance if calibration else ""
 
             # d. Generate draft via LLM
             draft_content = await self._generate_reply_draft(
                 user_id, user_name, email, context,
-                style_guidelines, tone_guidance,
+                style_guidelines, calibration,
                 special_instructions=special_instructions,
             )
 
@@ -889,9 +888,8 @@ Do not include any text outside the JSON object."""
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # c. Get personality calibration
+            # c. Get personality calibration (full object for traits)
             calibration = await self._personality_calibrator.get_calibration(user_id)
-            tone_guidance = calibration.tone_guidance if calibration else ""
 
             # d. Generate draft via LLM
             logger.info(
@@ -899,7 +897,7 @@ Do not include any text outside the JSON object."""
                 email.email_id,
             )
             draft_content = await self._generate_reply_draft(
-                user_id, user_name, email, context, style_guidelines, tone_guidance,
+                user_id, user_name, email, context, style_guidelines, calibration,
                 consolidated_from=consolidated_from,
             )
 
@@ -1274,7 +1272,7 @@ Example of well-formatted output:
         email: Any,
         context: DraftContext,
         style_guidelines: str,
-        tone_guidance: str,
+        calibration: Any | None,
         special_instructions: str | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
     ) -> ReplyDraftContent:
@@ -1286,7 +1284,7 @@ Example of well-formatted output:
             email: Original email (EmailCategory).
             context: Full context from EmailContextGatherer.
             style_guidelines: Style guidelines from DigitalTwin.
-            tone_guidance: Tone guidance from PersonalityCalibrator.
+            calibration: PersonalityCalibration object with tone_guidance and traits.
             special_instructions: Optional user instructions for the draft.
 
         Returns:
@@ -1299,7 +1297,7 @@ Example of well-formatted output:
         raw_writing_style = await self._get_raw_writing_style(user_id)
 
         prompt = self._build_reply_prompt(
-            user_name, email, context, style_guidelines, tone_guidance,
+            user_name, email, context, style_guidelines, calibration,
             special_instructions=special_instructions,
             formatting_patterns=formatting_patterns,
             consolidated_from=consolidated_from,
@@ -1365,7 +1363,7 @@ Example of well-formatted output:
         email: Any,
         context: DraftContext,
         style_guidelines: str,
-        tone_guidance: str,
+        calibration: Any | None,
         special_instructions: str | None = None,
         formatting_patterns: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
@@ -1442,10 +1440,18 @@ Write like a real person, not a template.""")
             ]
             sections.append("\n".join(style_lines))
 
-        # Tone guidance from personality calibrator
-        if tone_guidance:
-            sections.append(f"""## Tone Guidance
-{tone_guidance}""")
+        # Tone guidance from personality calibrator (includes traits)
+        if calibration:
+            tone_guidance = calibration.tone_guidance if calibration else ""
+            if tone_guidance:
+                trait_parts = []
+                trait_parts.append(f"directness={calibration.directness:.1f}")
+                trait_parts.append(f"warmth={calibration.warmth:.1f}")
+                trait_parts.append(f"formality={calibration.formality:.1f}")
+                sections.append(f"""## Tone Guidance
+{tone_guidance}
+
+Personality traits: {', '.join(trait_parts)}""")
 
         # HTML formatting instructions
         sections.append(self._build_formatting_instructions(formatting_patterns))

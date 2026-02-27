@@ -95,9 +95,8 @@ class DraftService:
             # Get user's style guidelines from Digital Twin
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # Get personality calibration for tone guidance
+            # Get personality calibration (full object for traits)
             calibration = await self._personality_calibrator.get_calibration(user_id)
-            tone_guidance = calibration.tone_guidance if calibration else ""
 
             # Build the generation prompt
             generation_prompt = self._build_generation_prompt(
@@ -109,7 +108,7 @@ class DraftService:
                 context=context,
                 lead_context=lead_context,
                 style_guidelines=style_guidelines,
-                tone_guidance=tone_guidance,
+                calibration=calibration,
             )
 
             # Generate email content via LLM
@@ -356,9 +355,8 @@ class DraftService:
             # Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # Get personality calibration for tone guidance
+            # Get personality calibration (full object for traits)
             calibration = await self._personality_calibrator.get_calibration(user_id)
-            tone_guidance = calibration.tone_guidance if calibration else ""
 
             # Combine original context with additional context
             original_context = draft.get("context", {}).get("user_context", "")
@@ -378,7 +376,7 @@ class DraftService:
                 context=combined_context,
                 lead_context=lead_context,
                 style_guidelines=style_guidelines,
-                tone_guidance=tone_guidance,
+                calibration=calibration,
             )
 
             # Generate with slightly higher temperature for variation
@@ -581,7 +579,7 @@ class DraftService:
         context: str | None,
         lead_context: dict[str, Any] | None,
         style_guidelines: str,
-        tone_guidance: str = "",
+        calibration: Any | None = None,
     ) -> str:
         """Build the generation prompt for the LLM.
 
@@ -594,7 +592,7 @@ class DraftService:
             context: Additional context provided by the user.
             lead_context: Context from lead memory.
             style_guidelines: User's writing style guidelines.
-            tone_guidance: Personality-calibrated tone guidance.
+            calibration: PersonalityCalibration object with tone_guidance and traits.
 
         Returns:
             The formatted generation prompt.
@@ -622,8 +620,14 @@ class DraftService:
 
         parts.append(f"\n--- WRITING STYLE GUIDELINES ---\n{style_guidelines}")
 
-        if tone_guidance:
-            parts.append(f"\n--- TONE GUIDANCE ---\n{tone_guidance}")
+        # Add personality calibration with tone guidance and traits
+        if calibration and calibration.tone_guidance:
+            trait_parts = []
+            trait_parts.append(f"directness={calibration.directness:.1f}")
+            trait_parts.append(f"warmth={calibration.warmth:.1f}")
+            trait_parts.append(f"formality={calibration.formality:.1f}")
+            parts.append(f"\n--- TONE GUIDANCE ---\n{calibration.tone_guidance}")
+            parts.append(f"Personality traits: {', '.join(trait_parts)}")
 
         return "\n".join(parts)
 

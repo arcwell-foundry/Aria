@@ -20,6 +20,7 @@ from src.services.email_context_gatherer import (
     CalendarContext,
     CRMContext,
 )
+from src.onboarding.personality_calibrator import PersonalityCalibration
 
 
 @pytest.fixture
@@ -455,12 +456,18 @@ class TestPromptBuilder:
 
     def test_prompt_includes_all_context(self, engine, sample_email, rich_context):
         """Prompt should include all available context sections."""
+        calibration = PersonalityCalibration(
+            tone_guidance="Keep it friendly but formal.",
+            directness=0.6,
+            warmth=0.7,
+            formality=0.8,
+        )
         prompt = engine._build_reply_prompt(
             user_name="Test User",
             email=sample_email,
             context=rich_context,
             style_guidelines="Be professional and concise.",
-            tone_guidance="Keep it friendly but formal.",
+            calibration=calibration,
         )
 
         # Check all sections are present
@@ -477,6 +484,10 @@ class TestPromptBuilder:
         assert "meetings" in prompt.lower()
         assert "Deal/pipeline context" in prompt or "CRM" in prompt
         assert "Test User" in prompt
+        # Check traits are included
+        assert "directness" in prompt
+        assert "warmth" in prompt
+        assert "formality" in prompt
 
     def test_prompt_handles_missing_context(self, engine, sample_email):
         """Prompt should handle missing context gracefully."""
@@ -495,7 +506,7 @@ class TestPromptBuilder:
             email=sample_email,
             context=context,
             style_guidelines="",
-            tone_guidance="",
+            calibration=None,
         )
 
         # Should still have original email
