@@ -433,7 +433,7 @@ class TestStrategicPlanningService:
     ) -> None:
         """Test scenario analysis returns impact assessment."""
         # Mock get_plan
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
             data={
                 "id": "plan-1",
                 "user_id": "user-1",
@@ -487,7 +487,7 @@ class TestStrategicPlanningService:
     ) -> None:
         """Test challenge_plan identifies plan weaknesses."""
         # Mock get_plan
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
             data={
                 "id": "plan-1",
                 "user_id": "user-1",
@@ -533,7 +533,7 @@ class TestStrategicPlanningService:
     ) -> None:
         """Test challenge_plan uses personality directness for tone."""
         # Mock get_plan
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
             data={
                 "id": "plan-1",
                 "user_id": "user-1",
@@ -576,7 +576,7 @@ class TestStrategicPlanningService:
     ) -> None:
         """Test update_progress recalculates progress score."""
         # Mock get_plan
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
             data={
                 "id": "plan-1",
                 "user_id": "user-1",
@@ -625,7 +625,7 @@ class TestStrategicPlanningService:
     ) -> None:
         """Test update_progress surfaces concerns for slow progress."""
         # Mock get_plan with a key result at 10%
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
             data={
                 "id": "plan-1",
                 "user_id": "user-1",

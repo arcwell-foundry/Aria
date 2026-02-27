@@ -435,6 +435,7 @@ class StrategicPlanningService:
                 .select("*")
                 .eq("id", plan_id)
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .single()
                 .execute()
             )

@@ -109,12 +109,13 @@ class ProactiveGoalProposer:
             )
             return False
 
-        # Dedup: skip if we already proposed for this signal
+        # Dedup: skip if we already have a pending proposal for this signal
         existing = (
             self._db.table("proactive_proposals")
             .select("id")
             .eq("user_id", user_id)
             .eq("source_signal_id", signal_id)
+            .eq("status", "proposed")
             .limit(1)
             .execute()
         )
@@ -333,6 +334,7 @@ class ProactiveGoalProposer:
                 self._db.table("lead_memories")
                 .select("id", count="exact")
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .ilike("company_name", f"%{company_name}%")
                 .execute()
             )
