@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -550,6 +551,8 @@ Topics (JSON array):"""
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=100,
+                task=TaskType.GENERAL,
+                agent_id="metacognition",
             )
 
             # Parse JSON array

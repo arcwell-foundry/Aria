@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -412,6 +413,8 @@ class StrategistAgent(SkillAwareAgent):
                 system_prompt=system_prompt,
                 temperature=0.5,
                 user_id=self.user_id,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategist",
             )
 
             # 5. Parse and validate
@@ -727,6 +730,8 @@ class StrategistAgent(SkillAwareAgent):
                 system_prompt=system_prompt,
                 temperature=0.5,
                 user_id=self.user_id,
+                task=TaskType.STRATEGIST_BATTLECARD,
+                agent_id="strategist",
             )
 
             # 4. Parse and validate

@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.intelligence.causal.models import (
     GoalImpact,
     GoalImpactSummary,
@@ -474,6 +475,8 @@ class GoalImpactMapper:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="goal_impact",
             )
 
             # Parse JSON response

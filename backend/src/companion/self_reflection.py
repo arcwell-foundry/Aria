@@ -21,6 +21,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
+from src.core.task_types import TaskType
+
 logger = logging.getLogger(__name__)
 
 
@@ -483,6 +485,8 @@ Output ONLY the acknowledgment text (2-3 sentences). Be {self._get_tone_descript
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
                 max_tokens=150,
+                task=TaskType.GENERAL,
+                agent_id="self_reflection",
             )
             acknowledgment = response.strip().strip('"')
 
@@ -645,6 +649,8 @@ Classify outcomes and identify patterns. Output ONLY valid JSON:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.GENERAL,
+                agent_id="self_reflection",
             )
 
             content = self._extract_json(response)
@@ -697,6 +703,8 @@ Identify strengths, weaknesses, and create an improvement plan. Output ONLY vali
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.GENERAL,
+                agent_id="self_reflection",
             )
 
             content = self._extract_json(response)

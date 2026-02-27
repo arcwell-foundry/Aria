@@ -23,6 +23,7 @@ from typing import Any
 
 from src.agents.skill_aware_agent import AGENT_SKILLS
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.security.skill_audit import SkillAuditService
 from src.skills.autonomy import SkillAutonomyService, SkillRiskLevel
@@ -308,6 +309,8 @@ class SkillOrchestrator:
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=3000,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="skill_orchestrator",
         )
 
         # Step 4: Parse LLM response
@@ -983,6 +986,8 @@ class SkillOrchestrator:
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=2048,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="skill_orchestrator",
         )
 
         # Parse LLM response

@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.intelligence.causal.models import (
     CausalChain,
     CausalHop,
@@ -231,6 +232,8 @@ Return ONLY a valid JSON array, no other text:
                 system_prompt=system_prompt,
                 temperature=0.3,
                 max_tokens=1000,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="causal_engine",
             )
 
             # Parse JSON response
@@ -435,6 +438,8 @@ Return ONLY a valid JSON array (max 5 items), no other text:
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=1000,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="causal_engine",
             )
 
             # Parse JSON response

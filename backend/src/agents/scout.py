@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -357,6 +358,8 @@ class ScoutAgent(SkillAwareAgent):
                 ),
                 temperature=0.3,
                 user_id=self.user_id,
+                task=TaskType.SCOUT_FILTER,
+                agent_id="scout",
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -463,6 +466,8 @@ class ScoutAgent(SkillAwareAgent):
                 ),
                 temperature=0.3,
                 user_id=self.user_id,
+                task=TaskType.SCOUT_FILTER,
+                agent_id="scout",
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -587,6 +592,8 @@ class ScoutAgent(SkillAwareAgent):
                 ),
                 temperature=0.3,
                 user_id=self.user_id,
+                task=TaskType.SCOUT_SUMMARIZE,
+                agent_id="scout",
             )
 
             parsed = _extract_json_from_text(response_text)
@@ -687,6 +694,8 @@ class ScoutAgent(SkillAwareAgent):
                     ),
                     temperature=0.2,
                     user_id=self.user_id,
+                    task=TaskType.SCOUT_SUMMARIZE,
+                    agent_id="scout",
                 )
 
                 parsed = _extract_json_from_text(response_text)

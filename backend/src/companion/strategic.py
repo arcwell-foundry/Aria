@@ -19,6 +19,7 @@ from enum import Enum
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.semantic import SemanticMemory
 
@@ -584,6 +585,8 @@ Output ONLY valid JSON with this structure:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
 
             # Parse JSON response
@@ -690,6 +693,8 @@ Output ONLY valid JSON with this structure:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
 
             # Parse JSON response
@@ -830,6 +835,8 @@ Output ONLY valid JSON array:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
 
             content = self._extract_json(response)
@@ -884,6 +891,8 @@ Output ONLY valid JSON array:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
 
             content = self._extract_json(response)
@@ -930,6 +939,8 @@ Output ONLY valid JSON array:
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
 
             content = self._extract_json(response)
@@ -1005,6 +1016,8 @@ Output ONLY the assessment text, no JSON."""
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.6,
                 max_tokens=200,
+                task=TaskType.STRATEGIST_PLAN,
+                agent_id="strategic",
             )
             return response.strip()
         except Exception as e:

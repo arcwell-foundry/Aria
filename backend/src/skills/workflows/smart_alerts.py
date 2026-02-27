@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.skills.workflows.base import BaseWorkflow, WorkflowResult, WorkflowStep
 from src.skills.workflows.models import (
     UserWorkflowDefinition,
@@ -167,6 +168,8 @@ class SmartAlertsWorkflow(BaseWorkflow):
                 system_prompt=urgency_system_prompt,
                 max_tokens=1024,
                 temperature=0.2,
+                task=TaskType.SIGNAL_CLASSIFY,
+                agent_id="smart_alerts",
             )
 
             urgency_result = json.loads(scoring_text)

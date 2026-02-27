@@ -20,6 +20,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.models.goal import GoalCreate, GoalType
 from src.onboarding.outcome_tracker import OnboardingOutcomeTracker
@@ -971,6 +972,8 @@ class OnboardingCompletionOrchestrator:
                 system_prompt=briefing_system_prompt,
                 max_tokens=300,
                 temperature=0.7,
+                task=TaskType.ONBOARD_FIRST_CONVO,
+                agent_id="onboarding",
             )
         except Exception:
             summary = (

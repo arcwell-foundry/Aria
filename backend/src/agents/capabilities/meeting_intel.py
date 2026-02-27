@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -344,6 +345,8 @@ class MeetingIntelligenceCapability(BaseCapability):
             system_prompt=_TRANSCRIPT_ANALYSIS_SYSTEM,
             max_tokens=4096,
             temperature=0.3,
+            task=TaskType.ANALYST_RESEARCH,
+            agent_id="meeting_intel",
         )
 
         parsed = _parse_json_response(raw_response)
@@ -479,6 +482,8 @@ class MeetingIntelligenceCapability(BaseCapability):
             system_prompt=_COACHING_SYSTEM,
             max_tokens=2048,
             temperature=0.4,
+            task=TaskType.ANALYST_RESEARCH,
+            agent_id="meeting_intel",
         )
 
         parsed = _parse_json_response(raw_response)
@@ -537,6 +542,8 @@ class MeetingIntelligenceCapability(BaseCapability):
             system_prompt=_CRM_SUMMARY_SYSTEM,
             max_tokens=1024,
             temperature=0.3,
+            task=TaskType.ANALYST_RESEARCH,
+            agent_id="meeting_intel",
         )
 
         # Queue for CRM push

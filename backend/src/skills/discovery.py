@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.security.trust_levels import TRUST_DATA_ACCESS, SkillTrustLevel
 from src.skills.index import SkillIndex, SkillIndexEntry
@@ -436,6 +437,8 @@ class SkillDiscoveryAgent:
                 system_prompt=system_prompt,
                 max_tokens=2048,
                 temperature=0.3,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="skill_discovery",
             )
 
             parsed = json.loads(response)
@@ -827,6 +830,8 @@ class SkillDiscoveryAgent:
                 system_prompt=system_prompt,
                 max_tokens=2048,
                 temperature=0.7,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="skill_discovery",
             )
 
             parsed = json.loads(response)

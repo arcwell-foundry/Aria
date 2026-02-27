@@ -26,6 +26,7 @@ from typing import Any
 from uuid import UUID
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.security.trust_levels import SkillTrustLevel
 
@@ -326,6 +327,8 @@ class SkillCreator:
                 system_prompt=system_prompt,
                 max_tokens=2048,
                 temperature=0.3,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="skill_creator",
             )
 
             parsed = json.loads(response)
@@ -718,6 +721,8 @@ class SkillCreator:
                 system_prompt=system_prompt,
                 max_tokens=2048,
                 temperature=0.4,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="skill_creator",
             )
 
             parsed = json.loads(response)

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -216,6 +217,8 @@ class VerifierAgent(BaseAgent):
                 system_prompt=system_prompt,
                 thinking_effort="complex",
                 user_id=self.user_id,
+                task=TaskType.GENERAL,
+                agent_id="verifier",
             )
 
             return self._parse_verification_response(response.text)

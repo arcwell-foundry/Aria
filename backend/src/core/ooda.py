@@ -23,6 +23,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from src.core.exceptions import OODABlockedError, OODAMaxIterationsError
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -568,6 +569,8 @@ If graph context is available, identify implication chains — non-obvious multi
                     max_tokens=self.config.orient_budget,
                     thinking_effort=effort,
                     user_id=self._user_id,
+                    task=TaskType.OODA_ORIENT,
+                    agent_id="ooda",
                 )
                 response = llm_response.text
                 if llm_response.thinking:
@@ -587,6 +590,8 @@ If graph context is available, identify implication chains — non-obvious multi
                     system_prompt=system_prompt,
                     max_tokens=self.config.orient_budget,
                     temperature=0.3,
+                    task=TaskType.OODA_ORIENT,
+                    agent_id="ooda",
                 )
                 input_chars = len(system_prompt) + len(user_prompt)
                 output_chars = len(response)
@@ -892,6 +897,8 @@ Select the best action to make progress toward the goal."""
                     max_tokens=self.config.decide_budget,
                     thinking_effort=decide_effort,
                     user_id=self._user_id,
+                    task=TaskType.OODA_DECIDE,
+                    agent_id="ooda",
                 )
                 response = llm_response.text
                 if llm_response.thinking:
@@ -911,6 +918,8 @@ Select the best action to make progress toward the goal."""
                     system_prompt=system_prompt,
                     max_tokens=self.config.decide_budget,
                     temperature=0.2,
+                    task=TaskType.OODA_DECIDE,
+                    agent_id="ooda",
                 )
                 input_chars = len(system_prompt) + len(user_prompt)
                 output_chars = len(response)

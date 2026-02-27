@@ -22,6 +22,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from src.core.persona import LAYER_1_CORE_IDENTITY
+from src.core.task_types import TaskType
 from src.services.email_analyzer import _strip_html
 
 logger = logging.getLogger(__name__)
@@ -855,6 +856,8 @@ Summary:"""
                     {"role": "user", "content": task_prompt},
                 ],
                 temperature=0.3,
+                task=TaskType.SCRIBE_CLASSIFY_EMAIL,
+                agent_id="email_context",
             )
 
             return summary.strip()
@@ -2019,6 +2022,8 @@ Return ONLY the JSON array, nothing else."""
                 ],
                 max_tokens=1500,
                 temperature=0.0,
+                task=TaskType.SCRIBE_CLASSIFY_EMAIL,
+                agent_id="email_context",
             )
 
             try:

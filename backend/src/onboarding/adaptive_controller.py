@@ -15,6 +15,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.working import WorkingMemoryManager
 from src.onboarding.models import OnboardingStep
@@ -202,6 +203,8 @@ class OnboardingOODAController:
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
+            task=TaskType.ONBOARD_ENRICH,
+            agent_id="onboarding",
         )
         try:
             return dict(json.loads(response))
@@ -307,6 +310,8 @@ class OnboardingOODAController:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=300,
                 temperature=0.3,
+                task=TaskType.ONBOARD_ENRICH,
+                agent_id="onboarding",
             )
             questions = json.loads(response)
             if isinstance(questions, list):

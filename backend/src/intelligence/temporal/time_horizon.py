@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.intelligence.temporal.models import (
     ActionTiming,
     TimeHorizon,
@@ -518,6 +519,8 @@ Time horizon definitions:
                 system_prompt=system_prompt,
                 temperature=0.1,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="time_horizon",
             )
 
             # Clean and parse JSON response

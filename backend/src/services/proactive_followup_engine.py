@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -372,6 +373,8 @@ Keep it concise (3-6 sentences). Be natural and human-sounding."""
                 temperature=0.4,
                 max_tokens=800,
                 user_id=user_id,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
+                agent_id="proactive_followup",
             )
             return response.strip() if response else None
         except Exception as e:

@@ -1127,6 +1127,7 @@ async def test_plan_pipeline_noauth(
     import traceback
 
     from src.core.llm import LLMClient
+    from src.core.task_types import TaskType
     from src.db.supabase import get_supabase_client
     from src.models.goal import GoalCreate, GoalType
     from src.services.goal_execution import GoalExecutionService
@@ -1215,6 +1216,8 @@ async def test_plan_pipeline_noauth(
             max_tokens=256,
             temperature=0.1,
             user_id=user_id,
+            task=TaskType.OODA_DECIDE,
+            agent_id="goals",
         )
         step("llm_call", {"raw_response": intent_raw})
     except Exception as e:
@@ -1302,6 +1305,7 @@ async def test_intent_detection(
     import traceback
 
     from src.core.llm import LLMClient
+    from src.core.task_types import TaskType
     from src.db.supabase import get_supabase_client
     from src.models.goal import GoalCreate, GoalType
     from src.services.goal_execution import GoalExecutionService
@@ -1372,6 +1376,8 @@ async def test_intent_detection(
             max_tokens=256,
             temperature=0.1,
             user_id=user_id,
+            task=TaskType.OODA_DECIDE,
+            agent_id="goals",
         )
         step("llm_call", {"raw_response": intent_raw})
     except Exception as e:

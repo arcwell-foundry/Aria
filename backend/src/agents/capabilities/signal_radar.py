@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 if TYPE_CHECKING:
@@ -480,6 +481,8 @@ class SignalRadarCapability(BaseCapability):
                 ),
                 max_tokens=2048,
                 temperature=0.4,
+                task=TaskType.SIGNAL_CLASSIFY,
+                agent_id="signal_radar",
             )
 
             implications = self._parse_implications_response(response, signal.id)

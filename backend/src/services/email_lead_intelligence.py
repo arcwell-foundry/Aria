@@ -18,6 +18,7 @@ from typing import Any
 
 from src.core.llm import LLMClient
 from src.core.persona import LAYER_1_CORE_IDENTITY
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.lead_memory import LeadMemoryService
 from src.memory.lead_memory_events import LeadEventService
@@ -203,6 +204,8 @@ class EmailLeadIntelligence:
                 temperature=0.0,
                 max_tokens=1024,
                 user_id=user_id,
+                task=TaskType.HUNTER_ENRICH,
+                agent_id="email_lead_intel",
             )
         except Exception:
             logger.exception("LLM signal extraction failed")

@@ -38,6 +38,7 @@ from src.services.email_tools import (
 )
 from src.services.extraction import ExtractionService
 
+from src.core.task_types import TaskType
 from src.core.cognitive_friction import (
     FRICTION_CHALLENGE,
     FRICTION_FLAG,
@@ -2912,6 +2913,8 @@ class ChatService:
                 tools=tools,
                 system_prompt=system_prompt,
                 user_id=user_id,
+                task=TaskType.CHAT_RESPONSE,
+                agent_id="chat",
             )
 
             # If no tool calls, return the text response

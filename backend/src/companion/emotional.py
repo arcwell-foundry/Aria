@@ -15,6 +15,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.core.task_types import TaskType
+
 logger = logging.getLogger(__name__)
 
 
@@ -256,6 +258,8 @@ class EmotionalIntelligenceEngine:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=20,
+                task=TaskType.GENERAL,
+                agent_id="emotional",
             )
             context_str = response.strip().lower()
 
@@ -427,6 +431,8 @@ class EmotionalIntelligenceEngine:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
                 max_tokens=150,
+                task=TaskType.GENERAL,
+                agent_id="emotional",
             )
             return response.strip().strip('"')
 

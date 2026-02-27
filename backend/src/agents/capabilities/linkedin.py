@@ -19,6 +19,7 @@ import httpx
 
 from src.agents.capabilities.base import BaseCapability, CapabilityResult
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.models.social import (
     EngagementReport,
@@ -220,6 +221,8 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.1,
                 max_tokens=1000,
+                task=TaskType.ENTITY_EXTRACT,
+                agent_id="linkedin",
             )
 
             # Strip markdown fences if present
@@ -326,6 +329,8 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.2,
                 max_tokens=800,
+                task=TaskType.ENTITY_EXTRACT,
+                agent_id="linkedin",
             )
 
             text = raw_response.strip()
@@ -417,6 +422,8 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.7,
                 max_tokens=600,
+                task=TaskType.ENTITY_EXTRACT,
+                agent_id="linkedin",
             )
 
             text = raw_response.strip()
@@ -564,6 +571,8 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 ),
                 temperature=0.7,
                 max_tokens=2000,
+                task=TaskType.ENTITY_EXTRACT,
+                agent_id="linkedin",
             )
 
             # Strip markdown fences if present

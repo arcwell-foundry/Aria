@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.intelligence.causal.engine import CausalChainEngine
 from src.intelligence.causal.implication_engine import ImplicationEngine
@@ -330,6 +331,8 @@ class SalesCausalReasoningEngine:
                 temperature=0.4,
                 max_tokens=500,
                 user_id=user_id,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="causal_reasoning",
             )
 
             # Parse JSON response

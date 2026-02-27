@@ -19,6 +19,7 @@ from enum import Enum
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.models.cognitive_load import LoadLevel
@@ -353,6 +354,8 @@ Tone:"""
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=20,
+                task=TaskType.GENERAL,
+                agent_id="theory_of_mind",
             )
 
             tone = response.strip().lower()
@@ -416,6 +419,8 @@ Focus:"""
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=30,
+                task=TaskType.GENERAL,
+                agent_id="theory_of_mind",
             )
 
             focus = response.strip()

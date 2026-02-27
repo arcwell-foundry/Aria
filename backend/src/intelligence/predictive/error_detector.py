@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.intelligence.predictive.models import (
     PredictionCategory,
     PredictionError,
@@ -265,6 +266,8 @@ Return ONLY a JSON object: {{"match_score": 0.0-1.0, "reasoning": "brief explana
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="error_detector",
             )
 
             # Parse response

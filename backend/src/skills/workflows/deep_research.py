@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.skills.workflows.base import BaseWorkflow, WorkflowResult, WorkflowStep
 from src.skills.workflows.models import (
     UserWorkflowDefinition,
@@ -191,6 +192,8 @@ class DeepResearchWorkflow(BaseWorkflow):
                 system_prompt=synthesis_system_prompt,
                 max_tokens=4096,
                 temperature=0.4,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="deep_research",
             )
 
             synthesis = json.loads(synthesis_text)

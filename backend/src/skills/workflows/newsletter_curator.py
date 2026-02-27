@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.skills.workflows.base import BaseWorkflow, WorkflowResult, WorkflowStep
 from src.skills.workflows.models import (
     UserWorkflowDefinition,
@@ -152,6 +153,8 @@ class NewsletterCuratorWorkflow(BaseWorkflow):
                 system_prompt=curation_system_prompt,
                 max_tokens=2048,
                 temperature=0.3,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="newsletter_curator",
             )
 
             import json

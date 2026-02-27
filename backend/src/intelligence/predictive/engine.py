@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.intelligence.predictive.context_gatherer import PredictionContextGatherer
 from src.intelligence.predictive.error_detector import PredictionErrorDetector
@@ -292,6 +293,8 @@ Return ONLY a JSON array of predictions, max {max_predictions} items:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
                 max_tokens=1500,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="predictive",
             )
 
             # Parse JSON response

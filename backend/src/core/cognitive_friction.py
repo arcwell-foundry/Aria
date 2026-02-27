@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from src.core.task_types import TaskType
+
 if TYPE_CHECKING:
     from src.core.llm import LLMClient, LLMResponse
     from src.core.persona import PersonaBuilder
@@ -204,6 +206,8 @@ class CognitiveFrictionEngine:
                 messages=messages,
                 system_prompt=system_prompt,
                 thinking_effort="routine",
+                task=TaskType.GENERAL,
+                agent_id="cognitive_friction",
             )
             raw_text = response.text
         else:
@@ -211,6 +215,8 @@ class CognitiveFrictionEngine:
                 messages=messages,
                 system_prompt=system_prompt,
                 temperature=0.2,
+                task=TaskType.GENERAL,
+                agent_id="cognitive_friction",
             )
 
         # 6. Parse & validate

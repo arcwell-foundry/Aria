@@ -17,6 +17,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from src.agents.base import AgentResult, BaseAgent
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -625,6 +626,8 @@ class ExecutorAgent(BaseAgent):
                 messages=[{"role": "user", "content": user_message}],
                 system_prompt=system_prompt,
                 user_id=self.user_id,
+                task=TaskType.OPERATOR_ACTION,
+                agent_id="executor",
             )
 
             return self._parse_steps_response(response.text)

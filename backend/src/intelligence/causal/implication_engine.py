@@ -21,6 +21,7 @@ from typing import Any
 from uuid import UUID
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.intelligence.causal.engine import CausalChainEngine
 from src.intelligence.causal.models import (
     CausalChain,
@@ -466,6 +467,8 @@ Is this goal affected by or relevant to this event impact?""",
                 system_prompt=system_prompt,
                 temperature=0.1,
                 max_tokens=10,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="implication_engine",
             )
 
             return "yes" in response.lower()
@@ -536,6 +539,8 @@ How does this chain affect the user's goals?""",
                 system_prompt=system_prompt,
                 temperature=0.1,
                 max_tokens=20,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="implication_engine",
             )
 
             response_lower = response.lower().strip()
@@ -709,6 +714,8 @@ Explain this implication in 2-3 sentences:""",
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="implication_engine",
             )
 
             return response.strip()
@@ -769,6 +776,8 @@ Generate 1-3 specific recommendations:""",
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=300,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="implication_engine",
             )
 
             # Parse JSON response

@@ -491,6 +491,10 @@ class LLMClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.7,
         user_id: str | None = None,
+        task: TaskType = TaskType.GENERAL,
+        tenant_id: str = "",
+        agent_id: str = "",
+        goal_id: str = "",
     ) -> str:
         """Generate a response from Claude.
 
@@ -501,6 +505,10 @@ class LLMClient:
             temperature: Sampling temperature (0-1).
             user_id: Optional user ID for cost governance. When provided,
                 budget is checked before the call and usage is recorded after.
+            task: TaskType for observability tagging.
+            tenant_id: Tenant ID for cost tracking.
+            agent_id: Agent/service identifier for tracing.
+            goal_id: Goal ID for tracing.
 
         Returns:
             Generated text response.
@@ -523,6 +531,7 @@ class LLMClient:
                 )
 
         litellm_messages = _prepend_system_message(system_prompt, messages)
+        metadata = _build_langfuse_metadata(task, tenant_id, user_id or "", agent_id, goal_id)
 
         logger.debug(
             "Calling Claude API via LiteLLM",
@@ -530,6 +539,7 @@ class LLMClient:
                 "model": self._litellm_model,
                 "message_count": len(messages),
                 "has_system": system_prompt is not None,
+                "task": task.value,
             },
         )
 
@@ -542,14 +552,20 @@ class LLMClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 api_key=self._api_key,
+                metadata=metadata,
             )
         except Exception as exc:
             latency_ms = int((time.time() - start) * 1000)
             self._fire_usage_log(
+                tenant_id=tenant_id,
+                user_id=user_id or "",
+                agent_id=agent_id,
+                task_type=task.value,
                 model=self._litellm_model,
                 latency_ms=latency_ms,
                 status="error",
                 error_message=str(exc),
+                goal_id=goal_id,
             )
             raise
 
@@ -565,11 +581,15 @@ class LLMClient:
 
         resp_usage = getattr(response, "usage", None)
         self._fire_usage_log(
+            tenant_id=tenant_id,
             user_id=user_id or "",
+            agent_id=agent_id,
+            task_type=task.value,
             model=getattr(response, "model", self._litellm_model),
             input_tokens=getattr(resp_usage, "prompt_tokens", 0) or 0,
             output_tokens=getattr(resp_usage, "completion_tokens", 0) or 0,
             latency_ms=latency_ms,
+            goal_id=goal_id,
         )
 
         # Record usage (when user_id provided, fail-open)
@@ -595,6 +615,10 @@ class LLMClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.7,
         user_id: str | None = None,
+        task: TaskType = TaskType.GENERAL,
+        tenant_id: str = "",
+        agent_id: str = "",
+        goal_id: str = "",
     ) -> LLMToolResponse:
         """Generate a response from Claude with tool use support.
 
@@ -609,6 +633,10 @@ class LLMClient:
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature (0-1).
             user_id: Optional user ID for cost governance.
+            task: TaskType for observability tagging.
+            tenant_id: Tenant ID for cost tracking.
+            agent_id: Agent/service identifier for tracing.
+            goal_id: Goal ID for tracing.
 
         Returns:
             LLMToolResponse with text, tool_calls, and stop_reason.
@@ -629,6 +657,7 @@ class LLMClient:
         # Translate to OpenAI formats
         litellm_messages = _translate_messages_for_litellm(system_prompt, messages)
         openai_tools = _anthropic_tools_to_openai(tools)
+        metadata = _build_langfuse_metadata(task, tenant_id, user_id or "", agent_id, goal_id)
 
         logger.debug(
             "Calling Claude API with tools via LiteLLM",
@@ -636,6 +665,7 @@ class LLMClient:
                 "model": self._litellm_model,
                 "message_count": len(messages),
                 "tool_count": len(tools),
+                "task": task.value,
             },
         )
 
@@ -649,15 +679,20 @@ class LLMClient:
                 temperature=temperature,
                 tools=openai_tools,
                 api_key=self._api_key,
+                metadata=metadata,
             )
         except Exception as exc:
             latency_ms = int((time.time() - start) * 1000)
             self._fire_usage_log(
+                tenant_id=tenant_id,
                 user_id=user_id or "",
+                agent_id=agent_id,
+                task_type=task.value,
                 model=self._litellm_model,
                 latency_ms=latency_ms,
                 status="error",
                 error_message=str(exc),
+                goal_id=goal_id,
             )
             raise
 
@@ -683,11 +718,15 @@ class LLMClient:
 
         resp_usage = getattr(response, "usage", None)
         self._fire_usage_log(
+            tenant_id=tenant_id,
             user_id=user_id or "",
+            agent_id=agent_id,
+            task_type=task.value,
             model=getattr(response, "model", self._litellm_model),
             input_tokens=getattr(resp_usage, "prompt_tokens", 0) or 0,
             output_tokens=getattr(resp_usage, "completion_tokens", 0) or 0,
             latency_ms=latency_ms,
+            goal_id=goal_id,
         )
 
         # Record usage (fail-open)
@@ -719,6 +758,10 @@ class LLMClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         thinking_effort: str = "complex",
         user_id: str | None = None,
+        task: TaskType = TaskType.GENERAL,
+        tenant_id: str = "",
+        agent_id: str = "",
+        goal_id: str = "",
     ) -> LLMResponse:
         """Generate a response with extended thinking enabled.
 
@@ -735,6 +778,10 @@ class LLMClient:
             max_tokens: Maximum tokens in response.
             thinking_effort: One of "routine", "complex", "critical".
             user_id: Optional user ID for cost governance.
+            task: TaskType for observability tagging.
+            tenant_id: Tenant ID for cost tracking.
+            agent_id: Agent/service identifier for tracing.
+            goal_id: Goal ID for tracing.
 
         Returns:
             LLMResponse with text, thinking trace, and usage.
@@ -798,11 +845,15 @@ class LLMClient:
         except Exception as exc:
             latency_ms = int((time.time() - start) * 1000)
             self._fire_usage_log(
+                tenant_id=tenant_id,
                 user_id=user_id or "",
+                agent_id=agent_id,
+                task_type=task.value,
                 model=self._model,
                 latency_ms=latency_ms,
                 status="error",
                 error_message=str(exc),
+                goal_id=goal_id,
             )
             raise
 
@@ -830,11 +881,15 @@ class LLMClient:
         )
 
         self._fire_usage_log(
+            tenant_id=tenant_id,
             user_id=user_id or "",
+            agent_id=agent_id,
+            task_type=task.value,
             model=self._model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             latency_ms=latency_ms,
+            goal_id=goal_id,
         )
 
         # Record usage (fail-open)
@@ -862,6 +917,10 @@ class LLMClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.7,
         user_id: str | None = None,
+        task: TaskType = TaskType.GENERAL,
+        tenant_id: str = "",
+        agent_id: str = "",
+        goal_id: str = "",
     ) -> AsyncIterator[str]:
         """Stream a response from Claude token by token.
 
@@ -871,6 +930,10 @@ class LLMClient:
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature (0-1).
             user_id: Optional user ID for cost governance.
+            task: TaskType for observability tagging.
+            tenant_id: Tenant ID for cost tracking.
+            agent_id: Agent/service identifier for tracing.
+            goal_id: Goal ID for tracing.
 
         Yields:
             Text chunks as they arrive from the API.
@@ -893,6 +956,7 @@ class LLMClient:
                 )
 
         litellm_messages = _prepend_system_message(system_prompt, messages)
+        metadata = _build_langfuse_metadata(task, tenant_id, user_id or "", agent_id, goal_id)
 
         logger.debug(
             "Streaming Claude API response via LiteLLM",
@@ -900,6 +964,7 @@ class LLMClient:
                 "model": self._litellm_model,
                 "message_count": len(messages),
                 "has_system": system_prompt is not None,
+                "task": task.value,
             },
         )
 
@@ -914,6 +979,7 @@ class LLMClient:
                 stream=True,
                 stream_options={"include_usage": True},
                 api_key=self._api_key,
+                metadata=metadata,
             )
 
             stream_usage: Any = None
@@ -932,19 +998,27 @@ class LLMClient:
             # Fire usage log after stream completes
             if stream_usage is not None:
                 self._fire_usage_log(
+                    tenant_id=tenant_id,
                     user_id=user_id or "",
+                    agent_id=agent_id,
+                    task_type=task.value,
                     model=self._litellm_model,
                     input_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
                     output_tokens=getattr(stream_usage, "completion_tokens", 0) or 0,
                     latency_ms=latency_ms,
+                    goal_id=goal_id,
                 )
             else:
                 self._fire_usage_log(
+                    tenant_id=tenant_id,
                     user_id=user_id or "",
+                    agent_id=agent_id,
+                    task_type=task.value,
                     model=self._litellm_model,
                     input_tokens=0,
                     output_tokens=0,
                     latency_ms=latency_ms,
+                    goal_id=goal_id,
                 )
 
             # Record usage after stream completes
@@ -962,11 +1036,15 @@ class LLMClient:
         except Exception as exc:
             latency_ms = int((time.time() - start) * 1000)
             self._fire_usage_log(
+                tenant_id=tenant_id,
                 user_id=user_id or "",
+                agent_id=agent_id,
+                task_type=task.value,
                 model=self._litellm_model,
                 latency_ms=latency_ms,
                 status="error",
                 error_message=str(exc),
+                goal_id=goal_id,
             )
             _llm_circuit_breaker.record_failure()
             raise

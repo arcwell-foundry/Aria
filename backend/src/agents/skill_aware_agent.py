@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, AgentStatus, BaseAgent
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -185,6 +186,8 @@ class SkillAwareAgent(BaseAgent):
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=256,
                 temperature=0.0,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="skill_aware_agent",
             )
 
             parsed = json.loads(response)

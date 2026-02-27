@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from src.core.task_types import TaskType
+
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
 
@@ -341,6 +343,8 @@ class ConversationService:
             messages=[{"role": "user", "content": summary_prompt}],
             max_tokens=500,
             temperature=0.3,
+            task=TaskType.MEMORY_SUMMARIZE,
+            agent_id="memory",
         )
 
         # Step 2: Extract structured information using LLM
@@ -349,6 +353,8 @@ class ConversationService:
             messages=[{"role": "user", "content": extraction_prompt}],
             max_tokens=1000,
             temperature=0.2,
+            task=TaskType.MEMORY_SUMMARIZE,
+            agent_id="memory",
         )
 
         # Parse the extraction response (handles malformed JSON gracefully)
@@ -543,6 +549,8 @@ class ConversationService:
             messages=[{"role": "user", "content": fact_prompt}],
             max_tokens=1000,
             temperature=0.2,
+            task=TaskType.MEMORY_SUMMARIZE,
+            agent_id="memory",
         )
 
         # Parse response

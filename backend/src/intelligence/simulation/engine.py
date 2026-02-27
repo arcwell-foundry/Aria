@@ -17,6 +17,7 @@ import uuid
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.intelligence.causal.engine import CausalChainEngine
 from src.intelligence.simulation.models import (
@@ -246,6 +247,8 @@ Format your response as JSON:
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=500,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="simulation",
             )
 
             # Parse JSON response
@@ -505,6 +508,8 @@ Return ONLY a JSON array of variable names, no other text:
                 system_prompt=system_prompt,
                 temperature=0.3,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="simulation",
             )
 
             response = response.strip()
@@ -569,6 +574,8 @@ Return ONLY a JSON array, no other text:
                 system_prompt=system_prompt,
                 temperature=0.6,
                 max_tokens=1000,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="simulation",
             )
 
             response = response.strip()
@@ -704,6 +711,8 @@ Return ONLY a JSON object, no other text:
                 system_prompt=system_prompt,
                 temperature=0.5,
                 max_tokens=500,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="simulation",
             )
 
             response = response.strip()

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import AGENT_SKILLS, SkillAwareAgent
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -106,6 +107,8 @@ class DynamicAgentFactory:
                     system_prompt=system_prompt,
                     max_tokens=2048,
                     temperature=0.3,
+                    task=TaskType.GENERAL,
+                    agent_id="dynamic_agent",
                 )
                 try:
                     data = json.loads(response)

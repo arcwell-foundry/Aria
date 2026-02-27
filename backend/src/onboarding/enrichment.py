@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from src.core.config import settings
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -403,6 +404,8 @@ Respond ONLY with the JSON object, no additional text."""
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
             temperature=0.3,
+            task=TaskType.ONBOARD_ENRICH,
+            agent_id="onboarding",
         )
         try:
             data = json.loads(_strip_markdown_fences(response))
@@ -943,6 +946,8 @@ Respond ONLY with the JSON array, no additional text."""
             messages=[{"role": "user", "content": prompt}],
             max_tokens=3000,
             temperature=0.3,
+            task=TaskType.ONBOARD_ENRICH,
+            agent_id="onboarding",
         )
         try:
             facts_data = json.loads(_strip_markdown_fences(response))
@@ -1005,6 +1010,8 @@ Respond ONLY with the JSON array, no additional text."""
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,
             temperature=0.5,
+            task=TaskType.ONBOARD_ENRICH,
+            agent_id="onboarding",
         )
         try:
             hyp_data = json.loads(_strip_markdown_fences(response))

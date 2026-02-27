@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.intelligence.temporal.models import (
     CrossScaleImpact,
@@ -294,6 +295,8 @@ Return ONLY a JSON object: {{"scale": "immediate|tactical|strategic|visionary", 
                 system_prompt="You classify decisions by time scale. Output ONLY valid JSON.",
                 temperature=0.0,
                 max_tokens=100,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="temporal_analysis",
             )
 
             data = json.loads(response.strip())
@@ -782,6 +785,8 @@ Return ONLY a JSON array:
                 ),
                 temperature=0.2,
                 max_tokens=1000,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="temporal_analysis",
             )
 
             # Clean response
@@ -1007,6 +1012,8 @@ Return ONLY a JSON object:
                 ),
                 temperature=0.3,
                 max_tokens=800,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="temporal_analysis",
             )
 
             # Clean response
@@ -1083,6 +1090,8 @@ Return ONLY the reconciliation advice text, no JSON or formatting."""
                 system_prompt="You provide practical reconciliation advice for conflicting priorities.",
                 temperature=0.4,
                 max_tokens=200,
+                task=TaskType.ANALYST_RESEARCH,
+                agent_id="temporal_analysis",
             )
 
             return response.strip()

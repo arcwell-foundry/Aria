@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.integrations.tavus_tools import TOOL_AGENT_MAP, VALID_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -1369,6 +1370,8 @@ class VideoToolExecutor:
                     messages=messages,
                     max_tokens=512,
                     temperature=0.2,
+                    task=TaskType.GENERAL,
+                    agent_id="tavus",
                 )
 
                 extracted = json.loads(raw)

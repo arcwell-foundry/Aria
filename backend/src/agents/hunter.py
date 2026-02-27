@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -395,6 +396,8 @@ class HunterAgent(SkillAwareAgent):
             ),
             temperature=0.3,
             user_id=self.user_id,
+            task=TaskType.HUNTER_ENRICH,
+            agent_id="hunter",
         )
 
         companies = _extract_json_from_text(response)
@@ -605,6 +608,8 @@ class HunterAgent(SkillAwareAgent):
             ),
             temperature=0.3,
             user_id=self.user_id,
+            task=TaskType.HUNTER_QUALIFY,
+            agent_id="hunter",
         )
 
         enrichment_data = _extract_json_from_text(response)
@@ -780,6 +785,8 @@ class HunterAgent(SkillAwareAgent):
             ),
             temperature=0.3,
             user_id=self.user_id,
+            task=TaskType.HUNTER_ENRICH,
+            agent_id="hunter",
         )
 
         contacts = _extract_json_from_text(response)

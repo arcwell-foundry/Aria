@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.db.supabase import SupabaseClient
 from src.memory.prospective import (
@@ -467,6 +468,8 @@ class ContextBridgeService:
                 system_prompt=_TRANSCRIPT_EXTRACTION_PROMPT,
                 max_tokens=1024,
                 temperature=0.3,
+                task=TaskType.GENERAL,
+                agent_id="context_bridge",
             )
             return json.loads(raw)
         except (json.JSONDecodeError, Exception):

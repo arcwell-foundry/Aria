@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from src.core.task_types import TaskType
 from src.intelligence.causal.engine import CausalChainEngine
 from src.intelligence.causal.models import (
     ConnectionInsight,
@@ -293,7 +294,7 @@ Return format:
 Return only the JSON array, no markdown."""
 
         try:
-            response = await self._llm.generate_response(prompt)
+            response = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
             # Parse JSON, handle markdown code blocks
             cleaned = response.strip()
             if cleaned.startswith("```"):
@@ -435,7 +436,7 @@ Return format:
 Return only JSON, no markdown."""
 
         try:
-            response = await self._llm.generate_response(prompt)
+            response = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
             cleaned = response.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
@@ -471,7 +472,7 @@ Recommended action: {scores.get("recommended_action", "None")}
 Write a clear, professional explanation suitable for a business context."""
 
         try:
-            explanation: str = await self._llm.generate_response(prompt)
+            explanation: str = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
             return explanation
         except Exception:
             return f"Connection found between: {event_a[:50]}... and {event_b[:50]}..."

@@ -49,6 +49,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.security.trust_levels import SkillTrustLevel
 
 logger = logging.getLogger(__name__)
@@ -394,6 +395,8 @@ class BaseSkillDefinition:
             messages=[{"role": "user", "content": user_prompt}],
             system_prompt=self._definition.system_prompt,
             temperature=0.4,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="skill_base",
         )
 
         parsed = self.parse_output(raw_response)
@@ -429,6 +432,8 @@ class BaseSkillDefinition:
             messages=[{"role": "user", "content": user_prompt}],
             system_prompt=self._definition.system_prompt,
             temperature=0.4,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="skill_base",
         )
 
         parsed = self.parse_output(raw_response)

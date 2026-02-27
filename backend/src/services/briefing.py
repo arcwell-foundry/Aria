@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from src.core.cache import cached
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.core.persona import PersonaBuilder, PersonaRequest
 from src.db.supabase import SupabaseClient
 from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -1294,12 +1295,16 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                         {"role": "user", "content": prompt},
                     ],
                     max_tokens=200,
+                    task=TaskType.ANALYST_SUMMARIZE,
+                    agent_id="briefing",
                 )
             else:
                 # Fallback without PersonaBuilder
                 return await self._llm.generate_response(
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=200,
+                    task=TaskType.ANALYST_SUMMARIZE,
+                    agent_id="briefing",
                 )
         except Exception as llm_error:
             logger.error(
@@ -1570,6 +1575,8 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                     messages=[{"role": "user", "content": topics_prompt}],
                     max_tokens=400,
                     temperature=0.0,
+                    task=TaskType.ANALYST_SUMMARIZE,
+                    agent_id="briefing",
                 )
                 parsed = json.loads(topic_response)
                 if isinstance(parsed, list):

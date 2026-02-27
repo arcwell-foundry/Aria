@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.core.exceptions import NotFoundError, sanitize_error
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
 from src.services.conversations import ConversationService
@@ -417,6 +418,8 @@ async def chat_stream(
             async for token in service._llm_client.stream_response(
                 messages=conversation_messages,
                 system_prompt=system_prompt,
+                task=TaskType.CHAT_STREAM,
+                agent_id="chat",
             ):
                 full_content += token
                 event = {"type": "token", "content": token}

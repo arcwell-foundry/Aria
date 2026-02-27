@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from src.core.exceptions import EmailDraftError, EmailSendError, NotFoundError
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.integrations.oauth import get_oauth_client
 from src.memory.digital_twin import DigitalTwin
@@ -116,6 +117,8 @@ class DraftService:
                 messages=[{"role": "user", "content": generation_prompt}],
                 system_prompt=EMAIL_GENERATION_PROMPT,
                 temperature=0.7,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
+                agent_id="draft_service",
             )
 
             # Parse JSON response from LLM
@@ -383,6 +386,8 @@ class DraftService:
                 messages=[{"role": "user", "content": generation_prompt}],
                 system_prompt=EMAIL_GENERATION_PROMPT,
                 temperature=0.8,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
+                agent_id="draft_service",
             )
 
             # Parse response

@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.capabilities.signal_radar import Implication, Signal
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.services.activity_service import ActivityService
 from src.services.notification_service import NotificationService
@@ -416,6 +417,8 @@ class ImplicationAwareSkillTrigger:
                 ),
                 max_tokens=3000,
                 temperature=0.4,
+                task=TaskType.SIGNAL_CLASSIFY,
+                agent_id="implication_trigger",
             )
 
             return self._parse_analysis_response(response, signal)

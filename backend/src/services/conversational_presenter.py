@@ -8,6 +8,8 @@ per-agent results (zero LLM cost), small LLM call for goal completion summaries.
 import logging
 from typing import Any
 
+from src.core.task_types import TaskType
+
 logger = logging.getLogger(__name__)
 
 # Agent type → conversational template config
@@ -685,6 +687,8 @@ class ConversationalPresenter:
                 max_tokens=250,
                 temperature=0.7,
                 user_id=None,
+                task=TaskType.CHAT_RESPONSE,
+                agent_id="conversational_presenter",
             )
 
             await governor.record_usage(user_id, getattr(response, "usage", None))

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.persona import PersonaBuilder, PersonaRequest
+from src.core.task_types import TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -503,6 +504,8 @@ class ReturnGreetingService:
                 max_tokens=256,
                 temperature=0.7,
                 user_id=None,  # Don't track this small call against user budget
+                task=TaskType.CHAT_RESPONSE,
+                agent_id="return_greeting",
             )
             return greeting.strip()
         except Exception as e:

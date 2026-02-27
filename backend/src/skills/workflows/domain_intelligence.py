@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.task_types import TaskType
 from src.skills.workflows.base import BaseWorkflow, WorkflowResult, WorkflowStep
 from src.skills.workflows.models import (
     UserWorkflowDefinition,
@@ -160,6 +161,8 @@ class DomainIntelligenceWorkflow(BaseWorkflow):
                 system_prompt=_DIFF_ANALYSIS_PROMPT,
                 max_tokens=2048,
                 temperature=0.3,
+                task=TaskType.SKILL_EXECUTE,
+                agent_id="domain_intelligence",
             )
 
             analysis = json.loads(analysis_text)

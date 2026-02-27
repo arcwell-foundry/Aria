@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.models.ws_events import AriaMessageEvent, ConnectedEvent, PongEvent, ThinkingEvent
 
@@ -526,6 +527,8 @@ async def _handle_user_message(
             async for token in service._llm_client.stream_response(
                 messages=conversation_messages,
                 system_prompt=system_prompt,
+                task=TaskType.CHAT_STREAM,
+                agent_id="chat",
             ):
                 full_content += token
                 await websocket.send_json(

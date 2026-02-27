@@ -38,6 +38,7 @@ from src.agents.capabilities.enrichment_providers.exa_provider import (
     ExaEnrichmentProvider,
 )
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -739,6 +740,8 @@ Only include people with clear names. Return valid JSON array only."""
                 ),
                 max_tokens=2048,
                 temperature=0.2,
+                task=TaskType.HUNTER_ENRICH,
+                agent_id="contact_enricher",
             )
 
             # Parse response

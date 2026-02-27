@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -1468,6 +1469,8 @@ class EmailAnalyzer:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
                 temperature=0.0,
+                task=TaskType.SCRIBE_CLASSIFY_EMAIL,
+                agent_id="email_analyzer",
             )
 
             # Parse JSON from response (handle markdown code blocks)

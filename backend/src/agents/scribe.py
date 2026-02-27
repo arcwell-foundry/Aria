@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -594,6 +595,8 @@ class ScribeAgent(SkillAwareAgent):
                 max_tokens=1024,
                 temperature=0.7,
                 user_id=self.user_id,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
+                agent_id="scribe",
             )
 
             parsed = _extract_json_from_text(response)
@@ -882,6 +885,8 @@ class ScribeAgent(SkillAwareAgent):
                     max_tokens=256,
                     temperature=0.3,
                     user_id=self.user_id,
+                    task=TaskType.SCRIBE_CLASSIFY_EMAIL,
+                    agent_id="scribe",
                 )
                 result["answer"] = answer
             except Exception as e:
@@ -1087,6 +1092,8 @@ class ScribeAgent(SkillAwareAgent):
                 max_tokens=2048,
                 temperature=0.7,
                 user_id=self.user_id,
+                task=TaskType.SCRIBE_DRAFT_EMAIL,
+                agent_id="scribe",
             )
 
             parsed = _extract_json_from_text(response)

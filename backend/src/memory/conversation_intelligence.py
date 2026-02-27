@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from supabase import Client
@@ -290,6 +291,8 @@ Respond with ONLY the JSON array, no additional text."""
             llm_response = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,  # Lower temperature for more consistent extraction
+                task=TaskType.MEMORY_SUMMARIZE,
+                agent_id="memory",
             )
         except Exception as e:
             logger.exception("LLM call failed during event analysis")

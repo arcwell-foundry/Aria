@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.core.business_hours import get_active_user_ids, get_user_timezone
+from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.services.proactive_router import InsightCategory, InsightPriority, ProactiveRouter
 
@@ -293,6 +294,8 @@ Respond in this exact JSON format:
         response = await llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
+            task=TaskType.ANALYST_SUMMARIZE,
+            agent_id="weekly_digest",
         )
 
         # Parse LLM response
