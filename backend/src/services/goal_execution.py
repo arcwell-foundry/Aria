@@ -2008,6 +2008,7 @@ class GoalExecutionService:
             self._db.table("prospective_memories")
             .select("task, metadata")
             .eq("user_id", user_id)
+            .eq("status", "pending")
             .execute()
         )
         gaps = [

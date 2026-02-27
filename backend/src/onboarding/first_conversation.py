@@ -749,6 +749,7 @@ class FirstConversationGenerator:
             self._db.table("prospective_memories")
             .select("task, metadata")
             .eq("user_id", user_id)
+            .eq("status", "pending")
             .execute()
         )
         gaps = [
@@ -772,6 +773,7 @@ class FirstConversationGenerator:
             self._db.table("goals")
             .select("title, description")
             .eq("user_id", user_id)
+            .in_("status", ["active", "in_progress", "pending"])
             .order("created_at", desc=False)
             .limit(1)
             .maybe_single()

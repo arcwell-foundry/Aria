@@ -27,6 +27,7 @@ def _build_chain(execute_return: Any) -> MagicMock:
     chain.insert.return_value = chain
     chain.update.return_value = chain
     chain.eq.return_value = chain
+    chain.in_.return_value = chain
     chain.order.return_value = chain
     chain.limit.return_value = chain
     chain.maybe_single.return_value = chain

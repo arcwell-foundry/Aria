@@ -891,8 +891,10 @@ async def test_get_tasks_for_goal_returns_linked_tasks() -> None:
     mock_select.eq.return_value = mock_eq1
     mock_eq2 = MagicMock()
     mock_eq1.eq.return_value = mock_eq2
+    mock_eq3 = MagicMock()
+    mock_eq2.eq.return_value = mock_eq3
     mock_order = MagicMock()
-    mock_eq2.order.return_value = mock_order
+    mock_eq3.order.return_value = mock_order
     mock_execute = MagicMock()
     mock_order.execute.return_value = mock_execute
     mock_execute.data = [
@@ -939,8 +941,10 @@ async def test_get_tasks_for_goal_returns_empty_when_none() -> None:
     mock_select.eq.return_value = mock_eq1
     mock_eq2 = MagicMock()
     mock_eq1.eq.return_value = mock_eq2
+    mock_eq3 = MagicMock()
+    mock_eq2.eq.return_value = mock_eq3
     mock_order = MagicMock()
-    mock_eq2.order.return_value = mock_order
+    mock_eq3.order.return_value = mock_order
     mock_execute = MagicMock()
     mock_order.execute.return_value = mock_execute
     mock_execute.data = []
@@ -972,8 +976,10 @@ async def test_get_tasks_for_lead_returns_linked_tasks() -> None:
     mock_select.eq.return_value = mock_eq1
     mock_eq2 = MagicMock()
     mock_eq1.eq.return_value = mock_eq2
+    mock_eq3 = MagicMock()
+    mock_eq2.eq.return_value = mock_eq3
     mock_order = MagicMock()
-    mock_eq2.order.return_value = mock_order
+    mock_eq3.order.return_value = mock_order
     mock_execute = MagicMock()
     mock_order.execute.return_value = mock_execute
     mock_execute.data = [
@@ -1020,8 +1026,10 @@ async def test_get_tasks_for_lead_returns_empty_when_none() -> None:
     mock_select.eq.return_value = mock_eq1
     mock_eq2 = MagicMock()
     mock_eq1.eq.return_value = mock_eq2
+    mock_eq3 = MagicMock()
+    mock_eq2.eq.return_value = mock_eq3
     mock_order = MagicMock()
-    mock_eq2.order.return_value = mock_order
+    mock_eq3.order.return_value = mock_order
     mock_execute = MagicMock()
     mock_order.execute.return_value = mock_execute
     mock_execute.data = []
