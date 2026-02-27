@@ -202,7 +202,7 @@ async def _read_recent_emails(
         result = await oauth_client.execute_action(
             connection_id=connection_id,
             action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
-            params={"$top": count, "$orderby": "receivedDateTime desc"},
+            params={"folder": "Inbox", "top": count, "orderby": ["receivedDateTime desc"]},
             user_id=user_id,
         )
         if result.get("successful") and result.get("data"):
@@ -240,9 +240,10 @@ async def _search_emails(
             connection_id=connection_id,
             action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
             params={
-                "$top": max_results,
+                "folder": "Inbox",
+                "top": max_results,
                 "$search": f'"{query}"',
-                "$orderby": "receivedDateTime desc",
+                "orderby": ["receivedDateTime desc"],
             },
             user_id=user_id,
         )

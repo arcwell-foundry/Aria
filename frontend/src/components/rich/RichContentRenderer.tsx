@@ -34,7 +34,7 @@ export function RichContentRenderer({ items }: RichContentRendererProps) {
   if (items.length === 0) return null;
 
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-3 space-y-2 max-w-full overflow-hidden">
       {items.map((item, i) => (
         <RichContentItem key={`${item.type}-${i}`} item={item} />
       ))}
@@ -135,7 +135,7 @@ function RichContentItem({ item }: { item: RichContent }) {
     case 'plan_approved': {
       const pa = item.data as Record<string, unknown>;
       return (
-        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 my-2 max-w-2xl">
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 my-2 max-w-full">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs">
               &#x2713;
@@ -150,7 +150,7 @@ function RichContentItem({ item }: { item: RichContent }) {
     case 'task_progress': {
       const tp = item.data as Record<string, unknown>;
       return (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 my-1 max-w-2xl">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 my-1 max-w-full">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px]">
               &#x2713;
