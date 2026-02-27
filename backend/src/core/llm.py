@@ -7,8 +7,10 @@ observability.  Extended thinking remains on the Anthropic SDK directly
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -25,6 +27,7 @@ from src.core.task_types import TaskType
 
 if TYPE_CHECKING:
     from src.core.cost_governor import CostGovernor, LLMUsage
+    from src.core.usage_logger import UsageLogger
 
 # ---------------------------------------------------------------------------
 # LiteLLM / Langfuse configuration
@@ -287,11 +290,16 @@ class LLMClient:
     directly.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        model: str = DEFAULT_MODEL,
+        usage_logger: UsageLogger | None = None,
+    ) -> None:
         """Initialize LLM client.
 
         Args:
             model: Claude model to use for generation.
+            usage_logger: Optional UsageLogger for persisting usage metrics.
         """
         self._api_key = settings.ANTHROPIC_API_KEY.get_secret_value()
         self._model = model
@@ -299,6 +307,15 @@ class LLMClient:
         self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
         # LiteLLM model string for standard calls
         self._litellm_model = f"anthropic/{model}"
+        self._usage_logger = usage_logger
+
+    def _fire_usage_log(self, **kwargs: Any) -> None:
+        """Fire-and-forget usage logging. Errors are suppressed."""
+        usage_logger = getattr(self, "_usage_logger", None)
+        if not usage_logger:
+            return
+        task = asyncio.create_task(usage_logger.log(**kwargs))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     # ------------------------------------------------------------------
     # New task-aware generation method
@@ -366,6 +383,7 @@ class LLMClient:
             },
         )
 
+        start = time.time()
         try:
             response = await _llm_circuit_breaker.call(
                 acompletion,
@@ -376,7 +394,7 @@ class LLMClient:
                 api_key=self._api_key,
                 metadata=metadata,
             )
-        except Exception:
+        except Exception as exc:
             # Fallback model on failure
             if config.fallback:
                 logger.warning(
@@ -385,18 +403,60 @@ class LLMClient:
                     task.value,
                     config.fallback,
                 )
-                response = await acompletion(
-                    model=config.fallback,
-                    messages=litellm_messages,
-                    max_tokens=effective_max_tokens,
-                    temperature=effective_temperature,
-                    api_key=self._api_key,
-                    metadata=metadata,
-                )
+                start = time.time()
+                try:
+                    response = await acompletion(
+                        model=config.fallback,
+                        messages=litellm_messages,
+                        max_tokens=effective_max_tokens,
+                        temperature=effective_temperature,
+                        api_key=self._api_key,
+                        metadata=metadata,
+                    )
+                except Exception as fallback_exc:
+                    latency_ms = int((time.time() - start) * 1000)
+                    self._fire_usage_log(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        task_type=task.value,
+                        model=config.fallback,
+                        latency_ms=latency_ms,
+                        status="error",
+                        error_message=str(fallback_exc),
+                        goal_id=goal_id,
+                    )
+                    raise
             else:
+                latency_ms = int((time.time() - start) * 1000)
+                self._fire_usage_log(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    task_type=task.value,
+                    model=effective_model,
+                    latency_ms=latency_ms,
+                    status="error",
+                    error_message=str(exc),
+                    goal_id=goal_id,
+                )
                 raise
 
+        latency_ms = int((time.time() - start) * 1000)
         text_content = response.choices[0].message.content or ""
+
+        resp_usage = getattr(response, "usage", None)
+        self._fire_usage_log(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            task_type=task.value,
+            model=getattr(response, "model", effective_model),
+            input_tokens=getattr(resp_usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(resp_usage, "completion_tokens", 0) or 0,
+            latency_ms=latency_ms,
+            goal_id=goal_id,
+        )
 
         # Record usage
         if user_id:
@@ -462,14 +522,27 @@ class LLMClient:
             },
         )
 
-        response = await _llm_circuit_breaker.call(
-            acompletion,
-            model=self._litellm_model,
-            messages=litellm_messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            api_key=self._api_key,
-        )
+        start = time.time()
+        try:
+            response = await _llm_circuit_breaker.call(
+                acompletion,
+                model=self._litellm_model,
+                messages=litellm_messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                api_key=self._api_key,
+            )
+        except Exception as exc:
+            latency_ms = int((time.time() - start) * 1000)
+            self._fire_usage_log(
+                model=self._litellm_model,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=str(exc),
+            )
+            raise
+
+        latency_ms = int((time.time() - start) * 1000)
 
         # Extract text from response (OpenAI format)
         text_content: str = str(response.choices[0].message.content or "")
@@ -477,6 +550,15 @@ class LLMClient:
         logger.debug(
             "Claude API response received",
             extra={"response_length": len(text_content)},
+        )
+
+        resp_usage = getattr(response, "usage", None)
+        self._fire_usage_log(
+            user_id=user_id or "",
+            model=getattr(response, "model", self._litellm_model),
+            input_tokens=getattr(resp_usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(resp_usage, "completion_tokens", 0) or 0,
+            latency_ms=latency_ms,
         )
 
         # Record usage (when user_id provided, fail-open)
@@ -546,15 +628,29 @@ class LLMClient:
             },
         )
 
-        response = await _llm_circuit_breaker.call(
-            acompletion,
-            model=self._litellm_model,
-            messages=litellm_messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            tools=openai_tools,
-            api_key=self._api_key,
-        )
+        start = time.time()
+        try:
+            response = await _llm_circuit_breaker.call(
+                acompletion,
+                model=self._litellm_model,
+                messages=litellm_messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tools=openai_tools,
+                api_key=self._api_key,
+            )
+        except Exception as exc:
+            latency_ms = int((time.time() - start) * 1000)
+            self._fire_usage_log(
+                user_id=user_id or "",
+                model=self._litellm_model,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=str(exc),
+            )
+            raise
+
+        latency_ms = int((time.time() - start) * 1000)
 
         choice = response.choices[0]
         message = choice.message
@@ -573,6 +669,15 @@ class LLMClient:
             stop_reason = "end_turn"
         else:
             stop_reason = finish_reason
+
+        resp_usage = getattr(response, "usage", None)
+        self._fire_usage_log(
+            user_id=user_id or "",
+            model=getattr(response, "model", self._litellm_model),
+            input_tokens=getattr(resp_usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(resp_usage, "completion_tokens", 0) or 0,
+            latency_ms=latency_ms,
+        )
 
         # Record usage (fail-open)
         usage: LLMUsage | None = None
@@ -674,9 +779,23 @@ class LLMClient:
             },
         )
 
-        response = await _llm_circuit_breaker.call(
-            self._client.messages.create, **kwargs
-        )
+        start = time.time()
+        try:
+            response = await _llm_circuit_breaker.call(
+                self._client.messages.create, **kwargs
+            )
+        except Exception as exc:
+            latency_ms = int((time.time() - start) * 1000)
+            self._fire_usage_log(
+                user_id=user_id or "",
+                model=self._model,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=str(exc),
+            )
+            raise
+
+        latency_ms = int((time.time() - start) * 1000)
 
         # Extract thinking and text blocks
         thinking_parts: list[str] = []
@@ -697,6 +816,14 @@ class LLMClient:
                 "response_length": sum(len(p) for p in text_parts),
                 "total_tokens": usage.total_tokens,
             },
+        )
+
+        self._fire_usage_log(
+            user_id=user_id or "",
+            model=self._model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            latency_ms=latency_ms,
         )
 
         # Record usage (fail-open)
@@ -766,6 +893,7 @@ class LLMClient:
         )
 
         _llm_circuit_breaker.check()
+        start = time.time()
         try:
             response = await acompletion(
                 model=self._litellm_model,
@@ -788,6 +916,26 @@ class LLMClient:
                     if delta_content:
                         yield delta_content
 
+            latency_ms = int((time.time() - start) * 1000)
+
+            # Fire usage log after stream completes
+            if stream_usage is not None:
+                self._fire_usage_log(
+                    user_id=user_id or "",
+                    model=self._litellm_model,
+                    input_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
+                    output_tokens=getattr(stream_usage, "completion_tokens", 0) or 0,
+                    latency_ms=latency_ms,
+                )
+            else:
+                self._fire_usage_log(
+                    user_id=user_id or "",
+                    model=self._litellm_model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=latency_ms,
+                )
+
             # Record usage after stream completes
             if user_id and stream_usage is not None:
                 try:
@@ -800,6 +948,14 @@ class LLMClient:
                     )
 
             _llm_circuit_breaker.record_success()
-        except Exception:
+        except Exception as exc:
+            latency_ms = int((time.time() - start) * 1000)
+            self._fire_usage_log(
+                user_id=user_id or "",
+                model=self._litellm_model,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=str(exc),
+            )
             _llm_circuit_breaker.record_failure()
             raise
