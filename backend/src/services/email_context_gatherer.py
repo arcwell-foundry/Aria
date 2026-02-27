@@ -798,6 +798,7 @@ class EmailContextGatherer:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
@@ -810,6 +811,7 @@ class EmailContextGatherer:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "gmail")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
@@ -817,6 +819,7 @@ class EmailContextGatherer:
                 self._cached_user_email = result.data.get("account_email", "") or ""
                 return result.data
 
+            logger.warning("No active email integration for user %s", user_id)
             return None
 
         except Exception as e:
@@ -1575,6 +1578,7 @@ Summary:"""
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "googlecalendar")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
@@ -1586,10 +1590,15 @@ Summary:"""
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook365calendar")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
-            return result.data if result.data else None
+            if result.data:
+                return result.data
+
+            logger.warning("No active calendar integration for user %s", user_id)
+            return None
 
         except Exception:
             return None
@@ -1769,6 +1778,7 @@ Summary:"""
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "salesforce")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
@@ -1780,10 +1790,15 @@ Summary:"""
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "hubspot")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
-            return result.data if result.data else None
+            if result.data:
+                return result.data
+
+            logger.warning("No active CRM integration for user %s", user_id)
+            return None
 
         except Exception:
             return None

@@ -520,6 +520,7 @@ class DraftFeedbackTracker:
                 .select("integration_type, composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
+                .eq("status", "active")
                 .limit(1)
                 .execute()
             )
@@ -531,6 +532,7 @@ class DraftFeedbackTracker:
                     .select("integration_type, composio_connection_id")
                     .eq("user_id", user_id)
                     .eq("integration_type", "gmail")
+                    .eq("status", "active")
                     .limit(1)
                     .execute()
                 )
@@ -542,6 +544,7 @@ class DraftFeedbackTracker:
                     integration.get("composio_connection_id"),
                 )
 
+            logger.warning("FEEDBACK_TRACKER: No active email integration for user %s", user_id)
             return None, None
 
         except Exception:

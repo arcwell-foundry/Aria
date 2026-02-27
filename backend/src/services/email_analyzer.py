@@ -786,6 +786,7 @@ class EmailAnalyzer:
                 .select("integration_type, composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
+                .eq("status", "active")
                 .limit(1)
                 .execute()
             )
@@ -797,6 +798,7 @@ class EmailAnalyzer:
                     .select("integration_type, composio_connection_id")
                     .eq("user_id", user_id)
                     .eq("integration_type", "gmail")
+                    .eq("status", "active")
                     .limit(1)
                     .execute()
                 )
@@ -1029,6 +1031,7 @@ class EmailAnalyzer:
                 self._db.table("user_integrations")
                 .select("account_email")
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .execute()
             )
             user_emails = {

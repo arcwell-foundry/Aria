@@ -34,7 +34,7 @@ class IntegrationService:
         try:
             client = SupabaseClient.get_client()
             response = (
-                client.table("user_integrations").select("*").eq("user_id", user_id).execute()
+                client.table("user_integrations").select("*").eq("user_id", user_id).eq("status", "active").execute()
             )
 
             return cast(list[dict[str, Any]], response.data) if response.data else []
@@ -64,6 +64,7 @@ class IntegrationService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", integration_type.value)
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )

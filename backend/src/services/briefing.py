@@ -1351,6 +1351,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 .select("integration_type, status")
                 .eq("user_id", user_id)
                 .in_("integration_type", ["gmail", "outlook"])
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )

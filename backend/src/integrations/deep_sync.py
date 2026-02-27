@@ -103,11 +103,13 @@ class DeepSyncService:
             .select("*")
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
+            .eq("status", "active")
             .maybe_single()
             .execute()
         )
 
         if not integration_response.data:
+            logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise CRMSyncError(
                 message=f"No active {integration_type.value} integration found for user",
                 provider=integration_type.value,
@@ -1174,11 +1176,13 @@ class DeepSyncService:
             .select("*")
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
+            .eq("status", "active")
             .maybe_single()
             .execute()
         )
 
         if not integration_response.data:
+            logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise CRMSyncError(
                 message=f"No active {integration_type.value} integration found for user",
                 provider=integration_type.value,
@@ -1737,11 +1741,13 @@ class DeepSyncService:
             .select("*")
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
+            .eq("status", "active")
             .maybe_single()
             .execute()
         )
 
         if not integration_response.data:
+            logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise Exception(f"No active {integration_type.value} integration found for user")
 
         integration = integration_response.data

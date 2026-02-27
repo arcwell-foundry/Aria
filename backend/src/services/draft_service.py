@@ -515,6 +515,7 @@ class DraftService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "gmail")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
@@ -527,10 +528,15 @@ class DraftService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
+                .eq("status", "active")
                 .maybe_single()
                 .execute()
             )
-            return cast(dict[str, Any], result.data) if result.data else None
+            if result.data:
+                return cast(dict[str, Any], result.data)
+
+            logger.warning("No active email integration for user %s", user_id)
+            return None
         except Exception:
             logger.warning(f"Failed to get email integration for user {user_id}")
             return None
