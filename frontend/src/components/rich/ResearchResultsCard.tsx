@@ -21,6 +21,8 @@ export function ResearchResultsCard({ data }: { data: ResearchResultsData }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  if (!data?.results) return null;
+
   const handleSave = async () => {
     setSaving(true);
     try {
