@@ -12,6 +12,10 @@ httpx>=0.26.0,<1.0.0
 # Anthropic Claude
 anthropic>=0.40.0,<1.0.0
 
+# LLM Gateway & Observability
+litellm>=1.80.0
+langfuse>=2.0.0,<3.0.0  # v3 incompatible with litellm callbacks
+
 # Supabase
 supabase>=2.3.0,<3.0.0
 
