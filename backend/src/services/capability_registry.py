@@ -724,6 +724,7 @@ class CapabilityRegistry:
                     "integration_type, display_name, status, sync_status, last_sync_at, last_sync_error"
                 )
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .execute()
             )
             return [

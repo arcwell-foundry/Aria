@@ -113,7 +113,7 @@ class ProfileService:
             integrations: list[dict[str, Any]] = []
             try:
                 response = (
-                    self.db.table("user_integrations").select("*").eq("user_id", user_id).execute()
+                    self.db.table("user_integrations").select("*").eq("user_id", user_id).eq("status", "active").execute()
                 )
                 integrations = response.data or []
             except Exception:

@@ -852,6 +852,7 @@ class OnboardingCompletionOrchestrator:
             self._db.table("goals")
             .select("id, title, status, config")
             .eq("user_id", user_id)
+            .in_("status", ["active", "in_progress", "pending"])
             .order("created_at", desc=True)
             .limit(10)
             .execute()

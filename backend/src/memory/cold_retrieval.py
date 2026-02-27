@@ -335,6 +335,7 @@ class ColdMemoryRetriever:
                 self.db.table("lead_memories")
                 .select("id, company_name, lifecycle_stage, status, metadata, created_at")
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .ilike("company_name", f"%{query}%")
                 .order("created_at", desc=True)
                 .limit(limit)
