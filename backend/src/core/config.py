@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     COST_GOVERNOR_OUTPUT_TOKEN_COST_PER_M: float = 15.00
     COST_GOVERNOR_THINKING_TOKEN_COST_PER_M: float = 15.00
 
+    # Tenant Monthly Budget Configuration (SaaS billing limits)
+    LLM_MONTHLY_BUDGET_PER_SEAT: float = 250.0  # $250/month per seat
+    LLM_BUDGET_ALERT_THRESHOLD: float = 0.8  # Alert at 80% utilization
+
     @field_validator("SUPABASE_URL")
     @classmethod
     def validate_supabase_url(cls, v: str) -> str:

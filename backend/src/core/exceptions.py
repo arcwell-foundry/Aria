@@ -18,6 +18,7 @@ _SAFE_MESSAGES: dict[str, str] = {
     "CircuitBreakerOpen": "A service dependency is temporarily unavailable. Please try again in a moment.",
     "RateLimitError": "Too many requests. Please try again later.",
     "BudgetExceededError": "ARIA has reached her daily analysis limit. She'll be back at full capacity tomorrow.",
+    "TenantBudgetExceededError": "Your organization's monthly AI budget has been reached. Please contact your administrator.",
     "BillingError": "Billing service temporarily unavailable.",
     "SkillNotFoundError": "The requested skill was not found.",
     "SkillExecutionError": "Skill execution failed. Please try again.",
@@ -855,5 +856,37 @@ class BudgetExceededError(ARIAException):
                 "user_id": user_id,
                 "tokens_used": tokens_used,
                 "daily_budget": daily_budget,
+            },
+        )
+
+
+class TenantBudgetExceededError(ARIAException):
+    """Monthly tenant budget exceeded error (402).
+
+    Raised when a tenant/company's monthly LLM budget has been exhausted.
+    This is distinct from BudgetExceededError which is per-user daily tokens.
+    """
+
+    def __init__(
+        self,
+        tenant_id: str,
+        monthly_spend_usd: float,
+        monthly_limit_usd: float,
+    ) -> None:
+        """Initialize tenant budget exceeded error.
+
+        Args:
+            tenant_id: The tenant that exceeded their budget.
+            monthly_spend_usd: Total spend this month in USD.
+            monthly_limit_usd: The monthly budget limit in USD.
+        """
+        super().__init__(
+            message="Your organization's monthly AI budget has been reached. Please contact your administrator.",
+            code="TENANT_BUDGET_EXCEEDED",
+            status_code=402,  # Payment Required
+            details={
+                "tenant_id": tenant_id,
+                "monthly_spend_usd": monthly_spend_usd,
+                "monthly_limit_usd": monthly_limit_usd,
             },
         )
