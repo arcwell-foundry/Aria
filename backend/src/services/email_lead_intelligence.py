@@ -156,24 +156,98 @@ class EmailLeadIntelligence:
     async def _match_sender_to_leads(
         self, user_id: str, sender_domain: str,
     ) -> list[dict[str, Any]]:
-        """Match a sender domain to existing active leads.
+        """Match a sender domain to existing active leads using two-tier matching.
 
-        Matches on company_name containing the domain's root
-        (e.g. 'savillex' from 'savillex.com').
+        TIER 1 (confidence 0.90): Exact domain match on website/domain field
+                                  or contact email domain.
+        TIER 2 (confidence 0.70): Company name match with minimum length
+                                  and coverage requirements.
+
+        Returns:
+            List of lead dicts with added 'match_confidence' field.
+            Empty list if no match found.
         """
+        client = SupabaseClient.get_client()
         domain_root = sender_domain.split(".")[0]
 
-        client = SupabaseClient.get_client()
-        response = (
+        # ------------------------------------------------------------------
+        # TIER 1: Exact domain match (confidence 0.90)
+        # Match on website field, domain field, or contact email domain
+        # ------------------------------------------------------------------
+        tier1_response = (
             client.table("lead_memories")
-            .select("id, company_name, status, health_score")
+            .select("id, company_name, status, health_score, website, domain")
             .eq("user_id", user_id)
-            .ilike("company_name", f"%{domain_root}%")
             .in_("status", ["active", "won"])
+            .or_(
+                f"website.ilike.%{sender_domain}%,"
+                f"domain.ilike.%{sender_domain}%"
+            )
             .execute()
         )
 
-        return response.data or []
+        if tier1_response.data:
+            # Found exact domain match(es)
+            return [
+                {**lead, "match_confidence": 0.90}
+                for lead in tier1_response.data
+            ]
+
+        # ------------------------------------------------------------------
+        # TIER 2: Company name match with minimum length (confidence 0.70)
+        # Only proceed if domain root is 4+ characters
+        # ------------------------------------------------------------------
+        if len(domain_root) < 4:
+            logger.info(
+                "LEAD_MATCH: Skipping tier2 for short domain_root='%s' "
+                "(sender_domain=%s, user_id=%s)",
+                domain_root, sender_domain, user_id,
+            )
+            return []
+
+        # Fetch all active leads to check coverage ratio in Python
+        # (PostgreSQL doesn't have a built-in function for this)
+        tier2_response = (
+            client.table("lead_memories")
+            .select("id, company_name, status, health_score")
+            .eq("user_id", user_id)
+            .in_("status", ["active", "won"])
+            .ilike("company_name", f"%{domain_root}%")
+            .execute()
+        )
+
+        if tier2_response.data:
+            # Filter by coverage ratio: match must cover >= 60% of company name
+            MIN_COVERAGE = 0.60
+            matches: list[dict[str, Any]] = []
+
+            for lead in tier2_response.data:
+                company_name = (lead.get("company_name") or "").lower()
+                domain_lower = domain_root.lower()
+
+                if domain_lower in company_name:
+                    # Calculate coverage: how much of company name does the match cover?
+                    coverage = len(domain_lower) / len(company_name)
+                    if coverage >= MIN_COVERAGE:
+                        matches.append({**lead, "match_confidence": 0.70})
+                    else:
+                        logger.debug(
+                            "LEAD_MATCH: Rejected tier2 match - coverage %.0f%% < 60%% "
+                            "(domain_root='%s', company='%s')",
+                            coverage * 100, domain_root, company_name,
+                        )
+
+            if matches:
+                return matches
+
+        # ------------------------------------------------------------------
+        # NO MATCH: Log and return empty
+        # ------------------------------------------------------------------
+        logger.info(
+            "LEAD_MATCH: No lead match for sender_domain=%s, domain_root=%s, user_id=%s",
+            sender_domain, domain_root, user_id,
+        )
+        return []
 
     async def _extract_signals(
         self,
