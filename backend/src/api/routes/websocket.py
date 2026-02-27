@@ -544,6 +544,19 @@ async def _handle_user_message(
                 f"email, gather full context, generate a style-matched draft, and save it "
                 f"to their {provider_name} drafts folder. Include any special instructions "
                 f"the user mentions (e.g. 'keep it brief', 'mention the Q3 timeline')."
+                f"\n\n## Email Intelligence Rules\n"
+                f"When discussing the user's emails, follow these rules:\n"
+                f"1. FACTS you can state directly: sender name, subject line, date, "
+                f"direct quotes from email content.\n"
+                f"2. INFERENCES you must hedge: any connection between an email and "
+                f"a goal, deal, or lead. Use phrases like 'This appears related to...' "
+                f"or 'Based on the content, this may connect to...'\n"
+                f"3. NEVER state that an email relates to a specific goal unless the "
+                f"email explicitly mentions that goal by name.\n"
+                f"4. When presenting email summaries, distinguish what you read in "
+                f"the email from what you are inferring about its significance.\n"
+                f"5. If you are uncertain about a connection, say so. The user "
+                f"trusts you more when you acknowledge uncertainty."
             )
 
         # Generate LLM response (tool-capable path or streaming path)
@@ -572,6 +585,23 @@ async def _handle_user_message(
                 )
             else:
                 # Streaming path (no tools)
+                # Add email awareness so ARIA can answer capability questions correctly
+                streaming_email_integration = None
+                try:
+                    streaming_email_integration = await get_email_integration(user_id)
+                except Exception:
+                    pass
+
+                if streaming_email_integration:
+                    provider_name = streaming_email_integration.get("integration_type", "email").title()
+                    system_prompt += (
+                        f"\n\n## Email Access\n"
+                        f"You have access to the user's email via their connected "
+                        f"{provider_name} integration. "
+                        f"You can read their emails, search their inbox, and view email details. "
+                        f"When the user asks if you can access their email, confirm yes."
+                    )
+
                 async for token in service._llm_client.stream_response(
                     messages=conversation_messages,
                     system_prompt=system_prompt,
