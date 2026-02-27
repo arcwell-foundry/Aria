@@ -257,7 +257,7 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
         <div className="space-y-0">
           {tasks.map((task, i) => {
             const agentColor = getAgentColor(task.agent);
-            const hasDeps = task.dependencies.length > 0;
+            const hasDeps = (task.dependencies ?? []).length > 0;
 
             return (
               <div key={`${task.title}-${i}`} className="flex gap-3">
@@ -312,7 +312,7 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
                     {hasDeps && (
                       <span className="inline-flex items-center gap-0.5 text-[9px] font-mono text-[var(--text-secondary)]">
                         <ChevronRight className="w-2.5 h-2.5" />
-                        after {task.dependencies.map(d => `#${d + 1}`).join(', ')}
+                        after {(task.dependencies ?? []).map(d => `#${d + 1}`).join(', ')}
                       </span>
                     )}
                   </div>

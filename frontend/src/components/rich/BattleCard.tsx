@@ -7,11 +7,13 @@ export interface BattleCardData {
 }
 
 export function BattleCard({ data }: { data: BattleCardData }) {
+  if (!data) return null;
+
   return (
     <div
       className="rounded-lg border border-[var(--border)] overflow-hidden"
       style={{ backgroundColor: 'var(--bg-elevated)' }}
-      data-aria-id={`battle-card-${data.competitor_name.toLowerCase().replace(/\s+/g, '-')}`}
+      data-aria-id={`battle-card-${(data.competitor_name ?? '').toLowerCase().replace(/\s+/g, '-')}`}
     >
       <div
         className="flex items-center gap-2 px-4 py-2.5"
@@ -26,7 +28,7 @@ export function BattleCard({ data }: { data: BattleCardData }) {
         </span>
       </div>
 
-      {data.rows.length > 0 && (
+      {data.rows?.length > 0 && (
         <table className="w-full text-xs">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -40,10 +42,10 @@ export function BattleCard({ data }: { data: BattleCardData }) {
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((row, i) => (
+            {data.rows?.map((row, i) => (
               <tr
                 key={i}
-                style={{ borderBottom: i < data.rows.length - 1 ? '1px solid var(--border)' : undefined }}
+                style={{ borderBottom: i < (data.rows?.length ?? 0) - 1 ? '1px solid var(--border)' : undefined }}
               >
                 <td className="px-4 py-2 font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
                   {row.label}

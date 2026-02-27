@@ -20,11 +20,13 @@ interface BriefingSummaryCardProps {
 
 export function BriefingSummaryCard({
   completedAt,
-  keyPoints,
-  actionItems,
+  keyPoints: rawKeyPoints,
+  actionItems: rawActionItems,
   onReplay,
   onActionItemClick,
 }: BriefingSummaryCardProps) {
+  const keyPoints = rawKeyPoints ?? [];
+  const actionItems = rawActionItems ?? [];
   // Format completed time
   const formatTime = (isoString: string) => {
     const date = new Date(isoString);

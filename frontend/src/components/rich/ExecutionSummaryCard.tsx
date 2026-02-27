@@ -85,12 +85,9 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
   const [feedbackSubmitted, setFeedbackSubmitted] = useState<'up' | 'down' | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  const statusConfig = getStatusConfig(data.status);
-  const StatusIcon = statusConfig.icon;
-
   const handleFeedback = useCallback(
     async (rating: 'up' | 'down') => {
-      if (feedbackSubmitting || feedbackSubmitted) return;
+      if (feedbackSubmitting || feedbackSubmitted || !data) return;
 
       setFeedbackSubmitting(true);
       setFeedbackError(null);
@@ -104,8 +101,13 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
         setFeedbackSubmitting(false);
       }
     },
-    [data.goal_id, feedbackSubmitting, feedbackSubmitted]
+    [data?.goal_id, feedbackSubmitting, feedbackSubmitted, data]
   );
+
+  if (!data) return null;
+
+  const statusConfig = getStatusConfig(data.status);
+  const StatusIcon = statusConfig.icon;
 
   return (
     <div
@@ -151,12 +153,12 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
       </div>
 
       {/* Agent Results Section */}
-      {data.agent_results.length > 0 && (
+      {data.agent_results?.length > 0 && (
         <div className="px-4 py-3 space-y-3">
           <p className="text-[11px] font-medium text-[var(--text-secondary)]">
             Agent Results
           </p>
-          {data.agent_results.map((result, i) => {
+          {data.agent_results?.map((result, i) => {
             const agent = resolveAgent(result.agent_name);
             return (
               <div
@@ -188,9 +190,9 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
                       </span>
                     )}
                   </div>
-                  {result.findings.length > 0 && (
+                  {result.findings?.length > 0 && (
                     <ul className="space-y-0.5">
-                      {result.findings.slice(0, 3).map((finding, j) => (
+                      {result.findings?.slice(0, 3).map((finding, j) => (
                         <li
                           key={j}
                           className="flex items-start gap-2 text-xs text-[var(--text-secondary)]"
@@ -212,7 +214,7 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
       )}
 
       {/* Suggested Actions Section */}
-      {data.suggested_actions.length > 0 && (
+      {data.suggested_actions?.length > 0 && (
         <div
           className="px-4 py-3"
           style={{ borderTop: '1px solid var(--border)' }}
@@ -221,7 +223,7 @@ export function ExecutionSummaryCard({ data }: ExecutionSummaryCardProps) {
             Suggested Next Steps
           </p>
           <ul className="space-y-1.5">
-            {data.suggested_actions.map((action, i) => (
+            {data.suggested_actions?.map((action, i) => (
               <li
                 key={i}
                 className="flex items-start gap-2 text-xs text-[var(--text-primary)]"

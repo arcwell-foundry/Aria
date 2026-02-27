@@ -104,7 +104,7 @@ export function BuyingSignalsModule({ signals: propSignals }: BuyingSignalsModul
                     className="font-mono text-[10px]"
                     style={{ color: STRENGTH_COLORS[signal.strength] }}
                   >
-                    {signal.strength.toUpperCase()}
+                    {signal.strength?.toUpperCase() ?? 'UNKNOWN'}
                   </span>
                   <span className="font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                     · {signal.source}

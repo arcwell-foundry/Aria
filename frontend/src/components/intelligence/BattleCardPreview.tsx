@@ -209,7 +209,7 @@ export function BattleCardPreview({
       </div>
 
       {/* Quick strengths preview (first 2) */}
-      {card.strengths.length > 0 && (
+      {card.strengths?.length > 0 && (
         <div className="mt-4 pt-3 border-t border-[var(--border)]">
           <span
             className="text-xs uppercase tracking-wide mb-2 block"
@@ -218,7 +218,7 @@ export function BattleCardPreview({
             Key Strengths
           </span>
           <ul className="space-y-1">
-            {card.strengths.slice(0, 2).map((strength, index) => (
+            {(card.strengths ?? []).slice(0, 2).map((strength, index) => (
               <li
                 key={index}
                 className="text-xs truncate"

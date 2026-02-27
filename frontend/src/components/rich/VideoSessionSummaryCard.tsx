@@ -15,10 +15,16 @@ function formatTimestamp(ts: string): string {
 
 export function VideoSessionSummaryCard({ data }: { data: VideoSessionSummaryData }) {
   const [expanded, setExpanded] = useState(false);
+
+  if (!data) return null;
+
   const Icon = data.is_audio_only ? Phone : Video;
   const label = data.is_audio_only ? 'Voice Call' : 'Video Session';
-  const topicCount = data.topics.length;
-  const actionCount = data.action_items.length;
+  const topics = data.topics ?? [];
+  const actionItems = data.action_items ?? [];
+  const transcriptEntries = data.transcript_entries ?? [];
+  const topicCount = topics.length;
+  const actionCount = actionItems.length;
 
   return (
     <div
@@ -69,13 +75,13 @@ export function VideoSessionSummaryCard({ data }: { data: VideoSessionSummaryDat
       {expanded && (
         <div className="border-t border-[var(--border)] px-4 py-3 space-y-4">
           {/* Action items */}
-          {data.action_items.length > 0 && (
+          {actionItems.length > 0 && (
             <div>
               <h4 className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Action Items
               </h4>
               <ul className="space-y-1.5">
-                {data.action_items.map((item, i) => (
+                {actionItems.map((item, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <CheckCircle2
                       size={14}
@@ -97,13 +103,13 @@ export function VideoSessionSummaryCard({ data }: { data: VideoSessionSummaryDat
           )}
 
           {/* Topics */}
-          {data.topics.length > 0 && (
+          {topics.length > 0 && (
             <div>
               <h4 className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Topics Discussed
               </h4>
               <div className="flex flex-wrap gap-1.5">
-                {data.topics.map((topic, i) => (
+                {topics.map((topic, i) => (
                   <span
                     key={i}
                     className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--border)]"
@@ -117,7 +123,7 @@ export function VideoSessionSummaryCard({ data }: { data: VideoSessionSummaryDat
           )}
 
           {/* Transcript */}
-          {data.transcript_entries.length > 0 && (
+          {transcriptEntries.length > 0 && (
             <div>
               <h4 className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Transcript
@@ -126,7 +132,7 @@ export function VideoSessionSummaryCard({ data }: { data: VideoSessionSummaryDat
                 className="max-h-[300px] overflow-y-auto space-y-2 rounded-lg p-3"
                 style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}
               >
-                {data.transcript_entries.map((entry, i) => (
+                {transcriptEntries.map((entry, i) => (
                   <div key={i} className="flex gap-2 text-xs">
                     <span className="font-mono text-[10px] flex-shrink-0 mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                       {formatTimestamp(entry.timestamp)}

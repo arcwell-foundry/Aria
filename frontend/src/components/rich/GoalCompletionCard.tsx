@@ -43,6 +43,8 @@ export function GoalCompletionCard({ data }: { data: GoalCompletionData }) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
+  if (!data) return null;
+
   const allSuccess = data.success_count === data.total_agents;
 
   const handleViewReport = () => {
@@ -105,7 +107,7 @@ export function GoalCompletionCard({ data }: { data: GoalCompletionData }) {
 
       {/* Agent results */}
       <div className="px-4 py-2 space-y-1.5">
-        {data.agent_results.map((result, i) => (
+        {(data.agent_results ?? []).map((result, i) => (
           <div
             key={`${result.agent_type}-${i}`}
             className="flex items-start gap-2 text-xs"

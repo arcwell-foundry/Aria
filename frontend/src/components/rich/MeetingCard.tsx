@@ -20,11 +20,8 @@ export function MeetingCard({ data }: MeetingCardProps) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
-  const formattedTime = data.time
-    ? new Date(data.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : '';
-
   const handleViewBrief = useCallback(() => {
+    if (!data) return;
     const label = data.company || data.title;
     const message = `Show me the meeting brief for ${label}`;
     addMessage({
@@ -38,7 +35,13 @@ export function MeetingCard({ data }: MeetingCardProps) {
       message,
       conversation_id: activeConversationId,
     });
-  }, [data.company, data.title, addMessage, activeConversationId]);
+  }, [data, addMessage, activeConversationId]);
+
+  if (!data) return null;
+
+  const formattedTime = data.time
+    ? new Date(data.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
 
   return (
     <div
@@ -54,8 +57,8 @@ export function MeetingCard({ data }: MeetingCardProps) {
           {data.company || data.title}
         </p>
         <p className="text-xs text-[var(--text-secondary)]">
-          {data.attendees.length > 0
-            ? `${data.attendees.length} attendee${data.attendees.length > 1 ? 's' : ''}`
+          {(data.attendees ?? []).length > 0
+            ? `${(data.attendees ?? []).length} attendee${(data.attendees ?? []).length > 1 ? 's' : ''}`
             : data.title}
         </p>
       </div>

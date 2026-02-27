@@ -14,6 +14,8 @@ export function LeadCard({ data }: { data: LeadCardData }) {
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
 
+  if (!data) return null;
+
   const handleAddToPipeline = async () => {
     setAdding(true);
     try {
@@ -31,7 +33,7 @@ export function LeadCard({ data }: { data: LeadCardData }) {
     <div
       className="rounded-lg border border-[var(--border)] overflow-hidden"
       style={{ backgroundColor: 'var(--bg-elevated)' }}
-      data-aria-id={`lead-card-${data.company_name.toLowerCase().replace(/\s+/g, '-')}`}
+      data-aria-id={`lead-card-${(data.company_name ?? '').toLowerCase().replace(/\s+/g, '-')}`}
     >
       {/* Header */}
       <div

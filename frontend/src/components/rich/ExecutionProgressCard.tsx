@@ -38,15 +38,16 @@ export function ExecutionProgressCard({ data: initialData }: ExecutionProgressCa
 
   const badge = STATUS_BADGES[data.overall_status] ?? STATUS_BADGES.pending;
 
-  const completedCount = data.steps.filter((s) => s.status === 'completed').length;
-  const totalCount = data.steps.length;
+  const steps = data.steps ?? [];
+  const completedCount = steps.filter((s) => s.status === 'completed').length;
+  const totalCount = steps.length;
 
   // Find the first pending step for APPROVE_EACH mode
   const nextPendingStepId = useMemo(() => {
     if (data.approval_mode !== 'APPROVE_EACH') return null;
-    const pending = data.steps.find((s) => s.status === 'pending');
+    const pending = steps.find((s) => s.status === 'pending');
     return pending?.step_id ?? null;
-  }, [data.approval_mode, data.steps]);
+  }, [data.approval_mode, steps]);
 
   // APPROVE_PLAN: "Execute All" handler
   const handleExecuteAll = useCallback(async () => {
@@ -131,7 +132,7 @@ export function ExecutionProgressCard({ data: initialData }: ExecutionProgressCa
           {/* Step list */}
           <div className="px-4 pb-3" role="list" aria-live="polite" aria-label="Execution steps">
             <AnimatePresence initial={false}>
-              {data.steps.map((step, i) => (
+              {steps.map((step, i) => (
                 <motion.div
                   key={step.step_id}
                   initial={{ opacity: 0, y: 8 }}
@@ -141,7 +142,7 @@ export function ExecutionProgressCard({ data: initialData }: ExecutionProgressCa
                 >
                   <ExecutionStepRow
                     step={step}
-                    isLast={i === data.steps.length - 1}
+                    isLast={i === steps.length - 1}
                     approvalMode={data.approval_mode}
                     isNextPendingApproval={step.step_id === nextPendingStepId}
                     trustContext={step.step_id === nextPendingStepId ? data.trust_context : undefined}

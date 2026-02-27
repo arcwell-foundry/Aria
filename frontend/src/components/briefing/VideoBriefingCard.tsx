@@ -34,8 +34,8 @@ export function VideoBriefingCard({
 
   // Format topics preview — convert any snake_case to Title Case as safety net
   const formatTopic = (topic: string) =>
-    topic.includes('_') ? topic.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : topic;
-  const topicsPreview = topics.slice(0, 3).map(formatTopic).join(', ') || 'Your daily briefing';
+    topic?.includes('_') ? topic.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : (topic ?? '');
+  const topicsPreview = (topics ?? []).slice(0, 3).map(formatTopic).join(', ') || 'Your daily briefing';
 
   return (
     <div

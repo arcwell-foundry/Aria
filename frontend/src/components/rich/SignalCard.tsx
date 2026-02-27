@@ -27,6 +27,7 @@ export function SignalCard({ data }: SignalCardProps) {
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
   const handleDraftOutreach = useCallback(() => {
+    if (!data) return;
     const message = `Draft outreach for ${data.company_name}`;
     addMessage({
       role: 'user',
@@ -39,7 +40,9 @@ export function SignalCard({ data }: SignalCardProps) {
       message,
       conversation_id: activeConversationId,
     });
-  }, [data.company_name, addMessage, activeConversationId]);
+  }, [data, addMessage, activeConversationId]);
+
+  if (!data) return null;
 
   return (
     <div
@@ -49,7 +52,7 @@ export function SignalCard({ data }: SignalCardProps) {
     >
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider bg-emerald-500/15 text-emerald-400">
-          {SIGNAL_TYPE_LABELS[data.signal_type] || data.signal_type.toUpperCase()}
+          {SIGNAL_TYPE_LABELS[data.signal_type] || data.signal_type?.toUpperCase() || 'SIGNAL'}
         </span>
         {data.health_score != null && (
           <span className={`text-xs font-mono ${data.health_score >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>

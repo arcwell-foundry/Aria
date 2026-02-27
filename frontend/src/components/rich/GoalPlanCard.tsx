@@ -387,7 +387,7 @@ export function GoalPlanCard({ data }: GoalPlanCardProps) {
         {/* Footer: agent badges + timeline */}
         <div className="px-4 pb-3 flex items-center justify-between">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {data.agents.map((agent) => {
+            {(data.agents ?? []).map((agent) => {
               const color = getAgentColor(agent);
               return (
                 <span

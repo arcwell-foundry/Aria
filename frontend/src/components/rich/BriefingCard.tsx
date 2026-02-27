@@ -82,17 +82,23 @@ interface BriefingCardProps {
 }
 
 export function BriefingCard({ data }: BriefingCardProps) {
+  if (!data) return null;
+
   // Pre-compute signal totals
+  const signals = data.signals ?? { company_news: [], market_trends: [], competitive_intel: [] };
   const allSignals = [
-    ...data.signals.company_news,
-    ...data.signals.market_trends,
-    ...data.signals.competitive_intel,
+    ...(signals.company_news ?? []),
+    ...(signals.market_trends ?? []),
+    ...(signals.competitive_intel ?? []),
   ];
   const signalCount = allSignals.length;
   const topSignals = allSignals.slice(0, 5);
 
-  const overdueCount = data.tasks.overdue.length;
-  const dueTodayCount = data.tasks.due_today.length;
+  const tasks = data.tasks ?? { overdue: [], due_today: [] };
+  const overdueCount = (tasks.overdue ?? []).length;
+  const dueTodayCount = (tasks.due_today ?? []).length;
+  const calendar = data.calendar ?? { meeting_count: 0, key_meetings: [] };
+  const leads = data.leads ?? { hot_leads: [], needs_attention: [] };
 
   return (
     <div
@@ -114,14 +120,14 @@ export function BriefingCard({ data }: BriefingCardProps) {
       <Section
         icon={<Calendar size={12} />}
         title="Calendar"
-        badge={data.calendar.meeting_count}
-        defaultOpen={data.calendar.key_meetings.length > 0}
+        badge={calendar.meeting_count}
+        defaultOpen={(calendar.key_meetings ?? []).length > 0}
       >
-        {data.calendar.key_meetings.length === 0 ? (
+        {(calendar.key_meetings ?? []).length === 0 ? (
           <p className="text-[11px] text-[var(--text-secondary)]">No meetings today.</p>
         ) : (
           <ul className="space-y-1.5">
-            {data.calendar.key_meetings.map((m, i) => (
+            {(calendar.key_meetings ?? []).map((m, i) => (
               <li key={i} className="flex items-start gap-2 text-[11px]">
                 <span className="shrink-0 font-mono text-[var(--text-secondary)] w-12">
                   {m.time}
@@ -130,7 +136,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
                   {m.title}
                 </span>
                 <span className="shrink-0 font-mono text-[var(--text-secondary)]">
-                  {m.attendees.length} {m.attendees.length === 1 ? 'person' : 'people'}
+                  {(m.attendees ?? []).length} {(m.attendees ?? []).length === 1 ? 'person' : 'people'}
                 </span>
               </li>
             ))}
@@ -142,14 +148,14 @@ export function BriefingCard({ data }: BriefingCardProps) {
       <Section
         icon={<Users size={12} />}
         title="Leads"
-        badge={data.leads.hot_leads.length + data.leads.needs_attention.length}
-        defaultOpen={data.leads.needs_attention.length > 0}
+        badge={(leads.hot_leads ?? []).length + (leads.needs_attention ?? []).length}
+        defaultOpen={(leads.needs_attention ?? []).length > 0}
       >
-        {data.leads.needs_attention.length === 0 && data.leads.hot_leads.length === 0 ? (
+        {(leads.needs_attention ?? []).length === 0 && (leads.hot_leads ?? []).length === 0 ? (
           <p className="text-[11px] text-[var(--text-secondary)]">No lead updates.</p>
         ) : (
           <ul className="space-y-1">
-            {data.leads.needs_attention.map((lead) => (
+            {(leads.needs_attention ?? []).map((lead) => (
               <li key={lead.id} className="flex items-center gap-2 text-[11px]">
                 <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--critical)]" />
                 <span className="text-[var(--text-primary)] truncate flex-1 min-w-0">
@@ -165,7 +171,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
                 )}
               </li>
             ))}
-            {data.leads.hot_leads.map((lead) => (
+            {(leads.hot_leads ?? []).map((lead) => (
               <li key={lead.id} className="flex items-center gap-2 text-[11px]">
                 <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--success)]" />
                 <span className="text-[var(--text-primary)] truncate flex-1 min-w-0">
@@ -226,7 +232,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
           <p className="text-[11px] text-[var(--text-secondary)]">All clear -- no pending tasks.</p>
         ) : (
           <ul className="space-y-1">
-            {data.tasks.overdue.map((t) => (
+            {(tasks.overdue ?? []).map((t) => (
               <li key={t.id} className="flex items-center gap-2 text-[11px]">
                 <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--critical)]" />
                 <span className="text-[var(--text-primary)] truncate flex-1 min-w-0">
@@ -239,7 +245,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
                 )}
               </li>
             ))}
-            {data.tasks.due_today.map((t) => (
+            {(tasks.due_today ?? []).map((t) => (
               <li key={t.id} className="flex items-center gap-2 text-[11px]">
                 <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]" />
                 <span className="text-[var(--text-primary)] truncate flex-1 min-w-0">

@@ -92,9 +92,9 @@ export function DebriefCard({ debrief, expandedContent }: DebriefCardProps) {
 
   const hasExpandedContent = expandedContent && (
     expandedContent.summary ||
-    expandedContent.commitments.ours.length > 0 ||
-    expandedContent.commitments.theirs.length > 0 ||
-    expandedContent.insights.length > 0
+    (expandedContent.commitments?.ours ?? []).length > 0 ||
+    (expandedContent.commitments?.theirs ?? []).length > 0 ||
+    (expandedContent.insights ?? []).length > 0
   );
 
   return (
@@ -200,20 +200,20 @@ export function DebriefCard({ debrief, expandedContent }: DebriefCardProps) {
           )}
 
           {/* Commitments */}
-          {(expandedContent.commitments.ours.length > 0 ||
-            expandedContent.commitments.theirs.length > 0) && (
+          {((expandedContent.commitments?.ours ?? []).length > 0 ||
+            (expandedContent.commitments?.theirs ?? []).length > 0) && (
             <div className="grid grid-cols-2 gap-4">
               {/* Our commitments */}
-              {expandedContent.commitments.ours.length > 0 && (
+              {(expandedContent.commitments?.ours ?? []).length > 0 && (
                 <div>
                   <h4
                     className="text-xs font-medium uppercase tracking-wide mb-2"
                     style={{ color: "var(--text-secondary)" }}
                   >
-                    Our Commitments ({expandedContent.commitments.ours.length})
+                    Our Commitments ({(expandedContent.commitments?.ours ?? []).length})
                   </h4>
                   <ul className="space-y-1">
-                    {expandedContent.commitments.ours.map((item, index) => (
+                    {(expandedContent.commitments?.ours ?? []).map((item, index) => (
                       <li
                         key={index}
                         className="text-sm flex items-start gap-2"
@@ -228,16 +228,16 @@ export function DebriefCard({ debrief, expandedContent }: DebriefCardProps) {
               )}
 
               {/* Their commitments */}
-              {expandedContent.commitments.theirs.length > 0 && (
+              {(expandedContent.commitments?.theirs ?? []).length > 0 && (
                 <div>
                   <h4
                     className="text-xs font-medium uppercase tracking-wide mb-2"
                     style={{ color: "var(--text-secondary)" }}
                   >
-                    Their Commitments ({expandedContent.commitments.theirs.length})
+                    Their Commitments ({(expandedContent.commitments?.theirs ?? []).length})
                   </h4>
                   <ul className="space-y-1">
-                    {expandedContent.commitments.theirs.map((item, index) => (
+                    {(expandedContent.commitments?.theirs ?? []).map((item, index) => (
                       <li
                         key={index}
                         className="text-sm flex items-start gap-2"
@@ -254,16 +254,16 @@ export function DebriefCard({ debrief, expandedContent }: DebriefCardProps) {
           )}
 
           {/* Insights */}
-          {expandedContent.insights.length > 0 && (
+          {(expandedContent.insights ?? []).length > 0 && (
             <div>
               <h4
                 className="text-xs font-medium uppercase tracking-wide mb-2"
                 style={{ color: "var(--text-secondary)" }}
               >
-                Insights ({expandedContent.insights.length})
+                Insights ({(expandedContent.insights ?? []).length})
               </h4>
               <div className="flex flex-wrap gap-2">
-                {expandedContent.insights.map((insight, index) => (
+                {(expandedContent.insights ?? []).map((insight, index) => (
                   <span
                     key={index}
                     className={cn(

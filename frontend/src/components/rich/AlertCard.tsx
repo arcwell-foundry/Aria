@@ -24,9 +24,9 @@ const SEVERITY_STYLES: Record<string, { bg: string; text: string; label: string 
 export function AlertCard({ data }: AlertCardProps) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
-  const severity = SEVERITY_STYLES[data.severity] || SEVERITY_STYLES.medium;
 
   const handleViewDetails = useCallback(() => {
+    if (!data) return;
     const label = data.company_name
       ? `Tell me more about the ${data.company_name} alert`
       : `Tell me more about "${data.headline}"`;
@@ -41,7 +41,11 @@ export function AlertCard({ data }: AlertCardProps) {
       message: label,
       conversation_id: activeConversationId,
     });
-  }, [data.company_name, data.headline, addMessage, activeConversationId]);
+  }, [data, addMessage, activeConversationId]);
+
+  if (!data) return null;
+
+  const severity = SEVERITY_STYLES[data.severity] || SEVERITY_STYLES.medium;
 
   return (
     <div

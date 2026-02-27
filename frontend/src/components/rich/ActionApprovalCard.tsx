@@ -31,6 +31,8 @@ export function ActionApprovalCard({ data }: { data: ActionApprovalData }) {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
 
+  if (!data) return null;
+
   const riskStyle = RISK_STYLES[data.risk_level] || RISK_STYLES.high;
 
   const handleApprove = async () => {

@@ -161,7 +161,7 @@ function GoalCard({ goal, onClick }: { goal: GoalDashboard; onClick?: () => void
             color: statusColor,
           }}
         >
-          {goal.status.toUpperCase()}
+          {goal.status?.toUpperCase() ?? 'UNKNOWN'}
         </span>
       </div>
 
@@ -353,7 +353,7 @@ function ActionItem({
                   color: riskColor,
                 }}
               >
-                {action.risk_level.toUpperCase()}
+                {action.risk_level?.toUpperCase() ?? 'UNKNOWN'}
               </span>
               <span
                 className="font-mono text-xs"
@@ -431,7 +431,7 @@ function ActionItem({
               {action.status === 'rejected' && <XCircle className="w-3.5 h-3.5" />}
               {action.status === 'failed' && <AlertCircle className="w-3.5 h-3.5" />}
               {action.status === 'executing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {action.status.replace('_', ' ').toUpperCase()}
+              {(action.status ?? '').replace('_', ' ').toUpperCase()}
             </span>
           </div>
         )}

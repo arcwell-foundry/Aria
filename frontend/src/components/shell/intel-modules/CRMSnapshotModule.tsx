@@ -45,7 +45,7 @@ export function CRMSnapshotModule({ snapshot: propSnapshot }: CRMSnapshotModuleP
     const lastSync = syncStatus?.find((s) => s.integration_type === (lead.crm_provider ?? 'salesforce'));
     snapshot = {
       account: lead.company_name,
-      stage: lead.lifecycle_stage.charAt(0).toUpperCase() + lead.lifecycle_stage.slice(1),
+      stage: lead.lifecycle_stage ? lead.lifecycle_stage.charAt(0).toUpperCase() + lead.lifecycle_stage.slice(1) : 'Unknown',
       amount: formatCurrency(lead.expected_value),
       closeDate: lead.expected_close_date
         ? new Date(lead.expected_close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -57,7 +57,7 @@ export function CRMSnapshotModule({ snapshot: propSnapshot }: CRMSnapshotModuleP
     const topLead = leads[0];
     snapshot = {
       account: topLead.company_name,
-      stage: topLead.lifecycle_stage.charAt(0).toUpperCase() + topLead.lifecycle_stage.slice(1),
+      stage: topLead.lifecycle_stage ? topLead.lifecycle_stage.charAt(0).toUpperCase() + topLead.lifecycle_stage.slice(1) : 'Unknown',
       amount: formatCurrency(topLead.expected_value),
       closeDate: topLead.expected_close_date
         ? new Date(topLead.expected_close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })

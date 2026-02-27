@@ -16,8 +16,11 @@ export function EmailDraftCard({ data }: { data: EmailDraftData }) {
   const [sent, setSent] = useState(false);
   const navigate = useNavigate();
 
-  const previewLines = data.body.split('\n').slice(0, 4).join('\n');
-  const hasMore = data.body.split('\n').length > 4;
+  if (!data) return null;
+
+  const body = data.body ?? '';
+  const previewLines = body.split('\n').slice(0, 4).join('\n');
+  const hasMore = body.split('\n').length > 4;
 
   const handleSend = async () => {
     setSending(true);

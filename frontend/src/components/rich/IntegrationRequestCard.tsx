@@ -23,6 +23,8 @@ export function IntegrationRequestCard({ data }: { data: IntegrationRequestData 
   const [dismissed, setDismissed] = useState(false);
   const navigate = useNavigate();
 
+  if (!data) return null;
+
   if (dismissed) {
     return (
       <div
@@ -75,7 +77,7 @@ export function IntegrationRequestCard({ data }: { data: IntegrationRequestData 
 
         {/* Provider badges */}
         <div className="flex items-center gap-2 mb-3">
-          {data.providers.map((provider) => (
+          {(data.providers ?? []).map((provider) => (
             <span
               key={provider}
               className="text-[11px] px-2 py-0.5 rounded-full border"

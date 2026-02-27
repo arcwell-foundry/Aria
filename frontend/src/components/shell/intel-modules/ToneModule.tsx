@@ -40,7 +40,7 @@ export function ToneModule({ tone: propTone }: ToneModuleProps) {
     tone = propTone;
   } else if (isDraftDetail && draft) {
     tone = {
-      current: `${draft.tone.charAt(0).toUpperCase()}${draft.tone.slice(1)}, ${draft.purpose}`,
+      current: `${draft.tone ? draft.tone.charAt(0).toUpperCase() + draft.tone.slice(1) : 'Default'}, ${draft.purpose ?? ''}`,
       recommendation: draft.style_match_score
         ? `Style match score: ${draft.style_match_score}%. ${draft.style_match_score > 80 ? 'Well-matched to your writing style.' : 'Consider adjusting to better match your voice.'}`
         : `Tone is set to ${draft.tone}. ARIA adapts this based on recipient preferences.`,
@@ -49,7 +49,7 @@ export function ToneModule({ tone: propTone }: ToneModuleProps) {
   } else if (drafts && drafts.length > 0) {
     const latest = drafts[0];
     tone = {
-      current: `${latest.tone.charAt(0).toUpperCase()}${latest.tone.slice(1)}, ${latest.purpose}`,
+      current: `${latest.tone ? latest.tone.charAt(0).toUpperCase() + latest.tone.slice(1) : 'Default'}, ${latest.purpose ?? ''}`,
       recommendation: 'Based on recent drafts. ARIA calibrates tone to each recipient.',
       formalityScore: TONE_FORMALITY[latest.tone] ?? 60,
     };
