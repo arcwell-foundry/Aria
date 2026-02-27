@@ -10,6 +10,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.models.ws_events import AriaMessageEvent, ConnectedEvent, PongEvent, ThinkingEvent
+from src.services.email_tools import (
+    EMAIL_TOOL_DEFINITIONS,
+    get_email_integration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -521,32 +525,76 @@ async def _handle_user_message(
         if pending_plan_context:
             system_prompt += pending_plan_context
 
-        # Stream LLM response
+        # Check if user has email integration (mirrors chat.py:2217-2224)
+        email_integration: dict[str, Any] | None = None
+        try:
+            email_integration = await get_email_integration(user_id)
+        except Exception as e:
+            logger.warning("Email integration check failed: %s", e)
+
+        if email_integration:
+            provider_name = email_integration.get("integration_type", "email").title()
+            system_prompt += (
+                f"\n\n## Email Access\n"
+                f"You have access to the user's {provider_name} email via tools. "
+                f"When they ask about emails, inbox, messages, or anything email-related, "
+                f"use the email tools to fetch real data. Do NOT say you can't access emails.\n"
+                f"You can also DRAFT replies to emails. When the user asks to draft, write, "
+                f"or reply to an email, use the draft_email_reply tool. It will find the "
+                f"email, gather full context, generate a style-matched draft, and save it "
+                f"to their {provider_name} drafts folder. Include any special instructions "
+                f"the user mentions (e.g. 'keep it brief', 'mention the Q3 timeline')."
+            )
+
+        # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
         try:
-            async for token in service._llm_client.stream_response(
-                messages=conversation_messages,
-                system_prompt=system_prompt,
-                task=TaskType.CHAT_STREAM,
-                agent_id="chat",
-            ):
-                full_content += token
+            if email_integration:
+                # Tool-capable path (non-streaming, mirrors REST chat.py:2705-2711)
+                full_content = await service._run_tool_loop(
+                    messages=conversation_messages,
+                    system_prompt=system_prompt,
+                    tools=EMAIL_TOOL_DEFINITIONS,
+                    user_id=user_id,
+                    email_integration=email_integration,
+                )
                 await websocket.send_json(
                     {
                         "type": "aria.token",
-                        "payload": {"content": token, "conversation_id": conversation_id},
+                        "payload": {"content": full_content, "conversation_id": conversation_id},
                     }
                 )
+                await websocket.send_json(
+                    {
+                        "type": "aria.stream_complete",
+                        "payload": {"conversation_id": conversation_id},
+                    }
+                )
+            else:
+                # Streaming path (no tools)
+                async for token in service._llm_client.stream_response(
+                    messages=conversation_messages,
+                    system_prompt=system_prompt,
+                    task=TaskType.CHAT_STREAM,
+                    agent_id="chat",
+                ):
+                    full_content += token
+                    await websocket.send_json(
+                        {
+                            "type": "aria.token",
+                            "payload": {"content": token, "conversation_id": conversation_id},
+                        }
+                    )
 
-            # Stream completed successfully
-            await websocket.send_json(
-                {
-                    "type": "aria.stream_complete",
-                    "payload": {"conversation_id": conversation_id},
-                }
-            )
+                # Stream completed successfully
+                await websocket.send_json(
+                    {
+                        "type": "aria.stream_complete",
+                        "payload": {"conversation_id": conversation_id},
+                    }
+                )
         except Exception as stream_err:
-            logger.error("LLM stream failed: %s", stream_err)
+            logger.error("LLM response failed: %s", stream_err)
             await websocket.send_json(
                 {
                     "type": "aria.stream_error",
