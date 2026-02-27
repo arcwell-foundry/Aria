@@ -10,7 +10,7 @@ class ModelConfig:
     timeout: int = 60
     fallback: Optional[str] = None
 
-CLAUDE_SONNET = "anthropic/claude-sonnet-4-20250514"
+CLAUDE_SONNET = "anthropic/claude-sonnet-4-6"
 CLAUDE_HAIKU = "anthropic/claude-haiku-4-5-20251001"
 
 MODEL_ROUTES: dict[TaskType, ModelConfig] = {
