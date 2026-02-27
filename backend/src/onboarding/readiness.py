@@ -412,7 +412,11 @@ class OnboardingReadinessService:
             if goal_count > 0:
                 goal_ids = [g["id"] for g in goals_result.data]
                 agents_result = (
-                    self._db.table("goal_agents").select("id").in_("goal_id", goal_ids).execute()
+                    self._db.table("goal_agents")
+                    .select("id")
+                    .in_("goal_id", goal_ids)
+                    .in_("status", ["active", "running", "pending"])
+                    .execute()
                 )
                 agent_count = len(agents_result.data or [])
                 agent_score = min(agent_count * 10, 40)

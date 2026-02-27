@@ -850,7 +850,7 @@ class OnboardingCompletionOrchestrator:
         # 2. Goals and agent results
         goals_result = (
             self._db.table("goals")
-            .select("title, status, config")
+            .select("id, title, status, config")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(10)
@@ -858,16 +858,28 @@ class OnboardingCompletionOrchestrator:
         )
         goals = goals_result.data or []
 
-        # 3. Recent agent execution outputs
-        executions_result = (
-            self._db.table("agent_executions")
-            .select("output, goal_agent_id, completed_at")
-            .order("completed_at", desc=True)
-            .limit(6)
-            .execute()
-        )
-        # Filter to this user's executions via goal_agents → goals
-        recent_executions = executions_result.data or []
+        # 3. Recent agent execution outputs (scoped to this user's goals)
+        goal_ids = [g.get("id") for g in goals if g.get("id")]
+        recent_executions: list[dict[str, Any]] = []
+        if goal_ids:
+            ga_result = (
+                self._db.table("goal_agents")
+                .select("id")
+                .in_("goal_id", goal_ids)
+                .execute()
+            )
+            ga_ids = [ga["id"] for ga in (ga_result.data or [])]
+            if ga_ids:
+                executions_result = (
+                    self._db.table("agent_executions")
+                    .select("output, goal_agent_id, completed_at")
+                    .in_("goal_agent_id", ga_ids)
+                    .in_("status", ["complete", "completed"])
+                    .order("completed_at", desc=True)
+                    .limit(6)
+                    .execute()
+                )
+                recent_executions = executions_result.data or []
 
         # 4. Readiness scores
         state_result = (

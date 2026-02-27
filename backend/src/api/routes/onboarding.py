@@ -1398,6 +1398,7 @@ async def get_activation_status(
         db.table("goals")
         .select("id, title, description, status, progress, config, goal_agents(*)")
         .eq("user_id", current_user.id)
+        .in_("status", ["active", "in_progress", "pending"])
         .execute()
     )
 

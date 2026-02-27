@@ -61,6 +61,7 @@ class AccountPlanningService:
                 "expected_value, last_activity_at, tags"
             )
             .eq("user_id", user_id)
+            .eq("status", "active")
         )
 
         if stage:

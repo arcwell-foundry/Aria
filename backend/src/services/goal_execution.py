@@ -3732,16 +3732,26 @@ class GoalExecutionService:
         )
         plan = plan_result.data
 
-        # Fetch recent executions
-        exec_result = (
-            self._db.table("agent_executions")
-            .select("goal_agent_id, status, started_at, completed_at, output")
-            .eq("goal_agent_id", goal_id)
-            .order("completed_at", desc=True)
-            .limit(10)
+        # Fetch recent executions via goal_agents for this goal
+        ga_result = (
+            self._db.table("goal_agents")
+            .select("id")
+            .eq("goal_id", goal_id)
             .execute()
         )
-        executions = exec_result.data or []
+        ga_ids = [ga["id"] for ga in (ga_result.data or [])]
+        if ga_ids:
+            exec_result = (
+                self._db.table("agent_executions")
+                .select("goal_agent_id, status, started_at, completed_at, output")
+                .in_("goal_agent_id", ga_ids)
+                .order("completed_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            executions = exec_result.data or []
+        else:
+            executions = []
 
         return {
             "goal_id": goal_id,
@@ -3958,15 +3968,26 @@ class GoalExecutionService:
                 from src.services.conversational_presenter import ConversationalPresenter
 
                 presenter = ConversationalPresenter()
-                # Fetch agent execution results for this goal
-                exec_result = (
-                    self._db.table("agent_executions")
-                    .select("goal_agent_id, status, result_summary")
-                    .eq("user_id", user_id)
+                # Fetch agent execution results for this goal via goal_agents
+                goal_agents_result = (
+                    self._db.table("goal_agents")
+                    .select("id")
+                    .eq("goal_id", goal_id)
                     .execute()
                 )
+                goal_agent_ids = [ga["id"] for ga in (goal_agents_result.data or [])]
+                exec_result_data: list[dict[str, Any]] = []
+                if goal_agent_ids:
+                    exec_result = (
+                        self._db.table("agent_executions")
+                        .select("goal_agent_id, status, result_summary")
+                        .in_("goal_agent_id", goal_agent_ids)
+                        .in_("status", ["complete", "completed"])
+                        .execute()
+                    )
+                    exec_result_data = exec_result.data or []
                 agent_results = []
-                for ex in (exec_result.data or []):
+                for ex in exec_result_data:
                     agent_results.append({
                         "agent_type": ex.get("goal_agent_id", ""),
                         "success": ex.get("status") == "completed",

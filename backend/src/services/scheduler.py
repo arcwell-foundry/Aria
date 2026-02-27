@@ -937,6 +937,7 @@ async def _run_stalled_goal_kickstart() -> None:
                     db.table("goal_agents")
                     .select("id, agent_type")
                     .eq("goal_id", goal_id)
+                    .in_("status", ["active", "running", "pending"])
                     .execute()
                 )
                 existing_agents = agents_result.data or []
@@ -973,6 +974,7 @@ async def _run_stalled_goal_kickstart() -> None:
                     db.table("agent_executions")
                     .select("id", count="exact")
                     .eq("goal_agent_id", existing_agents[0]["id"] if existing_agents else "none")
+                    .eq("status", "complete")
                     .limit(1)
                     .execute()
                 )

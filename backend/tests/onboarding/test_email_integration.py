@@ -90,9 +90,11 @@ async def test_check_connection_status_returns_connected(service, mock_db):
     mock_response.data = {
         "id": "conn-123",
         "provider": "google",
+        "status": "active",
         "created_at": "2026-02-01T00:00:00Z",
     }
-    mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+    # Chain: table().select().eq(user_id).eq(integration_type).maybe_single().execute()
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
         mock_response
     )
 
