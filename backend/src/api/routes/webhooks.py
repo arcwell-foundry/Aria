@@ -657,6 +657,7 @@ async def handle_perception_tool_call(
         db.table("video_sessions")
         .select("id, user_id, perception_events, started_at")
         .eq("tavus_conversation_id", conversation_id)
+        .in_("status", ["active", "in_progress"])
         .execute()
     )
 

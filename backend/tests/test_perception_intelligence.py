@@ -89,7 +89,7 @@ async def test_process_perception_analysis_with_lead(mock_db: MagicMock) -> None
     def table_side_effect(table_name: str) -> MagicMock:
         mock_table = MagicMock()
         if table_name == "video_sessions":
-            mock_table.select.return_value.eq.return_value.execute.return_value = session_select
+            mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = session_select
         elif table_name == "lead_memories":
             mock_table.select.return_value.eq.return_value.execute.return_value = lead_select
             mock_table.update.return_value.eq.return_value.execute.return_value = update_result
@@ -126,7 +126,7 @@ async def test_process_perception_analysis_no_lead(mock_db: MagicMock) -> None:
     session_select = MagicMock()
     session_select.data = [session]
 
-    mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = (
         session_select
     )
 
@@ -149,7 +149,7 @@ async def test_process_perception_analysis_session_not_found(mock_db: MagicMock)
     session_select = MagicMock()
     session_select.data = []
 
-    mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = (
         session_select
     )
 

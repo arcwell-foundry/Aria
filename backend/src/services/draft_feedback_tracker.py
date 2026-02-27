@@ -175,6 +175,7 @@ class DraftFeedbackTracker:
                 self._db.table("email_drafts")
                 .select("user_id")
                 .eq("user_action", "pending")
+                .eq("status", "ready")
                 .execute()
             )
 

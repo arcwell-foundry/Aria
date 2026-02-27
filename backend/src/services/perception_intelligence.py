@@ -78,11 +78,12 @@ class PerceptionIntelligenceService:
             confusion_events = int(analysis_data.get("confusion_events", 0))
             disengagement_events = int(analysis_data.get("disengagement_events", 0))
 
-            # Fetch session to check lead linkage
+            # Fetch session to check lead linkage (only active sessions)
             session_result = (
                 self._db.table("video_sessions")
                 .select("id, user_id, lead_id, started_at, ended_at, perception_events")
                 .eq("id", session_id)
+                .in_("status", ["active", "in_progress"])
                 .execute()
             )
 

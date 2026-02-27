@@ -15,7 +15,7 @@ async def test_full_perception_flow():
 
     # 1. Simulate perception tool call
     db = MagicMock()
-    db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+    db.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
         data=[{
             "id": "session-1",
             "user_id": "user-1",

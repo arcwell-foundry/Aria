@@ -208,6 +208,7 @@ class ContextBridgeService:
             .select("id, conversation_id, session_type")
             .eq("id", video_session_id)
             .eq("user_id", user_id)
+            .eq("status", "ended")
             .execute()
         )
         if not session_result.data:

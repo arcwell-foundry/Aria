@@ -800,18 +800,22 @@ async def test_send_draft_via_gmail(
                 mock_table.update.return_value = mock_update
 
             elif name == "user_integrations":
+                # Chain: select().eq(user_id).eq(integration_type).eq(status).maybe_single().execute()
                 mock_select = MagicMock()
                 mock_eq1 = MagicMock()
                 mock_eq2 = MagicMock()
+                mock_eq3 = MagicMock()
                 mock_maybe_single = MagicMock()
                 mock_maybe_single.execute.return_value = MagicMock(
                     data={
                         "id": "int-123",
                         "composio_connection_id": "conn-456",
                         "integration_type": "gmail",
+                        "status": "active",
                     }
                 )
-                mock_eq2.maybe_single.return_value = mock_maybe_single
+                mock_eq3.maybe_single.return_value = mock_maybe_single
+                mock_eq2.eq.return_value = mock_eq3
                 mock_eq1.eq.return_value = mock_eq2
                 mock_select.eq.return_value = mock_eq1
                 mock_table.select.return_value = mock_select
@@ -881,12 +885,14 @@ async def test_send_draft_via_outlook(
                 mock_table.update.return_value = mock_update
 
             elif name == "user_integrations":
+                # Chain: select().eq(user_id).eq(integration_type).eq(status).maybe_single().execute()
                 mock_select = MagicMock()
                 mock_eq1 = MagicMock()
 
                 def eq_router(field: str, value: str) -> MagicMock:
                     nonlocal gmail_call_count
                     mock_eq2 = MagicMock()
+                    mock_eq3 = MagicMock()
                     mock_maybe_single = MagicMock()
                     if value == "gmail":
                         gmail_call_count += 1
@@ -899,9 +905,11 @@ async def test_send_draft_via_outlook(
                                 "id": "int-123",
                                 "composio_connection_id": "conn-789",
                                 "integration_type": "outlook",
+                                "status": "active",
                             }
                         )
-                    mock_eq2.maybe_single.return_value = mock_maybe_single
+                    mock_eq3.maybe_single.return_value = mock_maybe_single
+                    mock_eq2.eq.return_value = mock_eq3
                     return mock_eq2
 
                 mock_eq1.eq = eq_router
