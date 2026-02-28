@@ -103,6 +103,29 @@ EMAIL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["email_identifier"],
         },
     },
+    {
+        "name": "check_email_decision",
+        "description": (
+            "Look up why ARIA did or didn't draft a reply to a specific email. "
+            "Use when the user asks 'why didn't you reply to...?' or "
+            "'what happened with that email from...?' or wants to understand "
+            "ARIA's categorization of an email."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sender_query": {
+                    "type": "string",
+                    "description": "Sender email or name to search for",
+                },
+                "subject_query": {
+                    "type": "string",
+                    "description": "Optional subject text to search for",
+                },
+            },
+            "required": ["sender_query"],
+        },
+    },
 ]
 
 
@@ -175,6 +198,8 @@ async def execute_email_tool(
             return await _handle_draft_email_reply(
                 oauth_client, connection_id, provider, user_id, params
             )
+        elif tool_name == "check_email_decision":
+            return await _check_email_decision(user_id, params)
         else:
             return {"error": f"Unknown email tool: {tool_name}"}
     except Exception as e:
@@ -472,3 +497,88 @@ async def _handle_draft_email_reply(
     )
 
     return result
+
+
+async def _check_email_decision(
+    user_id: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Look up ARIA's categorization decision for a specific email.
+
+    Searches the email_scan_log table by sender email/name and optionally
+    by subject to explain why an email was or wasn't drafted.
+
+    Args:
+        user_id: The user's ID.
+        params: Tool input with sender_query and optional subject_query.
+
+    Returns:
+        Dict with decision details or error message.
+    """
+    sender_query = params.get("sender_query", "")
+    subject_query = params.get("subject_query")
+
+    if not sender_query:
+        return {"error": "sender_query is required"}
+
+    try:
+        client = SupabaseClient.get_client()
+
+        # Build query with ILIKE for case-insensitive search
+        query = (
+            client.table("email_scan_log")
+            .select("*")
+            .eq("user_id", user_id)
+            .or_(f"sender_email.ilike.%{sender_query}%,sender_name.ilike.%{sender_query}%")
+            .order("scanned_at", desc=True)
+            .limit(5)
+        )
+
+        if subject_query:
+            # Add subject filter using ilike
+            query = query.ilike("subject", f"%{subject_query}%")
+
+        result = query.execute()
+
+        decisions = result.data or []
+        if not decisions:
+            return {
+                "found": False,
+                "message": f"No scan decision found for sender matching '{sender_query}'"
+                + (f" with subject containing '{subject_query}'" if subject_query else ""),
+            }
+
+        # Format the most recent decision
+        latest = decisions[0]
+        return {
+            "found": True,
+            "decision": {
+                "email_id": latest.get("email_id", ""),
+                "sender_email": latest.get("sender_email", ""),
+                "sender_name": latest.get("sender_name"),
+                "subject": latest.get("subject"),
+                "category": latest.get("category", "UNKNOWN"),
+                "urgency": latest.get("urgency", "NORMAL"),
+                "needs_draft": latest.get("needs_draft", False),
+                "reason": latest.get("reason", "No reason recorded"),
+                "scanned_at": latest.get("scanned_at", ""),
+            },
+            "other_matches": [
+                {
+                    "sender_email": d.get("sender_email", ""),
+                    "subject": d.get("subject"),
+                    "category": d.get("category"),
+                    "scanned_at": d.get("scanned_at", ""),
+                }
+                for d in decisions[1:]
+            ],
+        }
+
+    except Exception as e:
+        logger.error(
+            "Failed to check email decision for user %s: %s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        return {"error": f"Failed to look up email decision: {str(e)}"}
