@@ -762,9 +762,10 @@ class ChatService:
         db = get_supabase_client()
         self._cognitive_monitor = CognitiveLoadMonitor(db_client=db)
         self._proactive_service = ProactiveMemoryService(db_client=db)
+        self._salience_service = SalienceService(db_client=db)
         self._priming_service = ConversationPrimingService(
             conversation_service=ConversationService(db_client=db, llm_client=self._llm_client),
-            salience_service=SalienceService(db_client=db),
+            salience_service=self._salience_service,
             db_client=db,
         )
         self._episodic_memory = EpisodicMemory()
@@ -2148,6 +2149,28 @@ class ChatService:
                 extra={"user_id": user_id, "error": str(e)},
             )
 
+        # 4. Store conversation turn as episodic memory
+        # Centralised here so REST, SSE, and WebSocket paths all create episodes.
+        try:
+            episode = Episode(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                event_type="conversation",
+                content=f"User asked: {user_message}\nARIA responded: {assistant_message[:500]}",
+                participants=[user_id, "aria"],
+                occurred_at=datetime.now(UTC),
+                recorded_at=datetime.now(UTC),
+                context={
+                    "conversation_id": conversation_id,
+                },
+            )
+            await self._episodic_memory.store_episode(episode)
+        except Exception as e:
+            logger.warning(
+                "Episodic memory storage failed",
+                extra={"conversation_id": conversation_id, "error": str(e)},
+            )
+
     async def process_message(
         self,
         user_id: str,
@@ -2741,6 +2764,9 @@ class ChatService:
         # Build citations from used memories
         citations = self._build_citations(memories)
 
+        # Persist working memory state to Supabase (matches SSE and WebSocket paths)
+        await self._working_memory_manager.persist_session(conversation_id)
+
         # Persist messages, update metadata, extract information
         await self.persist_turn(
             user_id=user_id,
@@ -2761,26 +2787,6 @@ class ChatService:
                 )
             except Exception as e:
                 logger.warning("Companion post-response hooks failed: %s", e)
-
-        # Store conversation turn as episodic memory (unique to non-streaming path)
-        try:
-            episode = Episode(
-                id=str(uuid.uuid4()),
-                user_id=user_id,
-                event_type="conversation",
-                content=f"User asked: {message}\nARIA responded: {response_text[:500]}",
-                participants=[user_id, "aria"],
-                occurred_at=datetime.now(UTC),
-                recorded_at=datetime.now(UTC),
-                context={
-                    "conversation_id": conversation_id,
-                    "memory_count": len(memories),
-                    "had_skill_execution": skill_result is not None,
-                },
-            )
-            await self._episodic_memory.store_episode(episode)
-        except Exception as e:
-            logger.warning("Failed to store episodic memory: %s", e)
 
         total_ms = (time.perf_counter() - total_start) * 1000
 
@@ -2991,7 +2997,7 @@ class ChatService:
         limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Query memories relevant to the current message."""
-        return await self._memory_service.query(
+        results = await self._memory_service.query(
             user_id=user_id,
             query=query,
             memory_types=memory_types,
@@ -3001,6 +3007,23 @@ class ChatService:
             limit=limit,
             offset=0,
         )
+
+        # Record access for salience tracking (non-blocking)
+        for mem in results:
+            mem_type = mem.get("memory_type", "")
+            mem_id = mem.get("id", "")
+            if mem_type in ("episodic", "semantic", "lead") and mem_id:
+                try:
+                    await self._salience_service.record_access(
+                        memory_id=mem_id,
+                        memory_type=mem_type,
+                        user_id=user_id,
+                        context="chat_query",
+                    )
+                except Exception:
+                    pass  # salience tracking is non-critical
+
+        return results
 
     async def _get_proactive_insights(
         self,

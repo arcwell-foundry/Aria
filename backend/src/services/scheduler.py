@@ -1036,6 +1036,21 @@ async def _run_draft_auto_approve() -> None:
         logger.exception("Draft auto-approve scheduler run failed")
 
 
+async def _run_salience_decay() -> None:
+    """Run daily salience decay for all user memories."""
+    try:
+        from src.jobs.salience_decay import run_salience_decay_job
+
+        result = await run_salience_decay_job()
+        logger.info(
+            "Salience decay job completed: %d users, %d records updated",
+            result.get("users_processed", 0),
+            result.get("records_updated", 0),
+        )
+    except Exception:
+        logger.exception("Salience decay scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -1233,6 +1248,14 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="draft_staleness_check",
             name="Draft staleness detection for evolved threads",
+            replace_existing=True,
+        )
+
+        _scheduler.add_job(
+            _run_salience_decay,
+            trigger=CronTrigger(hour=2, minute=0),  # 2:00 AM daily
+            id="salience_decay",
+            name="Daily memory salience decay update",
             replace_existing=True,
         )
 
