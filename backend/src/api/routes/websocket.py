@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from src.core.task_types import TaskType
 from src.core.ws import ws_manager
-from src.models.ws_events import AriaMessageEvent, ConnectedEvent, PongEvent, ThinkingEvent
+from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     get_email_integration,
@@ -571,18 +571,7 @@ async def _handle_user_message(
                     user_id=user_id,
                     email_integration=email_integration,
                 )
-                await websocket.send_json(
-                    {
-                        "type": "aria.token",
-                        "payload": {"content": full_content, "conversation_id": conversation_id},
-                    }
-                )
-                await websocket.send_json(
-                    {
-                        "type": "aria.stream_complete",
-                        "payload": {"conversation_id": conversation_id},
-                    }
-                )
+                # Content sent after post-processing to avoid duplication
             else:
                 # Streaming path (no tools)
                 # Add email awareness so ARIA can answer capability questions correctly
@@ -616,13 +605,7 @@ async def _handle_user_message(
                         }
                     )
 
-                # Stream completed successfully
-                await websocket.send_json(
-                    {
-                        "type": "aria.stream_complete",
-                        "payload": {"conversation_id": conversation_id},
-                    }
-                )
+                # stream_complete sent after post-processing (below)
         except Exception as stream_err:
             logger.error("LLM response failed: %s", stream_err)
             await websocket.send_json(
@@ -676,20 +659,29 @@ async def _handle_user_message(
             # Strip the marker from the displayed message
             display_content = full_content.replace("[PLAN_APPROVED]", "").strip()
 
-        # Send complete response
+        # Send response — exactly once per user message
         ui_commands: list[dict] = []
         suggestions = _generate_suggestions(display_content, conversation_messages[-4:])
 
-        response_event = AriaMessageEvent(
-            message=display_content,
-            rich_content=rich_content,
-            ui_commands=ui_commands,
-            suggestions=suggestions,
-        )
+        if email_integration:
+            # Tool path: send complete content as a single token event
+            await websocket.send_json(
+                {
+                    "type": "aria.token",
+                    "payload": {"content": display_content, "conversation_id": conversation_id},
+                }
+            )
+
+        # Signal stream complete with metadata (no duplicate content)
         await websocket.send_json(
             {
-                **response_event.to_ws_dict(),
-                "conversation_id": conversation_id,
+                "type": "aria.stream_complete",
+                "payload": {
+                    "conversation_id": conversation_id,
+                    "rich_content": rich_content,
+                    "ui_commands": ui_commands,
+                    "suggestions": suggestions,
+                },
             }
         )
 
