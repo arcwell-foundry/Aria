@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Calendar,
+  Mail,
   Users,
   TrendingUp,
   AlertCircle,
@@ -30,6 +31,26 @@ export interface BriefingCardData {
   tasks: {
     overdue: { id: string; title: string; due_date?: string }[];
     due_today: { id: string; title: string; due_date?: string }[];
+  };
+  email_summary?: {
+    total_received: number;
+    needs_attention: {
+      sender: string;
+      company: string;
+      subject: string;
+      summary: string;
+      urgency: string;
+      draft_status: string;
+      draft_confidence: string;
+      draft_id?: string;
+      aria_notes: string;
+    }[];
+    fyi_count: number;
+    fyi_highlights: string[];
+    filtered_count: number;
+    drafts_waiting: number;
+    drafts_high_confidence: number;
+    drafts_need_review: number;
   };
 }
 
@@ -99,6 +120,8 @@ export function BriefingCard({ data }: BriefingCardProps) {
   const dueTodayCount = (tasks.due_today ?? []).length;
   const calendar = data.calendar ?? { meeting_count: 0, key_meetings: [] };
   const leads = data.leads ?? { hot_leads: [], needs_attention: [] };
+  const emailSummary = data.email_summary;
+  const [fyiOpen, setFyiOpen] = useState(false);
 
   return (
     <div
@@ -144,7 +167,107 @@ export function BriefingCard({ data }: BriefingCardProps) {
         )}
       </Section>
 
-      {/* 2. Leads */}
+      {/* 2. Email */}
+      {emailSummary && (
+        <Section
+          icon={<Mail size={12} />}
+          title="Email"
+          badge={emailSummary.drafts_waiting}
+          defaultOpen={(emailSummary.needs_attention ?? []).length > 0}
+        >
+          {/* Summary line */}
+          <p className="text-[10px] font-mono text-[var(--text-secondary)] mb-2">
+            {emailSummary.total_received} received · {emailSummary.drafts_waiting} drafts ready · {emailSummary.fyi_count} FYI
+          </p>
+
+          {/* Needs attention items */}
+          {(emailSummary.needs_attention ?? []).length > 0 && (
+            <ul className="space-y-2 mb-2">
+              {(emailSummary.needs_attention ?? []).map((item, i) => (
+                <li
+                  key={item.draft_id ?? i}
+                  className="rounded border border-[var(--border)] px-2 py-1.5"
+                  style={{ backgroundColor: 'var(--bg-surface)' }}
+                >
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-[var(--text-primary)] font-medium truncate">
+                      {item.sender}
+                    </span>
+                    <span className="text-[var(--text-secondary)] text-[10px] font-mono truncate">
+                      {item.company}
+                    </span>
+                    <span className="ml-auto shrink-0">
+                      {item.draft_status === 'ready' && (
+                        <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-mono bg-[var(--success)]/15 text-[var(--success)]">
+                          Ready
+                        </span>
+                      )}
+                      {item.draft_status === 'needs_review' && (
+                        <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-mono bg-[var(--warning)]/15 text-[var(--warning)]">
+                          Needs Review
+                        </span>
+                      )}
+                      {item.draft_status !== 'ready' && item.draft_status !== 'needs_review' && (
+                        <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-mono bg-[var(--text-secondary)]/10 text-[var(--text-secondary)]">
+                          Not Drafted
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-primary)] leading-snug mt-0.5 truncate">
+                    {item.subject}
+                  </p>
+                  <p className="text-[10px] text-[var(--text-secondary)] leading-snug mt-0.5">
+                    {item.summary}
+                  </p>
+                  {item.aria_notes && (
+                    <p className="text-[10px] text-[var(--accent)] leading-snug mt-0.5 italic">
+                      {item.aria_notes}
+                    </p>
+                  )}
+                  {item.draft_confidence && (
+                    <span className="text-[9px] font-mono text-[var(--text-secondary)] mt-0.5 inline-block">
+                      confidence: {item.draft_confidence}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* FYI highlights (collapsible) */}
+          {(emailSummary.fyi_highlights ?? []).length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                onClick={() => setFyiOpen((v) => !v)}
+              >
+                {fyiOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                <span>FYI ({emailSummary.fyi_count})</span>
+              </button>
+              {fyiOpen && (
+                <ul className="mt-1 space-y-0.5 pl-3">
+                  {(emailSummary.fyi_highlights ?? []).map((h, i) => (
+                    <li key={i} className="text-[10px] text-[var(--text-secondary)] leading-snug">
+                      · {h}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Filtered footer */}
+          {emailSummary.filtered_count > 0 && (
+            <p className="text-[9px] font-mono text-[var(--text-secondary)] mt-2 opacity-60">
+              {emailSummary.filtered_count} filtered (newsletters, automated)
+            </p>
+          )}
+        </Section>
+      )}
+
+      {/* 3. Leads */}
       <Section
         icon={<Users size={12} />}
         title="Leads"
@@ -191,7 +314,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
         )}
       </Section>
 
-      {/* 3. Signals */}
+      {/* 4. Signals */}
       <Section
         icon={<TrendingUp size={12} />}
         title="Signals"
@@ -221,7 +344,7 @@ export function BriefingCard({ data }: BriefingCardProps) {
         )}
       </Section>
 
-      {/* 4. Tasks */}
+      {/* 5. Tasks */}
       <Section
         icon={<AlertCircle size={12} />}
         title="Tasks"

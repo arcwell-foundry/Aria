@@ -55,12 +55,36 @@ export interface BriefingTasks {
   due_today: BriefingTask[];
 }
 
+export interface BriefingEmailItem {
+  sender: string;
+  company: string;
+  subject: string;
+  summary: string;
+  urgency: string;
+  draft_status: string;
+  draft_confidence: string;
+  draft_id?: string;
+  aria_notes: string;
+}
+
+export interface BriefingEmailSummary {
+  total_received: number;
+  needs_attention: BriefingEmailItem[];
+  fyi_count: number;
+  fyi_highlights: string[];
+  filtered_count: number;
+  drafts_waiting: number;
+  drafts_high_confidence: number;
+  drafts_need_review: number;
+}
+
 export interface BriefingContent {
   summary: string;
   calendar: BriefingCalendar;
   leads: BriefingLeads;
   signals: BriefingSignals;
   tasks: BriefingTasks;
+  email_summary?: BriefingEmailSummary;
   generated_at: string;
 }
 
