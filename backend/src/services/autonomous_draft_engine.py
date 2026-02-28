@@ -1211,6 +1211,75 @@ Do not include any text outside the JSON object."""
             logger.debug("DRAFT_ENGINE: Could not fetch writing_style: %s", e)
         return None
 
+    async def _get_recent_draft_feedback(
+        self,
+        user_id: str,
+        limit: int = 20,
+    ) -> dict[str, Any] | None:
+        """Fetch recent draft feedback to inform future drafts.
+
+        Queries the user's recent drafts that have been acted on
+        (approved, edited, rejected) and summarises patterns.
+
+        Args:
+            user_id: The user's ID.
+            limit: Max number of recent drafts to consider.
+
+        Returns:
+            Summary dict with counts and edit patterns, or None if no data.
+        """
+        try:
+            result = (
+                self._db.table("email_drafts")
+                .select("user_action, edit_distance, user_edited_body, body")
+                .eq("user_id", user_id)
+                .neq("user_action", "pending")
+                .order("action_detected_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            rows = result.data or []
+            if not rows:
+                return None
+
+            approved = sum(1 for r in rows if r["user_action"] == "approved")
+            edited = sum(1 for r in rows if r["user_action"] == "edited")
+            rejected = sum(1 for r in rows if r["user_action"] in ("rejected", "ignored"))
+
+            # Detect edit patterns from edited drafts
+            patterns: list[str] = []
+            edit_distances: list[float] = []
+            for r in rows:
+                if r["user_action"] == "edited" and r.get("edit_distance") is not None:
+                    edit_distances.append(r["edit_distance"])
+                    original_len = len(r.get("body") or "")
+                    edited_len = len(r.get("user_edited_body") or "")
+                    if original_len > 0 and edited_len > 0:
+                        ratio = edited_len / original_len
+                        if ratio < 0.8:
+                            patterns.append("shortened")
+                        elif ratio > 1.2:
+                            patterns.append("lengthened")
+
+            summary: dict[str, Any] = {
+                "total": len(rows),
+                "approved": approved,
+                "edited": edited,
+                "rejected": rejected,
+            }
+            if edit_distances:
+                summary["avg_edit_distance"] = sum(edit_distances) / len(edit_distances)
+            if patterns:
+                from collections import Counter
+                most_common = Counter(patterns).most_common(1)[0][0]
+                summary["common_edit_pattern"] = most_common
+
+            return summary
+
+        except Exception as e:
+            logger.debug("DRAFT_ENGINE: Could not fetch draft feedback: %s", e)
+            return None
+
     def _detect_attachment_context(
         self,
         email: Any,
@@ -1359,12 +1428,16 @@ Example of well-formatted output:
         # Fetch raw writing_style description from digital twin
         raw_writing_style = await self._get_raw_writing_style(user_id)
 
+        # Fetch recent draft feedback for learning loop
+        feedback_context = await self._get_recent_draft_feedback(user_id)
+
         prompt = self._build_reply_prompt(
             user_name, email, context, style_guidelines, calibration,
             special_instructions=special_instructions,
             formatting_patterns=formatting_patterns,
             consolidated_from=consolidated_from,
             raw_writing_style=raw_writing_style,
+            feedback_context=feedback_context,
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -1431,6 +1504,7 @@ Example of well-formatted output:
         formatting_patterns: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
         raw_writing_style: str | None = None,
+        feedback_context: dict[str, Any] | None = None,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
@@ -1717,6 +1791,28 @@ Recent messages:
             sections.append(
                 f"## Special Instructions from User\n{special_instructions}"
             )
+
+        # Recent draft feedback (learning loop)
+        if feedback_context and feedback_context.get("total", 0) > 0:
+            fb = feedback_context
+            fb_lines = [
+                "## Recent Feedback on Your Drafts",
+                f"- {fb.get('approved', 0)} drafts approved without changes",
+                f"- {fb.get('edited', 0)} drafts edited before sending",
+                f"- {fb.get('rejected', 0)} drafts dismissed or ignored",
+            ]
+            if fb.get("avg_edit_distance") is not None:
+                fb_lines.append(
+                    f"- Average similarity after edits: {fb['avg_edit_distance']:.0%}"
+                )
+            if fb.get("common_edit_pattern"):
+                fb_lines.append(
+                    f"- Common edit pattern: user typically {fb['common_edit_pattern']} your drafts"
+                )
+            fb_lines.append(
+                "Adjust your drafting to reduce the need for edits."
+            )
+            sections.append("\n".join(fb_lines))
 
         # Strategic guardrails (expanded version)
         sections.append(STRATEGIC_GUARDRAILS)

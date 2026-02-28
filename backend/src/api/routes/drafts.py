@@ -310,6 +310,12 @@ async def save_draft_to_client(
         ) from e
 
 
+class ApproveRequest(BaseModel):
+    """Request body for approving a draft, optionally with user edits."""
+
+    edited_body: str | None = Field(None, description="User-edited draft body, if modified")
+
+
 class ApproveResponse(BaseModel):
     """Response model for approving a draft."""
 
@@ -327,6 +333,7 @@ class DismissResponse(BaseModel):
 async def approve_draft(
     current_user: CurrentUser,
     draft_id: str,
+    body: ApproveRequest | None = None,
 ) -> dict[str, Any]:
     """Approve a pending draft and save it to the user's email client.
 
@@ -358,7 +365,7 @@ async def approve_draft(
     try:
         result = (
             db.table("email_drafts")
-            .select("id, status, user_id, recipient_name, subject")
+            .select("id, status, user_id, recipient_name, subject, body")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
             .maybe_single()
@@ -384,11 +391,29 @@ async def approve_draft(
             detail=f"Draft status is '{draft_data['status']}', expected 'pending_review'",
         )
 
-    # Update status to approved
+    # Update status to approved with feedback tracking
     try:
-        db.table("email_drafts").update(
-            {"status": "approved"}
-        ).eq("id", draft_id).execute()
+        from src.services.draft_feedback_tracker import levenshtein_ratio
+
+        edited_body = body.edited_body if body else None
+        original_body = draft_data.get("body", "")
+        now = datetime.now(UTC).isoformat()
+
+        update_data: dict[str, Any] = {"status": "approved", "action_detected_at": now}
+
+        if edited_body and edited_body != original_body:
+            edit_distance = levenshtein_ratio(original_body, edited_body)
+            update_data["user_action"] = "edited"
+            update_data["user_edited_body"] = edited_body
+            update_data["edit_distance"] = edit_distance
+            update_data["body"] = edited_body
+        else:
+            update_data["user_action"] = "approved"
+            update_data["edit_distance"] = 0.0
+
+        db.table("email_drafts").update(update_data).eq("id", draft_id).execute()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to update draft status to approved")
         raise HTTPException(
@@ -498,11 +523,13 @@ async def dismiss_draft(
 
     draft_data = result.data
 
-    # Update status to dismissed
+    # Update status to dismissed with feedback tracking
     try:
-        db.table("email_drafts").update(
-            {"status": "dismissed"}
-        ).eq("id", draft_id).execute()
+        db.table("email_drafts").update({
+            "status": "dismissed",
+            "user_action": "rejected",
+            "action_detected_at": datetime.now(UTC).isoformat(),
+        }).eq("id", draft_id).execute()
     except Exception as e:
         logger.exception("Failed to dismiss draft")
         raise HTTPException(
