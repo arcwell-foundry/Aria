@@ -126,6 +126,7 @@ class EmailLeadIntelligence:
                 updates.append({
                     "lead_id": lead["id"],
                     "company": lead["company_name"],
+                    "match_confidence": lead.get("match_confidence", 0.70),
                     "signal": signal,
                 })
 

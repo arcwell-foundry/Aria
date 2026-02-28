@@ -95,6 +95,7 @@ class DraftResult:
     context_id: str
     success: bool = True
     error: str | None = None
+    lead_updates: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -440,6 +441,20 @@ Do not include any text outside the JSON object."""
                 emails_deferred_active_conversation,
                 result.status,
             )
+
+            # Store Memory Delta: what ARIA learned from this email run
+            try:
+                await self._store_email_intelligence_delta(
+                    user_id=user_id,
+                    run_id=run_id,
+                    scan_result=scan_result,
+                    result=result,
+                )
+            except Exception as delta_err:
+                logger.warning(
+                    "[EMAIL_PIPELINE] Memory delta storage failed (non-fatal): %s",
+                    delta_err,
+                )
 
         except Exception as e:
             logger.error(
@@ -1054,6 +1069,7 @@ Do not include any text outside the JSON object."""
                 thread_id=email.thread_id,
                 context_id=context.id,
                 success=True,
+                lead_updates=lead_updates,
             )
 
         except Exception as e:
@@ -2166,6 +2182,110 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
                 e,
                 exc_info=True,
             )
+
+    # ------------------------------------------------------------------
+    # Memory Delta — email intelligence facts
+    # ------------------------------------------------------------------
+
+    async def _store_email_intelligence_delta(
+        self,
+        user_id: str,
+        run_id: str,
+        scan_result: Any,
+        result: ProcessingRunResult,
+    ) -> None:
+        """Store email intelligence facts in memory_semantic for Memory Delta.
+
+        After a full inbox processing run, this records what ARIA learned:
+        - Contacts who emailed and need attention
+        - Drafts prepared with confidence levels
+        - Lead matches and business intelligence signals
+
+        These facts are retrievable via MemoryDeltaPresenter.generate_delta()
+        and displayed in the frontend via the MemoryDelta component.
+        """
+        if not scan_result.needs_reply and not result.drafts:
+            return
+
+        facts_to_insert: list[dict[str, Any]] = []
+
+        # 1. Facts from emails needing reply (contact awareness)
+        for email in scan_result.needs_reply:
+            sender = email.sender_name or email.sender_email
+            subject = (email.subject or "")[:60]
+            facts_to_insert.append({
+                "user_id": user_id,
+                "fact": f"{sender} sent an email requiring attention ({subject})",
+                "confidence": 0.90 if email.category == "NEEDS_REPLY" else 0.70,
+                "source": "email_intelligence",
+                "metadata": {
+                    "category": "contact",
+                    "email_processing_run_id": run_id,
+                    "email_intelligence": True,
+                    "email_id": email.email_id,
+                },
+            })
+
+        # 2. Facts from generated drafts
+        for draft in result.drafts:
+            if not draft.success:
+                continue
+            recipient = draft.recipient_name or draft.recipient_email
+            facts_to_insert.append({
+                "user_id": user_id,
+                "fact": f"Draft reply prepared for {recipient}: {draft.subject[:60]}",
+                "confidence": draft.confidence_level,
+                "source": "email_intelligence",
+                "metadata": {
+                    "category": "contact",
+                    "email_processing_run_id": run_id,
+                    "email_intelligence": True,
+                    "draft_id": draft.draft_id,
+                },
+            })
+
+            # 3. Lead intelligence facts from each draft
+            for lead_update in draft.lead_updates:
+                match_confidence = lead_update.get("match_confidence", 0.70)
+                company = lead_update.get("company", "Unknown")
+                signal = lead_update.get("signal", {})
+                signal_detail = signal.get("detail", "")
+
+                fact_text = (
+                    f"Lead match: {company} — {signal_detail}"
+                    if signal_detail
+                    else f"Email activity detected from lead: {company}"
+                )
+
+                facts_to_insert.append({
+                    "user_id": user_id,
+                    "fact": fact_text,
+                    "confidence": match_confidence,
+                    "source": "email_intelligence",
+                    "metadata": {
+                        "category": "active_deal",
+                        "email_processing_run_id": run_id,
+                        "email_intelligence": True,
+                        "lead_id": lead_update.get("lead_id"),
+                        "signal_category": signal.get("category"),
+                    },
+                })
+
+        if not facts_to_insert:
+            return
+
+        # Batch-insert all facts into memory_semantic
+        self._db.table("memory_semantic").insert(facts_to_insert).execute()
+
+        logger.info(
+            "[EMAIL_PIPELINE] Stage: memory_delta_stored | run_id=%s | "
+            "facts_stored=%d | contacts=%d | drafts=%d | lead_signals=%d",
+            run_id,
+            len(facts_to_insert),
+            len(scan_result.needs_reply),
+            sum(1 for d in result.drafts if d.success),
+            sum(len(d.lead_updates) for d in result.drafts),
+        )
 
     # ------------------------------------------------------------------
     # Deduplication Methods
