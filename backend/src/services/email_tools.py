@@ -181,18 +181,23 @@ async def execute_email_tool(
     provider = integration.get("integration_type", "gmail").lower()
     oauth_client = get_oauth_client()
 
+    integration_id = integration.get("id", "")
+
     try:
         if tool_name == "read_recent_emails":
             return await _read_recent_emails(
-                oauth_client, connection_id, provider, user_id, params
+                oauth_client, connection_id, provider, user_id, params,
+                integration_id=integration_id,
             )
         elif tool_name == "search_emails":
             return await _search_emails(
-                oauth_client, connection_id, provider, user_id, params
+                oauth_client, connection_id, provider, user_id, params,
+                integration_id=integration_id,
             )
         elif tool_name == "read_email_detail":
             return await _read_email_detail(
-                oauth_client, connection_id, provider, user_id, params
+                oauth_client, connection_id, provider, user_id, params,
+                integration_id=integration_id,
             )
         elif tool_name == "draft_email_reply":
             return await _handle_draft_email_reply(
@@ -219,27 +224,37 @@ async def _read_recent_emails(
     provider: str,
     user_id: str,
     params: dict[str, Any],
+    *,
+    integration_id: str = "",
 ) -> dict[str, Any]:
     """Fetch recent inbox emails."""
+    from src.integrations.composio_client import execute_with_refresh
+
     count = min(params.get("count", 10), 20)
 
     if provider == "outlook":
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
             params={"folder": "Inbox", "top": count, "orderby": ["receivedDateTime desc"]},
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             messages = result["data"].get("value", [])
             return {"emails": _normalize_outlook_messages(messages)}
         return {"error": result.get("error", "Failed to fetch emails"), "emails": []}
     else:
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="GMAIL_FETCH_EMAILS",
             params={"max_results": count, "label": "INBOX"},
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             emails = result["data"].get("emails", [])
@@ -255,14 +270,21 @@ async def _search_emails(
     provider: str,
     user_id: str,
     params: dict[str, Any],
+    *,
+    integration_id: str = "",
 ) -> dict[str, Any]:
     """Search emails by query."""
+    from src.integrations.composio_client import execute_with_refresh
+
     query = params.get("query", "")
     max_results = min(params.get("max_results", 10), 20)
 
     if provider == "outlook":
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
             params={
                 "folder": "Inbox",
@@ -270,18 +292,21 @@ async def _search_emails(
                 "$search": f'"{query}"',
                 "orderby": ["receivedDateTime desc"],
             },
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             messages = result["data"].get("value", [])
             return {"emails": _normalize_outlook_messages(messages), "query": query}
         return {"error": result.get("error", "Search failed"), "emails": []}
     else:
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="GMAIL_FETCH_EMAILS",
             params={"query": query, "max_results": max_results},
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             emails = result["data"].get("emails", [])
@@ -297,18 +322,25 @@ async def _read_email_detail(
     provider: str,
     user_id: str,
     params: dict[str, Any],
+    *,
+    integration_id: str = "",
 ) -> dict[str, Any]:
     """Read a specific email by ID."""
+    from src.integrations.composio_client import execute_with_refresh
+
     message_id = params.get("message_id", "")
     if not message_id:
         return {"error": "message_id is required"}
 
     if provider == "outlook":
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="OUTLOOK_OUTLOOK_GET_MESSAGE",
             params={"message_id": message_id},
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             msg = result["data"]
@@ -325,11 +357,14 @@ async def _read_email_detail(
             }
         return {"error": result.get("error", "Failed to read email")}
     else:
-        result = await oauth_client.execute_action(
+        result = await execute_with_refresh(
+            user_id=user_id,
+            integration_id=integration_id,
             connection_id=connection_id,
+            integration_type=provider,
             action="GMAIL_GET_MESSAGE",
             params={"message_id": message_id},
-            user_id=user_id,
+            oauth_client=oauth_client,
         )
         if result.get("successful") and result.get("data"):
             msg = result["data"]

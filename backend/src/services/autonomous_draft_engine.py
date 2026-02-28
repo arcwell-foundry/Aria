@@ -2697,8 +2697,8 @@ Generate the note:"""
 
     async def _get_email_integration(
         self, user_id: str
-    ) -> tuple[str | None, str | None]:
-        """Get the email provider and connection_id for a user.
+    ) -> tuple[str | None, str | None, str | None]:
+        """Get the email provider, connection_id, and integration row ID for a user.
 
         Prefers Outlook, falls back to Gmail.
 
@@ -2706,12 +2706,12 @@ Generate the note:"""
             user_id: The user ID.
 
         Returns:
-            Tuple of (provider, connection_id) or (None, None).
+            Tuple of (provider, connection_id, integration_id) or (None, None, None).
         """
         try:
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type, composio_connection_id")
+                .select("id, integration_type, composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
                 .eq("status", "active")
@@ -2722,7 +2722,7 @@ Generate the note:"""
             if not result.data:
                 result = (
                     self._db.table("user_integrations")
-                    .select("integration_type, composio_connection_id")
+                    .select("id, integration_type, composio_connection_id")
                     .eq("user_id", user_id)
                     .eq("integration_type", "gmail")
                     .eq("status", "active")
@@ -2735,12 +2735,13 @@ Generate the note:"""
                 return (
                     integration.get("integration_type"),
                     integration.get("composio_connection_id"),
+                    integration.get("id"),
                 )
 
             logger.warning("DRAFT_ENGINE: No active email integration for user %s", user_id)
-            return None, None
+            return None, None, None
         except Exception:
-            return None, None
+            return None, None, None
 
     async def _fetch_sent_thread_ids(
         self,
@@ -2764,10 +2765,11 @@ Generate the note:"""
             Set of thread IDs found in sent messages.
         """
         try:
-            provider, connection_id = await self._get_email_integration(user_id)
+            provider, connection_id, integration_id = await self._get_email_integration(user_id)
             if not provider or not connection_id:
                 return set()
 
+            from src.integrations.composio_client import execute_with_refresh_sync
             from src.integrations.oauth import get_oauth_client
 
             oauth_client = get_oauth_client()
@@ -2787,8 +2789,11 @@ Generate the note:"""
                 # Use OUTLOOK_LIST_MESSAGES with from-address filter
                 # (replaces non-existent OUTLOOK_LIST_MAIL_FOLDER_MESSAGES)
                 safe_email = user_email.replace("'", "''")
-                response = oauth_client.execute_action_sync(
+                response = execute_with_refresh_sync(
+                    user_id=user_id,
+                    integration_id=integration_id or "",
                     connection_id=connection_id,
+                    integration_type=provider,
                     action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
                     params={
                         "$filter": (
@@ -2799,7 +2804,7 @@ Generate the note:"""
                         "$orderby": "sentDateTime desc",
                         "$select": "conversationId",
                     },
-                    user_id=user_id,
+                    oauth_client=oauth_client,
                 )
                 if response.get("successful") and response.get("data"):
                     messages = response["data"].get("value", [])
@@ -2821,14 +2826,17 @@ Generate the note:"""
                         response.get("error"),
                     )
             else:
-                response = oauth_client.execute_action_sync(
+                response = execute_with_refresh_sync(
+                    user_id=user_id,
+                    integration_id=integration_id or "",
                     connection_id=connection_id,
+                    integration_type=provider,
                     action="GMAIL_FETCH_EMAILS",
                     params={
                         "label": "SENT",
                         "max_results": 200,
                     },
-                    user_id=user_id,
+                    oauth_client=oauth_client,
                 )
                 if response.get("successful") and response.get("data"):
                     messages = response["data"].get("emails", [])

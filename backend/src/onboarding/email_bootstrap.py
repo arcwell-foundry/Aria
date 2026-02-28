@@ -401,7 +401,7 @@ class PriorityEmailIngestion:
             # First try Outlook, then fall back to Gmail
             result = (
                 self._db.table("user_integrations")
-                .select("integration_type, composio_connection_id")
+                .select("id, integration_type, composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
                 .eq("status", "active")
@@ -413,7 +413,7 @@ class PriorityEmailIngestion:
                 # Fall back to Gmail
                 result = (
                     self._db.table("user_integrations")
-                    .select("integration_type, composio_connection_id")
+                    .select("id, integration_type, composio_connection_id")
                     .eq("user_id", user_id)
                     .eq("integration_type", "gmail")
                     .eq("status", "active")
@@ -431,6 +431,7 @@ class PriorityEmailIngestion:
             integration = result.data[0]
             provider = integration.get("integration_type", "").lower()
             connection_id = integration.get("composio_connection_id")
+            integration_id = integration.get("id", "")
 
             if not connection_id:
                 logger.warning(
@@ -462,6 +463,8 @@ class PriorityEmailIngestion:
                     user_id=user_id,
                     since_date=since_date,
                     max_emails=max_emails,
+                    integration_id=integration_id,
+                    integration_type=provider,
                 )
             else:
                 # Default to Gmail
@@ -470,6 +473,8 @@ class PriorityEmailIngestion:
                     connection_id=connection_id,
                     user_id=user_id,
                     max_emails=max_emails,
+                    integration_id=integration_id,
+                    integration_type=provider,
                 )
 
             logger.info(
@@ -505,6 +510,8 @@ class PriorityEmailIngestion:
         since_date: str,
         max_emails: int,
         page_size: int = 200,
+        integration_id: str = "",
+        integration_type: str = "outlook",
     ) -> list[dict[str, Any]]:
         """Fetch Outlook sent emails with OData pagination ($skip).
 
@@ -515,10 +522,14 @@ class PriorityEmailIngestion:
             since_date: ISO date string for filtering.
             max_emails: Maximum emails to fetch.
             page_size: Number of emails per page.
+            integration_id: The user_integrations row ID for resilience wrapper.
+            integration_type: The provider type for resilience wrapper.
 
         Returns:
             List of raw Outlook email dicts.
         """
+        from src.integrations.composio_client import execute_with_refresh_sync
+
         all_emails: list[dict[str, Any]] = []
         skip = 0
         page_num = 0
@@ -538,8 +549,11 @@ class PriorityEmailIngestion:
                 len(all_emails),
             )
 
-            response = oauth_client.execute_action_sync(
+            response = execute_with_refresh_sync(
+                user_id=user_id,
+                integration_id=integration_id,
                 connection_id=connection_id,
+                integration_type=integration_type,
                 action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
                 params={
                     "folder": "SentItems",
@@ -548,7 +562,7 @@ class PriorityEmailIngestion:
                     "sent_date_time_gt": since_date,
                     "orderby": ["sentDateTime desc"],
                 },
-                user_id=user_id,
+                oauth_client=oauth_client,
             )
 
             if not response.get("successful"):
@@ -608,6 +622,8 @@ class PriorityEmailIngestion:
         user_id: str,
         max_emails: int,
         page_size: int = 200,
+        integration_id: str = "",
+        integration_type: str = "gmail",
     ) -> list[dict[str, Any]]:
         """Fetch Gmail sent emails with pageToken pagination.
 
@@ -617,10 +633,14 @@ class PriorityEmailIngestion:
             user_id: User ID for logging.
             max_emails: Maximum emails to fetch.
             page_size: Number of emails per page.
+            integration_id: The user_integrations row ID for resilience wrapper.
+            integration_type: The provider type for resilience wrapper.
 
         Returns:
             List of raw Gmail email dicts.
         """
+        from src.integrations.composio_client import execute_with_refresh_sync
+
         all_emails: list[dict[str, Any]] = []
         page_token: str | None = None
         page_num = 0
@@ -645,11 +665,14 @@ class PriorityEmailIngestion:
             if page_token:
                 params["page_token"] = page_token
 
-            response = oauth_client.execute_action_sync(
+            response = execute_with_refresh_sync(
+                user_id=user_id,
+                integration_id=integration_id,
                 connection_id=connection_id,
+                integration_type=integration_type,
                 action="GMAIL_FETCH_EMAILS",
                 params=params,
-                user_id=user_id,
+                oauth_client=oauth_client,
             )
 
             if not response.get("successful"):

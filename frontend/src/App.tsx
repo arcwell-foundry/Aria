@@ -8,6 +8,7 @@ import { IntelPanelProvider } from "@/contexts/IntelPanelContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ServiceHealthBanner } from "@/components/ServiceHealthBanner";
+import { IntegrationReconnectBanner } from "@/components/IntegrationReconnectBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
 import { useServiceHealth } from "@/hooks/useServiceHealth";
 import { CommandPalette } from "@/components/common/CommandPalette";
@@ -62,6 +63,7 @@ function AppContent() {
   return (
     <>
       <ServiceHealthBanner health={serviceHealth} />
+      <IntegrationReconnectBanner isAuthenticated={isAuthenticated} />
       <ThemeProvider>
         <SessionProvider isAuthenticated={isAuthenticated}>
           <IntelPanelProvider>
