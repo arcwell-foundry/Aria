@@ -114,6 +114,18 @@ class ProcessingRunResult:
     drafts_failed: int = 0
     status: str = "running"
     error_message: str | None = None
+    cross_references: list["TopicCluster"] = field(default_factory=list)
+
+
+@dataclass
+class TopicCluster:
+    """A group of emails connected by a shared business topic."""
+
+    topic: str
+    email_ids: list[str]
+    senders: list[str]
+    subjects: list[str]
+    connection: str  # LLM-generated explanation
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +282,21 @@ Do not include any text outside the JSON object."""
                     user_id,
                 )
 
+            # 2b. Cross-thread topic clustering
+            cross_ref_clusters: list[TopicCluster] = []
+            try:
+                cross_ref_clusters = await self._cluster_emails_by_topic(
+                    scan_result.needs_reply, scan_result.fyi,
+                )
+            except Exception as e:
+                logger.warning("[EMAIL_PIPELINE] Topic clustering failed (non-fatal): %s", e)
+
+            # Build lookup: email_id → cross-references for that email
+            email_cross_refs: dict[str, list[TopicCluster]] = {}
+            for cluster in cross_ref_clusters:
+                for eid in cluster.email_ids:
+                    email_cross_refs.setdefault(eid, []).append(cluster)
+
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
 
@@ -389,6 +416,7 @@ Do not include any text outside the JSON object."""
                         user_id, user_name, email, is_learning_mode, run_id,
                         confidence_tier=confidence_tier,
                         consolidated_from=consolidated_from,
+                        cross_references=email_cross_refs.get(email.email_id),
                     )
                     result.drafts.append(draft)
                     if draft.success:
@@ -429,17 +457,20 @@ Do not include any text outside the JSON object."""
                 else:
                     result.status = "failed"
 
+            result.cross_references = cross_ref_clusters
+
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
                 "skipped_existing=%d | skipped_already_replied=%d | "
-                "deferred_active=%d | status=%s",
+                "deferred_active=%d | cross_refs=%d | status=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
                 emails_skipped_already_replied,
                 emails_deferred_active_conversation,
+                len(cross_ref_clusters),
                 result.status,
             )
 
@@ -798,6 +829,7 @@ Do not include any text outside the JSON object."""
         run_id: str | None = None,
         confidence_tier: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
+        cross_references: list[TopicCluster] | None = None,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -959,6 +991,7 @@ Do not include any text outside the JSON object."""
                 guardrail_warnings=guardrail_warnings,
                 confidence_tier=confidence_tier,
                 consolidated_from=consolidated_from,
+                cross_references=cross_references,
             )
 
             # h. Determine risk policy via ActionGatekeeper
@@ -1848,6 +1881,111 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         return round(min(base + context_score + known_contact + thread_depth, 1.0), 3)
 
     # ------------------------------------------------------------------
+    # Cross-Thread Topic Clustering
+    # ------------------------------------------------------------------
+
+    async def _cluster_emails_by_topic(
+        self,
+        needs_reply: list[Any],
+        fyi: list[Any],
+    ) -> list[TopicCluster]:
+        """Cluster related emails across threads by business topic.
+
+        Uses LLM to identify emails that share a common business topic
+        even if they come from different senders / threads.
+
+        Args:
+            needs_reply: Emails categorised as NEEDS_REPLY.
+            fyi: Emails categorised as FYI.
+
+        Returns:
+            List of TopicCluster objects (only clusters with 2+ emails).
+        """
+        all_emails = list(needs_reply) + list(fyi)
+        if len(all_emails) < 2:
+            return []
+
+        # Cap at 30 emails (NEEDS_REPLY first, then FYI)
+        capped = all_emails[:30]
+
+        # Build email list for prompt
+        email_lines: list[str] = []
+        for idx, email in enumerate(capped):
+            sender = email.sender_name or email.sender_email
+            subject = (email.subject or "(no subject)")[:80]
+            cat = getattr(email, "category", "UNKNOWN")
+            email_lines.append(f"{idx}. [{cat}] {sender}: {subject}")
+
+        prompt = (
+            "You are an email intelligence analyst. Given the following list of emails, "
+            "identify groups of 2 or more emails that share a common business topic — "
+            "even if they come from different senders or threads.\n\n"
+            "Emails:\n" + "\n".join(email_lines) + "\n\n"
+            "Return ONLY a JSON array. Each element must have:\n"
+            '- "topic": short topic label (3-6 words)\n'
+            '- "email_indices": array of integer indices from the list above\n'
+            '- "connection": one sentence explaining how these emails relate\n\n'
+            "Rules:\n"
+            "- Only include clusters with 2+ emails\n"
+            "- An email may appear in multiple clusters\n"
+            "- If no clusters exist, return []\n"
+            "- Return raw JSON only — no markdown fences, no commentary\n"
+        )
+
+        try:
+            response = await self._llm.generate_response(
+                prompt,
+                task_type=TaskType.ANALYST_SUMMARIZE,
+                max_tokens=500,
+                temperature=0.0,
+            )
+
+            # Strip markdown fences if present
+            text = response.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+            text = text.strip()
+
+            raw_clusters = json.loads(text)
+            if not isinstance(raw_clusters, list):
+                return []
+
+            clusters: list[TopicCluster] = []
+            for item in raw_clusters:
+                indices = item.get("email_indices", [])
+                # Bounds-check indices
+                valid_indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(capped)]
+                if len(valid_indices) < 2:
+                    continue
+
+                emails_in_cluster = [capped[i] for i in valid_indices]
+                clusters.append(
+                    TopicCluster(
+                        topic=str(item.get("topic", "Related emails")),
+                        email_ids=[e.email_id for e in emails_in_cluster],
+                        senders=[e.sender_name or e.sender_email for e in emails_in_cluster],
+                        subjects=[e.subject or "(no subject)" for e in emails_in_cluster],
+                        connection=str(item.get("connection", "")),
+                    )
+                )
+
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: topic_clustering | emails=%d | clusters=%d",
+                len(capped),
+                len(clusters),
+            )
+            return clusters
+
+        except json.JSONDecodeError as e:
+            logger.warning("[EMAIL_PIPELINE] Topic clustering JSON parse failed: %s", e)
+            return []
+        except Exception as e:
+            logger.warning("[EMAIL_PIPELINE] Topic clustering failed: %s", e)
+            return []
+
+    # ------------------------------------------------------------------
     # ARIA Notes Generation
     # ------------------------------------------------------------------
 
@@ -1862,6 +2000,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         guardrail_warnings: list[str] | None = None,
         confidence_tier: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
+        cross_references: list[TopicCluster] | None = None,
     ) -> tuple[str, list[str]]:
         """Generate internal notes explaining ARIA's reasoning.
 
@@ -1997,6 +2136,19 @@ Generate the note:"""
                 f"This reply addresses {total_msgs} messages from {sender_label} "
                 f"in the same thread"
             )
+
+        # Add cross-thread connection notes
+        if cross_references:
+            for cluster in cross_references:
+                other_senders = [
+                    s for s in cluster.senders
+                    if s != (email.sender_name or email.sender_email)
+                ]
+                if other_senders:
+                    notes.append(
+                        f"Note: {', '.join(other_senders[:2])} also emailed about "
+                        f"this topic — {cluster.connection}"
+                    )
 
         # Add guardrail warnings prominently at the top if present
         if guardrail_warnings:
@@ -2408,6 +2560,24 @@ Generate the note:"""
                     },
                 })
 
+        # 4. Cross-thread connection facts
+        for cluster in result.cross_references:
+            facts_to_insert.append({
+                "user_id": user_id,
+                "fact": (
+                    f"Connected: {' and '.join(cluster.subjects[:2])} "
+                    f"both relate to {cluster.topic}"
+                ),
+                "confidence": 0.70,
+                "source": "cross_email_analysis",
+                "metadata": {
+                    "category": "cross_reference",
+                    "email_processing_run_id": run_id,
+                    "email_intelligence": True,
+                    "email_ids": cluster.email_ids,
+                },
+            })
+
         if not facts_to_insert:
             return
 
@@ -2416,12 +2586,13 @@ Generate the note:"""
 
         logger.info(
             "[EMAIL_PIPELINE] Stage: memory_delta_stored | run_id=%s | "
-            "facts_stored=%d | contacts=%d | drafts=%d | lead_signals=%d",
+            "facts_stored=%d | contacts=%d | drafts=%d | lead_signals=%d | cross_refs=%d",
             run_id,
             len(facts_to_insert),
             len(scan_result.needs_reply),
             sum(1 for d in result.drafts if d.success),
             sum(len(d.lead_updates) for d in result.drafts),
+            len(result.cross_references),
         )
 
     # ------------------------------------------------------------------

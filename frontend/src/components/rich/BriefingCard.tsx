@@ -7,6 +7,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  Link2,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,11 @@ export interface BriefingCardData {
     drafts_waiting: number;
     drafts_high_confidence: number;
     drafts_need_review: number;
+    connections?: {
+      topic: string;
+      emails: string[];
+      insight: string;
+    }[];
   };
 }
 
@@ -255,6 +261,35 @@ export function BriefingCard({ data }: BriefingCardProps) {
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+
+          {/* Connected threads */}
+          {(emailSummary.connections ?? []).length > 0 && (
+            <div className="mt-2 border-t border-[var(--border)] pt-2">
+              <div className="flex items-center gap-1 text-[10px] font-mono text-[var(--text-secondary)] mb-1">
+                <Link2 size={10} />
+                <span>Connected threads</span>
+              </div>
+              <ul className="space-y-1">
+                {(emailSummary.connections ?? []).map((conn, i) => (
+                  <li
+                    key={i}
+                    className="rounded border border-[var(--accent)]/20 px-2 py-1"
+                    style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 5%, transparent)' }}
+                  >
+                    <p className="text-[10px] text-[var(--accent)] font-medium">{conn.topic}</p>
+                    {conn.emails.map((e, j) => (
+                      <p key={j} className="text-[10px] text-[var(--text-secondary)] leading-snug">
+                        · {e}
+                      </p>
+                    ))}
+                    <p className="text-[9px] text-[var(--text-secondary)] italic mt-0.5">
+                      {conn.insight}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

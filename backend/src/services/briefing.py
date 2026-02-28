@@ -57,6 +57,7 @@ class EmailSummary(BaseModel):
     drafts_high_confidence: int = 0
     drafts_need_review: int = 0
     strategic_patterns: list[dict[str, Any]] = []
+    connections: list[dict[str, Any]] = []
 
 
 logger = logging.getLogger(__name__)
@@ -1342,6 +1343,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
             "drafts_high_confidence": 0,
             "drafts_need_review": 0,
             "strategic_patterns": [],
+            "connections": [],
         }
 
         try:
@@ -1431,6 +1433,19 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
             # Cross-email pattern synthesis
             email_patterns = await self._synthesize_email_patterns(user_id, scan_result)
 
+            # Build cross-thread connections from clustering results
+            connections = [
+                {
+                    "topic": c.topic,
+                    "emails": [
+                        f"{s}: {subj}"
+                        for s, subj in zip(c.senders, c.subjects)
+                    ],
+                    "insight": c.connection,
+                }
+                for c in getattr(processing_result, "cross_references", [])
+            ]
+
             return {
                 "total_received": scan_result.total_emails,
                 "needs_attention": needs_attention,
@@ -1442,6 +1457,7 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 "drafts_high_confidence": drafts_high_confidence,
                 "drafts_need_review": drafts_need_review,
                 "strategic_patterns": email_patterns,
+                "connections": connections,
             }
 
         except Exception:
