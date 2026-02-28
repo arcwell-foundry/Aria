@@ -581,7 +581,7 @@ Do not include any text outside the JSON object."""
             confidence = max(0.1, confidence - (len(guardrail_warnings) * 0.1))
 
             # g. Generate ARIA notes (with guardrail warnings)
-            aria_notes = await self._generate_aria_notes(
+            aria_notes, context_sources = await self._generate_aria_notes(
                 email, context, style_score, confidence,
                 lead_updates=lead_updates,
                 guardrail_warnings=guardrail_warnings,
@@ -603,9 +603,11 @@ Do not include any text outside the JSON object."""
                 urgency=email.urgency,
             )
 
-            # Update draft_context FK
+            # Update draft_context FK and store context_sources
             if context.id:
-                await self._context_gatherer.update_draft_id(context.id, draft_id)
+                await self._context_gatherer.update_draft_id(
+                    context.id, draft_id, context_sources=context_sources
+                )
 
             # i. Notify user for review (HIGH risk — no auto-save to client)
             try:
@@ -950,7 +952,7 @@ Do not include any text outside the JSON object."""
             )
 
             # g. Generate ARIA notes (with confidence tier, learning mode, and guardrail warnings)
-            aria_notes = await self._generate_aria_notes(
+            aria_notes, context_sources = await self._generate_aria_notes(
                 email, context, style_score, confidence, is_learning_mode,
                 lead_updates=lead_updates,
                 guardrail_warnings=guardrail_warnings,
@@ -978,9 +980,11 @@ Do not include any text outside the JSON object."""
                 confidence_tier=tier_label,
             )
 
-            # h2. Update draft_context.draft_id FK now that draft exists
+            # h2. Update draft_context.draft_id FK now that draft exists, store context_sources
             if context.id:
-                await self._context_gatherer.update_draft_id(context.id, draft_id)
+                await self._context_gatherer.update_draft_id(
+                    context.id, draft_id, context_sources=context_sources
+                )
 
             logger.info(
                 "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s",
@@ -1840,15 +1844,125 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         guardrail_warnings: list[str] | None = None,
         confidence_tier: dict[str, Any] | None = None,
         consolidated_from: list[dict[str, Any]] | None = None,
-    ) -> str:
+    ) -> tuple[str, list[str]]:
         """Generate internal notes explaining ARIA's reasoning.
 
         These notes help the user understand why ARIA drafted what it did,
         which context sources were used, and what was missing.
+
+        Returns:
+            tuple of (aria_notes string, context_sources list for metadata)
         """
+        sender_name = email.sender_name or email.sender_email
+        context_sources: list[str] = []
+
+        # ------------------------------------------------------------------
+        # Collect specific context sources for conversational notes
+        # ------------------------------------------------------------------
+
+        # Thread messages
+        if context.thread_context and context.thread_context.messages:
+            msg_count = len(context.thread_context.messages)
+            if msg_count > 0:
+                context_sources.append(
+                    f"your last {msg_count} emails with {sender_name}"
+                )
+
+        # Calendar context
+        if context.calendar_context and context.calendar_context.connected:
+            upcoming = context.calendar_context.upcoming_meetings or []
+            if upcoming:
+                # Get the first upcoming meeting
+                meeting = upcoming[0]
+                meeting_date = meeting.get("start", "")
+                meeting_title = meeting.get("title", "meeting")
+                # Parse date for readable format
+                if meeting_date:
+                    try:
+                        dt = datetime.fromisoformat(meeting_date.replace("Z", "+00:00"))
+                        readable_date = dt.strftime("%A, %B %d")
+                        context_sources.append(
+                            f"your upcoming {meeting_title.lower()} with {sender_name} on {readable_date}"
+                        )
+                    except Exception:
+                        context_sources.append(
+                            f"your upcoming meeting with {sender_name}"
+                        )
+                else:
+                    context_sources.append(f"your upcoming meeting with {sender_name}")
+
+        # Recipient research
+        if context.recipient_research and (
+            context.recipient_research.sender_title
+            or context.recipient_research.bio
+        ):
+            title = context.recipient_research.sender_title
+            company = context.recipient_research.sender_company
+            if title and company:
+                context_sources.append(f"{sender_name}'s role as {title} at {company}")
+            elif title:
+                context_sources.append(f"{sender_name}'s role as {title}")
+            elif context.recipient_research.bio:
+                context_sources.append(f"background on {sender_name}")
+
+        # CRM context
+        if context.crm_context and context.crm_context.connected:
+            lead_stage = context.crm_context.lead_stage
+            deal_value = context.crm_context.deal_value
+            if lead_stage:
+                context_sources.append(f"the {lead_stage} stage in your CRM")
+            if deal_value:
+                context_sources.append(f"the ${deal_value:,.0f} deal value")
+
+        # Corporate memory
+        if context.corporate_memory and context.corporate_memory.facts:
+            fact_count = len(context.corporate_memory.facts)
+            context_sources.append(f"{fact_count} corporate memory facts")
+
+        # Relationship history
+        if context.relationship_history and context.relationship_history.total_emails > 0:
+            total = context.relationship_history.total_emails
+            context_sources.append(f"your {total}-email history with {sender_name}")
+
+        # ------------------------------------------------------------------
+        # Generate conversational notes using LLM
+        # ------------------------------------------------------------------
+
+        conversational_note = ""
+        if context_sources:
+            try:
+                prompt = f"""Generate a brief 1-2 sentence note explaining what context you used to draft a reply to {sender_name}. Be specific and conversational, like a colleague would explain. Do not use bullet points or lists.
+
+Example good notes:
+- "Referenced your last 3 emails with Sarah, your Moderna meeting next Thursday, and the deal stage in your pipeline."
+- "Used your conversation history with John and his role as VP of Sales at Acme."
+- "Based on your upcoming meeting and the Negotiation stage in CRM."
+
+Available context sources I actually used: {', '.join(context_sources)}
+
+Generate the note:"""
+
+                response = await self._llm.generate_response(
+                    prompt,
+                    task_type=TaskType.EMAIL_DRAFT,
+                    max_tokens=100,
+                    temperature=0.3,
+                )
+                conversational_note = response.strip()
+            except Exception as e:
+                logger.warning("ARIA_NOTES: LLM generation failed, using fallback: %s", e)
+                conversational_note = f"Used: {', '.join(context_sources[:3])}"
+
+        # ------------------------------------------------------------------
+        # Build full notes with all metadata
+        # ------------------------------------------------------------------
         notes: list[str] = []
 
-        # Add confidence tier note first (replaces the old learning mode note)
+        # Add conversational note first if available
+        if conversational_note:
+            notes.append(conversational_note)
+
+        # Add confidence tier note (replaces the old learning mode note)
         if confidence_tier:
             tier = confidence_tier.get("tier", "UNKNOWN")
             tier_note = confidence_tier.get("note", "")
@@ -1874,7 +1988,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
                 warning_type = warning.split(":")[0] if ":" in warning else warning
                 notes.append(f"{warning_prefix}: {warning_type}")
 
-        # Context sources available vs missing
+        # Context sources available vs missing (keep for completeness)
         available: list[str] = []
         missing: list[str] = []
 
@@ -1947,7 +2061,6 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         if has_attachments:
             attachments = getattr(email, "attachments", None) or []
             names = [a.get("name", "file") if isinstance(a, dict) else str(a) for a in attachments]
-            sender_name = email.sender_name or email.sender_email
             notes.append(
                 f"{sender_name} attached '{names[0]}' — I acknowledged it in the reply"
             )
@@ -1992,7 +2105,7 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
                     + "; ".join(signal_summaries[:3])
                 )
 
-        return " | ".join(notes)
+        return " | ".join(notes), context_sources
 
     # ------------------------------------------------------------------
     # Persistence
