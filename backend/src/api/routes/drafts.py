@@ -19,6 +19,7 @@ from src.models.email_draft import (
 )
 from src.db.supabase import SupabaseClient
 from src.services.action_gatekeeper import get_action_gatekeeper
+from src.services.activity_service import ActivityService
 from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
 
@@ -357,7 +358,7 @@ async def approve_draft(
     try:
         result = (
             db.table("email_drafts")
-            .select("id, status, user_id")
+            .select("id, status, user_id, recipient_name, subject")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
             .maybe_single()
@@ -376,10 +377,11 @@ async def approve_draft(
             detail=f"Draft {draft_id} not found",
         )
 
-    if result.data["status"] != "pending_review":
+    draft_data = result.data
+    if draft_data["status"] != "pending_review":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Draft status is '{result.data['status']}', expected 'pending_review'",
+            detail=f"Draft status is '{draft_data['status']}', expected 'pending_review'",
         )
 
     # Update status to approved
@@ -429,6 +431,23 @@ async def approve_draft(
         "Draft approved and saved to client",
         extra={"user_id": current_user.id, "draft_id": draft_id},
     )
+
+    # Log to activity feed (non-blocking)
+    try:
+        activity_service = ActivityService()
+        await activity_service.record(
+            user_id=current_user.id,
+            agent="scribe",
+            activity_type="draft_saved_to_client",
+            title="Draft saved to Outlook",
+            description=f"Reply to {draft_data.get('recipient_name', 'Unknown')}: {draft_data.get('subject', 'No subject')}",
+            confidence=1.0,
+            related_entity_type="email_draft",
+            related_entity_id=draft_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to log draft approval activity: %s", e)
+
     return {"success": True, "saved_at": saved_at}
 
 
@@ -458,7 +477,7 @@ async def dismiss_draft(
     try:
         result = (
             db.table("email_drafts")
-            .select("id, user_id")
+            .select("id, user_id, recipient_name, subject")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
             .maybe_single()
@@ -477,6 +496,8 @@ async def dismiss_draft(
             detail=f"Draft {draft_id} not found",
         )
 
+    draft_data = result.data
+
     # Update status to dismissed
     try:
         db.table("email_drafts").update(
@@ -493,4 +514,21 @@ async def dismiss_draft(
         "Draft dismissed",
         extra={"user_id": current_user.id, "draft_id": draft_id},
     )
+
+    # Log to activity feed (non-blocking)
+    try:
+        activity_service = ActivityService()
+        await activity_service.record(
+            user_id=current_user.id,
+            agent="scribe",
+            activity_type="draft_dismissed",
+            title=f"Draft dismissed: {draft_data.get('subject', 'No subject')}",
+            description=f"User dismissed draft reply to {draft_data.get('recipient_name', 'Unknown')}",
+            confidence=1.0,
+            related_entity_type="email_draft",
+            related_entity_id=draft_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to log draft dismissal activity: %s", e)
+
     return {"success": True}
