@@ -2296,7 +2296,12 @@ Return ONLY the JSON array, nothing else."""
             )
             return False
 
-    async def update_draft_id(self, context_id: str, draft_id: str) -> bool:
+    async def update_draft_id(
+        self,
+        context_id: str,
+        draft_id: str,
+        context_sources: list[str] | None = None,
+    ) -> bool:
         """Update the draft_id FK in draft_context after draft is saved.
 
         This is called by AutonomousDraftEngine after the draft is created,
@@ -2305,19 +2310,26 @@ Return ONLY the JSON array, nothing else."""
         Args:
             context_id: The ID of the draft_context row to update.
             draft_id: The ID of the newly created email_draft.
+            context_sources: Optional list of conversational context source descriptions
+                for the frontend to display (e.g., "your last 3 emails with Sarah").
 
         Returns:
             True if update succeeded, False otherwise.
         """
         try:
-            self._db.table("draft_context").update(
-                {"draft_id": draft_id}
-            ).eq("id", context_id).execute()
+            update_data: dict[str, Any] = {"draft_id": draft_id}
+            if context_sources is not None:
+                update_data["context_sources"] = context_sources
+
+            self._db.table("draft_context").update(update_data).eq(
+                "id", context_id
+            ).execute()
 
             logger.info(
-                "[EMAIL_PIPELINE] Stage: context_draft_id_set | context_id=%s | draft_id=%s",
+                "[EMAIL_PIPELINE] Stage: context_draft_id_set | context_id=%s | draft_id=%s | context_sources=%d",
                 context_id,
                 draft_id,
+                len(context_sources) if context_sources else 0,
             )
             return True
 

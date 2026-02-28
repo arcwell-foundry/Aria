@@ -1026,6 +1026,16 @@ async def _run_stalled_goal_kickstart() -> None:
         logger.exception("Stalled goal kickstart scheduler run failed")
 
 
+async def _run_draft_auto_approve() -> None:
+    """Auto-approve MEDIUM-risk drafts past their auto_approve_at timeout."""
+    try:
+        from src.jobs.draft_auto_approve_job import run_draft_auto_approve
+
+        await run_draft_auto_approve()
+    except Exception:
+        logger.exception("Draft auto-approve scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -1082,6 +1092,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
             id="medium_action_timeout",
             name="Medium action 30-min auto-approve timeout",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_draft_auto_approve,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="draft_auto_approve",
+            name="Auto-approve MEDIUM-risk drafts past timeout",
             replace_existing=True,
         )
         _scheduler.add_job(

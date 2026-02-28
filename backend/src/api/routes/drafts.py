@@ -18,6 +18,7 @@ from src.models.email_draft import (
     EmailSendResponse,
 )
 from src.db.supabase import SupabaseClient
+from src.services.action_gatekeeper import get_action_gatekeeper
 from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
 
@@ -342,6 +343,14 @@ async def approve_draft(
     Raises:
         HTTPException: If draft not found, wrong status, or save fails.
     """
+    # Verify user permission via ActionGatekeeper
+    gatekeeper = get_action_gatekeeper()
+    if not await gatekeeper.authorize_approval("email_draft_save_to_client", current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to approve this action",
+        )
+
     db = SupabaseClient.get_client()
 
     # Verify draft belongs to user and is pending review

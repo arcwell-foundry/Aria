@@ -36,6 +36,7 @@ from src.services.email_context_gatherer import (
     EmailContextGatherer,
 )
 from src.services.email_lead_intelligence import EmailLeadIntelligence
+from src.services.action_gatekeeper import get_action_gatekeeper
 from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
@@ -960,7 +961,18 @@ Do not include any text outside the JSON object."""
                 consolidated_from=consolidated_from,
             )
 
-            # h. Save draft with all metadata (including confidence tier)
+            # h. Determine risk policy via ActionGatekeeper
+            gatekeeper = get_action_gatekeeper()
+            policy = await gatekeeper.check_action("email_draft_generated")
+            gk_risk = policy["risk"]
+            auto_approve_at_iso: str | None = None
+            if policy.get("auto_execute_after_minutes") is not None:
+                auto_approve_at_iso = (
+                    datetime.now(UTC)
+                    + timedelta(minutes=policy["auto_execute_after_minutes"])
+                ).isoformat()
+
+            # h2. Save draft with all metadata (including confidence tier and gatekeeper fields)
             tier_label = confidence_tier.get("tier", "LOW") if confidence_tier else "LOW"
             draft_id = await self._save_draft_with_metadata(
                 user_id=user_id,
@@ -978,18 +990,22 @@ Do not include any text outside the JSON object."""
                 learning_mode_draft=is_learning_mode,
                 processing_run_id=run_id,
                 confidence_tier=tier_label,
+                auto_approve_at=auto_approve_at_iso,
+                risk_level=gk_risk,
             )
 
-            # h2. Update draft_context.draft_id FK now that draft exists, store context_sources
+            # h3. Update draft_context.draft_id FK now that draft exists, store context_sources
             if context.id:
                 await self._context_gatherer.update_draft_id(
                     context.id, draft_id, context_sources=context_sources
                 )
 
             logger.info(
-                "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s",
+                "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s | risk=%s | auto_approve_at=%s",
                 draft_id,
                 email.email_id,
+                gk_risk,
+                auto_approve_at_iso,
             )
 
             # i. Notify user draft is pending review (no auto-save to client)
@@ -1000,7 +1016,7 @@ Do not include any text outside the JSON object."""
                         action_id=draft_id,
                         title="Email Draft Review",
                         agent="scribe",
-                        risk_level="HIGH",
+                        risk_level=gk_risk,
                         description=f"Draft reply to {email.sender_name or email.sender_email}: {draft_content.subject}",
                         payload={
                             "action_type": "email_draft_review",
@@ -1012,6 +1028,8 @@ Do not include any text outside the JSON object."""
                             "style_match": style_score,
                             "preview": draft_content.body[:200],
                             "aria_notes": aria_notes,
+                            "auto_approve_at": auto_approve_at_iso,
+                            "risk_level": gk_risk,
                         },
                     ),
                 )
@@ -2128,6 +2146,8 @@ Generate the note:"""
         learning_mode_draft: bool = False,
         processing_run_id: str | None = None,
         confidence_tier: str | None = None,
+        auto_approve_at: str | None = None,
+        risk_level: str = "HIGH",
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
@@ -2154,7 +2174,11 @@ Generate the note:"""
             "learning_mode_draft": learning_mode_draft,
             "processing_run_id": processing_run_id,
             "confidence_tier": confidence_tier or "LOW",
+            "risk_level": risk_level,
         }
+
+        if auto_approve_at is not None:
+            insert_data["auto_approve_at"] = auto_approve_at
 
         try:
             result = self._db.table("email_drafts").insert(insert_data).execute()
