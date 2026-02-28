@@ -161,3 +161,30 @@ export async function saveDraftToClient(
   );
   return response.data;
 }
+
+export interface ApproveDraftResponse {
+  success: boolean;
+  saved_at: string;
+}
+
+export async function approveDraft(
+  draftId: string
+): Promise<ApproveDraftResponse> {
+  const response = await apiClient.post<ApproveDraftResponse>(
+    `/drafts/${draftId}/approve`
+  );
+  return response.data;
+}
+
+export interface DismissDraftResponse {
+  success: boolean;
+}
+
+export async function dismissDraft(
+  draftId: string
+): Promise<DismissDraftResponse> {
+  const response = await apiClient.post<DismissDraftResponse>(
+    `/drafts/${draftId}/dismiss`
+  );
+  return response.data;
+}

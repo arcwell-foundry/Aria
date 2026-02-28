@@ -13,6 +13,7 @@ import { BattleCard, type BattleCardData } from './BattleCard';
 import { PipelineChart, type PipelineChartData } from './PipelineChart';
 import { ResearchResultsCard, type ResearchResultsData } from './ResearchResultsCard';
 import { EmailDraftCard, type EmailDraftData } from './EmailDraftCard';
+import { EmailDraftApprovalCard, type EmailDraftApprovalData } from './EmailDraftApprovalCard';
 import { VideoSessionSummaryCard } from './VideoSessionSummaryCard';
 import type { VideoSessionSummaryData } from '@/types/chat';
 import { ExecutionProgressCard } from './ExecutionProgressCard';
@@ -122,6 +123,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <ResearchResultsCard data={item.data as unknown as ResearchResultsData} />;
     case 'email_draft':
       return <EmailDraftCard data={item.data as unknown as EmailDraftData} />;
+    case 'email_draft_approval':
+      return <EmailDraftApprovalCard data={item.data as unknown as EmailDraftApprovalData} />;
     case 'video_session_summary':
       return <VideoSessionSummaryCard data={item.data as unknown as VideoSessionSummaryData} />;
     case 'execution_progress':
