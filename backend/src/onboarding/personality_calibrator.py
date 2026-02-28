@@ -312,12 +312,16 @@ class PersonalityCalibrator:
     ) -> dict[str, Any] | None:
         """Retrieve writing fingerprint from Digital Twin.
 
+        Tries user_settings first (richest source with 21-field fingerprint),
+        then falls back to digital_twin_profiles table.
+
         Args:
             user_id: The user whose fingerprint to fetch.
 
         Returns:
             Writing style dict or None if not available.
         """
+        # 1. Try user_settings.preferences.digital_twin.writing_style
         try:
             result = (
                 self._db.table("user_settings")
@@ -331,10 +335,88 @@ class PersonalityCalibrator:
                 prefs: dict[str, Any] = row.get("preferences", {}) or {}
                 dt: dict[str, Any] = prefs.get("digital_twin", {})
                 ws: dict[str, Any] | None = dt.get("writing_style")
-                return ws
+                if ws:
+                    return ws
         except Exception as e:
-            logger.warning("Failed to get writing fingerprint: %s", e)
+            logger.warning("Failed to get writing fingerprint from user_settings: %s", e)
+
+        # 2. Fallback: synthesize from digital_twin_profiles table
+        try:
+            result = (
+                self._db.table("digital_twin_profiles")
+                .select("tone, writing_style, vocabulary_patterns, formality_level")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                row = cast(dict[str, Any], result.data)
+                if row.get("writing_style") or row.get("tone"):
+                    fp = self._synthesize_fingerprint_from_profile(row)
+                    logger.info(
+                        "Using digital_twin_profiles fallback for writing fingerprint "
+                        "(user %s)",
+                        user_id,
+                    )
+                    return fp
+        except Exception as e:
+            logger.warning("Failed to get writing fingerprint from digital_twin_profiles: %s", e)
+
         return None
+
+    def _synthesize_fingerprint_from_profile(
+        self,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a partial fingerprint dict from digital_twin_profiles row.
+
+        Maps the 4-column profile into the dict shape that
+        ``_generate_tone_guidance`` and ``calibrate`` expect.
+
+        Args:
+            profile: Row from digital_twin_profiles table.
+
+        Returns:
+            Dict compatible with WritingStyleFingerprint fields.
+        """
+        formality_level = profile.get("formality_level", "business")
+        formality_map = {
+            "casual": 0.25,
+            "business": 0.55,
+            "formal": 0.80,
+            "academic": 0.90,
+        }
+        formality_index = formality_map.get(formality_level, 0.5)
+
+        vocab = profile.get("vocabulary_patterns", "") or ""
+        # Parse sophistication from patterns like "sophistication=simple"
+        directness = 0.5
+        warmth = 0.5
+        if "sophistication=simple" in vocab:
+            directness = 0.65
+        elif "sophistication=advanced" in vocab:
+            directness = 0.4
+        if "hedging=low" in vocab:
+            directness = min(directness + 0.1, 1.0)
+            warmth = 0.4
+
+        tone = profile.get("tone", "professional")
+        tone_warmth_map = {
+            "warm": 0.75,
+            "friendly": 0.70,
+            "professional": 0.45,
+            "formal": 0.30,
+            "simple": 0.40,
+        }
+        warmth = tone_warmth_map.get(tone, warmth)
+
+        return {
+            "style_summary": profile.get("writing_style", ""),
+            "formality_index": formality_index,
+            "directness": directness,
+            "warmth": warmth,
+            "assertiveness": 0.5,
+        }
 
     async def _store_calibration(
         self,
@@ -443,12 +525,16 @@ class PersonalityCalibrator:
     ) -> PersonalityCalibration | None:
         """Retrieve stored calibration for use in features.
 
+        Tries user_settings first (stored by ``_store_calibration``),
+        then falls back to synthesizing from digital_twin_profiles.
+
         Args:
             user_id: The user whose calibration to retrieve.
 
         Returns:
-            PersonalityCalibration if stored, None otherwise.
+            PersonalityCalibration if available, None otherwise.
         """
+        # 1. Try user_settings.preferences.digital_twin.personality_calibration
         try:
             result = (
                 self._db.table("user_settings")
@@ -465,5 +551,41 @@ class PersonalityCalibrator:
                 if cal_data:
                     return PersonalityCalibration(**cal_data)
         except Exception as e:
-            logger.warning("Failed to get personality calibration: %s", e)
+            logger.warning("Failed to get personality calibration from user_settings: %s", e)
+
+        # 2. Fallback: synthesize from digital_twin_profiles
+        try:
+            result = (
+                self._db.table("digital_twin_profiles")
+                .select("tone, writing_style, vocabulary_patterns, formality_level")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if result and result.data:
+                row = cast(dict[str, Any], result.data)
+                if row.get("writing_style") or row.get("tone"):
+                    fp = self._synthesize_fingerprint_from_profile(row)
+                    cal = PersonalityCalibration(
+                        directness=fp.get("directness", 0.5),
+                        warmth=fp.get("warmth", 0.5),
+                        assertiveness=fp.get("assertiveness", 0.5),
+                        detail_orientation=self._infer_detail_orientation(fp),
+                        formality=fp.get("formality_index", 0.5),
+                    )
+                    cal.tone_guidance = self._generate_tone_guidance(cal, fp)
+                    cal.example_adjustments = self._generate_examples(cal)
+                    logger.info(
+                        "Using digital_twin_profiles fallback for personality "
+                        "calibration (user %s)",
+                        user_id,
+                    )
+                    return cal
+        except Exception as e:
+            logger.warning(
+                "Failed to synthesize personality calibration from "
+                "digital_twin_profiles: %s",
+                e,
+            )
+
         return None
