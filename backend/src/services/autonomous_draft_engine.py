@@ -447,7 +447,16 @@ Do not include any text outside the JSON object."""
                     result.drafts_failed += 1
 
             # Determine final status
-            if result.drafts_failed == 0:
+            # Distinguish benign skips (duplicate prevention working as designed)
+            # from real errors (auth failures, API timeouts, crashes).
+            benign_skip_errors = {
+                "User already replied in thread",
+            }
+            real_failures = sum(
+                1 for d in result.drafts
+                if not d.success and d.error not in benign_skip_errors
+            )
+            if real_failures == 0:
                 result.status = "completed"
             elif result.drafts_generated > 0:
                 result.status = "partial_failure"

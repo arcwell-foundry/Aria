@@ -146,7 +146,7 @@ class DraftService:
                 "context": {"user_context": context, "lead_context": lead_context},
                 "lead_memory_id": lead_memory_id,
                 "style_match_score": style_score,
-                "status": "draft",
+                "status": "pending_review",
             }
 
             result = client.table("email_drafts").insert(draft_data).execute()
