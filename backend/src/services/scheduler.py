@@ -357,6 +357,26 @@ async def _run_ooda_goal_checks() -> None:
                     except Exception:
                         pass  # User may not be connected
 
+                    # Route OODA completion signal through Pulse Engine
+                    try:
+                        from src.services.intelligence_pulse import get_pulse_engine
+
+                        pulse_engine = get_pulse_engine()
+                        await pulse_engine.process_signal(
+                            user_id=user_id,
+                            signal={
+                                "source": "ooda",
+                                "title": f"Goal completed: {goal.get('title', '')}",
+                                "content": f"OODA loop determined goal '{goal.get('title', '')}' is complete",
+                                "signal_category": "goal",
+                                "pulse_type": "intelligent",
+                                "related_goal_id": goal_id,
+                                "raw_data": {"goal_id": goal_id, "action": "complete"},
+                            },
+                        )
+                    except Exception:
+                        logger.debug("Pulse engine failed for OODA completion signal")
+
                 elif state.is_blocked:
                     db.table("goals").update(
                         {
@@ -386,6 +406,26 @@ async def _run_ooda_goal_checks() -> None:
                         )
                     except Exception:
                         pass  # User may not be connected
+
+                    # Route OODA blocked signal through Pulse Engine
+                    try:
+                        from src.services.intelligence_pulse import get_pulse_engine
+
+                        pulse_engine = get_pulse_engine()
+                        await pulse_engine.process_signal(
+                            user_id=user_id,
+                            signal={
+                                "source": "ooda",
+                                "title": f"Goal blocked: {goal.get('title', '')}",
+                                "content": f"Blocked reason: {state.blocked_reason or 'Unknown'}",
+                                "signal_category": "goal",
+                                "pulse_type": "intelligent",
+                                "related_goal_id": goal_id,
+                                "raw_data": {"goal_id": goal_id, "action": "blocked", "reason": state.blocked_reason},
+                            },
+                        )
+                    except Exception:
+                        logger.debug("Pulse engine failed for OODA blocked signal")
 
             except Exception:
                 logger.warning(
