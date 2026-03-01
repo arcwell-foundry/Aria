@@ -135,9 +135,17 @@ class CapabilityGraphService:
 class ResolutionEngine:
     """Generates ranked resolution strategies for capability gaps."""
 
-    def __init__(self, db_client: Any, capability_graph: CapabilityGraphService) -> None:
+    def __init__(
+        self,
+        db_client: Any,
+        capability_graph: CapabilityGraphService,
+        ecosystem_search: Any = None,
+        skill_creation: Any = None,
+    ) -> None:
         self._db = db_client
         self._graph = capability_graph
+        self._ecosystem_search = ecosystem_search
+        self._skill_creation = skill_creation
 
     async def generate_strategies(
         self,
@@ -150,8 +158,9 @@ class ResolutionEngine:
         Strategy types (in order of preference):
         1. direct_integration — Connect via Composio OAuth
         2. composite — Use existing capabilities to approximate
-        3. ecosystem_discovered — Search Composio for solutions
-        4. user_provided — Ask the user
+        3. ecosystem_discovered — Search external ecosystems
+        4. skill_creation — ARIA builds a new skill
+        5. user_provided — Ask the user
         """
         strategies: list[ResolutionStrategy] = []
         tenant_config = await self._get_tenant_config(user_id)
@@ -202,27 +211,76 @@ class ResolutionEngine:
                         )
                     )
 
-        # Strategy 3: Ecosystem search (if tenant allows)
-        if tenant_config is None or "composio" in (
-            tenant_config.allowed_ecosystem_sources or ["composio"]
-        ):
-            ecosystem_results = self._search_composio_tools(capability_name)
-            for result in ecosystem_results[:2]:
-                strategies.append(
-                    ResolutionStrategy(
-                        strategy_type="ecosystem_discovered",
-                        provider_name=result.get("toolkit_name", "discovered_tool"),
-                        quality=0.75,
-                        setup_time_seconds=60,
-                        user_friction="low",
-                        description=f"Found: {result.get('description', 'External tool')}",
-                        action_label=f"Connect {result.get('toolkit_name', 'tool')}",
-                        ecosystem_source="composio",
-                        ecosystem_data=result,
-                    )
+        # Strategy 3: Ecosystem search (Phase B)
+        if self._ecosystem_search:
+            try:
+                ecosystem_results = await self._ecosystem_search.search_for_capability(
+                    capability_name,
+                    f"Tool for {capability_name} in life sciences context",
+                    user_id,
                 )
+                for result in ecosystem_results[:2]:
+                    strategies.append(
+                        ResolutionStrategy(
+                            strategy_type="ecosystem_discovered",
+                            provider_name=result.name,
+                            quality=result.final_score,
+                            setup_time_seconds=result.setup_time,
+                            user_friction="low",
+                            description=f"Found in {result.source}: {result.description}",
+                            action_label=f"Connect {result.name}",
+                            ecosystem_source=result.source,
+                            ecosystem_data=result.model_dump(),
+                        )
+                    )
+            except Exception:
+                logger.warning("Ecosystem search failed in resolution engine", exc_info=True)
+        else:
+            # Fallback: static Composio search (Phase A behavior)
+            if tenant_config is None or "composio" in (
+                getattr(tenant_config, "allowed_ecosystem_sources", None) or ["composio"]
+            ):
+                ecosystem_results = self._search_composio_tools(capability_name)
+                for result in ecosystem_results[:2]:
+                    strategies.append(
+                        ResolutionStrategy(
+                            strategy_type="ecosystem_discovered",
+                            provider_name=result.get("toolkit_name", "discovered_tool"),
+                            quality=0.75,
+                            setup_time_seconds=60,
+                            user_friction="low",
+                            description=f"Found: {result.get('description', 'External tool')}",
+                            action_label=f"Connect {result.get('toolkit_name', 'tool')}",
+                            ecosystem_source="composio",
+                            ecosystem_data=result,
+                        )
+                    )
 
-        # Strategy 4: User-provided (always available)
+        # Strategy 4: Skill creation (Phase B)
+        if self._skill_creation:
+            try:
+                creation_proposal = await self._skill_creation.assess_creation_opportunity(
+                    capability_name,
+                    f"Need to {capability_name} for life sciences commercial goals",
+                    user_id,
+                )
+                if creation_proposal and creation_proposal.confidence >= 0.6:
+                    strategies.append(
+                        ResolutionStrategy(
+                            strategy_type="skill_creation",
+                            provider_name=f"aria_create_{creation_proposal.skill_name}",
+                            quality=creation_proposal.estimated_quality,
+                            setup_time_seconds=120,
+                            user_friction="low",
+                            description=f"I can build: {creation_proposal.description}",
+                            action_label=f"Create {creation_proposal.skill_name.replace('_', ' ').title()}",
+                            creation_proposal=creation_proposal,
+                        )
+                    )
+            except Exception:
+                logger.warning("Skill creation assessment failed in resolution engine", exc_info=True)
+
+        # Strategy 5: User-provided (always available)
         strategies.append(
             ResolutionStrategy(
                 strategy_type="user_provided",
@@ -612,8 +670,47 @@ async def annotate_plan_with_gaps(
     unchanged.
     """
     try:
+        from src.services.ecosystem_search import EcosystemSearchService
+        from src.services.skill_creation import SkillCreationEngine
+
         graph = CapabilityGraphService(db_client)
-        engine = ResolutionEngine(db_client, graph)
+
+        # Try to create Phase B services; fall back gracefully
+        try:
+            tenant_config_result = (
+                db_client.table("user_profiles")
+                .select("company_id")
+                .eq("id", user_id)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            company_id = (tenant_config_result.data or {}).get("company_id")
+            tenant_config = None
+            if company_id:
+                tc_result = (
+                    db_client.table("tenant_capability_config")
+                    .select("*")
+                    .eq("tenant_id", company_id)
+                    .limit(1)
+                    .maybe_single()
+                    .execute()
+                )
+                if tc_result.data:
+                    from types import SimpleNamespace
+                    tenant_config = SimpleNamespace(**tc_result.data)
+
+            ecosystem = EcosystemSearchService(db_client, tenant_config=tenant_config)
+            creation = SkillCreationEngine(db_client)
+        except Exception:
+            ecosystem = None
+            creation = None
+
+        engine = ResolutionEngine(
+            db_client, graph,
+            ecosystem_search=ecosystem,
+            skill_creation=creation,
+        )
         detector = GapDetectionService(db_client, graph, engine)
 
         gaps = await detector.analyze_capabilities_for_plan(plan_dict, user_id)

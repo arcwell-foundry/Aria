@@ -656,3 +656,96 @@ class TestSkillHealthMonitor:
         assert len(health_updates) > 0
         assert health_updates[0]["health_status"] == "broken"
         assert len(status_updates) > 0
+
+
+# ---------------------------------------------------------------------------
+# Resolution Engine integration tests
+# ---------------------------------------------------------------------------
+
+class TestResolutionEnginePhaseB:
+    """Tests for ecosystem + creation strategies in ResolutionEngine."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_resolution_engine_includes_ecosystem(self, mock_db):
+        """Ecosystem results appear in strategies."""
+        from src.services.capability_provisioning import CapabilityGraphService, ResolutionEngine
+        from src.services.ecosystem_search import EcosystemSearchService
+
+        _setup_chain(mock_db, [])
+
+        graph = CapabilityGraphService(mock_db)
+        graph._check_user_connection = AsyncMock(return_value=False)
+
+        engine = ResolutionEngine(mock_db, graph)
+        engine._get_tenant_config = AsyncMock(return_value=None)
+
+        # Mock ecosystem search
+        mock_ecosystem = AsyncMock()
+        mock_ecosystem.search_for_capability = AsyncMock(return_value=[
+            EcosystemResult(
+                name="Salesforce",
+                source="composio",
+                description="CRM data",
+                quality_estimate=0.85,
+                final_score=0.80,
+                setup_time=30,
+            ),
+        ])
+        engine._ecosystem_search = mock_ecosystem
+        engine._skill_creation = AsyncMock()
+        engine._skill_creation.assess_creation_opportunity = AsyncMock(return_value=None)
+
+        strategies = await engine.generate_strategies(
+            "read_crm_pipeline", "user-1", []
+        )
+
+        ecosystem_strategies = [
+            s for s in strategies if s.strategy_type == "ecosystem_discovered"
+        ]
+        assert len(ecosystem_strategies) >= 1
+        assert ecosystem_strategies[0].provider_name == "Salesforce"
+
+    @pytest.mark.asyncio
+    async def test_resolution_engine_includes_creation(self, mock_db):
+        """Skill creation appears when feasible."""
+        from src.services.capability_provisioning import CapabilityGraphService, ResolutionEngine
+
+        _setup_chain(mock_db, [])
+
+        graph = CapabilityGraphService(mock_db)
+        engine = ResolutionEngine(mock_db, graph)
+        engine._get_tenant_config = AsyncMock(return_value=None)
+
+        # Mock: no ecosystem results
+        mock_ecosystem = AsyncMock()
+        mock_ecosystem.search_for_capability = AsyncMock(return_value=[])
+        engine._ecosystem_search = mock_ecosystem
+
+        # Mock: creation is feasible
+        mock_creation = AsyncMock()
+        mock_creation.assess_creation_opportunity = AsyncMock(
+            return_value=SkillCreationProposal(
+                can_create=True,
+                skill_type="prompt_chain",
+                confidence=0.8,
+                skill_name="patent_tracker",
+                description="Track patent filings",
+                estimated_quality=0.70,
+                approach="Use LLM prompts with USPTO data",
+            )
+        )
+        engine._skill_creation = mock_creation
+
+        strategies = await engine.generate_strategies(
+            "track_patents", "user-1", []
+        )
+
+        creation_strategies = [
+            s for s in strategies if s.strategy_type == "skill_creation"
+        ]
+        assert len(creation_strategies) == 1
+        assert "patent_tracker" in creation_strategies[0].provider_name
