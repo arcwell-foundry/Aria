@@ -272,7 +272,7 @@ async def test_crm_connected_updates_reasoning(
     facts_chain = _build_chain([
         {"fact": f"fact {i}", "metadata": {}} for i in range(10)
     ])
-    integrations_chain = _build_chain([{"provider": "salesforce"}])
+    integrations_chain = _build_chain([{"integration_type": "salesforce"}])
     classification_chain = _build_chain(
         {"metadata": {"classification": {"company_type": "Large Pharma"}}}
     )
@@ -450,7 +450,7 @@ async def test_observe_captures_onboarding_state(
     facts_chain = _build_chain([
         {"fact": f"fact {i}", "metadata": {}} for i in range(5)
     ])
-    integrations_chain = _build_chain([{"provider": "hubspot"}])
+    integrations_chain = _build_chain([{"integration_type": "hubspot"}])
     classification_chain = _build_chain(
         {"metadata": {"classification": {"company_type": "CRO"}}}
     )

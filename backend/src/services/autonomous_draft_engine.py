@@ -468,11 +468,21 @@ Do not include any text outside the JSON object."""
 
             result.cross_references = cross_ref_clusters
 
+            # Capture individual draft errors for debugging
+            if result.drafts_failed > 0:
+                draft_errors = [
+                    f"{d.recipient_email}: {d.error}"
+                    for d in result.drafts
+                    if not d.success and d.error
+                ]
+                if draft_errors:
+                    result.error_message = "; ".join(draft_errors[:5])
+
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
                 "skipped_existing=%d | skipped_already_replied=%d | "
-                "deferred_active=%d | cross_refs=%d | status=%s",
+                "deferred_active=%d | cross_refs=%d | status=%s | errors=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
@@ -481,6 +491,7 @@ Do not include any text outside the JSON object."""
                 emails_deferred_active_conversation,
                 len(cross_ref_clusters),
                 result.status,
+                result.error_message,
             )
 
             # Store Memory Delta: what ARIA learned from this email run
@@ -3227,9 +3238,35 @@ Generate the note:"""
             reason: The deferral reason ('active_conversation', etc.).
 
         Returns:
-            The ID of the deferred draft record.
+            The ID of the deferred draft record (existing or new).
         """
         from datetime import timedelta
+
+        # Dedup: check for existing pending deferred draft for this thread
+        try:
+            existing = (
+                self._db.table("deferred_email_drafts")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .eq("status", "pending")
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                existing_id = existing.data[0]["id"]
+                logger.info(
+                    "DRAFT_ENGINE: Deferred draft already exists for thread %s (id=%s), skipping duplicate",
+                    thread_id,
+                    existing_id,
+                )
+                return existing_id
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Deferred dedup check failed for thread %s: %s",
+                thread_id,
+                e,
+            )
 
         deferred_id = str(uuid4())
         deferred_until = datetime.now(UTC) + timedelta(minutes=30)
@@ -3261,6 +3298,7 @@ Generate the note:"""
                 "DRAFT_ENGINE: Failed to defer draft for thread %s: %s",
                 thread_id,
                 e,
+                exc_info=True,
             )
 
         return deferred_id

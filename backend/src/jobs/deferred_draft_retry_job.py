@@ -125,12 +125,29 @@ async def run_deferred_draft_retry() -> dict[str, Any]:
                 stats["processed"] += 1
 
             except Exception as e:
-                logger.warning(
+                logger.error(
                     "DEFERRED_DRAFT_RETRY: Failed to process deferred draft %s: %s",
                     deferred_id,
                     e,
                     exc_info=True,
                 )
+                # Increment retry_count so the entry eventually expires
+                # instead of staying "pending" forever
+                try:
+                    new_deferred_until = now + timedelta(minutes=DEFERRAL_PERIOD_MINUTES)
+                    db.table("deferred_email_drafts").update(
+                        {
+                            "retry_count": retry_count + 1,
+                            "deferred_until": new_deferred_until.isoformat(),
+                            "updated_at": now.isoformat(),
+                        }
+                    ).eq("id", deferred_id).execute()
+                except Exception as update_err:
+                    logger.error(
+                        "DEFERRED_DRAFT_RETRY: Failed to update retry_count for %s: %s",
+                        deferred_id,
+                        update_err,
+                    )
                 stats["errors"] += 1
 
         logger.info(

@@ -1381,6 +1381,48 @@ class DeepSyncService:
                         integration_type=integration_type,
                     )
 
+                    # Persist to calendar_events table (dedup by external_id)
+                    try:
+                        cal_row = {
+                            "user_id": user_id,
+                            "title": event.title,
+                            "start_time": event.start_time.isoformat(),
+                            "end_time": event.end_time.isoformat() if event.end_time else None,
+                            "attendees": event.attendees,
+                            "external_id": event.external_id,
+                            "source": integration_type.value if hasattr(integration_type, "value") else str(integration_type),
+                            "metadata": {
+                                "description": event.description,
+                                "location": event.location,
+                                "is_external": event.is_external,
+                            },
+                        }
+                        if event.external_id:
+                            existing = (
+                                self.db.table("calendar_events")
+                                .select("id")
+                                .eq("user_id", user_id)
+                                .eq("external_id", event.external_id)
+                                .limit(1)
+                                .execute()
+                            )
+                            if existing.data:
+                                # Update existing event (times/attendees may change)
+                                self.db.table("calendar_events").update(cal_row).eq(
+                                    "id", existing.data[0]["id"]
+                                ).execute()
+                            else:
+                                self.db.table("calendar_events").insert(cal_row).execute()
+                        else:
+                            self.db.table("calendar_events").insert(cal_row).execute()
+                    except Exception as cal_err:
+                        logger.error(
+                            "Failed to persist calendar event %s: %s",
+                            event.external_id,
+                            cal_err,
+                            exc_info=True,
+                        )
+
                     # Create research task for external meetings
                     if event.is_external:
                         task_id = await self._create_meeting_research_task(

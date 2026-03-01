@@ -675,7 +675,7 @@ async def test_get_signal_data_returns_categorized_signals() -> None:
         assert len(result["company_news"]) == 1
         assert result["company_news"][0]["id"] == "signal-1"
         assert result["company_news"][0]["company_name"] == "Acme Corp"
-        assert result["company_news"][0]["headline"] == "Acme raises $50M Series B"
+        assert result["company_news"][0]["title"] == "Acme raises $50M Series B"
 
         # Verify hiring and product signals are in competitive_intel
         assert len(result["competitive_intel"]) == 2

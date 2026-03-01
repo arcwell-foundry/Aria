@@ -213,11 +213,11 @@ async def _gather_week_stats(
     # Signals
     try:
         signals_result = (
-            db.table("intelligence_signals")
+            db.table("market_signals")
             .select("id")
             .eq("user_id", user_id)
-            .gte("created_at", start_iso)
-            .lt("created_at", end_iso)
+            .gte("detected_at", start_iso)
+            .lt("detected_at", end_iso)
             .execute()
         )
         data["signals_detected"] = len(signals_result.data or [])

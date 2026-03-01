@@ -2,7 +2,7 @@
 
 Runs every 15 minutes. For each active user, instantiates the ScoutAgent
 to detect new market signals for tracked competitors and active leads.
-New signals are stored in ``intelligence_signals`` and routed through
+New signals are stored in ``market_signals`` and routed through
 the ProactiveRouter based on relevance score.
 
 High-relevance signals (>= 0.8) are additionally evaluated by the
@@ -29,7 +29,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
     For each user (within business hours):
     1. Read tracked_competitors from user_preferences + company names from leads
     2. Instantiate ScoutAgent and execute entity search
-    3. Deduplicate against existing intelligence_signals
+    3. Deduplicate against existing market_signals
     4. Store new signals and route via ProactiveRouter
 
     Returns:
@@ -98,20 +98,22 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 if await _signal_exists(db, user_id, headline):
                     continue
 
-                # Store in intelligence_signals and capture the row ID
+                # Store in market_signals (the canonical table read by briefing,
+                # signals API, causal reasoning, and all downstream consumers)
                 relevance = float(signal.get("relevance_score", 0.5))
                 signal_id: str | None = None
                 try:
-                    insert_result = db.table("intelligence_signals").insert(
+                    insert_result = db.table("market_signals").insert(
                         {
                             "user_id": user_id,
+                            "company_name": signal.get("company_name", "Unknown"),
                             "signal_type": signal.get("signal_type", "news"),
                             "headline": headline,
                             "summary": signal.get("summary", ""),
+                            "source_name": signal.get("source", "scout_agent"),
+                            "source_url": signal.get("source_url"),
                             "relevance_score": relevance,
-                            "source": signal.get("source", "scout_agent"),
                             "metadata": signal.get("metadata", {}),
-                            "status": "active",
                         }
                     ).execute()
                     if insert_result.data:
@@ -174,10 +176,10 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
 
 async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
-    """Gather entity names to scan from user preferences and active leads."""
+    """Gather entity names to scan from all available sources."""
     entities: set[str] = set()
 
-    # Tracked competitors from user_preferences
+    # 1. Tracked competitors from user_preferences
     try:
         prefs_result = (
             db.table("user_preferences")
@@ -193,7 +195,7 @@ async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
     except Exception:
         pass
 
-    # Company names from active leads
+    # 2. Company names from active leads (lead_memories)
     try:
         leads_result = (
             db.table("lead_memories")
@@ -210,6 +212,57 @@ async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
     except Exception:
         pass
 
+    # 3. Entity names from monitored_entities table
+    try:
+        monitored_result = (
+            db.table("monitored_entities")
+            .select("entity_name")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .limit(20)
+            .execute()
+        )
+        for entity in monitored_result.data or []:
+            name = entity.get("entity_name")
+            if name:
+                entities.add(name)
+    except Exception:
+        pass
+
+    # 4. Company names from discovered_leads (populated by Hunter agent)
+    try:
+        discovered_result = (
+            db.table("discovered_leads")
+            .select("company_name")
+            .eq("user_id", user_id)
+            .limit(20)
+            .execute()
+        )
+        for lead in discovered_result.data or []:
+            name = lead.get("company_name")
+            if name:
+                entities.add(name)
+    except Exception:
+        pass
+
+    # 5. Company names from existing market_signals (bootstrap from past analysis)
+    if not entities:
+        try:
+            signals_result = (
+                db.table("market_signals")
+                .select("company_name")
+                .eq("user_id", user_id)
+                .neq("company_name", "Market")
+                .limit(10)
+                .execute()
+            )
+            for sig in signals_result.data or []:
+                name = sig.get("company_name")
+                if name:
+                    entities.add(name)
+        except Exception:
+            pass
+
     return list(entities)
 
 
@@ -217,7 +270,7 @@ async def _signal_exists(db: Any, user_id: str, headline: str) -> bool:
     """Check if a signal with a similar headline already exists."""
     try:
         result = (
-            db.table("intelligence_signals")
+            db.table("market_signals")
             .select("id")
             .eq("user_id", user_id)
             .eq("headline", headline)
@@ -246,7 +299,7 @@ async def _maybe_propose_goal(
 
     Args:
         user_id: Target user UUID.
-        signal_id: UUID of the stored intelligence_signals row.
+        signal_id: UUID of the stored market_signals row.
         signal: Raw signal dict from Scout agent.
         relevance: Relevance score (0-1).
 

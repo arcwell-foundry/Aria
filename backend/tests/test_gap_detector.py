@@ -410,7 +410,7 @@ def test_integration_gap_when_no_crm(
 ) -> None:
     """Integration gap when no CRM connected."""
     integrations: list[dict[str, Any]] = [
-        {"provider": "google", "created_at": "2026-01-01"},
+        {"integration_type": "google", "created_at": "2026-01-01"},
     ]
 
     gaps = detector._analyze_integrations(integrations)
@@ -425,7 +425,7 @@ def test_integration_gap_when_no_calendar(
 ) -> None:
     """Integration gap when no calendar connected."""
     integrations: list[dict[str, Any]] = [
-        {"provider": "salesforce", "created_at": "2026-01-01"},
+        {"integration_type": "salesforce", "created_at": "2026-01-01"},
     ]
 
     gaps = detector._analyze_integrations(integrations)
@@ -453,10 +453,10 @@ def test_no_integration_gap_when_all_connected(
 ) -> None:
     """No integration gaps when CRM, calendar, email, Slack all connected."""
     integrations: list[dict[str, Any]] = [
-        {"provider": "salesforce", "created_at": "2026-01-01"},
-        {"provider": "googlecalendar", "created_at": "2026-01-01"},
-        {"provider": "google", "created_at": "2026-01-01"},
-        {"provider": "slack", "created_at": "2026-01-01"},
+        {"integration_type": "salesforce", "created_at": "2026-01-01"},
+        {"integration_type": "googlecalendar", "created_at": "2026-01-01"},
+        {"integration_type": "google", "created_at": "2026-01-01"},
+        {"integration_type": "slack", "created_at": "2026-01-01"},
     ]
 
     gaps = detector._analyze_integrations(integrations)
@@ -469,9 +469,9 @@ def test_integration_gap_slack_is_medium_priority(
 ) -> None:
     """Slack gap is medium priority, not high."""
     integrations: list[dict[str, Any]] = [
-        {"provider": "salesforce", "created_at": "2026-01-01"},
-        {"provider": "googlecalendar", "created_at": "2026-01-01"},
-        {"provider": "google", "created_at": "2026-01-01"},
+        {"integration_type": "salesforce", "created_at": "2026-01-01"},
+        {"integration_type": "googlecalendar", "created_at": "2026-01-01"},
+        {"integration_type": "google", "created_at": "2026-01-01"},
     ]
 
     gaps = detector._analyze_integrations(integrations)
@@ -925,7 +925,7 @@ async def test_get_integrations_queries_correct_table(
     """_get_integrations queries user_integrations filtered by user_id."""
     chain = _build_chain(
         [
-            {"provider": "salesforce", "created_at": "2026-01-01"},
+            {"integration_type": "salesforce", "created_at": "2026-01-01"},
         ]
     )
     mock_db.table.return_value = chain

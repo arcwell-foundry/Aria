@@ -1584,6 +1584,14 @@ class GoalExecutionService:
                 goal_agent_id=goal_agent_id,
             )
 
+            # Persist structured output to domain tables
+            await self._persist_structured_output(
+                user_id=user_id,
+                agent_type=agent_type,
+                content=content,
+                goal_id=goal["id"],
+            )
+
             # Record goal update
             await self._record_goal_update(
                 goal["id"],
@@ -1749,6 +1757,14 @@ class GoalExecutionService:
                 goal_agent_id=goal_agent_id,
             )
 
+            # Persist structured output to domain tables
+            await self._persist_structured_output(
+                user_id=user_id,
+                agent_type=agent_type,
+                content=content,
+                goal_id=goal["id"],
+            )
+
             # Record goal update
             await self._record_goal_update(
                 goal["id"],
@@ -1885,10 +1901,20 @@ class GoalExecutionService:
                 return
 
             queue = ActionQueueService()
-            recommendations = content.get("recommendations", content.get("next_steps", []))
+            # Agent outputs use various keys for actionable items
+            recommendations = (
+                content.get("recommendations")
+                or content.get("next_steps")
+                or content.get("quick_wins")
+                or content.get("strategic_priorities")
+                or content.get("recommended_focus")
+                or content.get("opportunities")
+                or content.get("watch_items")
+                or []
+            )
             if isinstance(recommendations, list):
                 for rec in recommendations[:3]:
-                    action_title = rec if isinstance(rec, str) else rec.get("action", str(rec))
+                    action_title = rec if isinstance(rec, str) else rec.get("action", rec.get("title", str(rec)))
                     action_data = ActionCreate(
                         agent=agent_enum,
                         action_type=ActionType.RESEARCH,
@@ -1905,7 +1931,11 @@ class GoalExecutionService:
                         data=action_data,
                     )
         except Exception as e:
-            logger.warning("Failed to submit actions to queue: %s", e)
+            logger.error(
+                "Failed to submit actions to queue: %s",
+                e,
+                exc_info=True,
+            )
 
     async def _store_execution(
         self,
@@ -1983,6 +2013,182 @@ class GoalExecutionService:
                 "goal_agent_id": goal_agent_id,
             },
         )
+
+    async def _persist_structured_output(
+        self,
+        user_id: str,
+        agent_type: str,
+        content: dict[str, Any],
+        goal_id: str,
+    ) -> None:
+        """Decompose agent output into domain-specific tables.
+
+        After storing the raw output in agent_executions, this method
+        persists structured data to the appropriate domain tables
+        (discovered_leads, market_signals, etc.) so that dashboards,
+        briefings, and downstream features can query them.
+
+        Args:
+            user_id: The user's ID.
+            agent_type: The agent type (hunter, scout, strategist, etc.).
+            content: The agent's output dict.
+            goal_id: The goal ID this execution belongs to.
+        """
+        agent_lower = agent_type.lower()
+        now = datetime.now(UTC).isoformat()
+
+        try:
+            if agent_lower == "hunter":
+                await self._persist_hunter_leads(user_id, content, goal_id, now)
+            elif agent_lower in ("scout", "strategist"):
+                await self._persist_market_signals(user_id, agent_lower, content, now)
+        except Exception as e:
+            logger.error(
+                "Failed to persist structured output for %s agent: %s",
+                agent_type,
+                e,
+                exc_info=True,
+            )
+
+    async def _persist_hunter_leads(
+        self,
+        user_id: str,
+        content: dict[str, Any],
+        goal_id: str,
+        now: str,
+    ) -> None:
+        """Persist Hunter agent leads to discovered_leads table."""
+        from uuid import uuid4
+
+        # Content may be a list of leads directly or wrapped in {"result": [...]}
+        leads = content if isinstance(content, list) else content.get("result", [])
+        if not isinstance(leads, list) or not leads:
+            return
+
+        persisted = 0
+        for lead_data in leads:
+            company = lead_data.get("company", {})
+            company_name = company.get("name", "Unknown")
+            contacts = lead_data.get("contacts", [])
+            fit_score = lead_data.get("fit_score", 0.0)
+            source = lead_data.get("source", "hunter_pro")
+
+            lead_id = str(uuid4())
+            try:
+                self._db.table("discovered_leads").insert(
+                    {
+                        "id": lead_id,
+                        "user_id": user_id,
+                        "icp_id": None,
+                        "company_name": company_name,
+                        "company_data": company,
+                        "contacts": contacts,
+                        "fit_score": fit_score,
+                        "score_breakdown": {
+                            "overall_score": fit_score,
+                            "factors": lead_data.get("fit_reasons", []),
+                        },
+                        "signals": lead_data.get("gaps", []),
+                        "review_status": "pending",
+                        "source": source,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ).execute()
+                persisted += 1
+            except Exception as e:
+                logger.error(
+                    "Failed to persist discovered lead %s: %s",
+                    company_name,
+                    e,
+                    exc_info=True,
+                )
+
+        if persisted:
+            logger.info(
+                "Persisted %d discovered leads from Hunter agent (goal=%s)",
+                persisted,
+                goal_id,
+            )
+
+    async def _persist_market_signals(
+        self,
+        user_id: str,
+        agent_type: str,
+        content: dict[str, Any],
+        now: str,
+    ) -> None:
+        """Persist Scout/Strategist output as market signals."""
+        persisted = 0
+
+        # Extract competitors as signals
+        competitors = content.get("competitors", [])
+        for comp in competitors:
+            if not isinstance(comp, dict):
+                continue
+            comp_name = comp.get("name", "")
+            if not comp_name:
+                continue
+            try:
+                self._db.table("market_signals").insert(
+                    {
+                        "user_id": user_id,
+                        "company_name": comp_name,
+                        "signal_type": "competitive_intelligence",
+                        "headline": f"Competitor: {comp_name}",
+                        "summary": comp.get("key_differentiator", ""),
+                        "source_name": f"{agent_type}_agent",
+                        "relevance_score": 0.8,
+                        "detected_at": now,
+                        "metadata": {
+                            "relationship": comp.get("relationship", ""),
+                            "source_agent": agent_type,
+                        },
+                    }
+                ).execute()
+                persisted += 1
+            except Exception as e:
+                logger.error(
+                    "Failed to persist market signal for %s: %s",
+                    comp_name,
+                    e,
+                    exc_info=True,
+                )
+
+        # Extract watch_items as signals
+        watch_items = content.get("watch_items", [])
+        summary_company = content.get("summary", "")[:100]
+        for item in watch_items:
+            if not isinstance(item, str):
+                continue
+            try:
+                self._db.table("market_signals").insert(
+                    {
+                        "user_id": user_id,
+                        "company_name": summary_company or "Market",
+                        "signal_type": "watch_item",
+                        "headline": item[:200],
+                        "summary": item,
+                        "source_name": f"{agent_type}_agent",
+                        "relevance_score": 0.6,
+                        "detected_at": now,
+                        "metadata": {"source_agent": agent_type},
+                    }
+                ).execute()
+                persisted += 1
+            except Exception as e:
+                logger.error(
+                    "Failed to persist watch item signal: %s",
+                    e,
+                    exc_info=True,
+                )
+
+        if persisted:
+            logger.info(
+                "Persisted %d market signals from %s agent",
+                persisted,
+                agent_type,
+            )
 
     async def _gather_execution_context(self, user_id: str) -> dict[str, Any]:
         """Gather context needed for agent execution.

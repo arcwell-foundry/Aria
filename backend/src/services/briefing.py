@@ -948,7 +948,7 @@ class BriefingService:
             return {
                 "id": s["id"],
                 "company_name": s["company_name"],
-                "headline": s["headline"],
+                "title": s.get("headline", ""),
                 "summary": s.get("summary"),
                 "relevance_score": s.get("relevance_score"),
                 "detected_at": s.get("detected_at"),
@@ -1007,14 +1007,14 @@ class BriefingService:
                         for item in news_results:
                             # Avoid duplicates
                             headline = item.title
-                            if any(h.get("headline") == headline for h in company_news):
+                            if any(h.get("title") == headline for h in company_news):
                                 continue
 
                             company_news.append(
                                 {
                                     "id": f"exa-{hash(item.url) % 10000}",
                                     "company_name": company_name,
-                                    "headline": headline,
+                                    "title": headline,
                                     "summary": item.text[:300] if item.text else "",
                                     "relevance_score": 0.75,
                                     "detected_at": item.published_date
@@ -1045,7 +1045,7 @@ class BriefingService:
                                     {
                                         "id": f"exa-similar-{hash(item.url) % 10000}",
                                         "company_name": competitor_name,
-                                        "headline": f"Similar to {company_name}: {item.title}",
+                                        "title": f"Similar to {company_name}: {item.title}",
                                         "summary": item.text[:200] if item.text else "",
                                         "relevance_score": 0.6,
                                         "detected_at": datetime.now(UTC).isoformat(),
