@@ -78,3 +78,90 @@ class TestSkillCreationModels:
         assert p.can_create is True
         assert p.skill_type == "prompt_chain"
         assert p.confidence == 0.8
+
+
+# ---------------------------------------------------------------------------
+# EcosystemSearchService tests
+# ---------------------------------------------------------------------------
+
+class TestEcosystemSearchService:
+    """Tests for EcosystemSearchService."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_ecosystem_search_composio_static(self, mock_db):
+        """Composio static search returns results with correct structure."""
+        from src.services.ecosystem_search import EcosystemSearchService
+
+        _setup_chain(mock_db, [])  # No cache
+
+        tenant_config = SimpleNamespace(
+            allowed_ecosystem_sources=["composio"],
+        )
+        service = EcosystemSearchService(mock_db, tenant_config=tenant_config)
+
+        results = await service.search_for_capability(
+            "read_crm_pipeline",
+            "CRM pipeline data access",
+            "user-1",
+        )
+
+        assert len(results) > 0
+        for r in results:
+            assert r.source == "composio"
+            assert r.name
+            assert 0 <= r.quality_estimate <= 1
+
+    @pytest.mark.asyncio
+    async def test_ecosystem_search_cache(self, mock_db):
+        """Second search uses cache, not network."""
+        from src.services.ecosystem_search import EcosystemSearchService
+
+        tenant_config = SimpleNamespace(
+            allowed_ecosystem_sources=["composio"],
+        )
+        service = EcosystemSearchService(mock_db, tenant_config=tenant_config)
+
+        # First call: no cache → searches
+        _setup_chain(mock_db, [])
+        results1 = await service.search_for_capability(
+            "read_crm_pipeline", "CRM", "user-1"
+        )
+
+        # Second call: cache hit → returns cached results
+        cached_rows = [{
+            "search_source": "composio",
+            "results": [{"name": "Salesforce", "source": "composio", "description": "CRM", "quality_estimate": 0.85}],
+        }]
+        _setup_chain(mock_db, cached_rows)
+
+        results2 = await service.search_for_capability(
+            "read_crm_pipeline", "CRM", "user-1"
+        )
+
+        assert len(results2) > 0
+        # Cached results have the data from the mock
+        assert results2[0].name == "Salesforce"
+
+    @pytest.mark.asyncio
+    async def test_ecosystem_search_tenant_whitelist(self, mock_db):
+        """Restricted tenant only gets allowed sources."""
+        from src.services.ecosystem_search import EcosystemSearchService
+
+        _setup_chain(mock_db, [])
+
+        tenant_config = SimpleNamespace(
+            allowed_ecosystem_sources=["composio"],  # Only Composio
+        )
+        service = EcosystemSearchService(mock_db, tenant_config=tenant_config)
+
+        results = await service.search_for_capability(
+            "read_crm_pipeline", "CRM", "user-1"
+        )
+
+        # All results must be from composio (not mcp_registry or smithery)
+        for r in results:
+            assert r.source == "composio"
