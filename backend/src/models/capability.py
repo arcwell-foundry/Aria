@@ -50,6 +50,41 @@ class ResolutionStrategy(BaseModel):
     auto_usable: bool = False
     ecosystem_source: Optional[str] = None
     ecosystem_data: Optional[dict[str, Any]] = None
+    creation_proposal: Optional[Any] = None  # SkillCreationProposal when strategy_type == 'skill_creation'
+
+
+class EcosystemResult(BaseModel):
+    """A tool/server discovered from an external ecosystem search."""
+
+    name: str
+    source: str  # composio, mcp_registry, smithery
+    description: str = ""
+    quality_estimate: float = Field(default=0.5, ge=0, le=1)
+    relevance_score: float = Field(default=0.5, ge=0, le=1)
+    final_score: float = Field(default=0.5, ge=0, le=1)
+    app: Optional[str] = None  # Composio app identifier
+    qualified_name: Optional[str] = None  # Smithery qualified name
+    url: Optional[str] = None
+    author: Optional[str] = None
+    auth_type: str = "varies"
+    setup_time: int = 60  # seconds
+    stars: int = 0
+    last_updated: Optional[str] = None
+
+
+class SkillCreationProposal(BaseModel):
+    """LLM assessment of whether ARIA can build a skill for a capability gap."""
+
+    can_create: bool
+    skill_type: str  # prompt_chain, api_wrapper, composite_workflow
+    confidence: float = Field(ge=0, le=1)
+    skill_name: str
+    description: str
+    estimated_quality: float = Field(default=0.5, ge=0, le=1)
+    approach: str = ""
+    public_api_url: Optional[str] = None
+    required_capabilities: list[str] = Field(default_factory=list)
+    reason_if_no: Optional[str] = None
 
 
 class CapabilityGap(BaseModel):
