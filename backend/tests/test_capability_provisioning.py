@@ -587,3 +587,51 @@ class TestDemandTracking:
         update_args = chain.update.call_args[0][0]
         assert update_args["times_needed"] == 3
         assert update_args["times_satisfied_directly"] == 2
+
+
+class TestOrchestratorIntegration:
+    """Test that gap detection integrates with SkillOrchestrator plans."""
+
+    @pytest.mark.asyncio
+    async def test_plan_annotated_with_gaps(self):
+        """ExecutionPlan dict gets capability_gaps key when gaps exist."""
+        from src.services.capability_provisioning import annotate_plan_with_gaps
+
+        mock_db = MagicMock()
+        chain = MagicMock()
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.order.return_value = chain
+        chain.limit.return_value = chain
+        chain.maybe_single.return_value = chain
+        chain.insert.return_value = chain
+        chain.execute.return_value = _mock_db_response([])
+        mock_db.table.return_value = chain
+
+        # Plan dict (what analyze_task returns serialized)
+        plan_dict = {
+            "plan_id": "test-plan-1",
+            "steps": [
+                {"step_number": 1, "description": "Research competitors"},
+            ],
+        }
+
+        # Mock the gap detector to return one blocking gap
+        with patch(
+            "src.services.capability_provisioning.GapDetectionService"
+        ) as MockDetector:
+            mock_instance = AsyncMock()
+            mock_instance.analyze_capabilities_for_plan.return_value = [
+                CapabilityGap(
+                    capability="read_crm_pipeline",
+                    step={"description": "Research competitors"},
+                    severity="blocking",
+                ),
+            ]
+            MockDetector.return_value = mock_instance
+
+            result = await annotate_plan_with_gaps(plan_dict, "user-1", mock_db)
+
+        assert "capability_gaps" in result
+        assert result["has_blocking_gaps"] is True
+        assert len(result["capability_gaps"]) == 1

@@ -368,6 +368,31 @@ class SkillOrchestrator:
         # Step 7: Persist plan to database
         await self._persist_plan(plan, user_id)
 
+        # Step 8: Self-provisioning — annotate plan with capability gaps
+        try:
+            from src.services.capability_provisioning import annotate_plan_with_gaps
+
+            plan_dict = {
+                "plan_id": plan.plan_id,
+                "steps": [
+                    {
+                        "step_number": s.step_number,
+                        "skill_id": s.skill_id,
+                        "skill_path": s.skill_path,
+                        "description": s.input_data.get("description", s.skill_path),
+                        "input_data": s.input_data,
+                    }
+                    for s in plan.steps
+                ],
+            }
+            annotated = await annotate_plan_with_gaps(plan_dict, user_id, self._get_db())
+            # Attach gap metadata to plan for downstream consumers
+            plan.capability_gaps = annotated.get("capability_gaps", [])  # type: ignore[attr-defined]
+            plan.has_blocking_gaps = annotated.get("has_blocking_gaps", False)  # type: ignore[attr-defined]
+            plan.has_degraded_gaps = annotated.get("has_degraded_gaps", False)  # type: ignore[attr-defined]
+        except Exception:
+            logger.warning("Self-provisioning gap detection failed (non-fatal)")
+
         logger.info(
             "Task analyzed and plan created",
             extra={

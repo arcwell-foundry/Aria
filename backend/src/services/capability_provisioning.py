@@ -595,3 +595,55 @@ class DemandTracker:
                     "Failed to update capability demand",
                     extra={"user_id": user_id, "capability": cap_name},
                 )
+
+
+async def annotate_plan_with_gaps(
+    plan_dict: dict[str, Any],
+    user_id: str,
+    db_client: Any,
+) -> dict[str, Any]:
+    """Annotate an execution plan dict with capability gap information.
+
+    Called by SkillOrchestrator.analyze_task() after building the plan,
+    before returning it. Adds 'capability_gaps', 'has_blocking_gaps',
+    and 'has_degraded_gaps' keys to the plan dict.
+
+    Graceful degradation: if anything fails, the original plan is returned
+    unchanged.
+    """
+    try:
+        graph = CapabilityGraphService(db_client)
+        engine = ResolutionEngine(db_client, graph)
+        detector = GapDetectionService(db_client, graph, engine)
+
+        gaps = await detector.analyze_capabilities_for_plan(plan_dict, user_id)
+
+        if gaps:
+            plan_dict["capability_gaps"] = [g.model_dump() for g in gaps]
+            plan_dict["has_blocking_gaps"] = any(
+                g.severity == "blocking" for g in gaps
+            )
+            plan_dict["has_degraded_gaps"] = any(
+                g.severity == "degraded" for g in gaps
+            )
+
+            # Auto-resolve degraded gaps with auto-usable composites
+            for gap in gaps:
+                if gap.severity == "degraded":
+                    auto_strategies = [s for s in gap.resolutions if s.auto_usable]
+                    if auto_strategies:
+                        gap.auto_resolved = True
+                        gap.resolved_with = auto_strategies[0]
+        else:
+            plan_dict["capability_gaps"] = []
+            plan_dict["has_blocking_gaps"] = False
+            plan_dict["has_degraded_gaps"] = False
+
+    except Exception:
+        logger.exception("Failed to annotate plan with capability gaps")
+        # Graceful degradation — return plan unchanged
+        plan_dict.setdefault("capability_gaps", [])
+        plan_dict.setdefault("has_blocking_gaps", False)
+        plan_dict.setdefault("has_degraded_gaps", False)
+
+    return plan_dict
