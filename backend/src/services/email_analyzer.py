@@ -491,6 +491,7 @@ class EmailAnalyzer:
             sender_name=sender_name,
             subject=subject,
             snippet=snippet,
+            body=cleaned_body,
             category=category,
             urgency=urgency,
             topic_summary=topic_summary,

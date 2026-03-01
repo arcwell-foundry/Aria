@@ -1475,32 +1475,79 @@ Example of well-formatted output:
             task=TaskType.SCRIBE_DRAFT_EMAIL,
         )
 
-        # Parse JSON response (strip markdown code fences if present)
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            # Remove opening fence (```json or ```)
-            first_newline = cleaned.index("\n") if "\n" in cleaned else len(cleaned)
-            cleaned = cleaned[first_newline + 1:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
+        # Parse JSON response with robust extraction
+        parsed = self._parse_draft_json(response, email.subject, email.email_id)
+        return parsed
 
+    def _parse_draft_json(
+        self,
+        response: str,
+        original_subject: str,
+        email_id: str,
+    ) -> ReplyDraftContent:
+        """Parse LLM response into ReplyDraftContent with robust fallbacks.
+
+        Handles markdown code fences, embedded JSON, and plain-text responses.
+        Never returns raw JSON or markdown fences as draft body.
+        """
+        import re as _re
+
+        cleaned = response.strip()
+
+        # Strip ALL markdown code fences (handles multiple fence blocks)
+        if "```" in cleaned:
+            # Remove opening fence line (```json, ```JSON, ```, etc.)
+            cleaned = _re.sub(r"^```[a-zA-Z]*\s*\n?", "", cleaned)
+            # Remove closing fence
+            cleaned = _re.sub(r"\n?```\s*$", "", cleaned)
+            cleaned = cleaned.strip()
+
+        # Attempt 1: Direct JSON parse
         try:
             data = json.loads(cleaned)
-            return ReplyDraftContent(
-                subject=data.get("subject", f"Re: {email.subject}"),
-                body=data.get("body", cleaned),
-            )
-        except json.JSONDecodeError:
-            # Fallback: use raw response as body
-            logger.warning(
-                "DRAFT_ENGINE: LLM returned non-JSON for email %s, using fallback",
-                email.email_id,
-            )
-            return ReplyDraftContent(
-                subject=f"Re: {email.subject}",
-                body=response,
-            )
+            subject = data.get("subject") or f"Re: {original_subject}"
+            body = data.get("body", "")
+            if body:
+                return ReplyDraftContent(subject=subject, body=body)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        # Attempt 2: Extract JSON object from within the response text
+        json_match = _re.search(r"\{[\s\S]*\"body\"\s*:\s*\"[\s\S]*?\"\s*\}", cleaned)
+        if json_match:
+            try:
+                data = json.loads(json_match.group())
+                subject = data.get("subject") or f"Re: {original_subject}"
+                body = data.get("body", "")
+                if body:
+                    logger.info(
+                        "DRAFT_ENGINE: Extracted JSON from mixed response for email %s",
+                        email_id,
+                    )
+                    return ReplyDraftContent(subject=subject, body=body)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        # Attempt 3: The response is plain text (not JSON at all)
+        # Strip any remaining JSON-like artifacts so the user never sees raw JSON
+        logger.warning(
+            "DRAFT_ENGINE: LLM returned non-JSON for email %s, using cleaned text as body",
+            email_id,
+        )
+        # Remove any stray JSON keys/braces that might be in the text
+        fallback_body = cleaned
+        if fallback_body.startswith("{") and "body" in fallback_body:
+            # Looks like malformed JSON — try to extract just the body value
+            body_match = _re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', fallback_body)
+            if body_match:
+                fallback_body = body_match.group(1)
+                # Unescape JSON string escapes
+                fallback_body = fallback_body.replace("\\n", "\n").replace('\\"', '"')
+
+        return ReplyDraftContent(
+            subject=f"Re: {original_subject}",
+            body=fallback_body,
+        )
 
     def _build_reply_prompt(
         self,
@@ -1603,13 +1650,24 @@ Personality traits: {', '.join(trait_parts)}""")
         sections.append(self._build_formatting_instructions(formatting_patterns))
 
         # The original email being replied to
+        # body should always be populated after the email_analyzer fix;
+        # snippet (200 chars) is a last-resort fallback.
         email_body = getattr(email, "body", None)
         if not email_body:
-            logger.warning(
-                "BL-1: No body for email %s, falling back to snippet",
-                email.subject,
-            )
-            email_body = email.snippet
+            email_body = getattr(email, "snippet", None) or ""
+            if email_body:
+                logger.warning(
+                    "BL-1: No full body for email '%s', using snippet (%d chars). "
+                    "Draft quality may be reduced.",
+                    email.subject,
+                    len(email_body),
+                )
+            else:
+                logger.error(
+                    "BL-1-CRITICAL: No body AND no snippet for email '%s'. "
+                    "Draft will likely hallucinate content.",
+                    email.subject,
+                )
         sections.append(f"""## The email you're replying to
 From: {email.sender_name or 'Unknown'} <{email.sender_email}>
 Subject: {email.subject}
