@@ -270,6 +270,33 @@ Do not include any text outside the JSON object."""
                     e,
                 )
 
+            # Route urgent email signals through Intelligence Pulse Engine
+            if scan_result.needs_reply:
+                try:
+                    from src.services.intelligence_pulse import get_pulse_engine
+
+                    pulse_engine = get_pulse_engine()
+                    await pulse_engine.process_signal(
+                        user_id=user_id,
+                        signal={
+                            "source": "email_scanner",
+                            "title": f"{len(scan_result.needs_reply)} emails need attention",
+                            "content": f"Inbox scan found {result.emails_scanned} emails: "
+                                       f"{result.emails_needs_reply} need reply, "
+                                       f"{len(scan_result.fyi)} FYI",
+                            "signal_category": "email",
+                            "pulse_type": "event",
+                            "entities": [],
+                            "raw_data": {
+                                "run_id": run_id,
+                                "emails_scanned": result.emails_scanned,
+                                "needs_reply": result.emails_needs_reply,
+                            },
+                        },
+                    )
+                except Exception:
+                    logger.debug("DRAFT_ENGINE: Pulse engine routing failed")
+
             # Get user info for signature
             user_name = await self._get_user_name(user_id)
 
