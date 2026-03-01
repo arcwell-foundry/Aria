@@ -415,3 +415,244 @@ class TestSkillCreationEngine:
         assert result["passed"] is True
         assert result["errors"] == []
         assert result["execution_time_ms"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# SkillTrustManager tests
+# ---------------------------------------------------------------------------
+
+class TestSkillTrustManager:
+    """Tests for trust graduation and demotion."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_trust_graduation_low_to_medium(self, mock_db):
+        """5 successes with 0 failures graduates LOW → MEDIUM."""
+        from src.services.skill_trust import SkillTrustManager
+
+        skill = {
+            "id": "skill-001",
+            "user_id": "user-1",
+            "trust_level": "LOW",
+            "execution_count": 4,
+            "success_count": 4,
+            "failure_count": 0,
+            "avg_quality_score": 0.8,
+            "status": "active",
+        }
+
+        chain = _setup_chain(mock_db, skill)
+        chain.single.return_value = chain
+        chain.execute.return_value = _mock_db_response(skill)
+
+        manager = SkillTrustManager(mock_db)
+        manager._get_tenant_config = AsyncMock(return_value=None)
+
+        await manager.record_execution("skill-001", success=True, quality_score=0.85)
+
+        # Verify update was called with MEDIUM trust level
+        update_calls = mock_db.table.return_value.update.call_args_list
+        assert len(update_calls) > 0
+        update_data = update_calls[-1][0][0]
+        assert update_data["trust_level"] == "MEDIUM"
+        assert update_data["success_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_trust_graduation_blocked_by_tenant(self, mock_db):
+        """Admin config blocks auto-graduation above MEDIUM."""
+        from src.services.skill_trust import SkillTrustManager
+
+        skill = {
+            "id": "skill-001",
+            "user_id": "user-1",
+            "trust_level": "MEDIUM",
+            "execution_count": 19,
+            "success_count": 19,
+            "failure_count": 0,
+            "avg_quality_score": 0.9,
+            "status": "graduated",
+        }
+
+        chain = _setup_chain(mock_db, skill)
+        chain.single.return_value = chain
+        chain.execute.return_value = _mock_db_response(skill)
+
+        manager = SkillTrustManager(mock_db)
+        # Tenant says max auto is MEDIUM (HIGH needs admin approval)
+        manager._get_tenant_config = AsyncMock(
+            return_value={"max_auto_trust_level": "MEDIUM"}
+        )
+
+        await manager.record_execution("skill-001", success=True, quality_score=0.95)
+
+        # Verify trust_level was NOT auto-upgraded to HIGH
+        update_calls = mock_db.table.return_value.update.call_args_list
+        update_data = update_calls[-1][0][0]
+        assert update_data.get("trust_level", "MEDIUM") != "HIGH"
+
+        # Verify approval queue entry was created
+        insert_calls = [
+            c for c in mock_db.table.call_args_list
+            if c[0][0] == "skill_approval_queue"
+        ]
+        assert len(insert_calls) > 0
+
+    @pytest.mark.asyncio
+    async def test_trust_demotion(self, mock_db):
+        """3 consecutive failures demotes trust level."""
+        from src.services.skill_trust import SkillTrustManager
+
+        skill = {
+            "id": "skill-001",
+            "user_id": "user-1",
+            "trust_level": "MEDIUM",
+            "execution_count": 10,
+            "success_count": 8,
+            "failure_count": 2,
+            "avg_quality_score": 0.7,
+            "status": "graduated",
+        }
+
+        chain = _setup_chain(mock_db, skill)
+        chain.single.return_value = chain
+
+        # First execute() returns the skill, subsequent calls return various results
+        call_count = 0
+        original_execute = chain.execute
+
+        def side_effect_execute():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_db_response(skill)
+            # Return 3 recent failures for demotion check
+            return _mock_db_response([
+                {"metadata": {"success": False}},
+                {"metadata": {"success": False}},
+                {"metadata": {"success": False}},
+            ])
+
+        chain.execute = MagicMock(side_effect=side_effect_execute)
+
+        manager = SkillTrustManager(mock_db)
+        manager._get_tenant_config = AsyncMock(return_value=None)
+
+        await manager.record_execution("skill-001", success=False, quality_score=0.3)
+
+        # Verify trust demoted from MEDIUM to LOW
+        update_calls = mock_db.table.return_value.update.call_args_list
+        update_data = update_calls[-1][0][0]
+        assert update_data["trust_level"] == "LOW"
+
+
+# ---------------------------------------------------------------------------
+# SkillHealthMonitor tests
+# ---------------------------------------------------------------------------
+
+class TestSkillHealthMonitor:
+    """Tests for skill health monitoring."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_skill_health_degraded(self, mock_db):
+        """>15% error rate marks skill degraded."""
+        from src.services.skill_trust import SkillHealthMonitor
+
+        skills_data = [{
+            "id": "skill-001",
+            "user_id": "user-1",
+            "display_name": "FDA Lookup",
+            "skill_name": "fda_lookup",
+            "status": "active",
+        }]
+
+        # Recent executions: 2 failures out of 10 = 20% error rate
+        audit_data = [
+            {"metadata": {"success": True}} for _ in range(8)
+        ] + [
+            {"metadata": {"success": False}} for _ in range(2)
+        ]
+
+        call_count = 0
+
+        def side_effect_execute():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_db_response(skills_data)
+            elif call_count == 2:
+                return _mock_db_response(audit_data)
+            return _mock_db_response([])
+
+        chain = _setup_chain(mock_db, [])
+        chain.execute = MagicMock(side_effect=side_effect_execute)
+
+        mock_pulse = AsyncMock()
+        monitor = SkillHealthMonitor(mock_db, pulse_engine=mock_pulse)
+
+        await monitor.check_all_active_skills()
+
+        # Verify skill updated with degraded status
+        update_calls = mock_db.table.return_value.update.call_args_list
+        assert len(update_calls) > 0
+        update_data = update_calls[0][0][0]
+        assert update_data["health_status"] == "degraded"
+
+        # Verify pulse signal generated
+        mock_pulse.process_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skill_health_broken_auto_disable(self, mock_db):
+        """>50% error rate disables skill."""
+        from src.services.skill_trust import SkillHealthMonitor
+
+        skills_data = [{
+            "id": "skill-002",
+            "user_id": "user-1",
+            "display_name": "Broken Skill",
+            "skill_name": "broken_skill",
+            "status": "active",
+        }]
+
+        # 6 failures out of 10 = 60% error rate
+        audit_data = [
+            {"metadata": {"success": True}} for _ in range(4)
+        ] + [
+            {"metadata": {"success": False}} for _ in range(6)
+        ]
+
+        call_count = 0
+
+        def side_effect_execute():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_db_response(skills_data)
+            elif call_count == 2:
+                return _mock_db_response(audit_data)
+            return _mock_db_response([])
+
+        chain = _setup_chain(mock_db, [])
+        chain.execute = MagicMock(side_effect=side_effect_execute)
+
+        mock_pulse = AsyncMock()
+        monitor = SkillHealthMonitor(mock_db, pulse_engine=mock_pulse)
+
+        await monitor.check_all_active_skills()
+
+        # Verify skill updated with broken status AND disabled
+        update_calls = mock_db.table.return_value.update.call_args_list
+        # First update: health_status = broken
+        # Second update: status = disabled
+        update_data_all = [c[0][0] for c in update_calls]
+        health_updates = [d for d in update_data_all if "health_status" in d]
+        status_updates = [d for d in update_data_all if d.get("status") == "disabled"]
+        assert len(health_updates) > 0
+        assert health_updates[0]["health_status"] == "broken"
+        assert len(status_updates) > 0
