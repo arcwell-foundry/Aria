@@ -46,14 +46,12 @@ export function SignupPage() {
 
     setIsLoading(true);
 
-    // DEBUG: Log the exact payload being sent
     const signupPayload = {
       email,
       password,
       full_name: fullName,
       company_name: companyName || undefined,
     };
-    console.log("SIGNUP PAYLOAD:", JSON.stringify(signupPayload, null, 2));
 
     try {
       await signup(signupPayload);

@@ -1865,13 +1865,6 @@ export function OnboardingPage() {
       // Map provider to integration_type
       const integrationType = pendingProvider === "microsoft" ? "outlook" : "gmail";
 
-      console.log("[OAuth] Processing callback:", {
-        status,
-        connectedAccountId,
-        pendingProvider,
-        integrationType,
-      });
-
       // Clean URL params immediately to prevent re-triggering
       window.history.replaceState({}, "", window.location.pathname);
 
@@ -1881,7 +1874,6 @@ export function OnboardingPage() {
         connection_id: connectedAccountId,
       })
         .then(() => {
-          console.log("[OAuth] Connection recorded successfully");
           // Clear the pending provider
           sessionStorage.removeItem("pending_email_provider");
           // Invalidate email status to refresh UI

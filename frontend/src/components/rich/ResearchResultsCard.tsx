@@ -51,11 +51,11 @@ export function ResearchResultsCard({ data }: { data: ResearchResultsData }) {
         className="flex items-center justify-between px-4 py-2.5"
         style={{
           borderBottom: '1px solid var(--border)',
-          backgroundColor: 'rgba(139,92,246,0.05)',
+          backgroundColor: 'var(--bg-subtle)',
         }}
       >
         <div className="flex items-center gap-2">
-          <BookOpen className="w-3.5 h-3.5 text-violet-400" />
+          <BookOpen className="w-3.5 h-3.5" style={{ color: 'var(--info)' }} />
           <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
             Research Results
           </span>
@@ -87,7 +87,7 @@ export function ResearchResultsCard({ data }: { data: ResearchResultsData }) {
               {result.authors && <span>{result.authors}</span>}
               {result.date && <span>{result.date}</span>}
               {result.source && (
-                <span className="px-1 py-0.5 rounded bg-violet-500/10 text-violet-400">
+                <span className="px-1 py-0.5 rounded" style={{ backgroundColor: 'color-mix(in srgb, var(--info) 10%, transparent)', color: 'var(--info)' }}>
                   {result.source}
                 </span>
               )}

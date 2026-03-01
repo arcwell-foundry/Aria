@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { useIntelGoals } from '@/hooks/useIntelPanelData';
 import { useAgentStatusStore } from '@/stores/agentStatusStore';

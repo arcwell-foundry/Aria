@@ -16,9 +16,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  ZAxis,
 } from "recharts";
 import { useTrustSummaries, useTrustEvolution } from "@/hooks/useAdminDashboard";
 

@@ -815,7 +815,10 @@ export function ActivityFeed({
               <>
                 {isFetchingNextPage && (
                   <div className="flex justify-center py-4">
-                    <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                    <div
+                      className="w-5 h-5 rounded-full aria-breathe"
+                      style={{ backgroundColor: 'var(--accent)', opacity: 0.15 }}
+                    />
                   </div>
                 )}
                 {!hasNextPage && displayItems.length > 0 && (

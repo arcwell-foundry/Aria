@@ -32,7 +32,7 @@ const SESSION_TYPE_CONFIG: Record<
   chat: { icon: MessageSquare, label: "Chat", color: "text-blue-400" },
   briefing: { icon: Target, label: "Briefing", color: "text-amber-400" },
   debrief: { icon: ClipboardList, label: "Debrief", color: "text-emerald-400" },
-  consultation: { icon: Lightbulb, label: "Consultation", color: "text-violet-400" },
+  consultation: { icon: Lightbulb, label: "Consultation", color: "text-[var(--info)]" },
 };
 
 // Status badge mapping

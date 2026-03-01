@@ -11,11 +11,14 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { data: routingDecision, isLoading: routingLoading } = useRoutingDecision(!authLoading && isAuthenticated);
   const location = useLocation();
 
-  // Show loading spinner while checking auth or routing
+  // Show ARIA presence pulse while checking auth or routing
   if (authLoading || (isAuthenticated && routingLoading)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--accent)]" />
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <div
+          className="h-12 w-12 rounded-full aria-breathe"
+          style={{ backgroundColor: 'var(--accent)', opacity: 0.15 }}
+        />
       </div>
     );
   }

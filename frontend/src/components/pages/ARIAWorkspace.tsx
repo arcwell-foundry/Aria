@@ -64,13 +64,10 @@ export function ARIAWorkspace() {
 
     listConversations()
       .then((conversations) => {
-        console.log('[ARIAWorkspace] Loaded conversations:', conversations.length);
         if (!conversations.length) return;
         // Load the most recent conversation
         const latest = conversations[0];
-        console.log('[ARIAWorkspace] Loading latest conversation:', latest.id);
         return getConversation(latest.id).then((chatMessages) => {
-          console.log('[ARIAWorkspace] Loaded messages:', chatMessages.length);
           if (!chatMessages.length) return;
 
           const store = useConversationStore.getState();
@@ -95,15 +92,14 @@ export function ARIAWorkspace() {
               role: msg.role === 'assistant' ? 'aria' as const : 'user' as const,
               content: msg.content,
               rich_content: richContent,
-              ui_commands: [] as const,
-              suggestions: [] as const,
+              ui_commands: [] as UICommand[],
+              suggestions: [] as string[],
               timestamp: msg.created_at,
             };
           });
 
           // Prepend historic messages, keep existing messages (like briefing) at the end
           store.setMessages([...historicMessages, ...store.messages]);
-          console.log('[ARIAWorkspace] Conversation restored:', historicMessages.length, 'messages');
         });
       })
       .catch((error) => {

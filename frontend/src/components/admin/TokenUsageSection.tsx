@@ -23,7 +23,7 @@ import { cn } from "@/utils/cn";
 const PERIOD_OPTIONS = [7, 30, 90] as const;
 
 function KPI({ icon: Icon, label, value, alert }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   label: string;
   value: string | number;
   alert?: boolean;

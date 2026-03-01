@@ -50,9 +50,14 @@ const AdminDashboardPage = lazy(() =>
 function PageLoadingSkeleton() {
   return (
     <div className="flex items-center justify-center h-full w-full min-h-[50vh]">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent-primary)] border-t-transparent" />
-        <span className="text-sm text-[var(--text-secondary)]">Loading...</span>
+      <div className="flex flex-col items-center gap-4">
+        <div
+          className="h-10 w-10 rounded-full aria-breathe"
+          style={{ backgroundColor: 'var(--accent)', opacity: 0.15 }}
+        />
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Loading…
+        </span>
       </div>
     </div>
   );

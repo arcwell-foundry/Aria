@@ -162,9 +162,9 @@ function RichContentItem({ item }: { item: RichContent }) {
               <strong>{(tp?.task_title as string) || 'Task'}</strong>
               <span className="text-[var(--text-secondary)]"> complete</span>
             </span>
-            {tp?.agent && (
+            {tp?.agent != null && (
               <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-secondary)] ml-auto">
-                {tp.agent as string}
+                {String(tp.agent)}
               </span>
             )}
           </div>

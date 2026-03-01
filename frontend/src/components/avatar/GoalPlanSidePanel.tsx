@@ -128,7 +128,7 @@ export function GoalPlanSidePanel() {
  */
 function GoalPlanCardWithDismiss({
   data,
-  onApproved,
+  onApproved: _onApproved,
 }: {
   data: GoalPlanData;
   onApproved: () => void;
