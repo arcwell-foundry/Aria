@@ -20,6 +20,7 @@ class CapabilityProvider(BaseModel):
     capability_category: str
     provider_name: str
     provider_type: str  # native, composio_oauth, composio_api_key, composite, mcp_server, user_provided
+    description: str = ""
     quality_score: float = Field(ge=0, le=1)
     setup_time_seconds: int = 0
     user_friction: str = "none"

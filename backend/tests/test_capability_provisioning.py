@@ -235,3 +235,97 @@ class TestCapabilityGraphService:
         result = await service.get_best_available("research_person", "user-1")
 
         assert result is None
+
+
+class TestResolutionEngine:
+    """Tests for ResolutionEngine.generate_strategies()."""
+
+    @pytest.fixture
+    def mock_db(self):
+        db = MagicMock()
+        return db
+
+    def _setup_chain(self, db, data):
+        chain = MagicMock()
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.order.return_value = chain
+        chain.limit.return_value = chain
+        chain.maybe_single.return_value = chain
+        chain.execute.return_value = _mock_db_response(data)
+        db.table.return_value = chain
+        return chain
+
+    @pytest.mark.asyncio
+    async def test_resolution_strategies_ranked(self, mock_db):
+        """Strategies sorted by quality descending."""
+        from src.services.capability_provisioning import ResolutionEngine, CapabilityGraphService
+
+        providers = [
+            CapabilityProvider(**_make_provider_row(
+                "read_email", "composio_outlook", "composio_oauth", 0.95,
+                composio_app_name="OUTLOOK365",
+                capability_category="data_access",
+            )),
+            CapabilityProvider(**_make_provider_row(
+                "read_email", "composio_gmail", "composio_oauth", 0.95,
+                composio_app_name="GMAIL",
+                capability_category="data_access",
+            )),
+        ]
+
+        graph = CapabilityGraphService(mock_db)
+        graph._check_user_connection = AsyncMock(return_value=False)
+
+        # No tenant config
+        self._setup_chain(mock_db, [])
+
+        engine = ResolutionEngine(mock_db, graph)
+        strategies = await engine.generate_strategies("read_email", "user-1", providers)
+
+        # Should have: 2 direct_integration + user_provided at minimum
+        assert len(strategies) >= 3
+
+        # Verify sorted by quality descending
+        qualities = [s.quality for s in strategies]
+        assert qualities == sorted(qualities, reverse=True)
+
+        # Last strategy should be user_provided
+        assert strategies[-1].strategy_type == "user_provided"
+
+    @pytest.mark.asyncio
+    async def test_resolution_respects_tenant_whitelist(self, mock_db):
+        """Excluded toolkits not offered as resolution strategies."""
+        from src.services.capability_provisioning import ResolutionEngine, CapabilityGraphService
+
+        providers = [
+            CapabilityProvider(**_make_provider_row(
+                "read_email", "composio_outlook", "composio_oauth", 0.95,
+                composio_app_name="OUTLOOK365",
+                capability_category="data_access",
+            )),
+            CapabilityProvider(**_make_provider_row(
+                "read_email", "composio_gmail", "composio_oauth", 0.95,
+                composio_app_name="GMAIL",
+                capability_category="data_access",
+            )),
+        ]
+
+        graph = CapabilityGraphService(mock_db)
+        graph._check_user_connection = AsyncMock(return_value=False)
+
+        engine = ResolutionEngine(mock_db, graph)
+
+        # Mock tenant config: only OUTLOOK365 is allowed
+        engine._get_tenant_config = AsyncMock(return_value=MagicMock(
+            allowed_composio_toolkits=["OUTLOOK365"],
+            allowed_ecosystem_sources=["composio"],
+        ))
+
+        strategies = await engine.generate_strategies("read_email", "user-1", providers)
+
+        # Gmail should NOT appear as a direct_integration option
+        direct_strategies = [s for s in strategies if s.strategy_type == "direct_integration"]
+        direct_apps = [s.composio_app for s in direct_strategies]
+        assert "GMAIL" not in direct_apps
+        assert "OUTLOOK365" in direct_apps
