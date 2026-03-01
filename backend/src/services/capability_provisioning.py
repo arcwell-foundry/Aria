@@ -506,3 +506,92 @@ class ProvisioningConversation:
                 f"({quality_pct}% accuracy, {setup} setup)"
             )
         return "\n".join(options)
+
+
+class DemandTracker:
+    """Tracks capability demand patterns for proactive suggestions."""
+
+    def __init__(self, db_client: Any) -> None:
+        self._db = db_client
+
+    async def record_capability_usage(
+        self,
+        user_id: str,
+        goal_type: str,
+        capabilities_used: list[dict[str, Any]],
+    ) -> None:
+        """Update capability_demand after goal execution completes."""
+        for cap in capabilities_used:
+            cap_name = cap.get("name", "")
+            if not cap_name:
+                continue
+
+            try:
+                existing = (
+                    self._db.table("capability_demand")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("capability_name", cap_name)
+                    .eq("goal_type", goal_type)
+                    .limit(1)
+                    .execute()
+                )
+
+                if existing.data:
+                    row = existing.data[0]
+                    prev_count = row.get("times_needed", 0) or 1
+                    prev_avg = row.get("avg_quality_achieved", 0) or 0
+
+                    updates: dict[str, Any] = {
+                        "times_needed": row["times_needed"] + 1,
+                        "avg_quality_achieved": (
+                            (prev_avg * prev_count + cap.get("quality", 0.5))
+                            / (prev_count + 1)
+                        ),
+                        "updated_at": "now()",
+                    }
+
+                    provider_type = cap.get("provider_type", "")
+                    if provider_type == "native" or cap.get("direct", False):
+                        updates["times_satisfied_directly"] = (
+                            row.get("times_satisfied_directly", 0) + 1
+                        )
+                    elif provider_type == "composite":
+                        updates["times_used_composite"] = (
+                            row.get("times_used_composite", 0) + 1
+                        )
+                    else:
+                        updates["times_used_fallback"] = (
+                            row.get("times_used_fallback", 0) + 1
+                        )
+
+                    (
+                        self._db.table("capability_demand")
+                        .update(updates)
+                        .eq("id", row["id"])
+                        .execute()
+                    )
+                else:
+                    provider_type = cap.get("provider_type", "")
+                    self._db.table("capability_demand").insert({
+                        "user_id": user_id,
+                        "capability_name": cap_name,
+                        "goal_type": goal_type,
+                        "times_needed": 1,
+                        "times_satisfied_directly": (
+                            1 if (provider_type == "native" or cap.get("direct")) else 0
+                        ),
+                        "times_used_composite": (
+                            1 if provider_type == "composite" else 0
+                        ),
+                        "times_used_fallback": (
+                            1 if provider_type not in ("native", "composite") and not cap.get("direct") else 0
+                        ),
+                        "avg_quality_achieved": cap.get("quality", 0.5),
+                        "quality_with_ideal_provider": 0.95,
+                    }).execute()
+            except Exception:
+                logger.warning(
+                    "Failed to update capability demand",
+                    extra={"user_id": user_id, "capability": cap_name},
+                )

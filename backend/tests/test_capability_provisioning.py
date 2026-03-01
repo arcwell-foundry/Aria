@@ -530,3 +530,60 @@ class TestProvisioningConversation:
         assert "50%" in message
         assert "95%" in message
         assert "SALESFORCE" in message
+
+
+class TestDemandTracking:
+    """Tests for capability demand tracking."""
+
+    @pytest.fixture
+    def mock_db(self):
+        db = MagicMock()
+        return db
+
+    @pytest.mark.asyncio
+    async def test_demand_tracking_increments(self, mock_db):
+        """Capability demand record incremented after goal execution."""
+        from src.services.capability_provisioning import DemandTracker
+
+        # Mock: existing demand row found
+        existing_row = {
+            "id": "demand-1",
+            "times_needed": 2,
+            "times_satisfied_directly": 1,
+            "times_used_composite": 0,
+            "times_used_fallback": 1,
+            "avg_quality_achieved": 0.60,
+        }
+
+        chain = MagicMock()
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.limit.return_value = chain
+        chain.execute.return_value = _mock_db_response([existing_row])
+
+        update_chain = MagicMock()
+        update_chain.eq.return_value = update_chain
+        update_chain.execute.return_value = _mock_db_response([])
+        chain.update = MagicMock(return_value=update_chain)
+
+        mock_db.table.return_value = chain
+
+        tracker = DemandTracker(mock_db)
+        await tracker.record_capability_usage(
+            user_id="user-1",
+            goal_type="research",
+            capabilities_used=[
+                {
+                    "name": "research_person",
+                    "provider_type": "native",
+                    "quality": 0.80,
+                    "direct": True,
+                },
+            ],
+        )
+
+        # Verify update was called
+        chain.update.assert_called_once()
+        update_args = chain.update.call_args[0][0]
+        assert update_args["times_needed"] == 3
+        assert update_args["times_satisfied_directly"] == 2
