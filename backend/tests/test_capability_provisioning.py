@@ -329,3 +329,120 @@ class TestResolutionEngine:
         direct_apps = [s.composio_app for s in direct_strategies]
         assert "GMAIL" not in direct_apps
         assert "OUTLOOK365" in direct_apps
+
+
+class TestGapDetectionService:
+    """Tests for GapDetectionService.analyze_capabilities_for_plan()."""
+
+    @pytest.fixture
+    def mock_db(self):
+        db = MagicMock()
+        return db
+
+    def _setup_chain(self, db, data):
+        chain = MagicMock()
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.order.return_value = chain
+        chain.limit.return_value = chain
+        chain.maybe_single.return_value = chain
+        chain.insert.return_value = chain
+        chain.execute.return_value = _mock_db_response(data)
+        db.table.return_value = chain
+        return chain
+
+    @pytest.mark.asyncio
+    async def test_gap_detection_no_gaps(self, mock_db):
+        """All capabilities available returns empty gaps list."""
+        from src.services.capability_provisioning import (
+            CapabilityGraphService,
+            GapDetectionService,
+            ResolutionEngine,
+        )
+
+        self._setup_chain(mock_db, [])
+
+        graph = CapabilityGraphService(mock_db)
+        engine = ResolutionEngine(mock_db, graph)
+        detector = GapDetectionService(mock_db, graph, engine)
+
+        # Mock infer to return capabilities that are all available
+        detector._infer_capabilities_for_step = AsyncMock(return_value=["research_person"])
+
+        # Mock graph to say research_person IS available at high quality
+        graph.get_best_available = AsyncMock(return_value=CapabilityProvider(
+            id="id-exa", capability_name="research_person",
+            capability_category="research", provider_name="exa_people_search",
+            provider_type="native", quality_score=0.80,
+        ))
+        graph.get_providers = AsyncMock(return_value=[])
+
+        plan = {"steps": [{"description": "Research target person"}]}
+        gaps = await detector.analyze_capabilities_for_plan(plan, "user-1")
+
+        assert len(gaps) == 0
+
+    @pytest.mark.asyncio
+    async def test_gap_detection_blocking(self, mock_db):
+        """Missing capability returns blocking gap."""
+        from src.services.capability_provisioning import (
+            CapabilityGraphService,
+            GapDetectionService,
+            ResolutionEngine,
+        )
+
+        self._setup_chain(mock_db, [])
+
+        graph = CapabilityGraphService(mock_db)
+        engine = ResolutionEngine(mock_db, graph)
+        detector = GapDetectionService(mock_db, graph, engine)
+
+        detector._infer_capabilities_for_step = AsyncMock(return_value=["read_crm_pipeline"])
+        graph.get_best_available = AsyncMock(return_value=None)
+        graph.get_providers = AsyncMock(return_value=[])
+        engine.generate_strategies = AsyncMock(return_value=[
+            ResolutionStrategy(
+                strategy_type="user_provided",
+                provider_name="ask_user",
+                quality=0.40,
+            )
+        ])
+
+        plan = {"steps": [{"description": "Check pipeline status"}]}
+        gaps = await detector.analyze_capabilities_for_plan(plan, "user-1")
+
+        assert len(gaps) == 1
+        assert gaps[0].severity == "blocking"
+        assert gaps[0].capability == "read_crm_pipeline"
+
+    @pytest.mark.asyncio
+    async def test_gap_detection_degraded(self, mock_db):
+        """Low-quality available provider returns degraded gap."""
+        from src.services.capability_provisioning import (
+            CapabilityGraphService,
+            GapDetectionService,
+            ResolutionEngine,
+        )
+
+        self._setup_chain(mock_db, [])
+
+        graph = CapabilityGraphService(mock_db)
+        engine = ResolutionEngine(mock_db, graph)
+        detector = GapDetectionService(mock_db, graph, engine)
+
+        detector._infer_capabilities_for_step = AsyncMock(return_value=["read_crm_pipeline"])
+        graph.get_best_available = AsyncMock(return_value=CapabilityProvider(
+            id="id-user", capability_name="read_crm_pipeline",
+            capability_category="data_access", provider_name="user_stated",
+            provider_type="user_provided", quality_score=0.50,
+        ))
+        graph.get_providers = AsyncMock(return_value=[])
+        engine.generate_strategies = AsyncMock(return_value=[])
+
+        plan = {"steps": [{"description": "Check pipeline"}]}
+        gaps = await detector.analyze_capabilities_for_plan(plan, "user-1")
+
+        assert len(gaps) == 1
+        assert gaps[0].severity == "degraded"
+        assert gaps[0].can_proceed is True
+        assert gaps[0].current_quality == 0.50

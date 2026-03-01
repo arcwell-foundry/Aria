@@ -293,3 +293,150 @@ class ResolutionEngine:
             {"toolkit_name": t, "description": f"{t} integration via Composio"}
             for t in capability_to_toolkits.get(capability_name, [])
         ]
+
+
+class GapDetectionService:
+    """Detects capability gaps during goal planning."""
+
+    # Quality threshold: below this, capability is considered degraded
+    _QUALITY_THRESHOLD = 0.7
+
+    def __init__(
+        self,
+        db_client: Any,
+        capability_graph: CapabilityGraphService,
+        resolution_engine: ResolutionEngine,
+    ) -> None:
+        self._db = db_client
+        self._graph = capability_graph
+        self._resolution = resolution_engine
+
+    async def analyze_capabilities_for_plan(
+        self,
+        execution_plan: dict[str, Any],
+        user_id: str,
+    ) -> list[CapabilityGap]:
+        """Check each step's required capabilities against available providers.
+
+        Returns gaps with severity and resolution strategies.
+        """
+        gaps: list[CapabilityGap] = []
+
+        for step in execution_plan.get("steps", []):
+            try:
+                required = await self._infer_capabilities_for_step(step)
+            except Exception:
+                logger.warning(
+                    "Failed to infer capabilities for step",
+                    extra={"step": str(step)[:200]},
+                )
+                continue
+
+            for cap_name in required:
+                best = await self._graph.get_best_available(cap_name, user_id)
+                all_providers = await self._graph.get_providers(cap_name)
+
+                if best is None:
+                    gaps.append(
+                        CapabilityGap(
+                            capability=cap_name,
+                            step=step,
+                            severity="blocking",
+                            current_provider=None,
+                            current_quality=0,
+                            resolutions=await self._resolution.generate_strategies(
+                                cap_name, user_id, all_providers
+                            ),
+                        )
+                    )
+                elif best.quality_score < self._QUALITY_THRESHOLD:
+                    gaps.append(
+                        CapabilityGap(
+                            capability=cap_name,
+                            step=step,
+                            severity="degraded",
+                            current_provider=best.provider_name,
+                            current_quality=best.quality_score,
+                            can_proceed=True,
+                            resolutions=await self._resolution.generate_strategies(
+                                cap_name, user_id, all_providers
+                            ),
+                        )
+                    )
+
+        # Log gaps for demand tracking (best-effort)
+        for gap in gaps:
+            await self._log_gap(user_id, gap)
+
+        return gaps
+
+    async def _infer_capabilities_for_step(
+        self, step: dict[str, Any]
+    ) -> list[str]:
+        """Use LLM to infer which capabilities a step needs.
+
+        Uses Haiku for cost efficiency.
+        """
+        try:
+            # Get all unique capability names from the graph
+            cap_result = self._db.table("capability_graph").select("capability_name").execute()
+            unique_caps = sorted(set(r["capability_name"] for r in (cap_result.data or [])))
+        except Exception:
+            logger.warning("Failed to query capability names, using static list")
+            unique_caps = [
+                "monitor_competitor", "read_calendar", "read_crm_pipeline",
+                "read_email", "research_company", "research_person",
+                "research_scientific", "send_email", "track_fda_activity",
+                "track_patents",
+            ]
+
+        step_desc = step.get("description", step.get("task_description", str(step)))
+
+        prompt = (
+            "Given this task step, identify which capabilities are needed.\n\n"
+            f"Available capabilities: {', '.join(unique_caps)}\n\n"
+            f"Task step: {step_desc}\n\n"
+            "Return ONLY a JSON array of capability names needed. "
+            'Example: ["research_company", "read_crm_pipeline"]'
+        )
+
+        from src.core.llm import LLMClient, TaskType
+
+        llm = LLMClient()
+        response = await llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="You are a capability classifier. Output only valid JSON arrays.",
+            temperature=0.0,
+            max_tokens=200,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="capability_detector",
+        )
+
+        try:
+            parsed = json.loads(response.strip())
+            if isinstance(parsed, list):
+                return [c for c in parsed if isinstance(c, str)]
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "Failed to parse capability inference response",
+                extra={"response": response[:200]},
+            )
+        return []
+
+    async def _log_gap(self, user_id: str, gap: CapabilityGap) -> None:
+        """Log a detected gap to capability_gaps_log (best-effort)."""
+        try:
+            self._db.table("capability_gaps_log").insert({
+                "user_id": user_id,
+                "capability_name": gap.capability,
+                "step_description": gap.step.get("description", str(gap.step)[:500]),
+                "best_available_provider": gap.current_provider,
+                "best_available_quality": gap.current_quality,
+                "strategies_offered": [s.model_dump() for s in gap.resolutions],
+                "user_response": "pending",
+            }).execute()
+        except Exception:
+            logger.warning(
+                "Failed to log capability gap",
+                extra={"capability": gap.capability, "user_id": user_id},
+            )
