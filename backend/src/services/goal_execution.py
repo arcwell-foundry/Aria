@@ -502,6 +502,54 @@ class GoalExecutionService:
             logger.debug("Team intelligence fetch failed, proceeding without: %s", e)
             context["team_intelligence"] = ""
 
+        # --- Self-provisioning: check for capability gaps ---
+        try:
+            from src.services.capability_provisioning import (
+                CapabilityGraphService,
+                GapDetectionService,
+                ProvisioningConversation,
+                ResolutionEngine,
+            )
+
+            graph = CapabilityGraphService(self._db)
+            resolution = ResolutionEngine(self._db, graph)
+            detector = GapDetectionService(self._db, graph, resolution)
+
+            # Build a minimal plan dict from goal agents
+            agents = goal.get("goal_agents", [])
+            plan_steps = [
+                {"description": a.get("agent_type", "execute task")}
+                for a in agents
+                if a.get("status") in ("pending", "active", "running", None)
+            ]
+
+            if plan_steps:
+                gaps = await detector.analyze_capabilities_for_plan(
+                    {"steps": plan_steps}, user_id
+                )
+                blocking = [g for g in gaps if g.severity == "blocking"]
+
+                if blocking:
+                    conv = ProvisioningConversation()
+                    gap_message = await conv.format_gap_message(
+                        gaps, goal.get("title", "this goal")
+                    )
+                    # Send via WebSocket as provisioning options
+                    try:
+                        await ws_manager.send_to_user(
+                            user_id=user_id,
+                            event_type="provisioning_options",
+                            data={
+                                "goal_id": goal_id,
+                                "message": gap_message,
+                                "gaps": [g.model_dump() for g in gaps],
+                            },
+                        )
+                    except Exception:
+                        logger.debug("Failed to send provisioning options via WS")
+        except Exception:
+            logger.debug("Self-provisioning check failed (non-fatal)")
+
         # Execute each assigned agent
         agent_type = goal.get("config", {}).get("agent_type", "")
         results: list[dict[str, Any]] = []
