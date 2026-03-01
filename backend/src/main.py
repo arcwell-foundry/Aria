@@ -68,6 +68,7 @@ from src.api.routes import (
     usage,  # Wave 0: Cost Governor usage tracking
     video,
     webhooks,  # Tavus webhook handler
+    composio_webhooks,  # Composio event trigger webhooks
     websets,  # Phase 3: Websets integration
     workflows,
 )
@@ -242,6 +243,36 @@ async def lifespan(_app: FastAPI) -> Any:
         _asyncio.create_task(_persist_registry())
     except Exception:
         logger.exception("Failed to run capability registry static scan")
+
+    # Event Trigger System: real-time event processing
+    try:
+        from src.db.supabase import get_supabase_client
+        from src.core.ws import ws_manager
+        from src.services.event_trigger import EventTriggerService
+        from src.services.event_handlers import (
+            EmailEventHandler,
+            CalendarEventHandler,
+            InternalEventHandler,
+        )
+
+        db = get_supabase_client()
+        pulse_engine = None
+        try:
+            from src.services.intelligence_pulse import get_pulse_engine
+            pulse_engine = get_pulse_engine()
+        except Exception:
+            logger.warning("Pulse Engine not available — events will deliver via WebSocket only")
+
+        event_service = EventTriggerService(db, ws_manager, pulse_engine)
+        event_service.register_handler("email", EmailEventHandler(db))
+        event_service.register_handler("calendar", CalendarEventHandler(db))
+        event_service.register_handler("internal", InternalEventHandler(db))
+        _app.state.event_trigger_service = event_service
+        _app.state.db = db  # Expose for webhook user resolution
+        logger.info("EventTriggerService initialized with handlers: email, calendar, internal")
+    except Exception:
+        logger.exception("Failed to initialize EventTriggerService")
+
     yield
     # Shutdown
     logger.info("Shutting down ARIA API...")
@@ -353,6 +384,7 @@ app.include_router(trust.router, prefix="/api/v1")  # Wave 4: Trust dashboard
 app.include_router(usage.router, prefix="/api/v1")  # Wave 0: Cost Governor
 app.include_router(video.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(composio_webhooks.router, prefix="/api/v1")
 app.include_router(websets.router, prefix="/api/v1")
 app.include_router(workflows.router, prefix="/api/v1")
 

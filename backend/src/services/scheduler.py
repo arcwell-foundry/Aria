@@ -1376,6 +1376,17 @@ async def _cleanup_stale_goal_agents() -> None:
         logger.exception("Stale goal agents cleanup failed")
 
 
+async def _run_reconciliation_sweep() -> None:
+    """Safety net: Check for events that webhooks might have missed.
+
+    Runs every 30 min. Catches stragglers that Composio triggers didn't deliver.
+    Checks: "Are there emails in inbox that DON'T have a matching event_log entry?"
+
+    Currently a stub — will be wired to existing email scan logic later.
+    """
+    logger.info("Reconciliation sweep: stub (not yet implemented)")
+
+
 _scheduler: Any = None
 
 
@@ -1633,6 +1644,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(hour=0, minute=0),
             id="cleanup_stale_goal_agents",
             name="Clean up stale pending goal agents",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_reconciliation_sweep,
+            trigger=CronTrigger(minute="*/30"),
+            id="reconciliation_sweep",
+            name="Event reconciliation sweep",
             replace_existing=True,
         )
         _scheduler.start()

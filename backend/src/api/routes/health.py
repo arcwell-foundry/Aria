@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel
 
 from src.api.deps import AdminUser, CurrentUser
@@ -198,3 +198,38 @@ async def test_push_notification(
         message=message,
         timestamp=timestamp,
     )
+
+
+@router.post("/test-event")
+async def test_event_trigger(
+    request: Request,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Test the full event trigger pipeline with a synthetic email event."""
+    from uuid import uuid4
+    from src.services.event_trigger import (
+        EventTriggerService,
+        EventEnvelope,
+        EventType,
+        EventSource,
+    )
+
+    event_service: EventTriggerService = request.app.state.event_trigger_service
+    user_id = str(current_user.id)
+
+    envelope = EventEnvelope(
+        event_type=EventType.EMAIL_RECEIVED,
+        source=EventSource.INTERNAL,
+        user_id=user_id,
+        source_id=f"test-{uuid4()}",
+        payload={
+            "sender": "sarah@lonza.com",
+            "subject": "Re: PFA Vessel Pricing Discussion",
+            "snippet": "Hi, thanks for the follow-up. I've reviewed the pricing and have a few questions about volume discounts...",
+            "messageId": f"test-msg-{uuid4()}",
+            "threadId": "test-thread-001",
+        },
+    )
+
+    result = await event_service.ingest(envelope)
+    return {"test": "event_trigger_pipeline", "result": result}
