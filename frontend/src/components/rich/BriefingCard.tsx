@@ -109,6 +109,8 @@ interface BriefingCardProps {
 }
 
 export function BriefingCard({ data }: BriefingCardProps) {
+  const [fyiOpen, setFyiOpen] = useState(false);
+
   if (!data) return null;
 
   // Pre-compute signal totals
@@ -127,7 +129,6 @@ export function BriefingCard({ data }: BriefingCardProps) {
   const calendar = data.calendar ?? { meeting_count: 0, key_meetings: [] };
   const leads = data.leads ?? { hot_leads: [], needs_attention: [] };
   const emailSummary = data.email_summary;
-  const [fyiOpen, setFyiOpen] = useState(false);
 
   return (
     <div

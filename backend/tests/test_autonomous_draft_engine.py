@@ -392,15 +392,15 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(urgent_email, context, 0.8, 0.7)
 
-        assert "URGENT" in notes
+        assert "URGENT" in notes[0]
 
     @pytest.mark.asyncio
     async def test_aria_notes_includes_sources(self, engine, sample_email, rich_context):
         """ARIA notes should list context sources used."""
         notes = await engine._generate_aria_notes(sample_email, rich_context, 0.8, 0.7)
 
-        assert "Used:" in notes
-        assert "thread" in notes
+        assert "Used:" in notes[0]
+        assert "thread" in notes[0]
 
     @pytest.mark.asyncio
     async def test_aria_notes_warns_low_style(self, engine, sample_email):
@@ -417,16 +417,16 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(sample_email, context, 0.5, 0.6)
 
-        assert "LOW" in notes
-        assert "review recommended" in notes
+        assert "LOW" in notes[0]
+        assert "review recommended" in notes[0]
 
     @pytest.mark.asyncio
     async def test_aria_notes_shows_relationship(self, engine, sample_email, rich_context):
         """Notes should show prior relationship count."""
         notes = await engine._generate_aria_notes(sample_email, rich_context, 0.8, 0.7)
 
-        assert "relationship" in notes
-        assert "8 emails" in notes
+        assert "relationship" in notes[0]
+        assert "8 emails" in notes[0]
 
     @pytest.mark.asyncio
     async def test_aria_notes_new_contact(self, engine, sample_email):
@@ -447,8 +447,8 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(sample_email, context, 0.8, 0.7)
 
-        assert "Missing:" in notes
-        assert "relationship" in notes
+        assert "Missing:" in notes[0]
+        assert "relationship" in notes[0]
 
 
 class TestPromptBuilder:

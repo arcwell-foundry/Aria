@@ -64,18 +64,16 @@ export function EmailDraftApprovalCard({ data }: { data: EmailDraftApprovalData 
   const [expanded, setExpanded] = useState(false);
   const [editBody, setEditBody] = useState('');
 
-  if (!data) return null;
-
-  const draftId = data.draft_id ?? '';
-  const recipientName = data.recipient_name ?? '';
-  const recipientEmail = data.recipient_email ?? '';
-  const subject = data.subject ?? '';
-  const preview = data.preview ?? '';
-  const fullBody = data.full_body ?? '';
-  const confidence = data.confidence ?? 0;
-  const styleMatch = data.style_match ?? 0;
-  const ariaNotes = data.aria_notes ?? '';
-  const contextSources = data.context_sources ?? [];
+  const draftId = data?.draft_id ?? '';
+  const recipientName = data?.recipient_name ?? '';
+  const recipientEmail = data?.recipient_email ?? '';
+  const subject = data?.subject ?? '';
+  const preview = data?.preview ?? '';
+  const fullBody = data?.full_body ?? '';
+  const confidence = data?.confidence ?? 0;
+  const styleMatch = data?.style_match ?? 0;
+  const ariaNotes = data?.aria_notes ?? '';
+  const contextSources = data?.context_sources ?? [];
 
   const tier = getConfidenceTier(confidence);
   const tierStyle = CONFIDENCE_TIERS[tier];
@@ -127,6 +125,8 @@ export function EmailDraftApprovalCard({ data }: { data: EmailDraftApprovalData 
       setStatus('pending');
     }
   }, [draftId]);
+
+  if (!data) return null;
 
   // Dismissed cards fade out
   if (status === 'dismissed') {
