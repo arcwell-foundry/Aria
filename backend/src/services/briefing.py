@@ -241,6 +241,27 @@ class BriefingService:
             logger.warning("Failed to gather email data", extra={"user_id": user_id}, exc_info=True)
             email_data = empty_email
 
+        # Gather pulse signals queued for morning briefing
+        pulse_insights: list[dict[str, Any]] = []
+        try:
+            pulse_result = (
+                self._db.table("pulse_signals")
+                .select("id, title, content, source, signal_category, priority_score")
+                .eq("user_id", user_id)
+                .eq("delivery_channel", "morning_brief")
+                .is_("delivered_at", "null")
+                .order("priority_score", desc=True)
+                .limit(20)
+                .execute()
+            )
+            pulse_insights = pulse_result.data or []
+        except Exception:
+            logger.warning(
+                "Failed to gather pulse signals for briefing",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
         # Gather causal reasoning intelligence for market-aware briefing
         causal_actions: list[dict[str, Any]] = []
         try:
@@ -306,6 +327,17 @@ class BriefingService:
                 exc_info=True,
             )
 
+        # Merge pulse signals into queued_insights for LLM synthesis
+        combined_insights = list(queued_insights or [])
+        for pi in pulse_insights:
+            combined_insights.append({
+                "type": pi.get("signal_category", "intelligence"),
+                "title": pi["title"],
+                "content": pi["content"],
+                "source": pi.get("source", "pulse_engine"),
+                "priority": pi.get("priority_score", 0),
+            })
+
         # Generate summary using LLM with PersonaBuilder
         summary = await self._generate_summary(
             user_id,
@@ -315,7 +347,7 @@ class BriefingService:
             task_data,
             email_data,
             tone_guidance=tone_guidance,
-            queued_insights=queued_insights,
+            queued_insights=combined_insights if combined_insights else queued_insights,
             causal_actions=causal_actions,
         )
 
@@ -361,6 +393,16 @@ class BriefingService:
                 extra={"user_id": user_id},
                 exc_info=True,
             )
+
+        # Mark pulse signals as delivered
+        if pulse_insights:
+            try:
+                pulse_ids = [p["id"] for p in pulse_insights]
+                self._db.table("pulse_signals").update(
+                    {"delivered_at": datetime.now(UTC).isoformat()}
+                ).in_("id", pulse_ids).execute()
+            except Exception:
+                logger.warning("Failed to mark pulse signals as delivered", exc_info=True)
 
         logger.info(
             "Daily briefing generated",
