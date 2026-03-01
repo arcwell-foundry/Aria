@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Any
+from typing import Any, ClassVar
 
 from src.services.memory_query_service import MemoryQueryService
 from src.core.llm import LLMClient
@@ -822,51 +822,91 @@ class ChatService:
     # Inline Intent Detection
     # ------------------------------------------------------------------
 
+    # Deterministic goal-trigger patterns — bypass LLM classification
+    _GOAL_TRIGGER_PATTERNS: ClassVar[list[tuple[re.Pattern[str], str, str]]] = [
+        # (compiled regex, goal_type, description template)
+        (re.compile(r"\b(?:find|identify|discover|source|list)\b.{0,40}\b(?:compan|firm|vendor|supplier|provider|prospect|lead|account)", re.I),
+         "lead_gen", "Find and qualify target companies"),
+        (re.compile(r"\b(?:research|investigate|look into|dig into|explore)\b.{0,40}\b(?:compan|firm|market|sector|industry|competitor|landscape|space|pipeline|strateg|portfolio)", re.I),
+         "research", "Research and analyze market landscape"),
+        (re.compile(r"\b(?:draft|write|compose|prepare|create)\b.{0,40}\b(?:email|outreach|message|proposal|follow[- ]?up|intro)", re.I),
+         "outreach", "Draft professional outreach communications"),
+        (re.compile(r"\b(?:analyze|assess|evaluate|review|audit)\b.{0,40}\b(?:pipeline|deal|opportunit|portfolio|territory|funnel)", re.I),
+         "analysis", "Analyze sales pipeline and opportunities"),
+        (re.compile(r"\b(?:prepare|build|create|put together)\b.{0,40}\b(?:meeting|call|presentation|deck|brief|agenda)", re.I),
+         "meeting_prep", "Prepare meeting materials and briefing"),
+        (re.compile(r"\b(?:build|create|generate|prepare)\b.{0,40}\b(?:battle ?card|competitive|comparison|analysis|report|brief|strategy)", re.I),
+         "competitive_intel", "Build competitive intelligence materials"),
+        (re.compile(r"\b(?:map|analyze|plan|build)\b.{0,40}\b(?:territory|region|geo|market\s+entry)", re.I),
+         "territory", "Map and plan territory strategy"),
+        (re.compile(r"\b(?:monitor|track|watch|alert|notify)\b.{0,40}\b(?:compan|competitor|market|news|trigger|signal|change)", re.I),
+         "research", "Monitor and track market signals"),
+    ]
+
+    @staticmethod
+    def _match_goal_trigger(message: str) -> dict[str, Any] | None:
+        """Check message against deterministic goal-trigger patterns.
+
+        Returns a pre-filled intent dict if a pattern matches, else None.
+        This provides a fast, reliable fallback that doesn't depend on
+        LLM judgment for obvious action-oriented requests.
+        """
+        for pattern, goal_type, desc_template in ChatService._GOAL_TRIGGER_PATTERNS:
+            m = pattern.search(message)
+            if m:
+                # Build a concise title from the matched portion
+                title = message[:100].strip().rstrip(".")
+                return {
+                    "is_goal": True,
+                    "goal_title": title,
+                    "goal_type": goal_type,
+                    "goal_description": f"{desc_template} based on user request: {message[:200]}",
+                }
+        return None
+
     async def _classify_intent(self, user_id: str, message: str) -> dict[str, Any] | None:
         """Classify whether a user message implies a goal ARIA should plan.
 
-        Uses a fast LLM call (max_tokens=256, temperature=0.1) to determine
-        if the message is a goal request.  Returns the parsed intent dict on
-        success, or ``None`` when intent detection should be skipped or fails.
+        Uses a two-tier approach:
+        1. Deterministic pattern matching for obvious goal triggers (fast, reliable)
+        2. LLM classification for ambiguous messages (max_tokens=256, temperature=0.1)
 
-        Guard: if the user already has a ``plan_ready`` goal we skip
-        classification to avoid creating duplicate plans.
+        Returns the parsed intent dict on success, or ``None`` when the
+        message is conversational and doesn't warrant goal creation.
         """
-        try:
-            # Guard: skip if user already has a pending plan_ready goal
-            db = get_supabase_client()
-            plan_ready = (
-                db.table("goals")
-                .select("id")
-                .eq("user_id", user_id)
-                .eq("status", "plan_ready")
-                .limit(1)
-                .execute()
+        # --- Tier 1: Deterministic pattern match (no LLM call needed) ---
+        pattern_match = self._match_goal_trigger(message)
+        if pattern_match:
+            logger.info(
+                "Intent classified via PATTERN MATCH (deterministic): %s",
+                pattern_match.get("goal_type"),
             )
-            if plan_ready.data:
-                logger.info(
-                    "Intent classification skipped — user has plan_ready goal %s",
-                    plan_ready.data[0]["id"],
-                )
-                return None
+            return pattern_match
 
+        try:
             intent_prompt = (
-                "Analyze this user message and determine if it implies a goal "
-                "or task that ARIA should plan and execute autonomously.\n\n"
+                "You are the intent classifier for ARIA, an AI sales agent that "
+                "EXECUTES tasks using specialized agents (Hunter for lead gen, "
+                "Analyst for research, Strategist for planning, Scribe for drafting, "
+                "Scout for monitoring). ARIA doesn't just talk — she acts.\n\n"
                 f'User message: "{message}"\n\n'
-                "A message implies a goal if the user wants ARIA to:\n"
-                "- Research, analyze, or investigate something\n"
-                "- Find, compare, or evaluate options\n"
-                "- Monitor, track, or watch for changes\n"
-                "- Create, draft, prepare, or write something\n"
-                "- Schedule, plan, or organize something\n"
-                "- Build a strategy, report, or recommendation\n\n"
-                "Do NOT classify as a goal if the message is:\n"
+                "Classify as is_goal=true if the user wants ARIA to DO something:\n"
+                "- Find, source, or identify companies, leads, or prospects\n"
+                "- Research, investigate, or analyze a market, company, or competitor\n"
+                "- Draft, write, compose, or prepare any communication\n"
+                "- Build a strategy, battle card, report, or recommendation\n"
+                "- Monitor, track, or watch for changes or signals\n"
+                "- Prepare for a meeting, call, or presentation\n"
+                "- Plan or map a territory, pipeline, or go-to-market motion\n"
+                "- Compare, evaluate, or score options\n\n"
+                "Classify as is_goal=false ONLY if the message is:\n"
                 "- Casual conversation, greetings, or small talk\n"
-                "- A simple factual question (what is X, who is Y)\n"
-                "- Feedback on a previous response\n"
-                "- A request to explain or clarify something\n"
-                "- A single-step task that doesn't need planning\n\n"
+                "- Asking ARIA to explain, clarify, or teach a concept\n"
+                "- Feedback on a previous response (e.g. 'thanks', 'good job')\n"
+                "- A question about ARIA's own capabilities or status\n\n"
+                "IMPORTANT: When in doubt, classify as is_goal=true. ARIA's value "
+                "is in DOING things, not just answering questions. If the user wants "
+                "information that requires research or data gathering, that IS a goal.\n\n"
                 "Respond with ONLY valid JSON (no markdown, no backticks):\n"
                 "{\n"
                 '  "is_goal": true or false,\n'
@@ -896,11 +936,12 @@ class ChatService:
             cleaned = cleaned.strip()
 
             intent = json.loads(cleaned)
-            logger.info("Intent classification result: %s", intent)
+            logger.info("Intent classification result (LLM): %s", intent)
             return intent
 
         except json.JSONDecodeError as je:
-            logger.warning("Intent classification JSON parse error: %s", je)
+            raw_preview = intent_raw[:200] if "intent_raw" in locals() else "N/A"
+            logger.warning("Intent classification JSON parse error: %s — raw: %s", je, raw_preview)
             return None
         except Exception as e:
             logger.warning("Intent classification failed (fall-through to conversation): %s", e)
