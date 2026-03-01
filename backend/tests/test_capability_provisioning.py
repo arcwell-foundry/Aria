@@ -635,3 +635,55 @@ class TestOrchestratorIntegration:
         assert "capability_gaps" in result
         assert result["has_blocking_gaps"] is True
         assert len(result["capability_gaps"]) == 1
+
+
+class TestDemandPulse:
+    """Tests for capability demand → pulse signal integration."""
+
+    @pytest.mark.asyncio
+    async def test_demand_threshold_triggers_pulse(self):
+        """3+ uses without direct access generates pulse signal."""
+        mock_db = MagicMock()
+        demand_row = {
+            "id": "demand-1",
+            "user_id": "user-1",
+            "capability_name": "read_crm_pipeline",
+            "times_needed": 5,
+            "times_satisfied_directly": 0,
+            "times_used_composite": 2,
+            "times_used_fallback": 3,
+            "avg_quality_achieved": 0.55,
+            "quality_with_ideal_provider": 0.95,
+            "suggestion_threshold_reached": False,
+        }
+
+        # Mock the demand query
+        demand_chain = MagicMock()
+        demand_chain.select.return_value = demand_chain
+        demand_chain.gte.return_value = demand_chain
+        demand_chain.eq.return_value = demand_chain
+        demand_chain.execute.return_value = _mock_db_response([demand_row])
+        demand_chain.update.return_value = demand_chain
+
+        mock_db.table.return_value = demand_chain
+
+        # Mock pulse engine
+        mock_pulse = AsyncMock()
+        mock_pulse.process_signal = AsyncMock(return_value={"id": "signal-1"})
+
+        with patch("src.db.supabase.SupabaseClient.get_client", return_value=mock_db), \
+             patch("src.services.intelligence_pulse.get_pulse_engine", return_value=mock_pulse):
+            from src.services.scheduler import _run_capability_demand_check
+
+            await _run_capability_demand_check()
+
+        # Verify pulse was generated
+        mock_pulse.process_signal.assert_called_once()
+        call_kwargs = mock_pulse.process_signal.call_args
+        # Get signal from positional or keyword args
+        if call_kwargs[1]:
+            signal_arg = call_kwargs[1]["signal"]
+        else:
+            signal_arg = call_kwargs[0][1]
+        assert "read_crm_pipeline" in signal_arg["title"]
+        assert signal_arg["signal_category"] == "capability"

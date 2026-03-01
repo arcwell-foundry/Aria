@@ -1215,6 +1215,77 @@ async def _run_pulse_sweep() -> None:
         logger.exception("Pulse sweep scheduler run failed")
 
 
+async def _run_capability_demand_check() -> None:
+    """Check if any capabilities have crossed suggestion threshold.
+
+    When a user has needed a capability 3+ times without direct access,
+    generate a proactive pulse signal suggesting they connect the tool.
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.services.intelligence_pulse import get_pulse_engine
+
+        db = SupabaseClient.get_client()
+        pulse_engine = get_pulse_engine()
+
+        # Get all users with unresolved demand
+        demands_result = (
+            db.table("capability_demand")
+            .select("*")
+            .gte("times_needed", 3)
+            .eq("suggestion_threshold_reached", False)
+            .execute()
+        )
+
+        for demand in demands_result.data or []:
+            fallback_uses = (
+                demand.get("times_used_composite", 0)
+                + demand.get("times_used_fallback", 0)
+            )
+            if fallback_uses < 3:
+                continue
+
+            avg_quality = demand.get("avg_quality_achieved", 0.5) or 0.5
+            ideal_quality = demand.get("quality_with_ideal_provider", 0.95) or 0.95
+
+            await pulse_engine.process_signal(
+                user_id=demand["user_id"],
+                signal={
+                    "pulse_type": "intelligent",
+                    "source": "capability_demand",
+                    "title": f"Improve your {demand['capability_name']} accuracy",
+                    "content": (
+                        f"You've needed {demand['capability_name']} "
+                        f"{demand['times_needed']} times. Currently getting "
+                        f"~{int(avg_quality * 100)}% accuracy. Connecting the "
+                        f"right tool would get you to ~{int(ideal_quality * 100)}%."
+                    ),
+                    "signal_category": "capability",
+                    "raw_data": demand,
+                },
+            )
+
+            # Mark threshold reached
+            (
+                db.table("capability_demand")
+                .update({"suggestion_threshold_reached": True})
+                .eq("id", demand["id"])
+                .execute()
+            )
+
+            logger.info(
+                "Capability demand pulse generated",
+                extra={
+                    "user_id": demand["user_id"],
+                    "capability": demand["capability_name"],
+                    "times_needed": demand["times_needed"],
+                },
+            )
+
+    except Exception:
+        logger.exception("Capability demand check scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -1444,6 +1515,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),
             id="pulse_sweep",
             name="Intelligence Pulse Engine sweep for missed signals",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_capability_demand_check,
+            trigger=CronTrigger(hour="*/6"),
+            id="capability_demand_check",
+            name="Capability demand proactive suggestion check",
             replace_existing=True,
         )
         _scheduler.start()
