@@ -15,6 +15,7 @@ from src.memory.digital_twin import DigitalTwin
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
+from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class DraftService:
         self._llm = LLMClient()
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
+        self._activity = ActivityService()
 
     async def create_draft(
         self,
@@ -160,6 +162,29 @@ class DraftService:
                 "Email draft created",
                 extra={"user_id": user_id, "draft_id": created_draft["id"]},
             )
+
+            # Record activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="email_drafted",
+                    title=f"Drafted email to {recipient_name or recipient_email}",
+                    description=(
+                        f"Created {purpose.value} email draft for "
+                        f"{recipient_name or recipient_email}."
+                    ),
+                    confidence=style_score if isinstance(style_score, float) else 0.8,
+                    related_entity_type="draft",
+                    related_entity_id=created_draft["id"],
+                    metadata={
+                        "purpose": purpose.value,
+                        "tone": tone.value,
+                        "style_match_score": style_score,
+                    },
+                )
+            except Exception:
+                logger.debug("Failed to record email_drafted activity", exc_info=True)
 
             # Notify user that email draft is ready
             await notification_integration.notify_draft_ready(
@@ -408,7 +433,27 @@ class DraftService:
                 "style_match_score": style_score,
             }
 
-            return await self.update_draft(user_id, draft_id, updates)
+            updated_draft = await self.update_draft(user_id, draft_id, updates)
+
+            # Record activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="draft_regenerated",
+                    title=f"Regenerated draft for {draft.get('recipient_name') or draft['recipient_email']}",
+                    description=(
+                        f"Regenerated email draft with tone={use_tone.value}."
+                    ),
+                    confidence=style_score if isinstance(style_score, float) else 0.8,
+                    related_entity_type="draft",
+                    related_entity_id=draft_id,
+                    metadata={"tone": use_tone.value, "style_match_score": style_score},
+                )
+            except Exception:
+                logger.debug("Failed to record draft_regenerated activity", exc_info=True)
+
+            return updated_draft
 
         except NotFoundError:
             raise
@@ -483,6 +528,26 @@ class DraftService:
                     "integration": integration_type,
                 },
             )
+
+            # Record activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    agent="scribe",
+                    activity_type="email_sent",
+                    title=f"Sent email to {draft.get('recipient_name') or draft['recipient_email']}",
+                    description=(
+                        f"Sent email '{draft.get('subject', '')}' "
+                        f"via {integration_type}."
+                    ),
+                    confidence=1.0,
+                    related_entity_type="draft",
+                    related_entity_id=draft_id,
+                    metadata={"integration_type": integration_type},
+                )
+            except Exception:
+                logger.debug("Failed to record email_sent activity", exc_info=True)
+
             return result
 
         except (NotFoundError, EmailSendError):

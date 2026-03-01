@@ -160,6 +160,34 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
             )
             stats["errors"] += 1
 
+    # Record activity for each user who had cards updated
+    if stats["cards_updated"] > 0:
+        try:
+            from src.services.activity_service import ActivityService
+
+            activity = ActivityService()
+            for uid in user_ids:
+                try:
+                    await activity.record(
+                        user_id=uid,
+                        agent="scout",
+                        activity_type="battle_cards_refreshed",
+                        title="Battle cards refreshed",
+                        description=(
+                            f"Refreshed {stats['cards_updated']} battle cards "
+                            f"from {stats['competitors_scanned']} competitors."
+                        ),
+                        confidence=0.85,
+                        metadata={
+                            "cards_updated": stats["cards_updated"],
+                            "competitors_scanned": stats["competitors_scanned"],
+                        },
+                    )
+                except Exception:
+                    pass  # Non-critical — don't fail the job for activity logging
+        except Exception:
+            logger.debug("Failed to record battle card activity", exc_info=True)
+
     logger.info("Battle card refresh complete", extra=stats)
     return stats
 

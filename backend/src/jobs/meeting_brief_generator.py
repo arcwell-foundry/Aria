@@ -92,6 +92,27 @@ async def run_meeting_brief_job(hours_ahead: int = 24) -> dict[str, Any]:
                         "meeting_title": brief.get("meeting_title"),
                     },
                 )
+
+                # Record activity
+                try:
+                    from src.services.activity_service import ActivityService
+
+                    await ActivityService().record(
+                        user_id=user_id,
+                        agent="analyst",
+                        activity_type="meeting_prepped",
+                        title=f"Prepared for: {brief.get('meeting_title', 'meeting')}",
+                        description=(
+                            f"Generated meeting brief for "
+                            f"'{brief.get('meeting_title', 'upcoming meeting')}'."
+                        ),
+                        confidence=0.9,
+                        related_entity_type="meeting_brief",
+                        related_entity_id=brief_id,
+                        metadata={"meeting_title": brief.get("meeting_title")},
+                    )
+                except Exception:
+                    logger.debug("Failed to record meeting_prepped activity", exc_info=True)
             else:
                 errors += 1
                 logger.warning(

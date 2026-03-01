@@ -1286,6 +1286,62 @@ async def _run_capability_demand_check() -> None:
         logger.exception("Capability demand check scheduler run failed")
 
 
+async def _cleanup_stale_goal_agents() -> None:
+    """Mark stale pending/running goal agents as failed.
+
+    Targets agents that:
+    - Have status 'pending' and were created more than 24 hours ago
+    - Have a parent goal that is already 'failed' or 'cancelled'
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+        now = datetime.now(UTC).isoformat()
+
+        # Stale pending agents older than 24 hours
+        stale_result = (
+            db.table("goal_agents")
+            .update({"status": "failed", "updated_at": now})
+            .in_("status", ["pending", "running"])
+            .lt("created_at", cutoff)
+            .execute()
+        )
+        stale_count = len(stale_result.data) if stale_result.data else 0
+
+        # Agents whose parent goal is already failed/cancelled
+        failed_goals = (
+            db.table("goals")
+            .select("id")
+            .in_("status", ["failed", "cancelled"])
+            .execute()
+        )
+        orphan_count = 0
+        if failed_goals.data:
+            failed_ids = [g["id"] for g in failed_goals.data]
+            for goal_id in failed_ids:
+                orphan_result = (
+                    db.table("goal_agents")
+                    .update({"status": "failed", "updated_at": now})
+                    .eq("goal_id", goal_id)
+                    .in_("status", ["pending", "running"])
+                    .execute()
+                )
+                orphan_count += len(orphan_result.data) if orphan_result.data else 0
+
+        if stale_count or orphan_count:
+            logger.info(
+                "Cleaned up stale goal agents: %d stale, %d orphaned",
+                stale_count,
+                orphan_count,
+            )
+    except Exception:
+        logger.exception("Stale goal agents cleanup failed")
+
+
 _scheduler: Any = None
 
 
@@ -1522,6 +1578,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(hour="*/6"),
             id="capability_demand_check",
             name="Capability demand proactive suggestion check",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _cleanup_stale_goal_agents,
+            trigger=CronTrigger(hour=0, minute=0),
+            id="cleanup_stale_goal_agents",
+            name="Clean up stale pending goal agents",
             replace_existing=True,
         )
         _scheduler.start()

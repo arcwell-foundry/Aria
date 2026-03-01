@@ -290,6 +290,21 @@ class LeadMemoryService:
                 suppress_errors=True,
             )
 
+            # Auto-populate monitored entities for signal scanning
+            try:
+                from src.services.monitored_entity_service import MonitoredEntityService
+
+                await MonitoredEntityService().ensure_entity(
+                    user_id=user_id,
+                    entity_type="company",
+                    entity_name=company_name,
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to ensure monitored entity for lead %s", company_name,
+                    exc_info=True,
+                )
+
             return lead
 
         except LeadMemoryError:

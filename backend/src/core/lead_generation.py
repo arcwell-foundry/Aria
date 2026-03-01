@@ -315,6 +315,32 @@ class LeadGenerationService:
             },
         )
 
+        # Auto-approve high-confidence leads (fit_score >= 85)
+        auto_approved = 0
+        for lead in discovered:
+            if lead.fit_score >= 85:
+                try:
+                    await self.review_lead(
+                        user_id=user_id,
+                        lead_id=lead.id,
+                        action=ReviewStatus.APPROVED,
+                    )
+                    auto_approved += 1
+                except Exception:
+                    logger.debug(
+                        "Auto-approve failed for lead %s", lead.id, exc_info=True,
+                    )
+
+        if auto_approved:
+            logger.info(
+                "Auto-approved high-confidence leads",
+                extra={
+                    "user_id": user_id,
+                    "auto_approved": auto_approved,
+                    "total_discovered": len(discovered),
+                },
+            )
+
         return discovered
 
     def _compute_score_breakdown(

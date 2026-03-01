@@ -1284,6 +1284,114 @@ Respond ONLY with the JSON array, no additional text."""
         except Exception as e:
             logger.warning("Failed to record enrichment activity: %s", e)
 
+        # Auto-populate monitored entities for Scout signal scanning
+        try:
+            from src.services.monitored_entity_service import MonitoredEntityService
+
+            me_svc = MonitoredEntityService()
+
+            # Monitor the user's own company
+            company_name = result.classification.company_type
+            # Try to get the actual company name from facts
+            for fact in result.facts:
+                if fact.category == "company_profile" and "name" in fact.fact.lower():
+                    # Use the fact entities as company name if available
+                    if fact.entities:
+                        company_name = fact.entities[0]
+                        break
+
+            # Get company name from DB if available
+            try:
+                company_row = (
+                    self._db.table("companies")
+                    .select("name")
+                    .eq("id", company_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if company_row.data and company_row.data.get("name"):
+                    company_name = company_row.data["name"]
+            except Exception:
+                pass
+
+            if company_name:
+                await me_svc.ensure_entity(
+                    user_id=user_id,
+                    entity_type="company",
+                    entity_name=company_name,
+                )
+
+            # Monitor competitors discovered during enrichment
+            competitors: list[str] = []
+            for fact in result.facts:
+                if fact.category == "competitive_landscape" and fact.entities:
+                    competitors.extend(fact.entities)
+            if competitors:
+                await me_svc.ensure_entities_batch(
+                    user_id=user_id,
+                    entity_type="competitor",
+                    entity_names=list(set(competitors)),
+                )
+        except Exception:
+            logger.debug("Failed to populate monitored entities from enrichment", exc_info=True)
+
+        # Seed lead_memories with user's own company as an "account"
+        try:
+            from src.memory.lead_memory import LeadMemoryService, TriggerType
+
+            # Check if already exists to avoid duplicates
+            existing = (
+                self._db.table("lead_memories")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("company_id", company_id)
+                .limit(1)
+                .execute()
+            )
+            if not existing.data:
+                lead_svc = LeadMemoryService()
+                # Get company name from DB
+                co_name = "My Company"
+                try:
+                    co_row = (
+                        self._db.table("companies")
+                        .select("name")
+                        .eq("id", company_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    if co_row.data and co_row.data.get("name"):
+                        co_name = co_row.data["name"]
+                except Exception:
+                    pass
+
+                lead = await lead_svc.create(
+                    user_id=user_id,
+                    company_name=co_name,
+                    trigger=TriggerType.INBOUND,
+                    company_id=company_id,
+                    metadata={"source": "onboarding_enrichment"},
+                )
+                # Promote to account lifecycle stage (LEAD → OPPORTUNITY → ACCOUNT)
+                from src.memory.lead_memory import LifecycleStage
+
+                await lead_svc.transition_stage(
+                    user_id=user_id,
+                    lead_id=lead.id,
+                    new_stage=LifecycleStage.OPPORTUNITY,
+                )
+                await lead_svc.transition_stage(
+                    user_id=user_id,
+                    lead_id=lead.id,
+                    new_stage=LifecycleStage.ACCOUNT,
+                )
+                logger.info(
+                    "Seeded lead_memories with user's own company",
+                    extra={"user_id": user_id, "company_id": company_id},
+                )
+        except Exception:
+            logger.debug("Failed to seed lead_memories during enrichment", exc_info=True)
+
         # Store knowledge gaps as Prospective Memory tasks
         for gap in result.gaps:
             try:

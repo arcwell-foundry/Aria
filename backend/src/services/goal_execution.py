@@ -550,6 +550,28 @@ class GoalExecutionService:
         except Exception:
             logger.debug("Self-provisioning check failed (non-fatal)")
 
+        # Record goal_started activity
+        try:
+            await self._activity.record(
+                user_id=user_id,
+                activity_type="goal_started",
+                title=f"Goal started: {goal.get('title', 'Unknown')}",
+                description=f"Executing goal '{goal.get('title', '')}' in synchronous mode.",
+                confidence=1.0,
+                related_entity_type="goal",
+                related_entity_id=goal_id,
+            )
+        except Exception:
+            logger.debug("Failed to record goal_started activity", exc_info=True)
+
+        # Mark all goal agents as running
+        try:
+            self._db.table("goal_agents").update(
+                {"status": "running", "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("goal_id", goal_id).in_("status", ["pending"]).execute()
+        except Exception:
+            logger.debug("Failed to transition goal agents to running", exc_info=True)
+
         # Execute each assigned agent
         agent_type = goal.get("config", {}).get("agent_type", "")
         results: list[dict[str, Any]] = []
@@ -697,6 +719,34 @@ class GoalExecutionService:
             f"Goal completed: {success_count}/{len(results)} agents succeeded",
             progress_delta=100,
         )
+
+        # Record goal_completed activity
+        try:
+            await self._activity.record(
+                user_id=user_id,
+                activity_type="goal_completed",
+                title=f"Goal completed: {goal.get('title', 'Unknown')}",
+                description=(
+                    f"{success_count}/{len(results)} agents succeeded "
+                    f"for goal '{goal.get('title', '')}'."
+                ),
+                confidence=1.0,
+                related_entity_type="goal",
+                related_entity_id=goal_id,
+                metadata={"success_count": success_count, "total_agents": len(results)},
+            )
+        except Exception:
+            logger.debug("Failed to record goal_completed activity", exc_info=True)
+
+        # Ensure all goal agents are marked complete
+        try:
+            self._db.table("goal_agents").update(
+                {"status": "complete", "updated_at": now}
+            ).eq("goal_id", goal_id).in_(
+                "status", ["pending", "running"]
+            ).execute()
+        except Exception:
+            logger.debug("Failed to finalize goal agent statuses", exc_info=True)
 
         # Route goal completion through Intelligence Pulse Engine
         try:
@@ -3358,6 +3408,28 @@ class GoalExecutionService:
                 )
                 return
 
+            # Record goal_started activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    activity_type="goal_started",
+                    title="Goal execution started",
+                    description=f"Background execution started for goal {goal_id}.",
+                    confidence=1.0,
+                    related_entity_type="goal",
+                    related_entity_id=goal_id,
+                )
+            except Exception:
+                logger.debug("Failed to record goal_started activity", exc_info=True)
+
+            # Mark all pending goal agents as running
+            try:
+                self._db.table("goal_agents").update(
+                    {"status": "running", "updated_at": datetime.now(UTC).isoformat()}
+                ).eq("goal_id", goal_id).in_("status", ["pending"]).execute()
+            except Exception:
+                logger.debug("Failed to transition goal agents to running", exc_info=True)
+
             # Load execution plan
             plan_result = (
                 self._db.table("goal_execution_plans")
@@ -3443,11 +3515,14 @@ class GoalExecutionService:
             if execution_mode in ("parallel", "reused_workflow"):
                 # Parallel execution: group tasks by dependency layers
                 layers = self._build_dependency_layers(tasks)
+                # Limit concurrency to 4 agents and 5 min timeout per agent
+                _AGENT_TIMEOUT = 300  # seconds
+                _MAX_CONCURRENT = 4
+                _semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
 
-                for layer in layers:
-                    # Execute all tasks in this layer concurrently
-                    layer_results = await asyncio.gather(
-                        *[
+                async def _run_with_guard(t: dict[str, Any]) -> dict[str, Any]:
+                    async with _semaphore:
+                        return await asyncio.wait_for(
                             self._execute_task_with_events(
                                 task=t,
                                 goal_id=goal_id,
@@ -3455,9 +3530,14 @@ class GoalExecutionService:
                                 goal=goal,
                                 context=context,
                                 conversation_id=plan_conversation_id,
-                            )
-                            for t in layer
-                        ],
+                            ),
+                            timeout=_AGENT_TIMEOUT,
+                        )
+
+                for layer in layers:
+                    # Execute all tasks in this layer concurrently
+                    layer_results = await asyncio.gather(
+                        *[_run_with_guard(t) for t in layer],
                         return_exceptions=True,
                     )
 
@@ -3553,6 +3633,34 @@ class GoalExecutionService:
             # All tasks done — complete the goal
             await self.complete_goal_with_retro(goal_id, user_id)
 
+            # Ensure all goal agents are marked complete
+            try:
+                self._db.table("goal_agents").update(
+                    {"status": "complete", "updated_at": datetime.now(UTC).isoformat()}
+                ).eq("goal_id", goal_id).in_(
+                    "status", ["pending", "running"]
+                ).execute()
+            except Exception:
+                logger.debug("Failed to finalize goal agent statuses", exc_info=True)
+
+            # Record goal_completed activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    activity_type="goal_completed",
+                    title=f"Goal completed: {goal.get('title', 'Unknown')}",
+                    description=(
+                        f"All {completed_tasks}/{total_tasks} tasks completed "
+                        f"for goal '{goal.get('title', '')}'."
+                    ),
+                    confidence=1.0,
+                    related_entity_type="goal",
+                    related_entity_id=goal_id,
+                    metadata={"completed_tasks": completed_tasks, "total_tasks": total_tasks},
+                )
+            except Exception:
+                logger.debug("Failed to record goal_completed activity", exc_info=True)
+
             # Emit execution complete WS event for live frontend progress
             try:
                 await ws_manager.send_execution_complete(
@@ -3574,6 +3682,31 @@ class GoalExecutionService:
                 "Goal background execution failed",
                 extra={"goal_id": goal_id, "error": str(e)},
             )
+            # Mark remaining goal agents as failed
+            try:
+                self._db.table("goal_agents").update(
+                    {"status": "failed", "updated_at": datetime.now(UTC).isoformat()}
+                ).eq("goal_id", goal_id).in_(
+                    "status", ["pending", "running"]
+                ).execute()
+            except Exception:
+                logger.debug("Failed to mark goal agents as failed", exc_info=True)
+
+            # Record goal_failed activity
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    activity_type="goal_failed",
+                    title="Goal execution failed",
+                    description=f"Goal {goal_id} failed: {str(e)[:200]}",
+                    confidence=1.0,
+                    related_entity_type="goal",
+                    related_entity_id=goal_id,
+                    metadata={"error": str(e)[:500]},
+                )
+            except Exception:
+                logger.debug("Failed to record goal_failed activity", exc_info=True)
+
             # Update goal status to reflect error
             self._db.table("goals").update(
                 {"status": "paused", "updated_at": datetime.now(UTC).isoformat()}
