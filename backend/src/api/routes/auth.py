@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.deps import CurrentUser
-from src.core.circuit_breaker import CircuitBreakerOpen
+from src.core.resilience import CircuitBreakerOpen
 from src.core.exceptions import NotFoundError, sanitize_error
 from src.core.rate_limiter import RateLimitConfig, rate_limit
 from src.db.supabase import SupabaseClient

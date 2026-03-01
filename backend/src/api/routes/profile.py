@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.deps import CurrentUser
-from src.core.circuit_breaker import CircuitBreakerOpen
+from src.core.resilience import CircuitBreakerOpen
 from src.core.exceptions import ARIAException, NotFoundError, sanitize_error
 from src.services.profile_service import ProfileService
 

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.core.circuit_breaker import CircuitBreakerOpen
+from src.core.resilience import CircuitBreakerOpen
 
 
 @pytest.mark.asyncio
@@ -12,7 +12,7 @@ async def test_supabase_get_user_opens_circuit_after_failures() -> None:
     from src.db.supabase import SupabaseClient, _supabase_circuit_breaker
 
     # Reset circuit state
-    _supabase_circuit_breaker.record_success()
+    _supabase_circuit_breaker.reset()
 
     with patch.object(SupabaseClient, "get_client") as mock_get_client:
         mock_client = MagicMock()
@@ -21,7 +21,7 @@ async def test_supabase_get_user_opens_circuit_after_failures() -> None:
         )
         mock_get_client.return_value = mock_client
 
-        for _ in range(5):
+        for _ in range(_supabase_circuit_breaker.failure_threshold):
             with pytest.raises(Exception):
                 await SupabaseClient.get_user_by_id("test-id")
 
@@ -29,7 +29,7 @@ async def test_supabase_get_user_opens_circuit_after_failures() -> None:
             await SupabaseClient.get_user_by_id("test-id")
 
     # Reset for other tests
-    _supabase_circuit_breaker.record_success()
+    _supabase_circuit_breaker.reset()
 
 
 @pytest.mark.asyncio
@@ -38,7 +38,7 @@ async def test_supabase_circuit_resets_on_success() -> None:
     from src.db.supabase import SupabaseClient, _supabase_circuit_breaker
 
     # Reset circuit state
-    _supabase_circuit_breaker.record_success()
+    _supabase_circuit_breaker.reset()
 
     with patch.object(SupabaseClient, "get_client") as mock_get_client:
         mock_client = MagicMock()
@@ -67,4 +67,4 @@ async def test_supabase_circuit_resets_on_success() -> None:
         assert result["id"] == "test-id"
         assert _supabase_circuit_breaker._failure_count == 0
 
-    _supabase_circuit_breaker.record_success()
+    _supabase_circuit_breaker.reset()

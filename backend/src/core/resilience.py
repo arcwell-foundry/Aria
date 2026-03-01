@@ -248,6 +248,9 @@ claude_api_circuit_breaker = CircuitBreaker(
 supabase_circuit_breaker = CircuitBreaker(
     "supabase", failure_threshold=10, recovery_timeout=30.0, success_threshold=3,
 )
+graphiti_circuit_breaker = CircuitBreaker(
+    "graphiti_neo4j", failure_threshold=3, recovery_timeout=60.0, success_threshold=3,
+)
 
 
 # ---------------------------------------------------------------------------

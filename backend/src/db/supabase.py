@@ -3,14 +3,14 @@
 import logging
 from typing import Any, cast
 
-from src.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+from src.core.resilience import CircuitBreakerOpen, supabase_circuit_breaker
 from src.core.config import settings
 from src.core.exceptions import DatabaseError, NotFoundError
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
-_supabase_circuit_breaker = CircuitBreaker("supabase")
+_supabase_circuit_breaker = supabase_circuit_breaker
 
 
 class SupabaseClient:

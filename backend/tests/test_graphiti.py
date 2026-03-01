@@ -15,7 +15,7 @@ def reset_client() -> None:
     GraphitiClient._init_failed = False
     # Reset the module-level circuit breaker so state doesn't leak between tests
     from src.db.graphiti import _graphiti_circuit_breaker
-    _graphiti_circuit_breaker.record_success()
+    _graphiti_circuit_breaker.reset()
 
 
 def test_graphiti_client_is_singleton() -> None:
@@ -168,21 +168,21 @@ async def test_search_delegates_to_graphiti() -> None:
 @pytest.mark.asyncio
 async def test_graphiti_circuit_breaker_opens_after_failures() -> None:
     """Test that repeated Graphiti failures open the circuit breaker."""
-    from src.core.circuit_breaker import CircuitBreakerOpen
+    from src.core.resilience import CircuitBreakerOpen
     from src.db.graphiti import _graphiti_circuit_breaker
 
     # Reset circuit breaker state
-    _graphiti_circuit_breaker.record_success()
+    _graphiti_circuit_breaker.reset()
 
     mock_func = AsyncMock(side_effect=Exception("Neo4j down"))
 
     # The circuit breaker has failure_threshold=3, so after 3 failures it opens
     for _ in range(3):
         with pytest.raises(Exception, match="Neo4j down"):
-            await _graphiti_circuit_breaker.call_async(mock_func)
+            await _graphiti_circuit_breaker.call(mock_func)
 
     with pytest.raises(CircuitBreakerOpen):
         _graphiti_circuit_breaker.check()
 
     # Reset for other tests
-    _graphiti_circuit_breaker.record_success()
+    _graphiti_circuit_breaker.reset()

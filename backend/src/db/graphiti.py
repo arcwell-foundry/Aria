@@ -7,7 +7,7 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.core.circuit_breaker import CircuitBreaker
+from src.core.resilience import graphiti_circuit_breaker
 from src.core.config import settings
 from src.core.exceptions import GraphitiConnectionError
 
@@ -16,10 +16,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Reduced thresholds: open circuit after 3 failures, recover after 60s
-_graphiti_circuit_breaker = CircuitBreaker(
-    "graphiti_neo4j", failure_threshold=3, recovery_timeout=60.0
-)
+_graphiti_circuit_breaker = graphiti_circuit_breaker
 
 # Maximum seconds to wait for Neo4j connection during initialization
 _NEO4J_INIT_TIMEOUT = 10.0
@@ -218,7 +215,7 @@ class GraphitiClient:
         from graphiti_core.nodes import EpisodeType
 
         client = await cls.get_instance()
-        result = await _graphiti_circuit_breaker.call_async(
+        result = await _graphiti_circuit_breaker.call(
             client.add_episode,
             name=name,
             episode_body=episode_body,
@@ -273,5 +270,5 @@ class GraphitiClient:
             GraphitiConnectionError: If client is not initialized.
         """
         client = await cls.get_instance()
-        results = await _graphiti_circuit_breaker.call_async(client.search, query)
+        results = await _graphiti_circuit_breaker.call(client.search, query)
         return list(results)

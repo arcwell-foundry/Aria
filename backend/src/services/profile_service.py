@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any, cast
 
-from src.core.circuit_breaker import CircuitBreakerOpen
+from src.core.resilience import CircuitBreakerOpen
 from src.core.exceptions import ARIAException, NotFoundError
 from src.db.supabase import SupabaseClient
 from src.memory.profile_merge import ProfileMergeService
