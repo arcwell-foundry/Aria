@@ -6,11 +6,15 @@ access system resources or data beyond their permissions.
 """
 
 import asyncio
+import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 from src.security.trust_levels import SkillTrustLevel
+
+logger = logging.getLogger(__name__)
 
 
 class SandboxViolation(Exception):
@@ -194,23 +198,68 @@ class SkillSandbox:
 
     async def _execute_skill(
         self,
-        skill_content: str,  # noqa: ARG002
+        skill_content: str,
         input_data: dict[str, Any],
     ) -> Any:
-        """Execute the skill (placeholder for actual LLM-based execution).
+        """Execute the skill via LLM with skill instructions as system prompt.
 
-        For LLM-based skills, this builds a prompt with skill instructions
-        and sanitized input, then calls the LLM.
+        Builds a prompt from skill_content (markdown/YAML instructions) and
+        the sanitized input_data, calls the LLM, and returns parsed output.
 
         Args:
-            skill_content: The skill's instruction content.
+            skill_content: The skill's instruction content (markdown/text).
             input_data: The sanitized input data.
 
         Returns:
-            The skill's output.
+            Parsed JSON output from the LLM, or a dict with the raw text.
         """
-        # Placeholder implementation - actual execution would call LLM
-        return {"status": "executed", "input_received": bool(input_data)}
+        from src.core.llm import LLMClient
+        from src.core.task_types import TaskType
+
+        llm = LLMClient()
+
+        # Build system prompt from skill content
+        system_prompt = (
+            "You are executing a skill within ARIA, an AI assistant for "
+            "life sciences commercial teams.\n\n"
+            "SKILL INSTRUCTIONS:\n"
+            f"{skill_content}\n\n"
+            "IMPORTANT: Respond with valid JSON only. Your output will be "
+            "parsed programmatically."
+        )
+
+        # Build user message from input data
+        user_message = "Execute this skill with the following input:\n\n"
+        for key, value in input_data.items():
+            if isinstance(value, (dict, list)):
+                user_message += f"## {key}\n```json\n{json.dumps(value, indent=2, default=str)}\n```\n\n"
+            else:
+                user_message += f"## {key}\n{value}\n\n"
+
+        if not input_data:
+            user_message += "(No specific input provided — use skill defaults.)\n"
+
+        raw_response = await llm.generate_response(
+            messages=[{"role": "user", "content": user_message}],
+            system_prompt=system_prompt,
+            temperature=0.4,
+            max_tokens=4096,
+            task=TaskType.SKILL_EXECUTE,
+            agent_id="skill_sandbox",
+        )
+
+        # Parse JSON response
+        try:
+            text = raw_response.strip()
+            if text.startswith("```"):
+                first_newline = text.index("\n")
+                text = text[first_newline + 1 :]
+            if text.endswith("```"):
+                text = text[:-3].rstrip()
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            logger.debug("Skill output is not JSON, returning as text result")
+            return {"result": raw_response, "format": "text"}
 
     def check_network_access(self, config: SandboxConfig, domain: str) -> None:
         """Check if network access to a domain is permitted.

@@ -47,38 +47,42 @@ class SkillAnalysis:
 
 
 # Maps agent_id to the skill paths that agent is authorized to use.
+# These MUST match skill_path values in the skills_index table.
 AGENT_SKILLS: dict[str, list[str]] = {
     "hunter": [
-        "competitor-analysis",
-        "lead-research",
-        "company-profiling",
+        "aria:capability/contact-enricher",
+        "aria:capability/linkedin-intelligence",
     ],
     "analyst": [
-        "clinical-trial-analysis",
-        "pubmed-research",
-        "data-visualization",
+        "aria:skill_definition/financial-intel",
+        "aria:skill_definition/insight-visualizer",
+        "aria:skill_definition/kol-mapper",
+        "aria:skill_definition/trial-radar",
+        "aria:capability/mcp-evaluator",
     ],
     "strategist": [
-        "market-analysis",
-        "competitive-positioning",
-        "pricing-strategy",
+        "aria:skill_definition/battle-card-generator",
+        "aria:skill_definition/roi-calculator",
+        "aria:skill_definition/territory-planner",
     ],
     "scribe": [
-        "pdf",
-        "docx",
-        "pptx",
-        "xlsx",
-        "email-sequence",
+        "aria:skill_definition/document-forge",
+        "aria:skill_definition/deck-builder",
+        "aria:skill_definition/compliance-guardian",
+        "aria:skill_definition/email-sequence-builder",
+        "aria:capability/email-intelligence",
+        "aria:capability/compliance",
     ],
     "operator": [
-        "calendar-management",
-        "crm-operations",
-        "workflow-automation",
+        "aria:capability/calendar-intelligence",
+        "aria:capability/crm-deep-sync",
+        "aria:capability/meeting-intelligence",
+        "aria:capability/team-messenger",
     ],
     "scout": [
-        "regulatory-monitor",
-        "news-aggregation",
-        "signal-detection",
+        "aria:capability/web-intelligence",
+        "aria:capability/signal-radar",
+        "aria:capability/mcp-discovery",
     ],
 }
 
@@ -330,8 +334,16 @@ class SkillAwareAgent(BaseAgent):
             return await self.execute(task)
 
         try:
-            # Look up skill by path
+            # Look up skill by path (exact match), fall back to search
             skill_entry = await self.skill_index.get_by_path(skill_path)
+            if skill_entry is None:
+                # Try fuzzy search as fallback
+                search_results = await self.skill_index.search(
+                    skill_path.split("/")[-1],
+                    limit=1,
+                )
+                skill_entry = search_results[0] if search_results else None
+
             if skill_entry is None:
                 logger.warning(
                     f"Agent {self.name}: skill '{skill_path}' not found in index, "
@@ -347,19 +359,20 @@ class SkillAwareAgent(BaseAgent):
                     available_skills=[skill_entry],
                 )
 
-                working_memory = await self.skill_orchestrator.execute_plan(
+                plan_result = await self.skill_orchestrator.execute_plan(
                     user_id=self.user_id,
                     plan=plan,
                 )
 
-                if working_memory:
-                    entry = working_memory[0]
+                if plan_result.working_memory:
+                    entry = plan_result.working_memory[0]
                     return AgentResult(
                         success=entry.status == "completed",
                         data={
                             "skill_execution": True,
                             "execution_mode": "simple",
                             "skill_path": skill_path,
+                            "plan_id": plan_result.plan_id,
                             "summary": entry.summary,
                             "artifacts": entry.artifacts,
                         },
@@ -457,14 +470,14 @@ class SkillAwareAgent(BaseAgent):
                 },
             )
 
-            working_memory = await self.skill_orchestrator.execute_plan(
+            plan_result = await self.skill_orchestrator.execute_plan(
                 user_id=self.user_id,
                 plan=plan,
             )
 
             skill_outputs = []
             all_succeeded = True
-            for entry in working_memory:
+            for entry in plan_result.working_memory:
                 skill_outputs.append(
                     {
                         "step": entry.step_number,
@@ -482,7 +495,7 @@ class SkillAwareAgent(BaseAgent):
                 data={
                     "skill_execution": True,
                     "execution_mode": "orchestrator",
-                    "plan_id": plan.plan_id,
+                    "plan_id": plan_result.plan_id,
                     "steps": skill_outputs,
                 },
                 error=None if all_succeeded else "One or more skill steps failed",

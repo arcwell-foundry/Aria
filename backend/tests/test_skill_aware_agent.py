@@ -96,56 +96,59 @@ def test_agent_skills_mapping_has_all_agents() -> None:
 def test_agent_skills_hunter() -> None:
     """Test hunter agent has exact skill list."""
     assert AGENT_SKILLS["hunter"] == [
-        "competitor-analysis",
-        "lead-research",
-        "company-profiling",
+        "aria:capability/contact-enricher",
+        "aria:capability/linkedin-intelligence",
     ]
 
 
 def test_agent_skills_analyst() -> None:
     """Test analyst agent has exact skill list."""
     assert AGENT_SKILLS["analyst"] == [
-        "clinical-trial-analysis",
-        "pubmed-research",
-        "data-visualization",
+        "aria:skill_definition/financial-intel",
+        "aria:skill_definition/insight-visualizer",
+        "aria:skill_definition/kol-mapper",
+        "aria:skill_definition/trial-radar",
+        "aria:capability/mcp-evaluator",
     ]
 
 
 def test_agent_skills_strategist() -> None:
     """Test strategist agent has exact skill list."""
     assert AGENT_SKILLS["strategist"] == [
-        "market-analysis",
-        "competitive-positioning",
-        "pricing-strategy",
+        "aria:skill_definition/battle-card-generator",
+        "aria:skill_definition/roi-calculator",
+        "aria:skill_definition/territory-planner",
     ]
 
 
 def test_agent_skills_scribe() -> None:
     """Test scribe agent has exact skill list."""
     assert AGENT_SKILLS["scribe"] == [
-        "pdf",
-        "docx",
-        "pptx",
-        "xlsx",
-        "email-sequence",
+        "aria:skill_definition/document-forge",
+        "aria:skill_definition/deck-builder",
+        "aria:skill_definition/compliance-guardian",
+        "aria:skill_definition/email-sequence-builder",
+        "aria:capability/email-intelligence",
+        "aria:capability/compliance",
     ]
 
 
 def test_agent_skills_operator() -> None:
     """Test operator agent has exact skill list."""
     assert AGENT_SKILLS["operator"] == [
-        "calendar-management",
-        "crm-operations",
-        "workflow-automation",
+        "aria:capability/calendar-intelligence",
+        "aria:capability/crm-deep-sync",
+        "aria:capability/meeting-intelligence",
+        "aria:capability/team-messenger",
     ]
 
 
 def test_agent_skills_scout() -> None:
     """Test scout agent has exact skill list."""
     assert AGENT_SKILLS["scout"] == [
-        "regulatory-monitor",
-        "news-aggregation",
-        "signal-detection",
+        "aria:capability/web-intelligence",
+        "aria:capability/signal-radar",
+        "aria:capability/mcp-discovery",
     ]
 
 
@@ -226,18 +229,18 @@ async def test_analyze_skill_needs_returns_skill_analysis() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis"],
-            "reasoning": "Competitor data needed",
+            "recommended_skills": ["aria:capability/contact-enricher"],
+            "reasoning": "Contact enrichment needed",
         })
     )
 
     agent = _TestAgent(llm_client=mock_llm, user_id="user-1")
-    result = await agent._analyze_skill_needs({"goal": "analyze competitor"})
+    result = await agent._analyze_skill_needs({"goal": "enrich contact"})
 
     assert isinstance(result, SkillAnalysis)
     assert result.skills_needed is True
-    assert result.recommended_skills == ["competitor-analysis"]
-    assert result.reasoning == "Competitor data needed"
+    assert result.recommended_skills == ["aria:capability/contact-enricher"]
+    assert result.reasoning == "Contact enrichment needed"
 
 
 @pytest.mark.asyncio
@@ -266,7 +269,7 @@ async def test_analyze_skill_needs_filters_to_available_skills() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis", "unknown-skill", "pdf"],
+            "recommended_skills": ["aria:capability/contact-enricher", "unknown-skill", "aria:skill_definition/document-forge"],
             "reasoning": "Multiple skills suggested",
         })
     )
@@ -274,8 +277,8 @@ async def test_analyze_skill_needs_filters_to_available_skills() -> None:
     agent = _TestAgent(llm_client=mock_llm, user_id="user-1")
     result = await agent._analyze_skill_needs({"goal": "complex task"})
 
-    # Only "competitor-analysis" is in hunter's skill list
-    assert result.recommended_skills == ["competitor-analysis"]
+    # Only "aria:capability/contact-enricher" is in hunter's skill list
+    assert result.recommended_skills == ["aria:capability/contact-enricher"]
     assert result.skills_needed is True
 
 
@@ -319,8 +322,8 @@ async def test_execute_with_skills_simple_path() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis"],
-            "reasoning": "Need competitor data",
+            "recommended_skills": ["aria:capability/contact-enricher"],
+            "reasoning": "Need contact enrichment",
         })
     )
 
@@ -343,7 +346,10 @@ async def test_execute_with_skills_simple_path() -> None:
     mock_wm_entry.status = "completed"
     mock_wm_entry.summary = "Done"
     mock_wm_entry.artifacts = []
-    mock_orchestrator.execute_plan = AsyncMock(return_value=[mock_wm_entry])
+    mock_plan_result = MagicMock()
+    mock_plan_result.plan_id = "plan-simple"
+    mock_plan_result.working_memory = [mock_wm_entry]
+    mock_orchestrator.execute_plan = AsyncMock(return_value=mock_plan_result)
 
     agent = _TestAgent(
         llm_client=mock_llm,
@@ -352,15 +358,15 @@ async def test_execute_with_skills_simple_path() -> None:
         skill_index=mock_index,
     )
 
-    result = await agent.execute_with_skills({"goal": "analyze competitor"})
+    result = await agent.execute_with_skills({"goal": "enrich contact"})
 
     assert result.success is True
     assert result.data["skill_execution"] is True
     assert result.data["execution_mode"] == "simple"
-    assert result.data["skill_path"] == "competitor-analysis"
+    assert result.data["skill_path"] == "aria:capability/contact-enricher"
 
     # Verify get_by_path was used (simple path)
-    mock_index.get_by_path.assert_awaited_once_with("competitor-analysis")
+    mock_index.get_by_path.assert_awaited_once_with("aria:capability/contact-enricher")
 
 
 @pytest.mark.asyncio
@@ -371,8 +377,8 @@ async def test_execute_with_skills_delegates_to_orchestrator() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis", "lead-research"],
-            "reasoning": "Need competitor data and lead research",
+            "recommended_skills": ["aria:capability/contact-enricher", "aria:capability/linkedin-intelligence"],
+            "reasoning": "Need contact enrichment and LinkedIn intelligence",
         })
     )
 
@@ -396,7 +402,10 @@ async def test_execute_with_skills_delegates_to_orchestrator() -> None:
     mock_wm_entry.status = "completed"
     mock_wm_entry.summary = "Done"
     mock_wm_entry.artifacts = []
-    mock_orchestrator.execute_plan = AsyncMock(return_value=[mock_wm_entry])
+    mock_plan_result = MagicMock()
+    mock_plan_result.plan_id = "plan-123"
+    mock_plan_result.working_memory = [mock_wm_entry]
+    mock_orchestrator.execute_plan = AsyncMock(return_value=mock_plan_result)
 
     agent = _TestAgent(
         llm_client=mock_llm,
@@ -405,7 +414,7 @@ async def test_execute_with_skills_delegates_to_orchestrator() -> None:
         skill_index=mock_index,
     )
 
-    result = await agent.execute_with_skills({"goal": "analyze competitor"})
+    result = await agent.execute_with_skills({"goal": "enrich contact"})
 
     assert result.success is True
     assert result.data["skill_execution"] is True
@@ -446,7 +455,7 @@ async def test_execute_with_skills_no_orchestrator_falls_back() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis"],
+            "recommended_skills": ["aria:capability/contact-enricher"],
             "reasoning": "Need skills but no orchestrator",
         })
     )
@@ -467,7 +476,7 @@ async def test_execute_with_skills_handles_orchestrator_error() -> None:
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
             "skills_needed": True,
-            "recommended_skills": ["competitor-analysis", "lead-research"],
+            "recommended_skills": ["aria:capability/contact-enricher", "aria:capability/linkedin-intelligence"],
             "reasoning": "Skills needed",
         })
     )

@@ -1311,7 +1311,7 @@ class TestSelectAgentForStep:
         step = ExecutionStep(
             step_number=1,
             skill_id="s1",
-            skill_path="anthropics/skills/pdf",
+            skill_path="aria:skill_definition/document-forge",
             depends_on=[],
             status="pending",
             input_data={},
@@ -1321,7 +1321,7 @@ class TestSelectAgentForStep:
             step, ["hunter", "scribe", "analyst"]
         )
 
-        # "scribe" has "pdf" in its AGENT_SKILLS
+        # "scribe" has "aria:skill_definition/document-forge" in its AGENT_SKILLS
         assert agent == "scribe"
 
     async def test_returns_default_when_no_agents(self) -> None:

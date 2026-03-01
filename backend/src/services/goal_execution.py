@@ -994,8 +994,30 @@ class GoalExecutionService:
             skill_orchestrator = None
             skill_index = None
             try:
+                from src.security.data_classification import DataClassifier
+                from src.security.sandbox import SkillSandbox
+                from src.security.sanitization import DataSanitizer
+                from src.security.skill_audit import SkillAuditService
+                from src.skills.autonomy import SkillAutonomyService
+                from src.skills.executor import SkillExecutor
+                from src.skills.installer import SkillInstaller
+
                 skill_index = SkillIndex()
-                skill_orchestrator = SkillOrchestrator()
+                executor = SkillExecutor(
+                    classifier=DataClassifier(),
+                    sanitizer=DataSanitizer(),
+                    sandbox=SkillSandbox(),
+                    index=skill_index,
+                    installer=SkillInstaller(),
+                    audit_service=SkillAuditService(),
+                )
+                autonomy = SkillAutonomyService()
+                skill_orchestrator = SkillOrchestrator(
+                    executor=executor,
+                    index=skill_index,
+                    autonomy=autonomy,
+                    audit=SkillAuditService(),
+                )
             except Exception as e:
                 logger.debug(f"Skill infrastructure not available: {e}")
 

@@ -218,7 +218,7 @@ class TestSkillAutonomyServiceShouldRequestApproval:
 
     @patch("src.skills.autonomy.SupabaseClient.get_client")
     async def test_no_history_needs_approval(self, mock_get_client: MagicMock) -> None:
-        """Test skills with no history require approval."""
+        """Test MEDIUM+ skills with no history require approval."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         service = SkillAutonomyService()
@@ -227,9 +227,25 @@ class TestSkillAutonomyServiceShouldRequestApproval:
             None
         )
 
-        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+        result = await service.should_request_approval("user-abc", "skill-email", SkillRiskLevel.MEDIUM)
 
         assert result is True
+
+    @patch("src.skills.autonomy.SupabaseClient.get_client")
+    async def test_low_risk_always_auto_approves(self, mock_get_client: MagicMock) -> None:
+        """Test LOW risk skills always auto-approve regardless of history."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        service = SkillAutonomyService()
+
+        # No history at all
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
+            None
+        )
+
+        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+
+        assert result is False
 
     @patch("src.skills.autonomy.SupabaseClient.get_client")
     async def test_low_risk_auto_approves_after_3_successes(self, mock_get_client: MagicMock) -> None:
@@ -263,8 +279,8 @@ class TestSkillAutonomyServiceShouldRequestApproval:
         assert result is False
 
     @patch("src.skills.autonomy.SupabaseClient.get_client")
-    async def test_low_risk_needs_approval_before_3_successes(self, mock_get_client: MagicMock) -> None:
-        """Test LOW risk skills need approval before 3 successes."""
+    async def test_medium_risk_needs_approval_before_10_successes(self, mock_get_client: MagicMock) -> None:
+        """Test MEDIUM risk skills need approval before 10 successes."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         service = SkillAutonomyService()
@@ -273,8 +289,8 @@ class TestSkillAutonomyServiceShouldRequestApproval:
         db_row = {
             "id": "123",
             "user_id": "user-abc",
-            "skill_id": "skill-pdf",
-            "successful_executions": 2,  # Below threshold
+            "skill_id": "skill-email",
+            "successful_executions": 5,  # Below threshold of 10
             "failed_executions": 0,
             "last_success": now.isoformat(),
             "last_failure": None,
@@ -289,7 +305,7 @@ class TestSkillAutonomyServiceShouldRequestApproval:
             db_row
         )
 
-        result = await service.should_request_approval("user-abc", "skill-pdf", SkillRiskLevel.LOW)
+        result = await service.should_request_approval("user-abc", "skill-email", SkillRiskLevel.MEDIUM)
 
         assert result is True
 
@@ -693,15 +709,15 @@ class TestSkillAutonomyIntegration:
         service = SkillAutonomyService()
 
         user_id = "user-123"
-        skill_id = "skill-pdf"
+        skill_id = "skill-email"
         now = datetime.now(UTC)
 
-        # Step 1: First execution - no history, needs approval
+        # Step 1: First execution - no history, needs approval (MEDIUM risk)
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
             None
         )
 
-        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.MEDIUM)
         assert needs_approval is True
 
         # Step 2: Record first success
@@ -725,16 +741,16 @@ class TestSkillAutonomyIntegration:
         result = await service.record_execution_outcome(user_id, skill_id, success=True)
         assert result.successful_executions == 1
 
-        # Step 3: Second execution - still needs approval (only 1 success)
+        # Step 3: Second execution - still needs approval (only 1 success, need 10 for MEDIUM)
         mock_client.reset_mock()
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = (
             mock_insert_response.data[0]
         )
-        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
-        assert needs_approval is True  # Need 3 for LOW risk
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.MEDIUM)
+        assert needs_approval is True  # Need 10 for MEDIUM risk
 
-        # Step 4: Record two more successes
-        for i in range(2, 4):  # Executions 2 and 3
+        # Step 4: Record more successes to reach threshold
+        for i in range(2, 11):  # Executions 2 through 10
             mock_client.reset_mock()
 
             # Current state
@@ -767,13 +783,13 @@ class TestSkillAutonomyIntegration:
 
             await service.record_execution_outcome(user_id, skill_id, success=True)
 
-        # Step 5: Now should auto-approve (3 successes)
+        # Step 5: Now should auto-approve (10 successes for MEDIUM)
         mock_client.reset_mock()
         final_row = {
             "id": "123",
             "user_id": user_id,
             "skill_id": skill_id,
-            "successful_executions": 3,
+            "successful_executions": 10,
             "failed_executions": 0,
             "last_success": now.isoformat(),
             "last_failure": None,
@@ -787,8 +803,8 @@ class TestSkillAutonomyIntegration:
             final_row
         )
 
-        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.LOW)
-        assert needs_approval is False  # Auto-approved after 3 successes
+        needs_approval = await service.should_request_approval(user_id, skill_id, SkillRiskLevel.MEDIUM)
+        assert needs_approval is False  # Auto-approved after 10 successes
 
     @patch("src.skills.autonomy.SupabaseClient.get_client")
     async def test_session_trust_workflow(self, mock_get_client: MagicMock) -> None:

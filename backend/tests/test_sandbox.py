@@ -223,6 +223,12 @@ class TestSkillSandbox:
         sandbox = SkillSandbox()
         config = SandboxConfig(timeout_seconds=5)
 
+        # Mock _execute_skill to avoid LLM dependency
+        async def mock_execution(skill_content: str, input_data: dict) -> dict:
+            return {"result": "executed", "input_received": bool(input_data)}
+
+        sandbox._execute_skill = mock_execution  # type: ignore
+
         result = await sandbox.execute(
             skill_content="Test skill content",
             input_data={"query": "test"},

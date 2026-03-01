@@ -185,16 +185,23 @@ class SkillAutonomyService:
             True if approval is required, False if execution can proceed.
 
         Approval logic:
-        1. Globally approved skills: never require approval
-        2. Session trusted skills: never require approval
-        3. No history: require approval (first time)
-        4. LOW/MEDIUM risk: auto-approve after threshold successes
-        5. HIGH/CRITICAL risk: always require approval
+        1. LOW risk skills: auto-approve (read-only, safe operations)
+        2. Globally approved skills: never require approval
+        3. Session trusted skills: never require approval
+        4. No history + MEDIUM risk: require approval (first time)
+        5. MEDIUM risk: auto-approve after threshold successes
+        6. HIGH/CRITICAL risk: always require approval
         """
+        # LOW risk skills are read-only/safe — always auto-approve
+        # This prevents deadlock where no skills can ever execute
+        # because there's no UI for first-time approval
+        if risk_level == SkillRiskLevel.LOW:
+            return False
+
         # Get current trust history
         history = await self.get_trust_history(user_id, skill_id)
 
-        # No history exists - require approval
+        # No history exists — require approval for MEDIUM+ risk
         if history is None:
             return True
 

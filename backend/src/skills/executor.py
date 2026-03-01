@@ -177,14 +177,36 @@ class SkillExecutor:
                 stage="lookup",
             )
 
-        # Check if installed for user
-        is_installed = await self._installer.is_installed(user_id, skill_id)
-        if not is_installed:
-            raise SkillExecutionError(
-                f"Skill '{skill_id}' is not installed for user '{user_id}'",
-                skill_id=skill_id,
-                stage="lookup",
-            )
+        # Check if installed for user — CORE skills are auto-available
+        if skill_entry.trust_level == SkillTrustLevel.CORE:
+            # CORE skills are ARIA's built-in skills; auto-install on first use
+            is_installed = await self._installer.is_installed(user_id, skill_id)
+            if not is_installed:
+                try:
+                    await self._installer.install(
+                        user_id,
+                        skill_id,
+                        auto_installed=True,
+                    )
+                    logger.info(
+                        "Auto-installed CORE skill %s for user %s",
+                        skill_entry.skill_path,
+                        user_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to auto-install CORE skill %s: %s",
+                        skill_id,
+                        e,
+                    )
+        else:
+            is_installed = await self._installer.is_installed(user_id, skill_id)
+            if not is_installed:
+                raise SkillExecutionError(
+                    f"Skill '{skill_id}' is not installed for user '{user_id}'",
+                    skill_id=skill_id,
+                    stage="lookup",
+                )
 
         trust_level = skill_entry.trust_level
         input_hash = _hash_data(input_data)
