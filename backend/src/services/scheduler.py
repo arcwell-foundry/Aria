@@ -1286,6 +1286,40 @@ async def _run_capability_demand_check() -> None:
         logger.exception("Capability demand check scheduler run failed")
 
 
+async def _run_skill_health_check() -> None:
+    """Check health of ARIA-generated skills every 6 hours."""
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.services.intelligence_pulse import get_pulse_engine
+        from src.services.skill_trust import SkillHealthMonitor
+
+        db = SupabaseClient.get_client()
+        pulse_engine = get_pulse_engine()
+        monitor = SkillHealthMonitor(db, pulse_engine=pulse_engine)
+        await monitor.check_all_active_skills()
+    except Exception:
+        logger.exception("Skill health check scheduler run failed")
+
+
+async def _cleanup_expired_ecosystem_cache() -> None:
+    """Remove expired ecosystem search cache entries daily."""
+    try:
+        from datetime import datetime, timezone
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        (
+            db.table("ecosystem_search_cache")
+            .delete()
+            .lt("expires_at", datetime.now(timezone.utc).isoformat())
+            .execute()
+        )
+        logger.info("Expired ecosystem search cache cleaned")
+    except Exception:
+        logger.exception("Ecosystem cache cleanup failed")
+
+
 async def _cleanup_stale_goal_agents() -> None:
     """Mark stale pending/running goal agents as failed.
 
@@ -1578,6 +1612,20 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(hour="*/6"),
             id="capability_demand_check",
             name="Capability demand proactive suggestion check",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_skill_health_check,
+            trigger=CronTrigger(hour="*/6"),
+            id="skill_health_check",
+            name="Check health of ARIA-generated skills",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _cleanup_expired_ecosystem_cache,
+            trigger=CronTrigger(hour=3, minute=0),
+            id="ecosystem_cache_cleanup",
+            name="Clean expired ecosystem search cache",
             replace_existing=True,
         )
         _scheduler.add_job(
