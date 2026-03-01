@@ -22,6 +22,7 @@ import { ChallengeCard, type ChallengeCardProps } from '@/components/friction';
 import { IntegrationRequestCard, type IntegrationRequestData } from './IntegrationRequestCard';
 import { GoalCompletionCard, type GoalCompletionData } from './GoalCompletionCard';
 import { ExecutionSummaryCard, type ExecutionSummaryData } from './ExecutionSummaryCard';
+import { MemoryDeltaCard, type MemoryDeltaData } from './MemoryDeltaCard';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
@@ -135,6 +136,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <GoalCompletionCard data={item.data as unknown as GoalCompletionData} />;
     case 'execution_summary':
       return <ExecutionSummaryCard data={item.data as unknown as ExecutionSummaryData} />;
+    case 'memory_delta':
+      return <MemoryDeltaCard data={item.data as unknown as MemoryDeltaData} />;
     case 'plan_approved': {
       const pa = item.data as Record<string, unknown>;
       return (

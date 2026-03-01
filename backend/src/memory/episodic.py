@@ -747,6 +747,8 @@ class EpisodicMemory:
         query: str,
         limit: int = 10,
         as_of: datetime | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[Episode]:
         """Search episodes using semantic similarity.
 
@@ -759,6 +761,8 @@ class EpisodicMemory:
             limit: Maximum number of episodes to return.
             as_of: Optional point-in-time filter. If provided, only episodes
                    recorded on or before this datetime are included.
+            start_date: If provided, only episodes on or after this date.
+            end_date: If provided, only episodes on or before this date.
 
         Returns:
             List of Episode instances semantically similar to the query.
@@ -782,6 +786,11 @@ class EpisodicMemory:
 
                 episode = self._parse_edge_to_episode(edge, user_id)
                 if episode:
+                    # Post-filter by date range on occurred_at
+                    if start_date and episode.occurred_at and episode.occurred_at < start_date:
+                        continue
+                    if end_date and episode.occurred_at and episode.occurred_at > end_date:
+                        continue
                     episodes.append(episode)
             return episodes
         except Exception as graphiti_err:
@@ -793,6 +802,10 @@ class EpisodicMemory:
         # ── Fall back to Supabase ──
         try:
             filters: dict[str, Any] = {"content_search": query}
+            if start_date:
+                filters["start"] = start_date.isoformat()
+            if end_date:
+                filters["end"] = end_date.isoformat()
             return self._query_from_supabase(user_id, filters=filters, limit=limit)
         except Exception as e:
             logger.exception("Supabase fallback also failed for semantic_search")

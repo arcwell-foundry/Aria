@@ -2109,7 +2109,7 @@ class GoalExecutionService:
             self._db.table("agent_executions").insert(
                 {
                     "goal_agent_id": goal_agent_id,
-                    "input": {"goal_id": goal_id, "agent_type": agent_type},
+                    "input": {"goal_id": goal_id, "agent_type": agent_type_lower},
                     "output": content,
                     "status": "complete",
                     "tokens_used": 0,

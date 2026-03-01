@@ -26,4 +26,5 @@ class TaskType(str, Enum):
     MEMORY_SUMMARIZE = "background.memory_summarize"
     MEMORY_CONSOLIDATE = "background.memory_consolidate"
     SKILL_EXECUTE = "skill.execute"
+    SUGGEST_FOLLOWUP = "chat.suggest_followup"
     GENERAL = "general"

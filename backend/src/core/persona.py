@@ -761,7 +761,7 @@ class PersonaBuilder:
 
         try:
             # Lazy import to avoid circular dependency
-            from src.api.routes.memory import MemoryQueryService
+            from src.services.memory_query_service import MemoryQueryService
 
             memory_service = MemoryQueryService()
 

@@ -1,5 +1,6 @@
 """Service for email draft generation and management."""
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -306,12 +307,28 @@ class DraftService:
                 extra={"user_id": user_id, "draft_id": draft_id},
             )
 
+            # Fire-and-forget style recalibration when user edits draft content
+            if "body" in filtered or "subject" in filtered:
+                asyncio.create_task(
+                    self._trigger_style_recalibration(user_id),
+                    name=f"style-recal-{user_id[:8]}",
+                )
+
             return cast(dict[str, Any], result.data[0])
         except NotFoundError:
             raise
         except Exception as e:
             logger.exception("Failed to update draft")
             raise EmailDraftError(str(e)) from e
+
+    @staticmethod
+    async def _trigger_style_recalibration(user_id: str) -> None:
+        """Fire-and-forget style recalibration after user edits a draft."""
+        try:
+            calibrator = PersonalityCalibrator()
+            await calibrator.calibrate(user_id)
+        except Exception:
+            logger.debug("Style recalibration failed for %s", user_id, exc_info=True)
 
     async def delete_draft(self, user_id: str, draft_id: str) -> bool:
         """Delete a draft.

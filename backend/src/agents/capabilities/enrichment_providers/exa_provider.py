@@ -72,21 +72,29 @@ _MAX_REQUESTS_PER_MINUTE = 100
 
 
 async def _wait_for_rate_limit() -> None:
-    """Block until a request slot is available within the rate window."""
-    async with _rate_lock:
-        now = time.monotonic()
-        # Prune timestamps older than 60s
-        while _request_timestamps and _request_timestamps[0] < now - 60:
-            _request_timestamps.pop(0)
+    """Block until a request slot is available within the rate window.
 
-        if len(_request_timestamps) >= _MAX_REQUESTS_PER_MINUTE:
-            # Wait until the oldest request expires
+    Releases the lock before sleeping so other coroutines aren't blocked.
+    """
+    while True:
+        async with _rate_lock:
+            now = time.monotonic()
+            # Prune timestamps older than 60s
+            while _request_timestamps and _request_timestamps[0] < now - 60:
+                _request_timestamps.pop(0)
+
+            if len(_request_timestamps) < _MAX_REQUESTS_PER_MINUTE:
+                # Slot available — claim it and return
+                _request_timestamps.append(time.monotonic())
+                return
+
+            # Calculate wait time while holding the lock
             wait_time = 60 - (now - _request_timestamps[0])
-            if wait_time > 0:
-                logger.debug("Exa rate limit: waiting %.1fs", wait_time)
-                await asyncio.sleep(wait_time)
 
-        _request_timestamps.append(time.monotonic())
+        # Sleep *outside* the lock so other coroutines can proceed
+        if wait_time > 0:
+            logger.debug("Exa rate limit: waiting %.1fs", wait_time)
+            await asyncio.sleep(wait_time)
 
 
 # ---------------------------------------------------------------------------

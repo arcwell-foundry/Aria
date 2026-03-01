@@ -179,9 +179,10 @@ async def chat(
     raw_ui = result.get("ui_commands", [])
     raw_suggestions = result.get("suggestions", [])
     if not raw_suggestions:
-        raw_suggestions = _generate_suggestions(
+        raw_suggestions = await _generate_personalized_suggestions(
             result["message"],
             [],
+            current_user.id,
         )
 
     return ChatResponse(
@@ -593,7 +594,9 @@ async def chat_stream(
             skill_ui = skill_result.get("ui_commands", [])
             skill_sug = skill_result.get("suggestions", [])
             if not skill_sug:
-                skill_sug = _generate_suggestions(skill_msg, conversation_messages[-4:])
+                skill_sug = await _generate_personalized_suggestions(
+                    skill_msg, conversation_messages[-4:], current_user.id,
+                )
 
             complete_event = {
                 "type": "complete",
@@ -697,7 +700,9 @@ async def chat_stream(
             except Exception as e:
                 logger.warning("SSE companion ui_commands generation failed: %s", e)
 
-        suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
+        suggestions = await _generate_personalized_suggestions(
+            full_content, conversation_messages[-4:], current_user.id,
+        )
 
         complete_event = {
             "type": "complete",
@@ -984,3 +989,59 @@ def _generate_suggestions(
         suggestions.append("Show me my briefing")
 
     return suggestions[:4]
+
+
+async def _generate_personalized_suggestions(
+    response: str,
+    conversation: list[dict],
+    user_id: str,
+) -> list[str]:
+    """Generate personalized follow-up suggestions using LLM.
+
+    Calls a cheap/fast Haiku model to produce 2-3 context-aware follow-ups
+    based on the full conversation and response. Falls back to the keyword
+    heuristic ``_generate_suggestions()`` on any error.
+
+    Args:
+        response: The assistant's latest response text.
+        conversation: Recent conversation messages.
+        user_id: The user ID (for tracing).
+
+    Returns:
+        List of 2-3 suggestion strings.
+    """
+    try:
+        from src.core.llm import LLMClient
+
+        llm = LLMClient()
+        recent = conversation[-4:] if len(conversation) > 4 else conversation
+        history_text = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')}" for m in recent
+        )
+        prompt_messages = [
+            {
+                "role": "user",
+                "content": (
+                    "Based on this conversation, suggest 2-3 short follow-up questions "
+                    "the user might want to ask. Return ONLY a JSON array of strings, "
+                    "no other text.\n\n"
+                    f"Recent conversation:\n{history_text}\n\n"
+                    f"Latest assistant response:\n{response[:500]}"
+                ),
+            }
+        ]
+        raw = await llm.generate(
+            prompt_messages,
+            task=TaskType.SUGGEST_FOLLOWUP,
+            system_prompt="You are ARIA, an AI sales assistant. Generate short, actionable follow-up suggestions.",
+            user_id=user_id,
+        )
+        import json as _json
+
+        suggestions = _json.loads(raw)
+        if isinstance(suggestions, list) and all(isinstance(s, str) for s in suggestions):
+            return suggestions[:4]
+    except Exception:
+        logger.debug("Personalized suggestion generation failed, using heuristics", exc_info=True)
+
+    return _generate_suggestions(response, conversation)

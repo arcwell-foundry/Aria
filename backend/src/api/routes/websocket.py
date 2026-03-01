@@ -286,7 +286,7 @@ async def _handle_user_message(
     persistence) and sends back thinking indicators, token events, and a
     final AriaMessageEvent.
     """
-    from src.api.routes.chat import _generate_suggestions
+    from src.api.routes.chat import _generate_personalized_suggestions
     from src.db.supabase import get_supabase_client
     from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
 
@@ -661,7 +661,9 @@ async def _handle_user_message(
 
         # Send response — exactly once per user message
         ui_commands: list[dict] = []
-        suggestions = _generate_suggestions(display_content, conversation_messages[-4:])
+        suggestions = await _generate_personalized_suggestions(
+            display_content, conversation_messages[-4:], user_id,
+        )
 
         if email_integration:
             # Tool path: send complete content as a single token event

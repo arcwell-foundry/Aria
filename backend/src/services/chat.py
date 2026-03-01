@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
-from src.api.routes.memory import MemoryQueryService
+from src.services.memory_query_service import MemoryQueryService
 from src.core.llm import LLMClient
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
