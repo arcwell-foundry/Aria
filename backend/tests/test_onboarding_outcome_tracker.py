@@ -101,9 +101,8 @@ class TestRecordOutcome:
                 "goal_clarity": 80.0,
             },
             "step_data": {
-                "company_discovery": {"company_type": "cdmo"},
+                "company_discovery": {"company_id": "comp-abc"},
                 "first_goal": {"goal_type": "meeting_prep"},
-                "integration_wizard": {"email_connected": True, "crm_connected": True},
             },
             "metadata": {"documents_uploaded": 2},
         }
@@ -114,6 +113,24 @@ class TestRecordOutcome:
         state_chain.eq.return_value = state_chain
         state_chain.maybe_single.return_value = state_chain
         state_chain.execute.return_value.data = state_row
+
+        # Mock user_integrations query (email + CRM connected)
+        integrations_chain = MagicMock()
+        integrations_chain.select.return_value = integrations_chain
+        integrations_chain.eq.return_value = integrations_chain
+        integrations_chain.execute.return_value.data = [
+            {"integration_type": "outlook"},
+            {"integration_type": "salesforce"},
+        ]
+
+        # Mock companies query (for company_type)
+        companies_chain = MagicMock()
+        companies_chain.select.return_value = companies_chain
+        companies_chain.eq.return_value = companies_chain
+        companies_chain.maybe_single.return_value = companies_chain
+        companies_chain.execute.return_value.data = {
+            "settings": {"classification": {"company_type": "cdmo"}}
+        }
 
         # Mock outcome insert
         outcome_row = _make_db_row(
@@ -130,7 +147,12 @@ class TestRecordOutcome:
         )
         insert_chain = _build_chain([outcome_row])
 
-        mock_db.table.side_effect = [state_chain, insert_chain]
+        mock_db.table.side_effect = [
+            state_chain,          # 1. onboarding_state
+            integrations_chain,   # 2. user_integrations
+            companies_chain,      # 3. companies
+            insert_chain,         # 4. onboarding_outcomes
+        ]
 
         result = await tracker.record_outcome("user-123")
 

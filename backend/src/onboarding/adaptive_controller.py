@@ -145,7 +145,7 @@ class OnboardingOODAController:
             .execute()
         )
         integrations = (
-            self._db.table("user_integrations").select("provider").eq("user_id", user_id).execute()
+            self._db.table("user_integrations").select("integration_type").eq("user_id", user_id).execute()
         )
         classification = await self._get_classification(user_id)
 
@@ -157,7 +157,7 @@ class OnboardingOODAController:
             "step_data": (state or {}).get("step_data", {}),
             "fact_count": len(facts.data or []),
             "classification": classification,
-            "connected_integrations": [i["provider"] for i in integration_rows],
+            "connected_integrations": [i["integration_type"] for i in integration_rows],
             "readiness_scores": (state or {}).get("readiness_scores", {}),
         }
 

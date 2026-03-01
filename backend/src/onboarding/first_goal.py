@@ -306,13 +306,13 @@ class FirstGoalService:
         try:
             integrations_result = (
                 self._db.table("user_integrations")
-                .select("provider, status")
+                .select("integration_type, status")
                 .eq("user_id", user_id)
                 .eq("status", "active")
                 .execute()
             )
             if integrations_result and integrations_result.data:
-                providers = [i["provider"] for i in integrations_result.data]
+                providers = [i["integration_type"] for i in integrations_result.data]
                 context["connected_integrations"] = providers
                 context["has_crm"] = any(p in providers for p in ["salesforce", "hubspot"])
                 context["has_calendar"] = any(p in providers for p in ["google", "outlook"])

@@ -376,7 +376,7 @@ class KnowledgeGapDetector:
             List of KnowledgeGaps for missing integrations.
         """
         gaps: list[KnowledgeGap] = []
-        connected = {i.get("provider", "") for i in integrations}
+        connected = {i.get("integration_type", "") for i in integrations}
 
         for category, config in _CRITICAL_INTEGRATIONS.items():
             if not config["names"].intersection(connected):
@@ -511,7 +511,7 @@ class KnowledgeGapDetector:
         """
         result = (
             self.db.table("user_integrations")
-            .select("provider, created_at")
+            .select("integration_type, created_at")
             .eq("user_id", user_id)
             .execute()
         )

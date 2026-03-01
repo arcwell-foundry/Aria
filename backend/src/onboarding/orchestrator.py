@@ -646,23 +646,24 @@ class OnboardingOrchestrator:
         # Query actual integration connections
         result = (
             self._db.table("user_integrations")
-            .select("provider, status")
+            .select("integration_type, status")
             .eq("user_id", user_id)
             .eq("status", "active")
             .execute()
         )
 
-        connected_providers = [row["provider"] for row in (result.data or [])]
+        connected_providers = [row["integration_type"] for row in (result.data or [])]
+        connected_lower = {p.lower() for p in connected_providers if p}
 
-        crm_providers = {"SALESFORCE", "HUBSPOT"}
-        email_providers = {"GMAIL", "OUTLOOK", "google", "microsoft"}
-        calendar_providers = {"GOOGLECALENDAR", "OUTLOOK365CALENDAR"}
+        crm_types = {"salesforce", "hubspot"}
+        email_types = {"gmail", "outlook", "google", "microsoft"}
+        calendar_types = {"googlecalendar", "outlook365calendar", "google_calendar", "outlook_calendar"}
 
         integration_flags: dict[str, Any] = {
-            "crm_connected": bool(crm_providers & set(connected_providers)),
-            "email_connected": bool(email_providers & set(connected_providers)),
-            "calendar_connected": bool(calendar_providers & set(connected_providers)),
-            "slack_connected": "SLACK" in connected_providers,
+            "crm_connected": bool(crm_types & connected_lower),
+            "email_connected": bool(email_types & connected_lower),
+            "calendar_connected": bool(calendar_types & connected_lower),
+            "slack_connected": "slack" in connected_lower,
             "connected_providers": connected_providers,
         }
 

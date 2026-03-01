@@ -91,30 +91,50 @@ class OnboardingOutcomeTracker:
             except (ValueError, TypeError):
                 time_minutes = 0.0
 
-        # Extract integration status
-        integration_data = step_data.get("integration_wizard", {})
-        if not isinstance(integration_data, dict):
-            integration_data = {}
-        email_connected = (
-            integration_data.get("email_connected", False)
-            if isinstance(integration_data.get("email_connected"), bool)
-            else False
-        )
-        crm_connected = (
-            integration_data.get("crm_connected", False)
-            if isinstance(integration_data.get("crm_connected"), bool)
-            else False
-        )
+        # Extract integration status from user_integrations table directly
+        # (step_data flags may not be set due to async processing)
+        email_connected = False
+        crm_connected = False
+        try:
+            integrations_result = (
+                self._db.table("user_integrations")
+                .select("integration_type")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            active_types = {
+                row["integration_type"]
+                for row in (integrations_result.data or [])
+                if isinstance(row, dict)
+            }
+            email_types = {"gmail", "outlook"}
+            crm_types = {"salesforce", "hubspot"}
+            email_connected = bool(active_types & email_types)
+            crm_connected = bool(active_types & crm_types)
+        except Exception as e:
+            logger.warning("Failed to query integration status for outcome: %s", e)
 
-        # Extract company type and goal
-        company_discovery = step_data.get("company_discovery", {})
-        if not isinstance(company_discovery, dict):
-            company_discovery = {}
-        company_type = (
-            company_discovery.get("company_type", "")
-            if isinstance(company_discovery.get("company_type"), str)
-            else ""
-        )
+        # Extract company type from companies.settings.classification
+        company_type = ""
+        try:
+            company_discovery = step_data.get("company_discovery", {})
+            if isinstance(company_discovery, dict) and company_discovery.get("company_id"):
+                company_result = (
+                    self._db.table("companies")
+                    .select("settings")
+                    .eq("id", company_discovery["company_id"])
+                    .maybe_single()
+                    .execute()
+                )
+                if company_result and company_result.data:
+                    settings = company_result.data.get("settings", {})
+                    if isinstance(settings, dict):
+                        classification = settings.get("classification", {})
+                        if isinstance(classification, dict):
+                            company_type = classification.get("company_type", "")
+        except Exception as e:
+            logger.warning("Failed to extract company type for outcome: %s", e)
 
         first_goal = step_data.get("first_goal", {})
         if not isinstance(first_goal, dict):

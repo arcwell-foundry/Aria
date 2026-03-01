@@ -1175,14 +1175,14 @@ async def _get_enrichment_context(user_id: str) -> dict[str, Any] | None:
         # Get connected integrations
         integrations = (
             db.table("user_integrations")
-            .select("provider, status")
+            .select("integration_type, status")
             .eq("user_id", user_id)
             .eq("status", "active")
             .execute()
         )
 
         connected_providers = (
-            [i["provider"] for i in integrations.data] if integrations and integrations.data else []
+            [i["integration_type"] for i in integrations.data] if integrations and integrations.data else []
         )
 
         return {

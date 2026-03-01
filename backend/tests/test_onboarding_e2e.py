@@ -50,7 +50,7 @@ def _build_chain(execute_return: Any = None) -> MagicMock:
     for method in (
         "select", "insert", "update", "upsert", "delete",
         "eq", "neq", "gt", "gte", "lt", "lte",
-        "order", "limit", "single",
+        "in_", "order", "limit", "single", "range",
     ):
         getattr(chain, method).return_value = chain
 
@@ -800,9 +800,16 @@ class TestFirstConversationDownstream:
             # LLM calls in order:
             # 1. _identify_surprising_fact → returns plain text
             # 2. _compose_message → returns plain text (not JSON)
+            # 3. _generate_goal_proposals → returns JSON array
+            import json as _json
             mock_llm.generate_response.side_effect = [
                 "Acme Bio is a CDMO with oncology focus",
                 "Hello Jane! I have been learning about Acme Bio and its CDMO operations.",
+                _json.dumps([
+                    {"title": "Map CDMO pipeline", "rationale": "Understand capacity",
+                     "approach": "Scout research", "agents": ["Scout"], "timeline": "1 week",
+                     "goal_type": "pipeline"},
+                ]),
             ]
 
             from src.onboarding.first_conversation import FirstConversationGenerator

@@ -243,7 +243,7 @@ class OnboardingReadinessService:
     async def _calculate_corporate_memory(self, user_id: str) -> float:
         """Calculate corporate memory readiness from actual data.
 
-        Score: facts (1pt each, cap 60) + documents (8pt each, cap 40).
+        Score: semantic facts (1pt each, cap 60) + documents (8pt each, cap 40).
 
         Args:
             user_id: The user's ID.
@@ -255,7 +255,7 @@ class OnboardingReadinessService:
             profile = (
                 self._db.table("user_profiles")
                 .select("company_id")
-                .eq("user_id", user_id)
+                .eq("id", user_id)
                 .maybe_single()
                 .execute()
             )
@@ -264,11 +264,11 @@ class OnboardingReadinessService:
 
             company_id = profile.data["company_id"]
 
+            # Count semantic facts for this user (enrichment stores here, not corporate_facts)
             facts_result = (
-                self._db.table("corporate_facts")
+                self._db.table("memory_semantic")
                 .select("id")
-                .eq("company_id", company_id)
-                .eq("is_active", True)
+                .eq("user_id", user_id)
                 .execute()
             )
             fact_score = min(len(facts_result.data or []), 60)
