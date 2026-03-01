@@ -47,6 +47,20 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
         try:
             stats["users_processed"] += 1
 
+            # Resolve user_id → company_id (battle_cards are company-scoped)
+            profile_result = (
+                db.table("user_profiles")
+                .select("company_id")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            company_id: str | None = None
+            if profile_result and profile_result.data:
+                company_id = profile_result.data.get("company_id")
+            if not company_id:
+                continue
+
             # Get tracked competitors
             prefs_result = (
                 db.table("user_preferences")
@@ -76,25 +90,37 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
                         continue
 
                     # Find or create battle card
-                    from src.services.battle_card_service import BattleCardService
+                    from src.services.battle_card_service import (
+                        BattleCardService,
+                        BattleCardUpdate,
+                    )
 
                     service = BattleCardService()
 
                     # Check if battle card exists for this competitor
                     existing_result = (
                         db.table("battle_cards")
-                        .select("id")
-                        .eq("user_id", user_id)
-                        .ilike("company_name", competitor)
+                        .select("id, overview")
+                        .eq("company_id", company_id)
+                        .ilike("competitor_name", competitor)
                         .limit(1)
                         .execute()
                     )
 
                     if existing_result.data:
                         card_id = existing_result.data[0]["id"]
+                        # Synthesize intel into a brief overview update
+                        intel_summary = "; ".join(
+                            item.get("headline", "") for item in intel[:5] if item.get("headline")
+                        )
+                        current_overview = existing_result.data[0].get("overview") or ""
+                        updated_overview = (
+                            f"{current_overview}\n\n"
+                            f"[Auto-refreshed] Recent signals: {intel_summary}"
+                        ).strip()
                         await service.update_battle_card(
                             card_id=card_id,
-                            data={"recent_intel": intel, "auto_refreshed": True},
+                            data=BattleCardUpdate(overview=updated_overview),
                             source="auto",
                         )
                         stats["cards_updated"] += 1

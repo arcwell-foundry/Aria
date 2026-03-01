@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from src.api.deps import CurrentUser
 from src.models.meeting_brief import (
@@ -98,6 +98,7 @@ async def generate_meeting_brief(
     current_user: CurrentUser,
     calendar_event_id: str,
     request: GenerateBriefRequest,
+    background_tasks: BackgroundTasks,
 ) -> MeetingBriefResponse:
     """Generate or regenerate a meeting brief on-demand.
 
@@ -143,8 +144,17 @@ async def generate_meeting_brief(
         },
     )
 
-    # Note: Background job would pick this up and call generate_brief_content
-    # For now, we return 202 to indicate the request is accepted
+    # Fire brief generation in background so the user gets immediate 202
+    async def _generate(uid: str, bid: str) -> None:
+        try:
+            await service.generate_brief_content(user_id=uid, brief_id=bid)
+        except Exception:
+            logger.exception(
+                "Background brief generation failed",
+                extra={"brief_id": bid, "user_id": uid},
+            )
+
+    background_tasks.add_task(_generate, current_user.id, brief_id)
 
     # Fetch the updated brief to return complete response
     updated_brief = await service.get_brief(current_user.id, calendar_event_id)

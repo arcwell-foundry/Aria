@@ -883,6 +883,28 @@ async def _run_weekly_digest() -> None:
         logger.exception("Weekly digest scheduler run failed")
 
 
+async def _run_meeting_brief_generation() -> None:
+    """Process pending meeting briefs and generate content.
+
+    Picks up briefs created by calendar meeting checks (status=pending)
+    and generates research content via MeetingBriefService.
+    """
+    try:
+        from src.jobs.meeting_brief_generator import run_meeting_brief_job
+
+        result = await run_meeting_brief_job()
+
+        if result["meetings_found"] > 0:
+            logger.info(
+                "Meeting brief generation: %d found, %d generated, %d errors",
+                result["meetings_found"],
+                result["briefs_generated"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Meeting brief generation scheduler run failed")
+
+
 async def _run_battle_card_refresh() -> None:
     """Run weekly battle card refresh for tracked competitors."""
     try:
@@ -1221,6 +1243,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
             id="calendar_meeting_checks",
             name="Calendar meeting prep checks",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_meeting_brief_generation,
+            trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
+            id="meeting_brief_generation",
+            name="Process pending meeting briefs",
             replace_existing=True,
         )
         _scheduler.add_job(
