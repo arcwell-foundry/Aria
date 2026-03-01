@@ -446,3 +446,87 @@ class TestGapDetectionService:
         assert gaps[0].severity == "degraded"
         assert gaps[0].can_proceed is True
         assert gaps[0].current_quality == 0.50
+
+
+class TestProvisioningConversation:
+    """Tests for ProvisioningConversation.format_gap_message()."""
+
+    @pytest.mark.asyncio
+    async def test_provisioning_message_format(self):
+        """Gap message includes labeled options (A, B, C, D)."""
+        from src.services.capability_provisioning import ProvisioningConversation
+
+        gaps = [
+            CapabilityGap(
+                capability="read_crm_pipeline",
+                step={"description": "Check existing pipeline"},
+                severity="blocking",
+                resolutions=[
+                    ResolutionStrategy(
+                        strategy_type="direct_integration",
+                        provider_name="composio_salesforce",
+                        quality=0.95,
+                        setup_time_seconds=30,
+                        composio_app="SALESFORCE",
+                        action_label="Connect SALESFORCE",
+                    ),
+                    ResolutionStrategy(
+                        strategy_type="user_provided",
+                        provider_name="ask_user",
+                        quality=0.40,
+                        setup_time_seconds=120,
+                        action_label="I'll provide it",
+                    ),
+                ],
+            ),
+        ]
+
+        conv = ProvisioningConversation()
+        message = await conv.format_gap_message(gaps, "Analyze competitive landscape")
+
+        assert "**A.**" in message
+        assert "**B.**" in message
+        assert "SALESFORCE" in message
+        assert "read_crm_pipeline" in message
+
+    @pytest.mark.asyncio
+    async def test_provisioning_message_empty_gaps(self):
+        """Empty gaps returns empty string."""
+        from src.services.capability_provisioning import ProvisioningConversation
+
+        conv = ProvisioningConversation()
+        message = await conv.format_gap_message([], "Some goal")
+
+        assert message == ""
+
+    @pytest.mark.asyncio
+    async def test_provisioning_message_degraded_shows_upgrade(self):
+        """Degraded gap message shows current quality and upgrade option."""
+        from src.services.capability_provisioning import ProvisioningConversation
+
+        gaps = [
+            CapabilityGap(
+                capability="read_crm_pipeline",
+                step={"description": "Check pipeline"},
+                severity="degraded",
+                current_provider="user_stated",
+                current_quality=0.50,
+                can_proceed=True,
+                resolutions=[
+                    ResolutionStrategy(
+                        strategy_type="direct_integration",
+                        provider_name="composio_salesforce",
+                        quality=0.95,
+                        composio_app="SALESFORCE",
+                        action_label="Connect SALESFORCE",
+                    ),
+                ],
+            ),
+        ]
+
+        conv = ProvisioningConversation()
+        message = await conv.format_gap_message(gaps, "Analyze pipeline")
+
+        assert "50%" in message
+        assert "95%" in message
+        assert "SALESFORCE" in message

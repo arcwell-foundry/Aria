@@ -440,3 +440,69 @@ class GapDetectionService:
                 "Failed to log capability gap",
                 extra={"capability": gap.capability, "user_id": user_id},
             )
+
+
+class ProvisioningConversation:
+    """Presents capability gaps to users in natural conversation."""
+
+    async def format_gap_message(
+        self,
+        gaps: list[CapabilityGap],
+        goal_title: str,
+    ) -> str:
+        """Generate natural language message presenting gaps and options.
+
+        Injected into chat context — not a settings page or modal.
+        """
+        if not gaps:
+            return ""
+
+        blocking = [g for g in gaps if g.severity == "blocking"]
+        degraded = [g for g in gaps if g.severity == "degraded"]
+
+        message_parts: list[str] = []
+
+        for gap in blocking:
+            options = self._format_resolution_options(gap.resolutions)
+            step_desc = gap.step.get("description", "a step")
+            message_parts.append(
+                f"For **{step_desc}**, I need {gap.capability} access "
+                f"but don't have it yet. Options:\n{options}"
+            )
+
+        for gap in degraded:
+            best_upgrade = gap.resolutions[0] if gap.resolutions else None
+            step_desc = gap.step.get("description", "this step")
+            if best_upgrade and best_upgrade.strategy_type == "direct_integration":
+                message_parts.append(
+                    f"I can handle **{step_desc}** with "
+                    f"{gap.current_provider} (~{int(gap.current_quality * 100)}% accuracy). "
+                    f"For better results, connect {best_upgrade.composio_app} "
+                    f"({int(best_upgrade.quality * 100)}% accuracy)."
+                )
+            else:
+                message_parts.append(
+                    f"I can handle **{step_desc}** with "
+                    f"{gap.current_provider} (~{int(gap.current_quality * 100)}% accuracy), "
+                    f"but results may be limited."
+                )
+
+        return "\n\n".join(message_parts)
+
+    def _format_resolution_options(
+        self, strategies: list[ResolutionStrategy]
+    ) -> str:
+        """Format strategies as labeled options for chat."""
+        labels = ["A", "B", "C", "D"]
+        options: list[str] = []
+        for i, strategy in enumerate(strategies[:4]):
+            quality_pct = int(strategy.quality * 100)
+            if strategy.setup_time_seconds < 60:
+                setup = f"{strategy.setup_time_seconds}s"
+            else:
+                setup = f"~{strategy.setup_time_seconds // 60}min"
+            options.append(
+                f"**{labels[i]}.** {strategy.action_label} "
+                f"({quality_pct}% accuracy, {setup} setup)"
+            )
+        return "\n".join(options)
