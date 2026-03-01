@@ -2027,6 +2027,109 @@ class ChatService:
                 },
             )
 
+    async def _correlate_conversation_with_leads(
+        self,
+        user_id: str,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        """Match entities in a conversation turn against active leads.
+
+        Uses fast regex-based entity extraction to find company/person names
+        in the conversation, then checks if any match active lead memories.
+        For each match, creates a NOTE event on the lead timeline so the
+        lead's activity history reflects the conversation.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: Conversation identifier for source tracking.
+            user_message: The user's message text.
+            assistant_message: ARIA's response text.
+        """
+        from src.core.entity_extractor import extract_entities_from_observations
+
+        # Extract entities from the conversation turn (regex-based, no LLM)
+        observations = [
+            {"content": user_message},
+            {"content": assistant_message},
+        ]
+        entities = extract_entities_from_observations(observations, max_entities=5)
+
+        if not entities:
+            return
+
+        # Query active leads for this user (explicit status filter per CLAUDE.md)
+        db = get_supabase_client()
+        result = (
+            db.table("lead_memories")
+            .select("id, company_name")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .execute()
+        )
+
+        if not result.data:
+            return
+
+        # Build a lookup of lead company names → lead IDs
+        lead_lookup: dict[str, str] = {}
+        for lead in result.data:
+            company = (lead.get("company_name") or "").lower()
+            if company:
+                lead_lookup[company] = lead["id"]
+
+        # Match extracted entities against lead names
+        matched_lead_ids: set[str] = set()
+        for entity in entities:
+            entity_lower = entity.lower()
+            for lead_name, lead_id in lead_lookup.items():
+                if entity_lower in lead_name or lead_name in entity_lower:
+                    matched_lead_ids.add(lead_id)
+
+        if not matched_lead_ids:
+            return
+
+        # Create lead timeline events for matched leads
+        from src.memory.lead_memory_events import LeadEventService
+        from src.models.lead_memory import EventType, LeadEventCreate
+
+        event_svc = LeadEventService(db_client=db)
+        now = datetime.now(UTC)
+        snippet = user_message[:200]
+
+        for lead_id in matched_lead_ids:
+            try:
+                event_data = LeadEventCreate(
+                    event_type=EventType.NOTE,
+                    subject="Mentioned in conversation",
+                    content=snippet,
+                    occurred_at=now,
+                    source="conversation",
+                    source_id=conversation_id,
+                )
+                await event_svc.add_event(
+                    user_id=user_id,
+                    lead_memory_id=lead_id,
+                    event_data=event_data,
+                )
+                logger.info(
+                    "Lead timeline updated from conversation",
+                    extra={
+                        "user_id": user_id,
+                        "lead_memory_id": lead_id,
+                        "conversation_id": conversation_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to create lead event from conversation",
+                    extra={
+                        "lead_memory_id": lead_id,
+                        "error": str(e),
+                    },
+                )
+
     async def _update_conversation_metadata(
         self,
         user_id: str,
@@ -2146,6 +2249,20 @@ class ChatService:
         except Exception as e:
             logger.warning(
                 "Information extraction failed",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+
+        # 3b. Correlate conversation entities with active leads (fire-and-forget)
+        try:
+            await self._correlate_conversation_with_leads(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                assistant_message=assistant_message,
+            )
+        except Exception as e:
+            logger.warning(
+                "Lead correlation failed",
                 extra={"user_id": user_id, "error": str(e)},
             )
 

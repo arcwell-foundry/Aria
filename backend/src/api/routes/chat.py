@@ -346,6 +346,71 @@ async def chat_stream(
 
         # --- Normal conversational streaming path ---
 
+        # --- Cognitive Friction check (fail-open) ---
+        from src.core.cognitive_friction import (
+            FRICTION_CHALLENGE,
+            FRICTION_FLAG,
+            FRICTION_REFUSE,
+            get_cognitive_friction_engine,
+        )
+
+        friction_decision = None
+        try:
+            friction_engine = get_cognitive_friction_engine()
+            friction_decision = await friction_engine.evaluate(
+                user_id=current_user.id,
+                user_request=request.message,
+            )
+
+            if friction_decision and friction_decision.level in (
+                FRICTION_CHALLENGE,
+                FRICTION_REFUSE,
+            ):
+                # Short-circuit: emit friction pushback as response
+                metadata_evt = {
+                    "type": "metadata",
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                }
+                yield f"data: {json.dumps(metadata_evt)}\n\n"
+
+                friction_msg = friction_decision.user_message or (
+                    "Let me make sure I understand what you're asking before proceeding."
+                )
+                token_event = {"type": "token", "content": friction_msg}
+                yield f"data: {json.dumps(token_event)}\n\n"
+
+                complete_event = {
+                    "type": "complete",
+                    "rich_content": [
+                        {
+                            "type": "friction_decision",
+                            "data": {
+                                "level": friction_decision.level,
+                                "message": friction_msg,
+                            },
+                        }
+                    ],
+                    "ui_commands": [],
+                    "suggestions": ["Yes, proceed", "Let me rephrase"],
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        except Exception as e:
+            logger.warning("SSE cognitive friction check failed (proceeding): %s", e)
+
+        # --- Web grounding (fail-open) ---
+        web_context = None
+        try:
+            if service._web_grounding is None:
+                from src.services.chat import WebGroundingService
+
+                service._web_grounding = WebGroundingService()
+            web_context = await service._web_grounding.detect_and_ground(request.message)
+        except Exception as e:
+            logger.warning("SSE web grounding failed: %s", e)
+
         # Get proactive insights
         proactive_insights = await service._get_proactive_insights(
             user_id=current_user.id,
@@ -353,11 +418,64 @@ async def chat_stream(
             conversation_messages=conversation_messages,
         )
 
-        # Load Digital Twin personality calibration
-        personality = await service._get_personality_calibration(current_user.id)
+        # --- Causal reasoning + user mental model (fail-open, parallel) ---
+        import asyncio as _aio
 
-        # Fetch Digital Twin writing style fingerprint
-        style_guidelines = await service._get_style_guidelines(current_user.id)
+        causal_actions = []
+        user_mental_model = None
+        try:
+            if service._causal_reasoning is None:
+                from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+
+                service._causal_reasoning = SalesCausalReasoningEngine(
+                    db_client=get_supabase_client()
+                )
+            if service._user_model_service is None:
+                from src.intelligence.user_model import UserModelService
+
+                service._user_model_service = UserModelService(
+                    db_client=get_supabase_client()
+                )
+
+            causal_task = _aio.create_task(
+                service._causal_reasoning.analyze_recent_signals(
+                    current_user.id, limit=3, hours_back=24
+                )
+            )
+            model_task = _aio.create_task(
+                service._user_model_service.get_model(current_user.id)
+            )
+            causal_actions, user_mental_model = await _aio.gather(
+                causal_task, model_task
+            )
+        except Exception as e:
+            logger.warning("SSE causal/model failed (proceeding): %s", e)
+
+        # --- Companion Orchestrator (fail-open) ---
+        companion_ctx = None
+        try:
+            if service._companion_orchestrator is None:
+                from src.companion.factory import create_companion_orchestrator
+
+                service._companion_orchestrator = create_companion_orchestrator()
+            companion_ctx = await service._companion_orchestrator.build_full_context(
+                user_id=current_user.id,
+                message=request.message,
+                conversation_history=conversation_messages,
+                session_id=conversation_id,
+            )
+        except Exception as e:
+            logger.warning("SSE companion orchestrator failed, falling back: %s", e)
+
+        # Fall back to individual calls if orchestrator failed
+        if companion_ctx is not None:
+            personality = None
+            style_guidelines = None
+        else:
+            # Load Digital Twin personality calibration
+            personality = await service._get_personality_calibration(current_user.id)
+            # Fetch Digital Twin writing style fingerprint
+            style_guidelines = await service._get_style_guidelines(current_user.id)
 
         # Prime conversation with recent episodes, open threads, salient facts
         priming_context = await service._get_priming_context(current_user.id, request.message)
@@ -375,10 +493,13 @@ async def chat_stream(
                 load_state,
                 proactive_insights,
                 priming_context,
-                companion_context=None,
+                web_context,
+                companion_context=companion_ctx,
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+                causal_actions=causal_actions,
+                user_mental_model=user_mental_model,
             )
         else:
             system_prompt = service._build_system_prompt(
@@ -388,9 +509,23 @@ async def chat_stream(
                 personality,
                 style_guidelines,
                 priming_context,
+                web_context,
+                companion_context=companion_ctx,
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+            )
+
+        # Inject friction flag note into system prompt if flagged
+        if (
+            friction_decision
+            and friction_decision.level == FRICTION_FLAG
+            and friction_decision.user_message
+        ):
+            system_prompt += (
+                f"\n\n## Cognitive Friction Note\n"
+                f"Surface this concern naturally alongside your response: "
+                f"{friction_decision.user_message}"
             )
 
         # Inject pending plan context for discuss/unrelated plan interactions
@@ -403,6 +538,72 @@ async def chat_stream(
             "SSE_SYSTEM_PROMPT_DEBUG_START\n%s\nSSE_SYSTEM_PROMPT_DEBUG_END",
             system_prompt[:2000],
         )
+
+        # --- Skill-aware routing (before LLM streaming) ---
+        skill_result = None
+        try:
+            extend_plan_id = await service._detect_plan_extension(
+                current_user.id, conversation_id, request.message
+            )
+            if extend_plan_id:
+                skill_result = await service._route_through_skill(
+                    current_user.id,
+                    conversation_id,
+                    request.message,
+                    extend_plan_id=extend_plan_id,
+                )
+            else:
+                should_route, _ranked, _conf = await service._detect_skill_match(
+                    request.message
+                )
+                if should_route:
+                    skill_result = await service._route_through_skill(
+                        current_user.id,
+                        conversation_id,
+                        request.message,
+                    )
+        except Exception as e:
+            logger.warning("SSE skill detection/routing error: %s", e)
+
+        if skill_result and skill_result.get("message"):
+            # Short-circuit: emit skill result as token events
+            metadata_evt = {
+                "type": "metadata",
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+            }
+            yield f"data: {json.dumps(metadata_evt)}\n\n"
+
+            skill_msg = skill_result["message"]
+            token_event = {"type": "token", "content": skill_msg}
+            yield f"data: {json.dumps(token_event)}\n\n"
+
+            working_memory.add_message("assistant", skill_msg)
+            await service._working_memory_manager.persist_session(conversation_id)
+            await service.persist_turn(
+                user_id=current_user.id,
+                conversation_id=conversation_id,
+                user_message=request.message,
+                assistant_message=skill_msg,
+                assistant_metadata={"skill_execution": True},
+                conversation_context=conversation_messages[-2:],
+            )
+
+            skill_rich = skill_result.get("rich_content", [])
+            skill_ui = skill_result.get("ui_commands", [])
+            skill_sug = skill_result.get("suggestions", [])
+            if not skill_sug:
+                skill_sug = _generate_suggestions(skill_msg, conversation_messages[-4:])
+
+            complete_event = {
+                "type": "complete",
+                "rich_content": skill_rich,
+                "ui_commands": skill_ui,
+                "suggestions": skill_sug,
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         # Send metadata event
         metadata = {
@@ -452,6 +653,17 @@ async def chat_stream(
             conversation_context=conversation_messages[-2:],
         )
 
+        # Companion post-response hooks (narrative increment + theory of mind)
+        if companion_ctx is not None and service._companion_orchestrator is not None:
+            try:
+                await service._companion_orchestrator.post_response_hooks(
+                    user_id=current_user.id,
+                    mental_state_dict=companion_ctx.mental_state,
+                    session_id=conversation_id,
+                )
+            except Exception as e:
+                logger.warning("SSE companion post-response hooks failed: %s", e)
+
         total_ms = (time.perf_counter() - total_start) * 1000
         logger.info(
             "Streaming chat completed",
@@ -474,6 +686,17 @@ async def chat_stream(
 
         # Emit completion metadata with envelope fields
         ui_commands: list[dict] = []
+
+        # Generate companion-driven ui_commands from response + context
+        if companion_ctx is not None and service._companion_orchestrator is not None:
+            try:
+                companion_commands = service._companion_orchestrator.generate_ui_commands(
+                    full_content, companion_ctx
+                )
+                ui_commands.extend(companion_commands)
+            except Exception as e:
+                logger.warning("SSE companion ui_commands generation failed: %s", e)
+
         suggestions = _generate_suggestions(full_content, conversation_messages[-4:])
 
         complete_event = {
