@@ -124,6 +124,26 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
                 stats["signals_detected"] += 1
 
+                # Route through Intelligence Pulse Engine
+                try:
+                    from src.services.intelligence_pulse import get_pulse_engine
+
+                    pulse_engine = get_pulse_engine()
+                    await pulse_engine.process_signal(
+                        user_id=user_id,
+                        signal={
+                            "source": "scout_agent",
+                            "title": headline,
+                            "content": signal.get("summary", ""),
+                            "signal_category": signal.get("signal_type", "news"),
+                            "pulse_type": "event",
+                            "entities": [signal.get("company_name", "Unknown")],
+                            "raw_data": signal,
+                        },
+                    )
+                except Exception:
+                    logger.debug("Pulse engine routing failed for signal: %s", headline[:60])
+
                 # Route based on relevance
                 if relevance >= _GOAL_PROPOSAL_THRESHOLD:
                     priority = InsightPriority.HIGH
