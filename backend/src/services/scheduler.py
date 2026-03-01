@@ -1091,6 +1091,108 @@ async def _run_salience_decay() -> None:
         logger.exception("Salience decay scheduler run failed")
 
 
+async def _run_pulse_sweep() -> None:
+    """Sweep for signals that don't have explicit producer hooks.
+
+    Catches:
+    1. Goals that changed status meaningfully since last check
+    2. Overdue prospective memories
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+        from src.services.intelligence_pulse import get_pulse_engine
+
+        db = SupabaseClient.get_client()
+        pulse_engine = get_pulse_engine()
+
+        # Time window: signals from the last 15 minutes
+        cutoff = (datetime.now(UTC) - timedelta(minutes=15)).isoformat()
+
+        # 1. Goals that recently changed to blocked or complete
+        try:
+            goals_result = (
+                db.table("goals")
+                .select("id, user_id, title, status, updated_at")
+                .gt("updated_at", cutoff)
+                .in_("status", ["blocked", "complete"])
+                .execute()
+            )
+            for goal in (goals_result.data or []):
+                # Deduplicate: check if pulse_signals already has this goal+status
+                existing = (
+                    db.table("pulse_signals")
+                    .select("id")
+                    .eq("related_goal_id", goal["id"])
+                    .eq("source", "pulse_sweep")
+                    .gt("created_at", cutoff)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    continue
+
+                await pulse_engine.process_signal(
+                    user_id=goal["user_id"],
+                    signal={
+                        "source": "pulse_sweep",
+                        "title": f"Goal {goal['status']}: {goal.get('title', '')}",
+                        "content": f"Goal '{goal.get('title', '')}' changed to {goal['status']}",
+                        "signal_category": "goal",
+                        "pulse_type": "scheduled",
+                        "related_goal_id": goal["id"],
+                        "raw_data": {"goal_id": goal["id"], "status": goal["status"]},
+                    },
+                )
+        except Exception:
+            logger.warning("Pulse sweep: goal status check failed", exc_info=True)
+
+        # 2. Overdue prospective memories
+        try:
+            now = datetime.now(UTC).isoformat()
+            overdue_result = (
+                db.table("prospective_memories")
+                .select("id, user_id, task, description, priority")
+                .eq("status", "active")
+                .is_("completed_at", "null")
+                .lte("trigger_at", now)
+                .limit(20)
+                .execute()
+            )
+            for task in (overdue_result.data or []):
+                # Deduplicate
+                existing = (
+                    db.table("pulse_signals")
+                    .select("id")
+                    .eq("source", "pulse_sweep")
+                    .eq("title", f"Overdue: {task.get('task', '')[:80]}")
+                    .eq("user_id", task["user_id"])
+                    .gt("created_at", cutoff)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    continue
+
+                await pulse_engine.process_signal(
+                    user_id=task["user_id"],
+                    signal={
+                        "source": "pulse_sweep",
+                        "title": f"Overdue: {task.get('task', '')[:80]}",
+                        "content": task.get("description", "Overdue prospective memory task"),
+                        "signal_category": "goal",
+                        "pulse_type": "scheduled",
+                        "raw_data": {"prospective_memory_id": task["id"]},
+                    },
+                )
+        except Exception:
+            logger.warning("Pulse sweep: overdue memory check failed", exc_info=True)
+
+    except Exception:
+        logger.exception("Pulse sweep scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -1306,6 +1408,13 @@ async def start_scheduler() -> None:
             trigger=IntervalTrigger(seconds=30),
             id="working_memory_sync",
             name="Working memory 30-second persistence sync",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_pulse_sweep,
+            trigger=CronTrigger(minute="*/15"),
+            id="pulse_sweep",
+            name="Intelligence Pulse Engine sweep for missed signals",
             replace_existing=True,
         )
         _scheduler.start()
