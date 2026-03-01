@@ -4,6 +4,7 @@ Provides:
 - GET /health — overall health with per-service dependency checks (public)
 - GET /health/detailed — circuit breaker states, error summary, memory (admin only)
 - GET /health/ping — lightweight 200 for external uptime monitors
+- POST /health/test-push — send test WebSocket notification (authenticated)
 """
 
 import logging
@@ -13,11 +14,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Response, status
+from pydantic import BaseModel
 
-from src.api.deps import AdminUser
+from src.api.deps import AdminUser, CurrentUser
 from src.core.cache import cached
 from src.core.error_tracker import ErrorTracker
 from src.core.resilience import get_all_circuit_breakers
+from src.core.ws import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -124,3 +127,74 @@ async def health_check_detailed(
         "uptime_seconds": round(time.monotonic() - _start_time, 1),
         "version": _VERSION,
     }
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Push Test Endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestPushRequest(BaseModel):
+    """Request body for test push notification."""
+
+    message: str = "WebSocket is alive"
+    signal_type: str = "test"
+
+
+class TestPushResponse(BaseModel):
+    """Response for test push notification."""
+
+    success: bool
+    user_id: str
+    connected: bool
+    message: str
+    timestamp: str
+
+
+@router.post("/test-push", response_model=TestPushResponse)
+async def test_push_notification(
+    current_user: CurrentUser,
+    request: TestPushRequest | None = None,
+) -> TestPushResponse:
+    """Send a test WebSocket notification to the authenticated user.
+
+    This endpoint tests the real-time push pipeline by sending a signal
+    event through the WebSocket connection. Use this to verify:
+    - Backend WebSocket manager is functional
+    - Frontend receives and displays the notification
+
+    Args:
+        current_user: The authenticated user (from JWT token).
+        request: Optional custom message and signal type.
+
+    Returns:
+        Status of the push attempt including whether user is connected.
+    """
+    user_id = str(current_user.id)
+    message = request.message if request else "WebSocket is alive"
+    signal_type = request.signal_type if request else "test"
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Check if user has active WebSocket connection
+    is_connected = ws_manager.is_connected(user_id)
+
+    # Send signal event (will be queued if not connected)
+    await ws_manager.send_signal(
+        user_id=user_id,
+        signal_type=signal_type,
+        title="Test Notification",
+        severity="medium",
+        data={
+            "message": message,
+            "timestamp": timestamp,
+            "test": True,
+        },
+    )
+
+    return TestPushResponse(
+        success=True,
+        user_id=user_id,
+        connected=is_connected,
+        message=message,
+        timestamp=timestamp,
+    )

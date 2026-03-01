@@ -22,6 +22,7 @@ import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
 import { useWebSocketStatus } from '@/hooks/useWebSocketStatus';
 import { UrgentEmailNotification } from '@/components/notifications/UrgentEmailNotification';
+import { NotificationToastContainer } from '@/components/notifications/NotificationToast';
 import { useDashboardEvents } from '@/hooks/useDashboardEvents';
 import { useExecutionProgress } from '@/hooks/useExecutionProgress';
 import { useUICommands } from '@/hooks/useUICommands';
@@ -116,6 +117,9 @@ export function AppShell() {
 
       {/* Urgent email notifications — top-right overlay */}
       <UrgentEmailNotification />
+
+      {/* General notifications — signals, progress, recommendations */}
+      <NotificationToastContainer />
 
       {/* Undo toast — persists across all routes */}
       <UndoToastContainer />
