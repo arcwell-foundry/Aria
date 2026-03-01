@@ -156,7 +156,11 @@ class EventTriggerService:
             handler_output = await handler.process(envelope, classification)
             self._update_event_log(event_log_id, "handled", handler_result=handler_output.__dict__)
 
-            # 4. Emit to Pulse Engine
+            # 4. Always notify user immediately via WebSocket
+            await self._deliver_direct(envelope.user_id, handler_output, classification)
+            self._update_event_log(event_log_id, "delivered")
+
+            # 5. Also emit to Pulse Engine for bundling/briefing strategy
             if self.pulse_engine and handler_output.signals:
                 for signal_data in handler_output.signals:
                     try:
@@ -170,11 +174,6 @@ class EventTriggerService:
                             )
                     except Exception as e:
                         logger.error("Pulse emission failed: %s", e)
-
-            # 5. Direct WebSocket delivery (urgent items or no Pulse Engine)
-            if classification.priority_hint == "urgent" or not self.pulse_engine:
-                await self._deliver_direct(envelope.user_id, handler_output, classification)
-                self._update_event_log(event_log_id, "delivered")
 
             latency_ms = int((time.time() - start_time) * 1000)
             self._update_event_log(event_log_id, latency_ms=latency_ms)
