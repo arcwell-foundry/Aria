@@ -650,6 +650,26 @@ class GoalExecutionService:
             progress_delta=100,
         )
 
+        # Route goal completion through Intelligence Pulse Engine
+        try:
+            from src.services.intelligence_pulse import get_pulse_engine
+
+            pulse_engine = get_pulse_engine()
+            await pulse_engine.process_signal(
+                user_id=user_id,
+                signal={
+                    "source": "goal_monitor",
+                    "title": f"Goal completed: {goal.get('title', '')}",
+                    "content": f"Goal completed: {success_count}/{len(results)} agents succeeded",
+                    "signal_category": "goal",
+                    "pulse_type": "event",
+                    "related_goal_id": goal_id,
+                    "raw_data": {"goal_id": goal_id, "status": "complete"},
+                },
+            )
+        except Exception:
+            logger.debug("Pulse engine routing failed for goal completion", exc_info=True)
+
         # Notify frontend that goal is complete — conversational presentation
         try:
             from src.services.conversational_presenter import ConversationalPresenter

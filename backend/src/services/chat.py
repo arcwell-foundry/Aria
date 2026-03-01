@@ -3225,10 +3225,43 @@ class ChatService:
             ConversationContext if available, None otherwise.
         """
         try:
-            return await self._priming_service.prime_conversation(
+            context = await self._priming_service.prime_conversation(
                 user_id=user_id,
                 initial_message=initial_message,
             )
+
+            # Inject pending pulse check-in signals into formatted context
+            try:
+                db = get_supabase_client()
+                check_ins = (
+                    db.table("pulse_signals")
+                    .select("id, title, content, source, priority_score")
+                    .eq("user_id", user_id)
+                    .eq("delivery_channel", "check_in")
+                    .is_("delivered_at", "null")
+                    .order("priority_score", desc=True)
+                    .limit(5)
+                    .execute()
+                )
+                if check_ins.data:
+                    pulse_section = "\n\n## Pending Updates (mention naturally in conversation)\n"
+                    for signal in check_ins.data:
+                        pulse_section += f"- {signal['title']}: {signal['content'][:200]}\n"
+
+                    if context and context.formatted_context:
+                        context.formatted_context += pulse_section
+                    elif context:
+                        context.formatted_context = pulse_section
+
+                    # Mark as delivered
+                    ids = [s["id"] for s in check_ins.data]
+                    db.table("pulse_signals").update(
+                        {"delivered_at": datetime.now(UTC).isoformat()}
+                    ).in_("id", ids).execute()
+            except Exception:
+                logger.debug("Pulse check-in injection failed (non-fatal)")
+
+            return context
         except Exception as e:
             logger.warning("Failed to prime conversation: %s", e)
             return None
