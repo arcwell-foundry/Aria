@@ -619,32 +619,58 @@ async def _check_email_decision(
         return {"error": f"Failed to look up email decision: {str(e)}"}
 
 
-async def get_email_context_for_chat(user_id: str) -> str | None:
+async def get_email_context_for_chat(user_id: str) -> str:
     """Build a system-prompt snippet summarizing recent email activity.
 
-    Queries ``email_scan_log`` for the most recent scanned emails and
+    Queries ``user_integrations`` for integration status,
+    ``email_scan_log`` for the most recent scanned emails, and
     ``email_drafts`` for pending-review drafts.  Returns a formatted string
-    suitable for injection into the chat system prompt, or *None* when no
-    email data exists for this user.
+    suitable for injection into the chat system prompt, or empty string
+    when no email data exists for this user.
+
+    This function reads exclusively from Supabase — no OAuth required.
     """
     try:
         client = SupabaseClient.get_client()
+        parts: list[str] = []
 
-        # Recent scans (last 5)
+        # 1. Integration status (so ARIA knows the account email)
+        integration_result = (
+            client.table("user_integrations")
+            .select("integration_type,status,account_email,last_sync_at")
+            .eq("user_id", user_id)
+            .in_("integration_type", ["outlook", "gmail"])
+            .execute()
+        )
+        if integration_result.data:
+            i = integration_result.data[0]
+            parts.append(
+                f"Email integration: {i['integration_type'].title()} "
+                f"({i.get('account_email', 'unknown')}) — "
+                f"Status: {i['status']}, Last sync: {i.get('last_sync_at', 'unknown')}"
+            )
+
+        # 2. Recent scans (last 10)
         scans_result = (
             client.table("email_scan_log")
-            .select("sender_name,sender_email,subject,category,urgency,scanned_at")
+            .select(
+                "sender_name,sender_email,subject,category,urgency,"
+                "needs_draft,scanned_at"
+            )
             .eq("user_id", user_id)
             .order("scanned_at", desc=True)
-            .limit(5)
+            .limit(10)
             .execute()
         )
         scans = scans_result.data if scans_result.data else []
 
-        # Pending-review drafts
+        # 3. Pending-review drafts
         drafts_result = (
             client.table("email_drafts")
-            .select("recipient_email,recipient_name,subject,status")
+            .select(
+                "recipient_email,recipient_name,subject,status,"
+                "confidence_level"
+            )
             .eq("user_id", user_id)
             .eq("status", "pending_review")
             .order("created_at", desc=True)
@@ -653,31 +679,127 @@ async def get_email_context_for_chat(user_id: str) -> str | None:
         )
         drafts = drafts_result.data if drafts_result.data else []
 
-        if not scans and not drafts:
-            return None
+        if not parts and not scans and not drafts:
+            return ""
 
-        parts: list[str] = ["\n\n## Recent Email Activity"]
+        header = ["\n\n## Your Email Activity"]
 
         if scans:
-            parts.append("Recently scanned emails:")
+            header.append(f"You have scanned {len(scans)} recent emails:")
             for s in scans:
                 name = s.get("sender_name") or s.get("sender_email", "unknown")
                 subj = s.get("subject", "(no subject)")
                 cat = s.get("category", "")
                 urg = s.get("urgency", "")
-                parts.append(f"- From {name}: \"{subj}\" [{cat}, {urg}]")
+                flag = " ⚡URGENT" if urg == "URGENT" else ""
+                draft_flag = " [draft pending]" if s.get("needs_draft") else ""
+                header.append(
+                    f"  - {name}: \"{subj}\" [{cat}]{flag}{draft_flag}"
+                )
 
         if drafts:
-            parts.append(
-                f"\nYou have {len(drafts)} draft(s) awaiting the user's review:"
+            header.append(
+                f"\nYou have {len(drafts)} email draft(s) awaiting the user's review:"
             )
             for d in drafts:
                 rname = d.get("recipient_name") or d.get("recipient_email", "unknown")
                 dsubj = d.get("subject", "(no subject)")
-                parts.append(f"- To {rname}: \"{dsubj}\"")
+                conf = d.get("confidence_level")
+                conf_str = f" (confidence: {conf:.0%})" if conf is not None else ""
+                header.append(f"  - To {rname}: \"{dsubj}\"{conf_str}")
 
-        return "\n".join(parts)
+        return "\n".join(parts + header)
 
     except Exception as e:
         logger.warning("Failed to build email context for chat: %s", e)
-        return None
+        return ""
+
+
+async def get_calendar_context_for_chat(user_id: str) -> str:
+    """Build a system-prompt snippet summarizing calendar activity.
+
+    Queries ``calendar_events`` for upcoming events and ``meeting_briefs``
+    for prepared briefs.  Returns a formatted string suitable for injection
+    into the chat system prompt, or empty string when no data exists.
+
+    This function reads exclusively from Supabase — no OAuth required.
+    """
+    try:
+        client = SupabaseClient.get_client()
+        parts: list[str] = []
+
+        # Check if calendar integration exists
+        integration_result = (
+            client.table("user_integrations")
+            .select("integration_type,status,account_email")
+            .eq("user_id", user_id)
+            .in_(
+                "integration_type",
+                ["outlook_calendar", "google_calendar", "outlook"],
+            )
+            .eq("status", "active")
+            .execute()
+        )
+
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC).isoformat()
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+
+        # Upcoming events (next 24 hours)
+        events_result = (
+            client.table("calendar_events")
+            .select("title,start_time,end_time,attendees,metadata")
+            .eq("user_id", user_id)
+            .gte("start_time", now)
+            .lte("start_time", tomorrow)
+            .order("start_time")
+            .limit(10)
+            .execute()
+        )
+        events = events_result.data if events_result.data else []
+
+        # Meeting briefs
+        briefs_result = (
+            client.table("meeting_briefs")
+            .select("meeting_title,meeting_time,status")
+            .eq("user_id", user_id)
+            .order("meeting_time", desc=True)
+            .limit(5)
+            .execute()
+        )
+        briefs = briefs_result.data if briefs_result.data else []
+
+        if events:
+            parts.append(f"Upcoming calendar events ({len(events)}):")
+            for e in events:
+                title = e.get("title", "No title")
+                start = e.get("start_time", "TBD")
+                attendees = e.get("attendees") or []
+                att_str = f" ({len(attendees)} attendees)" if attendees else ""
+                meta = e.get("metadata") or {}
+                loc = meta.get("location")
+                loc_str = f" @ {loc}" if loc else ""
+                parts.append(f"  - {title} at {start}{loc_str}{att_str}")
+
+        if briefs:
+            parts.append(f"\nMeeting briefs prepared: {len(briefs)}")
+            for b in briefs:
+                parts.append(
+                    f"  - {b.get('meeting_title', 'Untitled')} "
+                    f"({b.get('status', 'unknown')})"
+                )
+
+        if not parts:
+            if integration_result.data:
+                return (
+                    "\n\n## Calendar\n"
+                    "Calendar connected but no upcoming events found."
+                )
+            return ""
+
+        return "\n\n## Your Calendar\n" + "\n".join(parts)
+
+    except Exception as e:
+        logger.warning("Failed to build calendar context for chat: %s", e)
+        return ""

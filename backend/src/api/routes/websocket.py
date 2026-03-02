@@ -12,6 +12,7 @@ from src.core.ws import ws_manager
 from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
+    get_calendar_context_for_chat,
     get_email_context_for_chat,
     get_email_integration,
 )
@@ -565,16 +566,13 @@ async def _handle_user_message(
         if pending_plan_context:
             system_prompt += pending_plan_context
 
-        # Check if user has email integration + fetch recent email activity
-        email_integration: dict[str, Any] | None = None
-        email_activity_ctx: str | None = None
-        try:
-            email_integration, email_activity_ctx = await _aio.gather(
-                get_email_integration(user_id),
-                get_email_context_for_chat(user_id),
-            )
-        except Exception as e:
-            logger.warning("Email context gathering failed: %s", e)
+        # Gather email/calendar context — all use _safe() with timeout
+        # so a slow Supabase call never blocks the chat path.
+        email_integration, email_activity_ctx, calendar_ctx = await _aio.gather(
+            _safe(get_email_integration(user_id), None, "email_integration"),
+            _safe(get_email_context_for_chat(user_id), "", "email_context"),
+            _safe(get_calendar_context_for_chat(user_id), "", "calendar_context"),
+        )
 
         if email_integration:
             provider_name = email_integration.get("integration_type", "email").title()
@@ -603,10 +601,12 @@ async def _handle_user_message(
                 f"trusts you more when you acknowledge uncertainty."
             )
 
-        # Inject recent email activity context (independent of live integration)
-        # This lets ARIA reference scanned emails even if OAuth token expired
-        if email_activity_ctx:
-            system_prompt += email_activity_ctx
+        # Email activity context is ALWAYS injected (reads from Supabase,
+        # not OAuth — works even when Composio token is expired).
+        system_prompt += email_activity_ctx
+
+        # Calendar context is ALWAYS injected (same — Supabase only).
+        system_prompt += calendar_ctx
 
         # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
