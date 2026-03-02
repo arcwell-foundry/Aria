@@ -265,6 +265,9 @@ supabase_circuit_breaker = CircuitBreaker(
 graphiti_circuit_breaker = CircuitBreaker(
     "graphiti_neo4j", failure_threshold=3, recovery_timeout=60.0, success_threshold=3,
 )
+thesys_circuit_breaker = CircuitBreaker(
+    "thesys_c1", failure_threshold=5, recovery_timeout=60.0, success_threshold=3,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +447,12 @@ def _composio_fallback(error: Exception) -> dict[str, Any]:
         "degraded": True,
         "reason": str(error),
     }
+
+
+@graceful_degradation.register("thesys")
+def _thesys_fallback(error: Exception) -> dict[str, Any]:
+    """When Thesys C1 is down, return raw markdown content."""
+    return {"available": False, "degraded": True, "render_mode": "markdown", "reason": str(error)}
 
 
 # ---------------------------------------------------------------------------

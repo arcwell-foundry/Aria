@@ -521,3 +521,30 @@ class TestFullLifecycle:
         assert cb.state == CircuitState.CLOSED
 
         cb.reset()
+
+
+# ---------------------------------------------------------------------------
+# Thesys C1 circuit breaker
+# ---------------------------------------------------------------------------
+
+
+class TestThesysCircuitBreaker:
+    """Thesys C1 circuit breaker registration."""
+
+    def test_thesys_in_registry(self) -> None:
+        registry = get_all_circuit_breakers()
+        assert "thesys_c1" in registry
+
+    def test_thesys_starts_closed(self) -> None:
+        from src.core.resilience import thesys_circuit_breaker
+        thesys_circuit_breaker.reset()
+        assert thesys_circuit_breaker.state == CircuitState.CLOSED
+
+    def test_thesys_fallback_registered(self) -> None:
+        assert graceful_degradation.has_fallback("thesys")
+
+    def test_thesys_fallback_returns_markdown_mode(self) -> None:
+        fb = graceful_degradation._fallbacks["thesys"]
+        result = fb(ConnectionError("API down"))
+        assert result["render_mode"] == "markdown"
+        assert result["degraded"] is True
