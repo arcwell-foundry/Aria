@@ -9,6 +9,11 @@ import pytest
 
 from src.services.composio_tools import (
     COMPOSIO_META_TOOL_NAMES,
+    _extract_toolkit_from_tool,
+    _filter_search_results_by_governance,
+    _get_approved_toolkits,
+    _get_user_tenant_id,
+    _is_toolkit_approved,
     _openai_to_anthropic,
     execute_composio_meta_tool,
     get_composio_meta_tool_definitions,
@@ -251,3 +256,402 @@ class TestDispatchRouting:
         assert "read_recent_emails" not in COMPOSIO_META_TOOL_NAMES
         assert "search_emails" not in COMPOSIO_META_TOOL_NAMES
         assert "draft_email_reply" not in COMPOSIO_META_TOOL_NAMES
+
+
+# ---------------------------------------------------------------------------
+# Governance filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGovernanceHelpers:
+    """Test governance helper functions."""
+
+    @pytest.mark.asyncio
+    async def test_get_user_tenant_id_found(self) -> None:
+        """Tenant ID is returned when user has company association."""
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data={"company_id": "company-123"}
+        )
+        with patch(
+            "src.db.supabase.get_supabase_client", return_value=mock_db
+        ):
+            result = await _get_user_tenant_id("user-1")
+            assert result == "company-123"
+
+    @pytest.mark.asyncio
+    async def test_get_user_tenant_id_not_found(self) -> None:
+        """None is returned when user has no company."""
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+            data=None
+        )
+        with patch(
+            "src.db.supabase.get_supabase_client", return_value=mock_db
+        ):
+            result = await _get_user_tenant_id("user-1")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_approved_toolkits_with_config(self) -> None:
+        """Returns set of approved toolkits when config exists."""
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[
+                {"toolkit_slug": "GMAIL"},
+                {"toolkit_slug": "SALESFORCE"},
+            ]
+        )
+        with patch(
+            "src.db.supabase.get_supabase_client", return_value=mock_db
+        ):
+            result = await _get_approved_toolkits("company-1")
+            assert result == {"GMAIL", "SALESFORCE"}
+
+    @pytest.mark.asyncio
+    async def test_get_approved_toolkits_empty_returns_none(self) -> None:
+        """Returns None (permissive) when no config rows exist."""
+        mock_db = MagicMock()
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        with patch(
+            "src.db.supabase.get_supabase_client", return_value=mock_db
+        ):
+            result = await _get_approved_toolkits("company-1")
+            # Empty config = permissive mode
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_is_toolkit_approved_no_tenant(self) -> None:
+        """Permissive mode when user has no tenant."""
+        with patch(
+            "src.services.composio_tools._get_user_tenant_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            is_approved, has_config = await _is_toolkit_approved("user-1", "SLACK")
+            assert is_approved is True
+            assert has_config is False
+
+    @pytest.mark.asyncio
+    async def test_is_toolkit_approved_no_config(self) -> None:
+        """Permissive mode when tenant has no toolkit config."""
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value=None,  # No config = permissive
+            ),
+        ):
+            is_approved, has_config = await _is_toolkit_approved("user-1", "SLACK")
+            assert is_approved is True
+            assert has_config is False
+
+    @pytest.mark.asyncio
+    async def test_is_toolkit_approved_explicitly_approved(self) -> None:
+        """Approved when toolkit is in approved set."""
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value={"GMAIL", "SALESFORCE"},
+            ),
+        ):
+            is_approved, has_config = await _is_toolkit_approved("user-1", "GMAIL")
+            assert is_approved is True
+            assert has_config is True
+
+    @pytest.mark.asyncio
+    async def test_is_toolkit_approved_not_in_approved_set(self) -> None:
+        """Not approved when toolkit not in approved set."""
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value={"GMAIL", "SALESFORCE"},
+            ),
+        ):
+            is_approved, has_config = await _is_toolkit_approved("user-1", "SLACK")
+            assert is_approved is False
+            assert has_config is True
+
+
+class TestExtractToolkitFromTool:
+    """Test toolkit slug extraction from various tool formats."""
+
+    def test_toolkit_as_string(self) -> None:
+        assert _extract_toolkit_from_tool({"toolkit": "GMAIL"}) == "GMAIL"
+
+    def test_toolkit_as_dict_with_slug(self) -> None:
+        assert _extract_toolkit_from_tool({"toolkit": {"slug": "SLACK"}}) == "SLACK"
+
+    def test_app_as_string(self) -> None:
+        assert _extract_toolkit_from_tool({"app": "SALESFORCE"}) == "SALESFORCE"
+
+    def test_app_as_dict(self) -> None:
+        assert _extract_toolkit_from_tool({"app": {"name": "VEEVA"}}) == "VEEVA"
+
+    def test_appName_key(self) -> None:
+        assert _extract_toolkit_from_tool({"appName": "OUTLOOK"}) == "OUTLOOK"
+
+    def test_parse_from_tool_name(self) -> None:
+        assert _extract_toolkit_from_tool({"name": "GMAIL_SEND_EMAIL"}) == "GMAIL"
+
+    def test_returns_none_for_unknown_format(self) -> None:
+        assert _extract_toolkit_from_tool({"description": "some tool"}) is None
+
+
+class TestFilterSearchResultsByGovernance:
+    """Test governance filtering of search results."""
+
+    @pytest.mark.asyncio
+    async def test_permissive_mode_no_tenant(self) -> None:
+        """Tools pass through unchanged when no tenant."""
+        tools = [{"name": "GMAIL_SEND_EMAIL"}, {"name": "SLACK_SEND_MESSAGE"}]
+        with patch(
+            "src.services.composio_tools._get_user_tenant_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await _filter_search_results_by_governance("user-1", tools)
+            assert len(result) == 2
+            assert "_approved" not in result[0]
+            assert "_needs_admin_approval" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_permissive_mode_no_config(self) -> None:
+        """Tools pass through unchanged when no tenant config."""
+        tools = [{"name": "GMAIL_SEND_EMAIL"}]
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value=None,  # No config = permissive
+            ),
+        ):
+            result = await _filter_search_results_by_governance("user-1", tools)
+            assert len(result) == 1
+            assert "_approved" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_approved_toolkit_passes(self) -> None:
+        """Approved tool gets _approved flag."""
+        tools = [{"name": "GMAIL_SEND_EMAIL"}]
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value={"GMAIL"},
+            ),
+        ):
+            result = await _filter_search_results_by_governance("user-1", tools)
+            assert len(result) == 1
+            assert result[0]["_approved"] is True
+            assert result[0]["_toolkit_slug"] == "GMAIL"
+            assert "_needs_admin_approval" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_unapproved_toolkit_flagged(self) -> None:
+        """Unapproved tool gets _needs_admin_approval flag."""
+        tools = [{"name": "SLACK_SEND_MESSAGE"}]
+        with (
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value={"GMAIL"},  # Only GMAIL approved
+            ),
+        ):
+            result = await _filter_search_results_by_governance("user-1", tools)
+            assert len(result) == 1
+            assert result[0]["_approved"] is False
+            assert result[0]["_toolkit_slug"] == "SLACK"
+            assert result[0]["_needs_admin_approval"] is True
+            assert "not approved" in result[0]["_approval_reason"].lower()
+
+
+class TestExecuteMetaToolWithGovernance:
+    """Test execute_composio_meta_tool applies governance."""
+
+    @pytest.mark.asyncio
+    async def test_search_tools_applies_governance(self) -> None:
+        """SEARCH_TOOLS result is filtered by governance."""
+        raw_result = {
+            "data": {
+                "tools": [
+                    {"name": "GMAIL_SEND_EMAIL"},
+                    {"name": "SLACK_SEND_MESSAGE"},
+                ]
+            },
+            "successful": True,
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.execute_meta_tool = AsyncMock(return_value=raw_result)
+
+        with (
+            patch(
+                "src.integrations.composio_sessions.get_session_manager",
+                return_value=mock_manager,
+            ),
+            patch(
+                "src.services.composio_tools._get_user_tenant_id",
+                new_callable=AsyncMock,
+                return_value="company-1",
+            ),
+            patch(
+                "src.services.composio_tools._get_approved_toolkits",
+                new_callable=AsyncMock,
+                return_value={"GMAIL"},
+            ),
+        ):
+            result = await execute_composio_meta_tool(
+                user_id="user-1",
+                tool_name="COMPOSIO_SEARCH_TOOLS",
+                tool_input={"query": "email"},
+            )
+
+            assert result["successful"] is True
+            assert result["data"]["_governance_applied"] is True
+            tools = result["data"]["tools"]
+            # GMAIL should be approved
+            gmail_tool = next(t for t in tools if t.get("_toolkit_slug") == "GMAIL")
+            assert gmail_tool["_approved"] is True
+            # SLACK should need approval
+            slack_tool = next(t for t in tools if t.get("_toolkit_slug") == "SLACK")
+            assert slack_tool["_needs_admin_approval"] is True
+
+    @pytest.mark.asyncio
+    async def test_manage_connections_blocks_unapproved(self) -> None:
+        """MANAGE_CONNECTIONS blocks connect URL for unapproved toolkits."""
+        raw_result = {
+            "data": {
+                "redirectUrl": "https://connect.composio.io/...",
+                "connectionId": "conn-123",
+            },
+            "successful": True,
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.execute_meta_tool = AsyncMock(return_value=raw_result)
+
+        with (
+            patch(
+                "src.integrations.composio_sessions.get_session_manager",
+                return_value=mock_manager,
+            ),
+            patch(
+                "src.services.composio_tools._is_toolkit_approved",
+                new_callable=AsyncMock,
+                return_value=(False, True),  # Not approved, has config
+            ),
+        ):
+            result = await execute_composio_meta_tool(
+                user_id="user-1",
+                tool_name="COMPOSIO_MANAGE_CONNECTIONS",
+                tool_input={"toolkit": "SLACK"},
+            )
+
+            assert result["successful"] is True
+            assert result["data"]["_needs_admin_approval"] is True
+            assert result["data"]["_connect_blocked"] is True
+            assert "redirectUrl" not in result["data"]
+
+    @pytest.mark.asyncio
+    async def test_manage_connections_allows_approved(self) -> None:
+        """MANAGE_CONNECTIONS allows connect URL for approved toolkits."""
+        raw_result = {
+            "data": {
+                "redirectUrl": "https://connect.composio.io/...",
+                "connectionId": "conn-123",
+            },
+            "successful": True,
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.execute_meta_tool = AsyncMock(return_value=raw_result)
+
+        with (
+            patch(
+                "src.integrations.composio_sessions.get_session_manager",
+                return_value=mock_manager,
+            ),
+            patch(
+                "src.services.composio_tools._is_toolkit_approved",
+                new_callable=AsyncMock,
+                return_value=(True, True),  # Approved, has config
+            ),
+        ):
+            result = await execute_composio_meta_tool(
+                user_id="user-1",
+                tool_name="COMPOSIO_MANAGE_CONNECTIONS",
+                tool_input={"toolkit": "GMAIL"},
+            )
+
+            assert result["successful"] is True
+            assert result["data"]["_approved"] is True
+            assert result["data"]["redirectUrl"] == "https://connect.composio.io/..."
+
+    @pytest.mark.asyncio
+    async def test_manage_connections_permissive_when_no_config(self) -> None:
+        """MANAGE_CONNECTIONS allows all when no config (permissive default)."""
+        raw_result = {
+            "data": {
+                "redirectUrl": "https://connect.composio.io/...",
+            },
+            "successful": True,
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.execute_meta_tool = AsyncMock(return_value=raw_result)
+
+        with (
+            patch(
+                "src.integrations.composio_sessions.get_session_manager",
+                return_value=mock_manager,
+            ),
+            patch(
+                "src.services.composio_tools._is_toolkit_approved",
+                new_callable=AsyncMock,
+                return_value=(True, False),  # Permissive (no config)
+            ),
+        ):
+            result = await execute_composio_meta_tool(
+                user_id="user-1",
+                tool_name="COMPOSIO_MANAGE_CONNECTIONS",
+                tool_input={"toolkit": "SLACK"},
+            )
+
+            assert result["successful"] is True
+            assert result["data"]["_approved"] is True
+            assert "redirectUrl" in result["data"]
