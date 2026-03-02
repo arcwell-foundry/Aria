@@ -874,8 +874,18 @@ class ChatService:
         Returns the parsed intent dict on success, or ``None`` when the
         message is conversational and doesn't warrant goal creation.
         """
+        logger.warning(
+            "INTENT_DEBUG: _classify_intent CALLED — message=%s, user=%s",
+            message[:80],
+            user_id,
+        )
+
         # --- Tier 1: Deterministic pattern match (no LLM call needed) ---
         pattern_match = self._match_goal_trigger(message)
+        logger.warning(
+            "INTENT_DEBUG: pattern_match result=%s",
+            pattern_match,
+        )
         if pattern_match:
             logger.info(
                 "Intent classified via PATTERN MATCH (deterministic): %s",
@@ -936,7 +946,7 @@ class ChatService:
             cleaned = cleaned.strip()
 
             intent = json.loads(cleaned)
-            logger.info("Intent classification result (LLM): %s", intent)
+            logger.warning("INTENT_DEBUG: LLM classification result=%s", intent)
             return intent
 
         except json.JSONDecodeError as je:

@@ -453,57 +453,58 @@ async def _handle_user_message(
             pending_plan_goal_id, user_id,
         )
 
-        # --- Inline Intent Detection (before building system prompt) ---
-        if not pending_plan_goal_id:
-            intent_result = await service._classify_intent(user_id, message_text)
-            if intent_result and intent_result.get("is_goal"):
-                logger.info(
-                    "WS intent classified as GOAL, routing to plan",
-                    extra={"user_id": user_id, "goal_title": intent_result.get("goal_title")},
+        # --- Inline Intent Detection (ALWAYS runs — even with pending plans) ---
+        # A new action request like "find companies" must create a new goal,
+        # not be blocked by a stale plan_ready goal from an earlier request.
+        intent_result = await service._classify_intent(user_id, message_text)
+        if intent_result and intent_result.get("is_goal"):
+            logger.info(
+                "WS intent classified as GOAL, routing to plan",
+                extra={"user_id": user_id, "goal_title": intent_result.get("goal_title")},
+            )
+            try:
+                goal_response = await service._handle_goal_intent(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message_text,
+                    intent=intent_result,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                    load_state=load_state,
                 )
-                try:
-                    goal_response = await service._handle_goal_intent(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message=message_text,
-                        intent=intent_result,
-                        working_memory=working_memory,
-                        conversation_messages=conversation_messages,
-                        load_state=load_state,
-                    )
-                except Exception:
-                    logger.exception(
-                        "WS goal intent handling failed",
-                        extra={"user_id": user_id},
-                    )
-                    await websocket.send_json(
-                        {
-                            "type": "aria.message",
-                            "message": (
-                                "I understood your request but ran into a problem "
-                                "building the plan. Please try again."
-                            ),
-                            "rich_content": [],
-                            "ui_commands": [],
-                            "suggestions": ["Try again", "Show me my goals"],
-                            "conversation_id": conversation_id,
-                            "intent_detected": "goal",
-                        }
-                    )
-                    return
-                # Send the goal response via WebSocket
+            except Exception:
+                logger.exception(
+                    "WS goal intent handling failed",
+                    extra={"user_id": user_id},
+                )
                 await websocket.send_json(
                     {
                         "type": "aria.message",
-                        "message": goal_response["message"],
-                        "rich_content": goal_response.get("rich_content", []),
+                        "message": (
+                            "I understood your request but ran into a problem "
+                            "building the plan. Please try again."
+                        ),
+                        "rich_content": [],
                         "ui_commands": [],
-                        "suggestions": goal_response.get("suggestions", []),
+                        "suggestions": ["Try again", "Show me my goals"],
                         "conversation_id": conversation_id,
                         "intent_detected": "goal",
                     }
                 )
                 return
+            # Send the goal response via WebSocket
+            await websocket.send_json(
+                {
+                    "type": "aria.message",
+                    "message": goal_response["message"],
+                    "rich_content": goal_response.get("rich_content", []),
+                    "ui_commands": [],
+                    "suggestions": goal_response.get("suggestions", []),
+                    "conversation_id": conversation_id,
+                    "intent_detected": "goal",
+                }
+            )
+            return
 
         # Query active goals and digital twin calibration for prompt injection
         active_goals = await service._get_active_goals(user_id)
