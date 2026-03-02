@@ -528,8 +528,6 @@ class PriorityEmailIngestion:
         Returns:
             List of raw Outlook email dicts.
         """
-        from src.integrations.composio_client import execute_with_refresh_sync
-
         all_emails: list[dict[str, Any]] = []
         skip = 0
         page_num = 0
@@ -549,21 +547,36 @@ class PriorityEmailIngestion:
                 len(all_emails),
             )
 
-            response = execute_with_refresh_sync(
-                user_id=user_id,
-                integration_id=integration_id,
-                connection_id=connection_id,
-                integration_type=integration_type,
-                action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
-                params={
-                    "folder": "SentItems",
-                    "top": page_size,
-                    "skip": skip,
-                    "sent_date_time_gt": since_date,
-                    "orderby": ["sentDateTime desc"],
-                },
-                oauth_client=oauth_client,
-            )
+            action_params = {
+                "folder": "SentItems",
+                "top": page_size,
+                "skip": skip,
+                "sent_date_time_gt": since_date,
+                "orderby": ["sentDateTime desc"],
+            }
+
+            try:
+                from src.integrations.composio_sessions import get_session_manager
+
+                mgr = get_session_manager()
+                response = await mgr.execute_action(
+                    user_id=user_id,
+                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+                    params=action_params,
+                    connection_id=connection_id,
+                )
+            except Exception:
+                from src.integrations.composio_client import execute_with_refresh_sync
+
+                response = execute_with_refresh_sync(
+                    user_id=user_id,
+                    integration_id=integration_id,
+                    connection_id=connection_id,
+                    integration_type=integration_type,
+                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+                    params=action_params,
+                    oauth_client=oauth_client,
+                )
 
             if not response.get("successful"):
                 logger.warning(
@@ -639,8 +652,6 @@ class PriorityEmailIngestion:
         Returns:
             List of raw Gmail email dicts.
         """
-        from src.integrations.composio_client import execute_with_refresh_sync
-
         all_emails: list[dict[str, Any]] = []
         page_token: str | None = None
         page_num = 0
@@ -665,15 +676,28 @@ class PriorityEmailIngestion:
             if page_token:
                 params["page_token"] = page_token
 
-            response = execute_with_refresh_sync(
-                user_id=user_id,
-                integration_id=integration_id,
-                connection_id=connection_id,
-                integration_type=integration_type,
-                action="GMAIL_FETCH_EMAILS",
-                params=params,
-                oauth_client=oauth_client,
-            )
+            try:
+                from src.integrations.composio_sessions import get_session_manager
+
+                mgr = get_session_manager()
+                response = await mgr.execute_action(
+                    user_id=user_id,
+                    action="GMAIL_FETCH_EMAILS",
+                    params=params,
+                    connection_id=connection_id,
+                )
+            except Exception:
+                from src.integrations.composio_client import execute_with_refresh_sync
+
+                response = execute_with_refresh_sync(
+                    user_id=user_id,
+                    integration_id=integration_id,
+                    connection_id=connection_id,
+                    integration_type=integration_type,
+                    action="GMAIL_FETCH_EMAILS",
+                    params=params,
+                    oauth_client=oauth_client,
+                )
 
             if not response.get("successful"):
                 logger.warning(

@@ -284,6 +284,11 @@ async def execute_with_refresh(
 ) -> dict[str, Any]:
     """Execute a Composio action with automatic auth-failure failover.
 
+    .. deprecated::
+        Prefer ``_execute_composio`` in ``email_tools.py`` or the session
+        manager (``composio_sessions.get_session_manager().execute_action``)
+        for new code.  This function is retained as the fallback path.
+
     1. Try the primary connection.
     2. On auth error, find alternative Composio connections for the
        same user+integration_type.
@@ -414,8 +419,13 @@ def execute_with_refresh_sync(
 ) -> dict[str, Any]:
     """Synchronous variant of ``execute_with_refresh``.
 
-    Used by ``email_bootstrap.py`` and ``autonomous_draft_engine.py``
-    which call ``execute_action_sync`` inside async functions.
+    .. deprecated::
+        Prefer the async session manager
+        (``composio_sessions.get_session_manager().execute_action``) for new
+        code.  This function is retained as the fallback path for callers
+        that cannot use async execution.
+
+    Used by ``email_bootstrap.py`` as a fallback when session execution fails.
 
     Args:
         user_id: The user's ID.

@@ -13,6 +13,59 @@ from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
+
+async def _execute_composio(
+    *,
+    user_id: str,
+    integration_id: str,
+    connection_id: str,
+    integration_type: str,
+    action: str,
+    params: dict[str, Any],
+    oauth_client: Any = None,
+) -> dict[str, Any]:
+    """Execute a Composio action, preferring session-based execution.
+
+    Falls back to execute_with_refresh (manual retry + failover)
+    if session execution fails.
+    """
+    try:
+        from src.integrations.composio_sessions import get_session_manager
+
+        mgr = get_session_manager()
+        result = await mgr.execute_action(
+            user_id=user_id,
+            action=action,
+            params=params,
+            connection_id=connection_id,
+        )
+        if result.get("successful"):
+            return result
+        error = str(result.get("error", ""))
+        if "401" not in error and "auth" not in error.lower() and "token" not in error.lower():
+            return result  # Non-auth error, return as-is
+        logger.warning("Session execution auth error for %s, trying legacy path", action)
+    except Exception as e:
+        logger.warning("Session execution failed for %s: %s, trying legacy path", action, e)
+
+    from src.integrations.composio_client import execute_with_refresh
+
+    if oauth_client is None:
+        from src.integrations.oauth import get_oauth_client
+
+        oauth_client = get_oauth_client()
+
+    return await execute_with_refresh(
+        user_id=user_id,
+        integration_id=integration_id,
+        connection_id=connection_id,
+        integration_type=integration_type,
+        action=action,
+        params=params,
+        oauth_client=oauth_client,
+    )
+
+
 # Anthropic tool definitions for email access
 EMAIL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -228,12 +281,10 @@ async def _read_recent_emails(
     integration_id: str = "",
 ) -> dict[str, Any]:
     """Fetch recent inbox emails."""
-    from src.integrations.composio_client import execute_with_refresh
-
     count = min(params.get("count", 10), 20)
 
     if provider == "outlook":
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,
@@ -247,7 +298,7 @@ async def _read_recent_emails(
             return {"emails": _normalize_outlook_messages(messages)}
         return {"error": result.get("error", "Failed to fetch emails"), "emails": []}
     else:
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,
@@ -274,13 +325,11 @@ async def _search_emails(
     integration_id: str = "",
 ) -> dict[str, Any]:
     """Search emails by query."""
-    from src.integrations.composio_client import execute_with_refresh
-
     query = params.get("query", "")
     max_results = min(params.get("max_results", 10), 20)
 
     if provider == "outlook":
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,
@@ -299,7 +348,7 @@ async def _search_emails(
             return {"emails": _normalize_outlook_messages(messages), "query": query}
         return {"error": result.get("error", "Search failed"), "emails": []}
     else:
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,
@@ -326,14 +375,12 @@ async def _read_email_detail(
     integration_id: str = "",
 ) -> dict[str, Any]:
     """Read a specific email by ID."""
-    from src.integrations.composio_client import execute_with_refresh
-
     message_id = params.get("message_id", "")
     if not message_id:
         return {"error": "message_id is required"}
 
     if provider == "outlook":
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,
@@ -357,7 +404,7 @@ async def _read_email_detail(
             }
         return {"error": result.get("error", "Failed to read email")}
     else:
-        result = await execute_with_refresh(
+        result = await _execute_composio(
             user_id=user_id,
             integration_id=integration_id,
             connection_id=connection_id,

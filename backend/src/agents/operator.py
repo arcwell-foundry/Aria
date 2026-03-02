@@ -427,7 +427,10 @@ class OperatorAgent(SkillAwareAgent):
         action: str,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        """Execute a Composio action via the OAuth client.
+        """Execute a Composio action, preferring session-based execution.
+
+        Tries the session manager first, then falls back to direct OAuth
+        client execution.
 
         Args:
             connection_id: Composio connection ID for the user's integration.
@@ -442,20 +445,36 @@ class OperatorAgent(SkillAwareAgent):
         if not settings.COMPOSIO_API_KEY:
             return {
                 "status": "not_configured",
-                "message": ("Set COMPOSIO_API_KEY in environment to enable integrations."),
+                "message": "Set COMPOSIO_API_KEY in environment to enable integrations.",
             }
 
+        # Try session-based execution first
+        try:
+            from src.integrations.composio_sessions import get_session_manager
+
+            mgr = get_session_manager()
+            result = await mgr.execute_action(
+                user_id=self.user_id,
+                action=action,
+                params=params,
+                connection_id=connection_id,
+            )
+            if result.get("successful") or "error" not in result:
+                return result
+            logger.warning("Session execution failed for %s, falling back", action)
+        except Exception as e:
+            logger.warning("Session execution error for %s: %s", action, e)
+
+        # Fallback to direct execution
         try:
             from src.integrations.oauth import get_oauth_client
 
             oauth_client = get_oauth_client()
-            result = await oauth_client.execute_action(
+            return await oauth_client.execute_action(
                 connection_id=connection_id,
                 action=action,
                 params=params,
             )
-            return result
-
         except Exception as e:
             logger.error(
                 "Composio action %s failed: %s",
