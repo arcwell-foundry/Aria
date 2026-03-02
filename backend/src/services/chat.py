@@ -31,13 +31,8 @@ from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
-from src.services.composio_tools import (
-    COMPOSIO_META_TOOL_NAMES,
-    execute_composio_meta_tool,
-)
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
-    execute_email_tool,
     get_email_context_for_chat,
     get_email_integration,
 )
@@ -3221,25 +3216,16 @@ class ChatService:
 
             # Execute each tool call and build tool_result messages
             tool_results: list[dict[str, Any]] = []
+            from src.services.tool_assembly import dispatch_tool_call
+
             for tc in response.tool_calls:
-                if tc.name in COMPOSIO_META_TOOL_NAMES:
-                    logger.info("Executing Composio meta tool %s for user %s", tc.name, user_id)
-                    result = await execute_composio_meta_tool(
-                        user_id=user_id,
-                        tool_name=tc.name,
-                        tool_input=tc.input,
-                    )
-                elif email_integration is not None:
-                    logger.info("Executing email tool %s for user %s", tc.name, user_id)
-                    result = await execute_email_tool(
-                        tool_name=tc.name,
-                        params=tc.input,
-                        user_id=user_id,
-                        integration=email_integration,
-                    )
-                else:
-                    logger.warning("Tool %s called but no handler available for user %s", tc.name, user_id)
-                    result = {"error": f"Tool '{tc.name}' is not available."}
+                logger.info("Executing tool %s for user %s", tc.name, user_id)
+                result = await dispatch_tool_call(
+                    user_id=user_id,
+                    tool_name=tc.name,
+                    tool_input=tc.input,
+                    email_integration=email_integration,
+                )
 
                 tool_results.append({
                     "type": "tool_result",
