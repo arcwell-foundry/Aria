@@ -11,13 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
-from src.services.composio_tools import get_composio_meta_tool_definitions
-from src.services.email_tools import (
-    EMAIL_TOOL_DEFINITIONS,
-    get_calendar_context_for_chat,
-    get_email_context_for_chat,
-    get_email_integration,
-)
+from src.services.tool_assembly import get_tools_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -591,15 +585,12 @@ async def _handle_user_message(
         if pending_plan_context:
             system_prompt += pending_plan_context
 
-        # Gather email/calendar context — all use _safe() with timeout
-        # so a slow Supabase call never blocks the chat path.
-        email_integration, email_activity_ctx, calendar_ctx, meta_tool_defs = await _aio.gather(
-            _safe(get_email_integration(user_id), None, "email_integration"),
-            _safe(get_email_context_for_chat(user_id), "", "email_context"),
-            _safe(get_calendar_context_for_chat(user_id), "", "calendar_context"),
-            _safe(get_composio_meta_tool_definitions(user_id), [], "meta_tools"),
-        )
+        # Assemble tools via central tool_assembly service
+        tool_set = await get_tools_for_user(user_id)
+        email_integration = tool_set.email_integration
+        all_tools = tool_set.tools
 
+        # System prompt enrichment (presentation layer, stays in websocket handler)
         if email_integration:
             provider_name = email_integration.get("integration_type", "email").title()
             system_prompt += (
@@ -629,12 +620,12 @@ async def _handle_user_message(
 
         # Email activity context is ALWAYS injected (reads from Supabase,
         # not OAuth — works even when Composio token is expired).
-        system_prompt += email_activity_ctx
+        system_prompt += tool_set.email_context
 
         # Calendar context is ALWAYS injected (same — Supabase only).
-        system_prompt += calendar_ctx
+        system_prompt += tool_set.calendar_context
 
-        if meta_tool_defs:
+        if tool_set.meta_tool_defs:
             system_prompt += (
                 "\n\n## Integration Tools\n"
                 "You have access to Composio integration tools that let you:\n"
@@ -648,12 +639,6 @@ async def _handle_user_message(
                 "For existing connected tools (like email), prefer the dedicated email tools "
                 "over meta tools — they're faster and more reliable.\n"
             )
-
-        # Build combined tool set
-        all_tools: list[dict] = []
-        if email_integration:
-            all_tools.extend(EMAIL_TOOL_DEFINITIONS)
-        all_tools.extend(meta_tool_defs)  # already [] if unavailable
 
         # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
