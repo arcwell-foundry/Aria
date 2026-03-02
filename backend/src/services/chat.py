@@ -8,6 +8,7 @@ This service handles chat interactions by:
 5. Web grounding for real-time information via Exa
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -2992,13 +2993,23 @@ class ChatService:
                 f"trusts you more when you acknowledge uncertainty."
             )
 
-            response_text = await self._run_tool_loop(
-                messages=conversation_messages,
-                system_prompt=system_prompt,
-                tools=EMAIL_TOOL_DEFINITIONS,
-                user_id=user_id,
-                email_integration=email_integration,
-            )
+            try:
+                response_text = await asyncio.wait_for(
+                    self._run_tool_loop(
+                        messages=conversation_messages,
+                        system_prompt=system_prompt,
+                        tools=EMAIL_TOOL_DEFINITIONS,
+                        user_id=user_id,
+                        email_integration=email_integration,
+                    ),
+                    timeout=120.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Tool loop timed out after 120s for user %s", user_id)
+                response_text = (
+                    "I ran into a delay connecting to an external service. "
+                    "Let me try a simpler approach — what specifically can I help you with?"
+                )
         else:
             response_text = await self._llm_client.generate_response(
                 messages=conversation_messages,

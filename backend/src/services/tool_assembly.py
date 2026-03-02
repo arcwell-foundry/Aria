@@ -106,20 +106,40 @@ async def dispatch_tool_call(
     """
     if tool_name in COMPOSIO_META_TOOL_NAMES:
         logger.info("Dispatching Composio meta tool %s for user %s", tool_name, user_id)
-        return await execute_composio_meta_tool(
-            user_id=user_id,
-            tool_name=tool_name,
-            tool_input=tool_input,
-        )
+        try:
+            return await _aio.wait_for(
+                execute_composio_meta_tool(
+                    user_id=user_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                ),
+                timeout=30.0,
+            )
+        except _aio.TimeoutError:
+            logger.error("Composio tool %s timed out after 30s for user %s", tool_name, user_id)
+            return {
+                "error": f"Tool '{tool_name}' timed out after 30 seconds",
+                "timed_out": True,
+            }
 
     if tool_name in EMAIL_TOOL_NAMES and email_integration is not None:
         logger.info("Dispatching email tool %s for user %s", tool_name, user_id)
-        return await execute_email_tool(
-            tool_name=tool_name,
-            params=tool_input,
-            user_id=user_id,
-            integration=email_integration,
-        )
+        try:
+            return await _aio.wait_for(
+                execute_email_tool(
+                    tool_name=tool_name,
+                    params=tool_input,
+                    user_id=user_id,
+                    integration=email_integration,
+                ),
+                timeout=30.0,
+            )
+        except _aio.TimeoutError:
+            logger.error("Email tool %s timed out after 30s for user %s", tool_name, user_id)
+            return {
+                "error": f"Email tool '{tool_name}' timed out after 30 seconds",
+                "timed_out": True,
+            }
 
     logger.warning("Unknown tool %s called for user %s", tool_name, user_id)
     return {"error": f"Tool '{tool_name}' is not available."}

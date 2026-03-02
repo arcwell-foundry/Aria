@@ -128,7 +128,14 @@ class ComposioSessionManager:
             return self._client.create(**kwargs)
 
         try:
-            session = await asyncio.to_thread(_create)
+            session = await asyncio.wait_for(
+                asyncio.to_thread(_create),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            composio_circuit_breaker.record_failure()
+            logger.error("Composio session creation timed out after 30s for user %s", user_id)
+            raise
         except Exception:
             composio_circuit_breaker.record_failure()
             raise
@@ -169,7 +176,14 @@ class ComposioSessionManager:
             toolkits=toolkits,
             connected_accounts=connected_accounts,
         )
-        return await asyncio.to_thread(session.tools)
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(session.tools),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Composio get_tools timed out after 30s for user %s", user_id)
+            return []
 
     async def execute_action(
         self,
@@ -256,7 +270,22 @@ class ComposioSessionManager:
             }
 
         try:
-            result = await asyncio.to_thread(_execute)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_execute),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            composio_circuit_breaker.record_failure()
+            logger.error(
+                "Composio meta tool timed out after 30s",
+                extra={"user_id": user_id, "tool_name": tool_name},
+            )
+            return {
+                "data": None,
+                "error": "Tool call timed out after 30 seconds",
+                "timed_out": True,
+                "successful": False,
+            }
         except Exception:
             composio_circuit_breaker.record_failure()
             raise

@@ -645,13 +645,23 @@ async def _handle_user_message(
         try:
             if all_tools:
                 # Tool-capable path (non-streaming, mirrors REST chat.py:2705-2711)
-                full_content = await service._run_tool_loop(
-                    messages=conversation_messages,
-                    system_prompt=system_prompt,
-                    tools=all_tools,
-                    user_id=user_id,
-                    email_integration=email_integration,  # may be None
-                )
+                try:
+                    full_content = await asyncio.wait_for(
+                        service._run_tool_loop(
+                            messages=conversation_messages,
+                            system_prompt=system_prompt,
+                            tools=all_tools,
+                            user_id=user_id,
+                            email_integration=email_integration,  # may be None
+                        ),
+                        timeout=120.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("WebSocket tool loop timed out after 120s for user %s", user_id)
+                    full_content = (
+                        "I ran into a delay connecting to an external service. "
+                        "Let me try a simpler approach — what specifically can I help you with?"
+                    )
                 # Content sent after post-processing to avoid duplication
             else:
                 # Streaming path (no tools)
