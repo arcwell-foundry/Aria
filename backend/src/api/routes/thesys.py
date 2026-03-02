@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from src.api.deps import CurrentUser, get_current_user
+from src.api.deps import CurrentUser
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)

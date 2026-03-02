@@ -6,7 +6,6 @@ All actions use dynamic parameterized payloads — NO hardcoded IDs.
 
 from pydantic import BaseModel
 
-
 # ---------------------------------------------------------------------------
 # Action Schemas — tell C1 what buttons to generate and what params they carry
 # ---------------------------------------------------------------------------
