@@ -145,11 +145,15 @@ class WebSocketManagerImpl {
       clearTimeout(connectTimeout);
       this._transport = 'websocket';
       this._connectionState = 'connected';
+      const wasReconnect = this.reconnectAttempts > 0;
       this.reconnectAttempts = 0;
       this.startHeartbeat();
       this.stopWSUpgradeRetry();
       this.emit('connection.established', { transport: 'websocket' });
       this.emit('connection.state_changed', { state: 'connected' });
+      if (wasReconnect) {
+        this.emit('connection.reconnected', { transport: 'websocket' });
+      }
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -180,10 +184,24 @@ class WebSocketManagerImpl {
         return;
       }
 
-      // Abnormal closure (1006) or policy violation (1008) - fall back to SSE
-      if (event.code === 1006 || event.code === 1008) {
-        console.debug(`[WebSocketManager] Connection failed (code=${event.code}), falling back to SSE`);
+      // Policy violation (1008) - fall back to SSE immediately
+      if (event.code === 1008) {
+        console.debug(`[WebSocketManager] Policy violation (code=1008), falling back to SSE`);
         this.fallbackToSSE();
+        return;
+      }
+
+      // Abnormal closure (1006) - try WS reconnect first, then SSE
+      if (event.code === 1006) {
+        if (this.reconnectAttempts < 2) {
+          console.debug(`[WebSocketManager] Abnormal close (1006), attempting WS reconnect (attempt ${this.reconnectAttempts + 1}/2)`);
+          this._connectionState = 'reconnecting';
+          this.emit('connection.state_changed', { state: 'reconnecting', reason: 'abnormal_close' });
+          this.scheduleReconnect();
+        } else {
+          console.debug(`[WebSocketManager] Abnormal close (1006), WS reconnect exhausted, falling back to SSE`);
+          this.fallbackToSSE();
+        }
         return;
       }
 
