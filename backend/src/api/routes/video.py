@@ -609,12 +609,6 @@ async def execute_video_tool(
     Returns:
         Spoken-ready result string for the avatar to speak.
     """
-    if request.tool_name not in VALID_TOOL_NAMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown tool: {request.tool_name}",
-        )
-
     logger.info(
         "Executing video tool call",
         extra={
@@ -624,14 +618,37 @@ async def execute_video_tool(
         },
     )
 
-    executor = VideoToolExecutor(user_id=current_user.id)
-    result = await executor.execute(
+    if request.tool_name in VALID_TOOL_NAMES:
+        # ARIA-native video tools (search_companies, get_lead_details, etc.)
+        executor = VideoToolExecutor(user_id=current_user.id)
+        result = await executor.execute(
+            tool_name=request.tool_name,
+            arguments=request.arguments,
+        )
+        return VideoToolCallResponse(
+            tool_name=request.tool_name,
+            result=result,
+            success=not result.startswith("I ran into an issue"),
+        )
+
+    # Fallback: Composio meta tools, email tools, etc.
+    import json as _json
+
+    from src.services.tool_assembly import dispatch_tool_call
+
+    result_dict = await dispatch_tool_call(
+        user_id=current_user.id,
         tool_name=request.tool_name,
-        arguments=request.arguments,
+        tool_input=request.arguments or {},
     )
 
+    if "error" in result_dict:
+        raise HTTPException(status_code=400, detail=result_dict["error"])
+
+    # Convert dict result to spoken text for avatar
+    spoken = _json.dumps(result_dict, default=str)[:500]
     return VideoToolCallResponse(
         tool_name=request.tool_name,
-        result=result,
-        success=not result.startswith("I ran into an issue"),
+        result=spoken,
+        success=True,
     )
