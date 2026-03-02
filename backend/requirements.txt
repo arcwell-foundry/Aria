@@ -73,3 +73,6 @@ playwright>=1.40.0,<2.0.0
 
 # Structured JSON Logging (production)
 python-json-logger>=3.0.0,<4.0.0
+
+# Thesys C1 Generative UI (uses OpenAI-compatible API protocol)
+openai>=1.0.0,<2.0.0
