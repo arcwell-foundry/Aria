@@ -12,6 +12,7 @@ from src.core.ws import ws_manager
 from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
+    get_email_context_for_chat,
     get_email_integration,
 )
 
@@ -358,24 +359,39 @@ async def _handle_user_message(
         # Get conversation context
         conversation_messages = working_memory.get_context_for_llm()
 
-        # Estimate cognitive load
-        load_state = await service._cognitive_monitor.estimate_load(
-            user_id=user_id,
-            recent_messages=conversation_messages[-5:],
-            session_id=conversation_id,
-        )
+        # Gather context in parallel (all depend only on user_id/message/conversation)
+        import asyncio as _aio
 
-        # Get proactive insights
-        proactive_insights = await service._get_proactive_insights(
-            user_id=user_id,
-            current_message=message_text,
-            conversation_messages=conversation_messages,
-        )
+        _CTX_TIMEOUT = 5.0  # seconds
 
-        # Digital Twin personality & style
-        personality = await service._get_personality_calibration(user_id)
-        style_guidelines = await service._get_style_guidelines(user_id)
-        priming_context = await service._get_priming_context(user_id, message_text)
+        async def _safe(coro, default, label: str):
+            try:
+                return await _aio.wait_for(coro, timeout=_CTX_TIMEOUT)
+            except Exception:
+                logger.warning("WS context gather '%s' failed/timed out", label)
+                return default
+
+        (
+            load_state,
+            proactive_insights,
+            personality,
+            style_guidelines,
+            priming_context,
+        ) = await _aio.gather(
+            _safe(service._cognitive_monitor.estimate_load(
+                user_id=user_id,
+                recent_messages=conversation_messages[-5:],
+                session_id=conversation_id,
+            ), None, "cognitive_load"),
+            _safe(service._get_proactive_insights(
+                user_id=user_id,
+                current_message=message_text,
+                conversation_messages=conversation_messages,
+            ), [], "proactive"),
+            _safe(service._get_personality_calibration(user_id), None, "personality"),
+            _safe(service._get_style_guidelines(user_id), None, "style"),
+            _safe(service._get_priming_context(user_id, message_text), None, "priming"),
+        )
 
         # --- Pending plan context injection ---
         # If the user has a goal in plan_ready status, inject the plan
@@ -507,9 +523,11 @@ async def _handle_user_message(
             return
 
         # Query active goals and digital twin calibration for prompt injection
-        active_goals = await service._get_active_goals(user_id)
-        digital_twin_calibration = await service._get_digital_twin_calibration(user_id)
-        capability_context = await service._get_capability_context(user_id)
+        active_goals, digital_twin_calibration, capability_context = await _aio.gather(
+            _safe(service._get_active_goals(user_id), [], "goals"),
+            _safe(service._get_digital_twin_calibration(user_id), None, "digital_twin"),
+            _safe(service._get_capability_context(user_id), None, "capability"),
+        )
 
         # Build system prompt — use PersonaBuilder (v2) for full ARIA identity
         if service._use_persona_builder:
@@ -547,12 +565,16 @@ async def _handle_user_message(
         if pending_plan_context:
             system_prompt += pending_plan_context
 
-        # Check if user has email integration (mirrors chat.py:2217-2224)
+        # Check if user has email integration + fetch recent email activity
         email_integration: dict[str, Any] | None = None
+        email_activity_ctx: str | None = None
         try:
-            email_integration = await get_email_integration(user_id)
+            email_integration, email_activity_ctx = await _aio.gather(
+                get_email_integration(user_id),
+                get_email_context_for_chat(user_id),
+            )
         except Exception as e:
-            logger.warning("Email integration check failed: %s", e)
+            logger.warning("Email context gathering failed: %s", e)
 
         if email_integration:
             provider_name = email_integration.get("integration_type", "email").title()
@@ -581,6 +603,11 @@ async def _handle_user_message(
                 f"trusts you more when you acknowledge uncertainty."
             )
 
+        # Inject recent email activity context (independent of live integration)
+        # This lets ARIA reference scanned emails even if OAuth token expired
+        if email_activity_ctx:
+            system_prompt += email_activity_ctx
+
         # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
         try:
@@ -596,23 +623,6 @@ async def _handle_user_message(
                 # Content sent after post-processing to avoid duplication
             else:
                 # Streaming path (no tools)
-                # Add email awareness so ARIA can answer capability questions correctly
-                streaming_email_integration = None
-                try:
-                    streaming_email_integration = await get_email_integration(user_id)
-                except Exception:
-                    pass
-
-                if streaming_email_integration:
-                    provider_name = streaming_email_integration.get("integration_type", "email").title()
-                    system_prompt += (
-                        f"\n\n## Email Access\n"
-                        f"You have access to the user's email via their connected "
-                        f"{provider_name} integration. "
-                        f"You can read their emails, search their inbox, and view email details. "
-                        f"When the user asks if you can access their email, confirm yes."
-                    )
-
                 async for token in service._llm_client.stream_response(
                     messages=conversation_messages,
                     system_prompt=system_prompt,
