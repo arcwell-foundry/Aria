@@ -3269,49 +3269,35 @@ Generate the note:"""
         """
         from datetime import timedelta
 
-        # Dedup: check for existing pending deferred draft for this thread
-        try:
-            existing = (
-                self._db.table("deferred_email_drafts")
-                .select("id")
-                .eq("user_id", user_id)
-                .eq("thread_id", thread_id)
-                .eq("status", "pending")
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                existing_id = existing.data[0]["id"]
-                logger.info(
-                    "DRAFT_ENGINE: Deferred draft already exists for thread %s (id=%s), skipping duplicate",
-                    thread_id,
-                    existing_id,
-                )
-                return existing_id
-        except Exception as e:
-            logger.warning(
-                "DRAFT_ENGINE: Deferred dedup check failed for thread %s: %s",
-                thread_id,
-                e,
-            )
-
         deferred_id = str(uuid4())
         deferred_until = datetime.now(UTC) + timedelta(minutes=30)
 
         try:
-            self._db.table("deferred_email_drafts").insert(
-                {
-                    "id": deferred_id,
-                    "user_id": user_id,
-                    "thread_id": thread_id,
-                    "latest_email_id": email.email_id,
-                    "subject": email.subject,
-                    "sender_email": email.sender_email,
-                    "deferred_until": deferred_until.isoformat(),
-                    "reason": reason,
-                    "status": "pending",
-                }
-            ).execute()
+            # Upsert on (user_id, thread_id) to prevent duplicate rows.
+            # If a pending deferred draft already exists for this thread,
+            # update it with the latest email info instead of inserting a new row.
+            result = (
+                self._db.table("deferred_email_drafts")
+                .upsert(
+                    {
+                        "id": deferred_id,
+                        "user_id": user_id,
+                        "thread_id": thread_id,
+                        "latest_email_id": email.email_id,
+                        "subject": email.subject,
+                        "sender_email": email.sender_email,
+                        "deferred_until": deferred_until.isoformat(),
+                        "reason": reason,
+                        "status": "pending",
+                    },
+                    on_conflict="user_id,thread_id",
+                )
+                .execute()
+            )
+
+            # Return the actual ID (existing row keeps its original ID on conflict)
+            if result.data:
+                deferred_id = result.data[0].get("id", deferred_id)
 
             logger.info(
                 "DRAFT_ENGINE: Deferred thread %s until %s (reason: %s)",

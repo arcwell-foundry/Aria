@@ -7,7 +7,7 @@ Provides endpoints for:
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
@@ -105,6 +105,46 @@ async def scan_inbox_now(
     """
     user_id = current_user.id
     scanned_at = datetime.now(UTC).isoformat()
+
+    # Rate-limit: reject if a processing run started within the last 60 seconds
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        cutoff = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+        recent_run = (
+            db.table("email_processing_runs")
+            .select("id, status, started_at")
+            .eq("user_id", user_id)
+            .gte("started_at", cutoff)
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if recent_run.data:
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: throttled | user_id=%s | recent_run_id=%s | started_at=%s",
+                user_id,
+                recent_run.data[0]["id"],
+                recent_run.data[0]["started_at"],
+            )
+            return {
+                "total_emails": 0,
+                "needs_reply": 0,
+                "urgent": 0,
+                "drafts_generated": 0,
+                "drafts_failed": 0,
+                "run_id": None,
+                "run_status": "throttled",
+                "urgent_emails": [],
+                "scanned_at": scanned_at,
+                "notifications_sent": 0,
+            }
+    except Exception as e:
+        # Don't block scan if rate-limit check fails
+        logger.warning(
+            "[EMAIL_PIPELINE] Rate-limit check failed, proceeding with scan: %s", e
+        )
 
     logger.info(
         "[EMAIL_PIPELINE] Stage: scan_requested | user_id=%s | since_hours=%d | generate_drafts=%s",
