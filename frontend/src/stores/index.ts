@@ -16,3 +16,4 @@ export { useNotificationsStore, type NotificationsState, type Notification } fro
 export { usePerceptionStore, type PerceptionState, type EmotionReading, type DetectedEmotion } from './perceptionStore';
 export { useAgentStatusStore, type AgentStatusState } from './agentStatusStore';
 export { useActionQueueStore, type ActionQueueState } from './actionQueueStore';
+export { useThesysStore, type ThesysStore } from './thesysStore';

@@ -1,7 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import * as Sentry from "@sentry/react";
+import "@crayonai/react-ui/styles/index.css";
 import "./index.css";
+import "./styles/thesys-overrides.css";
 import App from "./App.tsx";
 
 if (import.meta.env.VITE_APP_ENV === "production" && import.meta.env.VITE_SENTRY_DSN) {

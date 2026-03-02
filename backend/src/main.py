@@ -40,6 +40,7 @@ from src.api.routes import (
     email,  # Real-time email urgency detection
     email_intelligence_settings,
     email_preferences,
+    features,  # Feature flags for frontend
     feedback,
     friction,  # Wave 2: Cognitive friction decisions
     goals,
@@ -390,6 +391,7 @@ app.include_router(skill_replay.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(social.router, prefix="/api/v1")
 app.include_router(team_intelligence.router, prefix="/api/v1")  # Team-level shared intelligence
+app.include_router(features.router, prefix="/api/v1")  # Feature flags for frontend
 app.include_router(thesys.router, prefix="/api/v1")  # Thesys C1 Generative UI
 app.include_router(tool_request.router, prefix="/api/v1")  # Phase 4D: User tool requests
 app.include_router(traces.router, prefix="/api/v1")  # Wave 2: Delegation traces

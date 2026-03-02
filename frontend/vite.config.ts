@@ -42,6 +42,7 @@ export default defineConfig(async () => {
               "@tiptap/extension-underline",
             ],
             "vendor-video": ["@daily-co/daily-js", "@daily-co/daily-react"],
+            "vendor-thesys": ["@thesysai/genui-sdk", "@crayonai/react-ui"],
           },
         },
       },

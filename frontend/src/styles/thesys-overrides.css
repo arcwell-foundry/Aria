@@ -1,0 +1,29 @@
+/*
+ * Thesys C1 overrides for ARIA's dark workspace.
+ * Loaded AFTER @crayonai/react-ui/styles/index.css and index.css.
+ *
+ * C1 components retain some visual contrast against the dark workspace,
+ * creating a "Jarvis projecting information" effect. Full dark theme
+ * unification comes post-funding with proper design resources.
+ */
+
+.c1-component-wrapper {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+[data-c1-action] button,
+.c1-action-button {
+  background-color: var(--accent, #2E66FF);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-family: var(--font-sans, 'Inter', sans-serif);
+}
+
+[data-c1-action] button:hover,
+.c1-action-button:hover {
+  background-color: var(--accent-glow, rgba(46, 102, 255, 0.8));
+}

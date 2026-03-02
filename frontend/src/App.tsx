@@ -15,6 +15,9 @@ import { CommandPalette } from "@/components/common/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAuth } from "@/hooks/useAuth";
 import { AppRoutes } from "@/app/routes";
+import { ThesysProvider } from "@/contexts/ThesysContext";
+import { useThesysStore } from "@/stores/thesysStore";
+import { apiClient } from "@/api/client";
 import type { SearchResult, RecentItem } from "@/api/search";
 import { globalSearch, getRecentItems } from "@/api/search";
 
@@ -31,6 +34,7 @@ function AppContent() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const serviceHealth = useServiceHealth(isAuthenticated);
+  const thesysEnabled = useThesysStore((s) => s.enabled);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
@@ -38,6 +42,14 @@ function AppContent() {
   useEffect(() => {
     if (!isAuthenticated) return;
     getRecentItems().then(setRecentItems).catch(() => setRecentItems([]));
+  }, [isAuthenticated]);
+
+  // Fetch Thesys feature flag after authentication
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    apiClient.get('/api/v1/config/features')
+      .then((res) => useThesysStore.getState().setEnabled(res.data.thesys_enabled))
+      .catch(() => {}); // Default: disabled
   }, [isAuthenticated]);
 
   const handleSearch = useCallback(async (query: string) => {
@@ -64,13 +76,15 @@ function AppContent() {
     <>
       <ServiceHealthBanner health={serviceHealth} />
       <IntegrationReconnectBanner isAuthenticated={isAuthenticated} />
-      <ThemeProvider>
-        <SessionProvider isAuthenticated={isAuthenticated}>
-          <IntelPanelProvider>
-            <AppRoutes />
-          </IntelPanelProvider>
-        </SessionProvider>
-      </ThemeProvider>
+      <ThesysProvider enabled={thesysEnabled}>
+        <ThemeProvider>
+          <SessionProvider isAuthenticated={isAuthenticated}>
+            <IntelPanelProvider>
+              <AppRoutes />
+            </IntelPanelProvider>
+          </SessionProvider>
+        </ThemeProvider>
+      </ThesysProvider>
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}
