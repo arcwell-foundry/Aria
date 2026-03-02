@@ -1348,13 +1348,13 @@ class DeepSyncService:
 
             # Determine the action and params based on integration type
             if integration_type == IntegrationType.GOOGLE_CALENDAR:
-                action = "list_events"
+                action = "GOOGLECALENDAR_FIND_EVENT"
                 params = {
                     "timeMin": time_min_str,
                     "timeMax": time_max_str,
                 }
             else:  # OUTLOOK
-                action = "list_calendar_events"
+                action = "OUTLOOK_OUTLOOK_LIST_EVENTS"
                 params = {
                     "startDateTime": time_min_str,
                     "endDateTime": time_max_str,
@@ -1365,10 +1365,17 @@ class DeepSyncService:
                 connection_id=connection_id,
                 action=action,
                 params=params,
+                user_id=user_id,
             )
 
-            # Extract events from response
-            events = result.get("data", [])
+            # Extract events from response — Outlook returns {data: {value: [...]}}
+            raw_data = result.get("data", {})
+            if isinstance(raw_data, dict):
+                events = raw_data.get("value", raw_data.get("events", []))
+            elif isinstance(raw_data, list):
+                events = raw_data
+            else:
+                events = []
             if not isinstance(events, list):
                 events = []
 
