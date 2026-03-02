@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 from src.core.config import settings
 from src.core.resilience import CircuitBreakerOpen, thesys_circuit_breaker
 from src.services.thesys_actions import get_aria_custom_actions
+from src.services.thesys_components import get_aria_custom_components
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +89,11 @@ class ThesysService:
         """Internal non-streaming call to the C1 Visualize endpoint."""
         assert self._client is not None
 
-        # Build metadata with custom actions
+        # Build metadata with custom actions and components
         metadata: dict[str, Any] = {
             "thesys": json.dumps({
                 "c1_custom_actions": get_aria_custom_actions(),
+                "c1_custom_components": get_aria_custom_components(),
             }),
         }
 
@@ -129,10 +131,11 @@ class ThesysService:
 
         start = time.perf_counter()
         try:
-            # Build metadata with custom actions
+            # Build metadata with custom actions and components
             metadata: dict[str, Any] = {
                 "thesys": json.dumps({
                     "c1_custom_actions": get_aria_custom_actions(),
+                    "c1_custom_components": get_aria_custom_components(),
                 }),
             }
 
