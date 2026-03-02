@@ -62,6 +62,35 @@ async def _authenticate_ws_token(token: str) -> Any | None:
         return None
 
 
+async def _send_agent_thinking(
+    websocket: WebSocket,
+    message: str,
+    agent: str,
+    phase: str = "observe",
+    progress: float | None = None,
+) -> None:
+    """Send a structured thinking event with agent context.
+
+    This enables the frontend to show rich progress indicators when
+    ARIA's agents are working (Hunter searching, Analyst processing, etc.).
+
+    Args:
+        websocket: The WebSocket connection.
+        message: Human-readable description of what's happening.
+        agent: Agent name (hunter, analyst, strategist, scribe, operator, scout).
+        phase: OODA phase (observe, orient, decide, act).
+        progress: Optional progress indicator (0.0 to 1.0).
+    """
+    thinking = ThinkingEvent(
+        is_thinking=True,
+        message=message,
+        agent=agent,
+        phase=phase,
+        progress=progress,
+    )
+    await websocket.send_json(thinking.to_ws_dict())
+
+
 @router.websocket("/ws/{user_id}")
 async def websocket_endpoint(
     websocket: WebSocket,

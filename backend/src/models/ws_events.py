@@ -57,10 +57,14 @@ class AriaMessageEvent(WSEvent):
 
 
 class ThinkingEvent(WSEvent):
-    """ARIA is processing/thinking indicator."""
+    """ARIA is processing/thinking indicator with optional agent context."""
 
     type: WSEventType = WSEventType.THINKING
     is_thinking: bool = True
+    message: str | None = None
+    agent: str | None = None  # e.g., "hunter", "analyst", "strategist"
+    phase: str | None = None  # OODA phase: "observe", "orient", "decide", "act"
+    progress: float | None = None  # 0.0 to 1.0
 
 
 class AriaSpeakingEvent(WSEvent):

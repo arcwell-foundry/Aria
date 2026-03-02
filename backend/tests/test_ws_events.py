@@ -93,3 +93,62 @@ def test_pong_event():
     event = PongEvent()
     data = event.to_ws_dict()
     assert data["type"] == "pong"
+
+
+class TestThinkingEventWithAgentContext:
+    def test_thinking_event_has_optional_agent_field(self) -> None:
+        """ThinkingEvent can include agent name."""
+        event = ThinkingEvent(
+            is_thinking=True,
+            agent="hunter",
+        )
+
+        assert event.agent == "hunter"
+
+    def test_thinking_event_has_optional_phase_field(self) -> None:
+        """ThinkingEvent can include OODA phase."""
+        event = ThinkingEvent(
+            is_thinking=True,
+            agent="analyst",
+            phase="observe",
+        )
+
+        assert event.phase == "observe"
+
+    def test_thinking_event_has_optional_progress_field(self) -> None:
+        """ThinkingEvent can include progress indicator."""
+        event = ThinkingEvent(
+            is_thinking=True,
+            agent="strategist",
+            phase="decide",
+            progress=0.5,
+        )
+
+        assert event.progress == 0.5
+
+    def test_thinking_event_message_field(self) -> None:
+        """ThinkingEvent can include human-readable message."""
+        event = ThinkingEvent(
+            is_thinking=True,
+            message="Hunter agent searching for leads...",
+        )
+
+        assert event.message == "Hunter agent searching for leads..."
+
+    def test_thinking_event_serializes_correctly(self) -> None:
+        """ThinkingEvent serializes to correct WebSocket dict format."""
+        event = ThinkingEvent(
+            is_thinking=True,
+            message="Analyst processing data...",
+            agent="analyst",
+            phase="orient",
+            progress=0.3,
+        )
+
+        ws_dict = event.to_ws_dict()
+
+        assert ws_dict["type"] == "aria.thinking"
+        assert ws_dict["payload"]["message"] == "Analyst processing data..."
+        assert ws_dict["payload"]["agent"] == "analyst"
+        assert ws_dict["payload"]["phase"] == "orient"
+        assert ws_dict["payload"]["progress"] == 0.3
