@@ -166,6 +166,8 @@ export function ARIAWorkspace() {
           rich_content: data.rich_content ?? [],
           ui_commands: data.ui_commands ?? [],
           suggestions: data.suggestions ?? [],
+          render_mode: data.render_mode ?? 'markdown',
+          c1_response: data.c1_response ?? null,
         });
         streamingIdRef.current = null;
         return;
@@ -177,6 +179,8 @@ export function ARIAWorkspace() {
         rich_content: data.rich_content ?? [],
         ui_commands: data.ui_commands ?? [],
         suggestions: data.suggestions ?? [],
+        render_mode: data.render_mode ?? 'markdown',
+        c1_response: data.c1_response ?? null,
       });
 
       if (data.suggestions?.length) {
@@ -223,6 +227,8 @@ export function ARIAWorkspace() {
         rich_content: RichContent[];
         ui_commands: UICommand[];
         suggestions: string[];
+        render_mode: 'c1' | 'markdown';
+        c1_response: string | null;
       }>;
 
       if (streamingIdRef.current) {
@@ -230,6 +236,8 @@ export function ARIAWorkspace() {
           rich_content: data.rich_content ?? [],
           ui_commands: data.ui_commands ?? [],
           suggestions: data.suggestions ?? [],
+          render_mode: data.render_mode,
+          c1_response: data.c1_response,
         });
       }
     };
