@@ -20,7 +20,6 @@ from src.services.email_context_gatherer import (
     CalendarContext,
     CRMContext,
 )
-from src.onboarding.personality_calibrator import PersonalityCalibration
 
 
 @pytest.fixture
@@ -211,7 +210,7 @@ class TestProcessInbox:
         result = await engine.process_inbox("user-123")
 
         assert result.emails_scanned == 0
-        assert result.emails_needs_reply == 0
+        assert result.emails_needing_reply == 0
         assert result.drafts_generated == 0
         assert result.status == "completed"
 
@@ -248,7 +247,7 @@ class TestProcessInbox:
         result = await engine.process_inbox("user-123")
 
         assert result.emails_scanned == 5
-        assert result.emails_needs_reply == 1
+        assert result.emails_needing_reply == 1
         assert result.status == "completed"
 
     @pytest.mark.asyncio
@@ -270,8 +269,6 @@ class TestProcessInbox:
 
         # Mock _check_existing_draft to return None (no existing draft)
         engine._check_existing_draft = AsyncMock(return_value=None)
-        # Mock _user_already_replied to return False
-        engine._user_already_replied = AsyncMock(return_value=False)
         # Mock _is_active_conversation to return False
         engine._is_active_conversation = AsyncMock(return_value=False)
         # Mock _get_user_name to return a name
@@ -279,35 +276,20 @@ class TestProcessInbox:
         # Mock _create_processing_run and _update_processing_run
         engine._create_processing_run = AsyncMock()
         engine._update_processing_run = AsyncMock()
-        # Mock _cleanup_stale_runs
-        engine._cleanup_stale_runs = AsyncMock()
         # Mock activity service (non-blocking, should not affect flow)
         engine._activity_service = AsyncMock()
         # Mock learning mode to be inactive
         engine._learning_mode = MagicMock()
         engine._learning_mode.is_learning_mode_active = AsyncMock(return_value=False)
-        # Mock thread grouping to return single-email thread
-        engine._group_emails_by_thread = AsyncMock(
-            return_value={sample_email.thread_id: [sample_email]}
-        )
-        # Mock sent thread IDs fetch
-        engine._fetch_sent_thread_ids = AsyncMock(return_value=set())
-        # Mock _get_latest_email_in_thread to return the sample email
-        engine._get_latest_email_in_thread = AsyncMock(return_value=sample_email)
-        # Mock _assign_draft_confidence_tier
-        engine._assign_draft_confidence_tier = AsyncMock(return_value=None)
-        # Mock _log_skip_decision
-        engine._log_skip_decision = AsyncMock()
 
         engine._db.table().insert().execute = MagicMock()
         engine._db.table().update().eq().execute = MagicMock()
 
         result = await engine.process_inbox("user-123")
 
+        assert result.drafts_failed == 1
         assert result.drafts_generated == 0
-        # Status should be "failed" when all drafts fail, or "completed"
-        # if emails were skipped before reaching draft generation
-        assert result.status in ("failed", "completed")
+        assert result.status == "failed"
 
 
 class TestConfidenceCalculation:
@@ -315,13 +297,15 @@ class TestConfidenceCalculation:
 
     def test_confidence_high_context(self, engine, rich_context):
         """Rich context should produce high confidence (>= 0.8)."""
-        confidence = engine._calculate_confidence(rich_context)
+        style_score = 0.9
+        confidence = engine._calculate_confidence(rich_context, style_score)
 
         assert confidence >= 0.8, f"Expected >= 0.8, got {confidence}"
 
     def test_confidence_low_context(self, engine, poor_context):
         """Poor context should produce lower confidence (< 0.6)."""
-        confidence = engine._calculate_confidence(poor_context)
+        style_score = 0.5
+        confidence = engine._calculate_confidence(poor_context, style_score)
 
         assert confidence < 0.6, f"Expected < 0.6, got {confidence}"
 
@@ -358,19 +342,19 @@ class TestConfidenceCalculation:
             ),
         )
 
-        conf_no_thread = engine._calculate_confidence(context_no_thread)
-        conf_with_thread = engine._calculate_confidence(context_with_thread)
+        conf_no_thread = engine._calculate_confidence(context_no_thread, 0.5)
+        conf_with_thread = engine._calculate_confidence(context_with_thread, 0.5)
 
         assert conf_with_thread > conf_no_thread
 
     def test_confidence_bounded(self, engine, rich_context, poor_context):
         """Confidence should be bounded between 0 and 1."""
-        # Even with rich context
-        confidence = engine._calculate_confidence(rich_context)
+        # Even with perfect score
+        confidence = engine._calculate_confidence(rich_context, 1.0)
         assert 0.0 <= confidence <= 1.0
 
         # Even with poor context
-        confidence = engine._calculate_confidence(poor_context)
+        confidence = engine._calculate_confidence(poor_context, 0.0)
         assert 0.0 <= confidence <= 1.0
 
 
@@ -392,15 +376,15 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(urgent_email, context, 0.8, 0.7)
 
-        assert "URGENT" in notes[0]
+        assert "URGENT" in notes
 
     @pytest.mark.asyncio
     async def test_aria_notes_includes_sources(self, engine, sample_email, rich_context):
         """ARIA notes should list context sources used."""
         notes = await engine._generate_aria_notes(sample_email, rich_context, 0.8, 0.7)
 
-        assert "Used:" in notes[0]
-        assert "thread" in notes[0]
+        assert "composio_thread" in notes
+        assert "exa_research" in notes
 
     @pytest.mark.asyncio
     async def test_aria_notes_warns_low_style(self, engine, sample_email):
@@ -417,16 +401,16 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(sample_email, context, 0.5, 0.6)
 
-        assert "LOW" in notes[0]
-        assert "review recommended" in notes[0]
+        assert "WARNING" in notes
+        assert "Style match is low" in notes
 
     @pytest.mark.asyncio
     async def test_aria_notes_shows_relationship(self, engine, sample_email, rich_context):
         """Notes should show prior relationship count."""
         notes = await engine._generate_aria_notes(sample_email, rich_context, 0.8, 0.7)
 
-        assert "relationship" in notes[0]
-        assert "8 emails" in notes[0]
+        assert "Prior relationship" in notes
+        assert "8 emails" in notes
 
     @pytest.mark.asyncio
     async def test_aria_notes_new_contact(self, engine, sample_email):
@@ -447,8 +431,7 @@ class TestARIANotes:
 
         notes = await engine._generate_aria_notes(sample_email, context, 0.8, 0.7)
 
-        assert "Missing:" in notes[0]
-        assert "relationship" in notes[0]
+        assert "New contact" in notes
 
 
 class TestPromptBuilder:
@@ -456,38 +439,28 @@ class TestPromptBuilder:
 
     def test_prompt_includes_all_context(self, engine, sample_email, rich_context):
         """Prompt should include all available context sections."""
-        calibration = PersonalityCalibration(
-            tone_guidance="Keep it friendly but formal.",
-            directness=0.6,
-            warmth=0.7,
-            formality=0.8,
-        )
         prompt = engine._build_reply_prompt(
             user_name="Test User",
             email=sample_email,
             context=rich_context,
             style_guidelines="Be professional and concise.",
-            calibration=calibration,
+            tone_guidance="Keep it friendly but formal.",
         )
 
         # Check all sections are present
-        assert "email you're replying to" in prompt
+        assert "ORIGINAL EMAIL" in prompt
         assert sample_email.subject in prompt
-        assert "conversation thread" in prompt.lower()
-        assert "recipient" in prompt.lower()
+        assert "CONVERSATION THREAD" in prompt
+        assert "ABOUT THE RECIPIENT" in prompt
         assert "John Smith" in prompt
-        assert "relationship" in prompt.lower()
-        assert "writes to" in prompt
-        assert "Writing Style" in prompt
+        assert "RELATIONSHIP HISTORY" in prompt
+        assert "RECIPIENT'S COMMUNICATION STYLE" in prompt
+        assert "WRITING STYLE" in prompt
         assert "Be professional" in prompt
-        assert "Tone Guidance" in prompt
-        assert "meetings" in prompt.lower()
-        assert "Deal/pipeline context" in prompt or "CRM" in prompt
+        assert "TONE GUIDANCE" in prompt
+        assert "UPCOMING MEETINGS" in prompt
+        assert "CRM STATUS" in prompt
         assert "Test User" in prompt
-        # Check traits are included
-        assert "directness" in prompt
-        assert "warmth" in prompt
-        assert "formality" in prompt
 
     def test_prompt_handles_missing_context(self, engine, sample_email):
         """Prompt should handle missing context gracefully."""
@@ -506,11 +479,11 @@ class TestPromptBuilder:
             email=sample_email,
             context=context,
             style_guidelines="",
-            calibration=None,
+            tone_guidance="",
         )
 
         # Should still have original email
-        assert "email you're replying to" in prompt
+        assert "ORIGINAL EMAIL" in prompt
         assert "Test User" not in prompt  # User name is User, not Test User
         assert "User" in prompt
 
@@ -598,7 +571,7 @@ class TestProcessingRun:
             started_at=datetime.now(UTC),
             completed_at=datetime.now(UTC),
             emails_scanned=10,
-            emails_needs_reply=3,
+            emails_needing_reply=3,
             drafts_generated=3,
             drafts_failed=0,
             status="completed",
@@ -608,145 +581,6 @@ class TestProcessingRun:
 
         # Verify update was called
         assert engine._db.table().update().eq().execute.called
-
-
-class TestGuardrails:
-    """Tests for strategic guardrail checking."""
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_no_warnings_clean_draft(self, engine, rich_context):
-        """Clean draft with no commitment language should have no warnings."""
-        draft_body = """Hi John,
-
-Thanks for reaching out about the Q2 proposal. I'd be happy to discuss this further.
-
-Let me know when works for a call.
-
-Best regards,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, rich_context)
-        assert warnings == []
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_pricing_warning(self, engine, rich_context):
-        """Draft mentioning pricing without context should warn."""
-        draft_body = """Hi John,
-
-Thanks for your interest. Our pricing starts at $50,000 per year.
-
-Let me know if you have questions.
-
-Best regards,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, rich_context)
-        assert len(warnings) == 1
-        assert "PRICING_COMMITMENT" in warnings[0]
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_pricing_allowed_with_context(self, engine):
-        """Draft mentioning pricing is OK if thread context has pricing discussion."""
-        context = DraftContext(
-            id="ctx-1",
-            user_id="user-1",
-            email_id="email-1",
-            thread_id="thread-1",
-            sender_email="test@test.com",
-            subject="Pricing",
-            sources_used=["thread"],
-            thread_context=ThreadContext(
-                thread_id="thread-1",
-                messages=[
-                    ThreadMessage(
-                        sender_email="test@test.com",
-                        sender_name="Test",
-                        body="What is your price for this?",
-                        timestamp="2026-02-01T10:00:00Z",
-                    ),
-                ],
-                summary="Discussion about pricing and costs",
-                message_count=1,
-            ),
-        )
-
-        draft_body = """Hi,
-
-Our price is $50,000 as discussed.
-
-Best,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, context)
-        # Should NOT warn because thread has pricing context
-        assert not any("PRICING" in w for w in warnings)
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_timeline_warning(self, engine, rich_context):
-        """Draft with specific timeline should warn."""
-        draft_body = """Hi John,
-
-I'll have that to you by Friday.
-
-Best regards,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, rich_context)
-        assert len(warnings) == 1
-        assert "TIMELINE_COMMITMENT" in warnings[0]
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_meeting_warning(self, engine, rich_context):
-        """Draft confirming a meeting should warn."""
-        draft_body = """Hi John,
-
-See you at 2pm on Thursday!
-
-Best regards,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, rich_context)
-        assert len(warnings) == 1
-        assert "MEETING_COMMITMENT" in warnings[0]
-
-    @pytest.mark.asyncio
-    async def test_check_guardrails_multiple_warnings(self, engine, rich_context):
-        """Draft with multiple issues should generate multiple warnings."""
-        draft_body = """Hi John,
-
-Our pricing is $50K and I'll have the proposal ready by Friday.
-
-See you at the meeting on Monday!
-
-Best regards,
-User"""
-
-        warnings = await engine._check_guardrails(draft_body, rich_context)
-        assert len(warnings) >= 2
-        warning_types = [w.split(":")[0] for w in warnings]
-        assert "PRICING_COMMITMENT" in warning_types
-        assert "TIMELINE_COMMITMENT" in warning_types
-        assert "MEETING_COMMITMENT" in warning_types
-
-    @pytest.mark.asyncio
-    async def test_confidence_reduced_by_guardrail_warnings(self, engine, rich_context):
-        """Each guardrail warning should reduce confidence by 0.1."""
-        base_confidence = engine._calculate_confidence(rich_context)
-
-        # Simulate 2 warnings
-        adjusted_confidence = max(0.1, base_confidence - (2 * 0.1))
-
-        assert adjusted_confidence == base_confidence - 0.2
-
-    @pytest.mark.asyncio
-    async def test_confidence_floor_at_0_1(self, engine, rich_context):
-        """Confidence should not go below 0.1 even with many warnings."""
-        base_confidence = 0.3
-
-        # Simulate 10 warnings
-        adjusted_confidence = max(0.1, base_confidence - (10 * 0.1))
-
-        assert adjusted_confidence == 0.1
 
 
 class TestSingleton:

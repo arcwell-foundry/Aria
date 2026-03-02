@@ -15,63 +15,26 @@ It does NOT extend DraftService - it uses composition, not inheritance.
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
-from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
-from src.services.activity_service import ActivityService
 from src.services.email_analyzer import EmailAnalyzer
-from src.core.ws import ws_manager
-from src.models.ws_events import ActionPendingEvent
+from src.services.email_client_writer import DraftSaveError, EmailClientWriter
 from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
-from src.services.email_lead_intelligence import EmailLeadIntelligence
-from src.services.action_gatekeeper import get_action_gatekeeper
+from src.services.activity_service import ActivityService
 from src.services.learning_mode_service import get_learning_mode_service
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Strategic Guardrails for Draft Generation
-# ---------------------------------------------------------------------------
-
-STRATEGIC_GUARDRAILS = """
-## Critical Guardrails — Do NOT include in the draft:
-1. PRICING: Never quote specific prices, discounts, or ranges unless the
-   thread shows pricing was already discussed and numbers were shared.
-   Instead: "I'd be happy to discuss pricing — let me put together some options."
-
-2. TIMELINES: Never commit to specific delivery dates or deadlines unless
-   confirmed in the context. Instead: "Let me check on the timeline and
-   get back to you."
-
-3. MEETINGS: Never accept or propose specific meeting times. Instead:
-   "I'd love to connect — I'll send some availability."
-
-4. PRODUCT CLAIMS: Only reference product capabilities that appear in the
-   corporate memory or prior thread. Don't invent features.
-
-5. CONFIDENTIAL: Never share internal pricing strategies, competitive
-   intelligence, or internal discussions in an external email.
-
-6. AUTHORITY: Don't make decisions above the user's role. If unsure,
-   suggest the user will "look into it" or "discuss with the team."
-
-If you're uncertain about ANY commitment, err on the warm-but-vague side:
-acknowledge the request, express interest, and defer specifics to a
-follow-up conversation.
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +59,6 @@ class DraftResult:
     context_id: str
     success: bool = True
     error: str | None = None
-    lead_updates: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -114,18 +76,6 @@ class ProcessingRunResult:
     drafts_failed: int = 0
     status: str = "running"
     error_message: str | None = None
-    cross_references: list["TopicCluster"] = field(default_factory=list)
-
-
-@dataclass
-class TopicCluster:
-    """A group of emails connected by a shared business topic."""
-
-    topic: str
-    email_ids: list[str]
-    senders: list[str]
-    subjects: list[str]
-    connection: str  # LLM-generated explanation
 
 
 # ---------------------------------------------------------------------------
@@ -159,25 +109,22 @@ class AutonomousDraftEngine:
     8. Tracks processing run in email_processing_runs table
     """
 
-    _FALLBACK_REPLY_PROMPT = (
-        "You are drafting an email reply on behalf of the user. "
-        "You must match their exact writing style — they should not be able "
-        "to tell this wasn't written by them. Write naturally, not like an AI."
-    )
+    _FALLBACK_REPLY_PROMPT = """You are ARIA, an AI assistant drafting an email reply."""
 
     _REPLY_TASK_INSTRUCTIONS = """
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
 {
   "subject": "The reply subject line (usually Re: original subject)",
-  "body": "The full email body as clean HTML (see formatting instructions)"
+  "body": "The full email body with greeting and signature"
 }
 
-The "body" value MUST be clean HTML suitable for email clients:
-- Wrap each paragraph in <p> tags
-- Use <ul>/<li> for bullet points if appropriate
-- Use <br> for line breaks within a signoff block
-- Do NOT include <html>, <head>, <body>, or <style> tags
-- Do NOT include a signature block (the email client adds it)
+Guidelines:
+1. Start with an appropriate greeting based on the relationship
+2. Acknowledge the sender's message specifically
+3. Address any questions or requests directly
+4. Be concise but thorough - match the sender's detail level
+5. End with an appropriate sign-off
+6. Sign as the user (use their provided name)
 
 Do not include any text outside the JSON object."""
 
@@ -189,9 +136,9 @@ Do not include any text outside the JSON object."""
         self._context_gatherer = EmailContextGatherer()
         self._digital_twin = DigitalTwin()
         self._personality_calibrator = PersonalityCalibrator()
+        self._client_writer = EmailClientWriter()
         self._learning_mode = get_learning_mode_service()
         self._activity_service = ActivityService()
-        self._lead_intelligence = EmailLeadIntelligence()
 
     # ------------------------------------------------------------------
     # Public API
@@ -270,83 +217,36 @@ Do not include any text outside the JSON object."""
                     e,
                 )
 
-            # Route urgent email signals through Intelligence Pulse Engine
-            if scan_result.needs_reply:
-                try:
-                    from src.services.intelligence_pulse import get_pulse_engine
-
-                    pulse_engine = get_pulse_engine()
-                    await pulse_engine.process_signal(
-                        user_id=user_id,
-                        signal={
-                            "source": "email_scanner",
-                            "title": f"{len(scan_result.needs_reply)} emails need attention",
-                            "content": f"Inbox scan found {result.emails_scanned} emails: "
-                                       f"{result.emails_needs_reply} need reply, "
-                                       f"{len(scan_result.fyi)} FYI",
-                            "signal_category": "email",
-                            "pulse_type": "event",
-                            "entities": [],
-                            "raw_data": {
-                                "run_id": run_id,
-                                "emails_scanned": result.emails_scanned,
-                                "needs_reply": result.emails_needs_reply,
-                            },
-                        },
-                    )
-                except Exception:
-                    logger.debug("DRAFT_ENGINE: Pulse engine routing failed")
-
             # Get user info for signature
             user_name = await self._get_user_name(user_id)
 
-            # 2. Check learning mode status (informational only — no gating)
+            # 2. Check learning mode status
             is_learning_mode = await self._learning_mode.is_learning_mode_active(user_id)
+            top_contacts: list[str] = []
 
             if is_learning_mode:
+                top_contacts = await self._learning_mode.get_top_contacts(user_id)
                 logger.info(
-                    "DRAFT_ENGINE: Learning mode ACTIVE for user %s (informational only — drafting all contacts).",
+                    "DRAFT_ENGINE: Learning mode ACTIVE for user %s. "
+                    "Limiting to %d top contacts.",
                     user_id,
+                    len(top_contacts),
                 )
 
-            # 2b. Cross-thread topic clustering
-            cross_ref_clusters: list[TopicCluster] = []
-            try:
-                cross_ref_clusters = await self._cluster_emails_by_topic(
-                    scan_result.needs_reply, scan_result.fyi,
-                )
-            except Exception as e:
-                logger.warning("[EMAIL_PIPELINE] Topic clustering failed (non-fatal): %s", e)
-
-            # Build lookup: email_id → cross-references for that email
-            email_cross_refs: dict[str, list[TopicCluster]] = {}
-            for cluster in cross_ref_clusters:
-                for eid in cluster.email_ids:
-                    email_cross_refs.setdefault(eid, []).append(cluster)
+                if not top_contacts:
+                    logger.warning(
+                        "DRAFT_ENGINE: No top contacts in learning mode for user %s. "
+                        "This is expected for new users - will populate after first email interactions. "
+                        "Processing first 3 emails anyway to bootstrap.",
+                        user_id,
+                    )
 
             # 3. Group emails by thread and deduplicate
             grouped_emails = await self._group_emails_by_thread(scan_result.needs_reply)
 
-            multi_msg_threads = sum(1 for emails in grouped_emails.values() if len(emails) > 1)
-            if multi_msg_threads > 0:
-                consolidated_count = len(scan_result.needs_reply) - len(grouped_emails)
-                logger.info(
-                    "[EMAIL_PIPELINE] Stage: thread_consolidation | "
-                    "needs_reply=%d | threads=%d | multi_msg_threads=%d | "
-                    "consolidated=%d | run_id=%s",
-                    len(scan_result.needs_reply),
-                    len(grouped_emails),
-                    multi_msg_threads,
-                    consolidated_count,
-                    run_id,
-                )
-
-            # 3b. Pre-fetch sent thread IDs (one API call for dedup)
-            sent_thread_ids = await self._fetch_sent_thread_ids(user_id, since_hours)
-
             emails_processed = 0
+            emails_skipped_learning_mode = 0
             emails_skipped_existing_draft = 0
-            emails_skipped_already_replied = 0
             emails_deferred_active_conversation = 0
 
             for thread_id, thread_emails in grouped_emails.items():
@@ -367,46 +267,8 @@ Do not include any text outside the JSON object."""
                     emails_skipped_existing_draft += 1
                     continue
 
-                # Check if user already replied to this thread
-                if await self._user_already_replied(user_id, thread_id, sent_thread_ids):
-                    logger.info(
-                        "SKIP_ALREADY_REPLIED: User already replied in thread_id=%s",
-                        thread_id,
-                    )
-                    await self._log_skip_decision(
-                        user_id, thread_id, "already_replied",
-                        thread_emails[0].email_id if thread_emails else None,
-                    )
-                    emails_skipped_already_replied += 1
-                    continue
-
                 # Get only the latest email in thread
                 email = await self._get_latest_email_in_thread(thread_emails)
-
-                # Build consolidation info for multi-message threads
-                consolidated_from: list[dict[str, Any]] | None = None
-                if len(thread_emails) > 1:
-                    earlier = [e for e in thread_emails if e.email_id != email.email_id]
-                    if earlier:
-                        earlier_sorted = sorted(
-                            earlier,
-                            key=lambda e: getattr(e, "scanned_at", "") or "",
-                        )
-                        consolidated_from = [
-                            {
-                                "sender": e.sender_name or e.sender_email,
-                                "subject": e.subject,
-                                "date": str(getattr(e, "scanned_at", "")),
-                                "snippet": (e.snippet or "")[:200],
-                            }
-                            for e in earlier_sorted
-                        ]
-                        logger.info(
-                            "THREAD_CONSOLIDATED: %d messages in thread %s → single reply to %s",
-                            len(thread_emails),
-                            thread_id[:8] if len(thread_id) > 8 else thread_id,
-                            email.sender_name or email.sender_email,
-                        )
 
                 # Check for active conversation (rapid-fire)
                 if await self._is_active_conversation(user_id, thread_id):
@@ -421,12 +283,23 @@ Do not include any text outside the JSON object."""
                     emails_deferred_active_conversation += 1
                     continue
 
-                # Assign confidence tier (no gating — all emails get drafted)
-                confidence_tier = await self._assign_draft_confidence_tier(
-                    user_id, email.sender_email,
-                )
+                # Apply learning mode filter
+                # If no top contacts yet, process first 3 emails to bootstrap
+                if is_learning_mode and top_contacts:
+                    sender_email = email.sender_email.lower().strip()
+                    is_top_contact = any(
+                        c.lower().strip() == sender_email for c in top_contacts
+                    )
 
-                # Increment interaction count for learning mode tracking
+                    if not is_top_contact:
+                        logger.debug(
+                            "DRAFT_ENGINE: Skipping email from %s - not in top contacts (learning mode)",
+                            email.sender_email,
+                        )
+                        emails_skipped_learning_mode += 1
+                        continue
+
+                # Increment interaction count for learning mode
                 if is_learning_mode:
                     await self._learning_mode.increment_draft_interaction(user_id)
 
@@ -440,10 +313,7 @@ Do not include any text outside the JSON object."""
                         run_id,
                     )
                     draft = await self._process_single_email(
-                        user_id, user_name, email, is_learning_mode, run_id,
-                        confidence_tier=confidence_tier,
-                        consolidated_from=consolidated_from,
-                        cross_references=email_cross_refs.get(email.email_id),
+                        user_id, user_name, email, is_learning_mode, run_id
                     )
                     result.drafts.append(draft)
                     if draft.success:
@@ -474,16 +344,7 @@ Do not include any text outside the JSON object."""
                     result.drafts_failed += 1
 
             # Determine final status
-            # Distinguish benign skips (duplicate prevention working as designed)
-            # from real errors (auth failures, API timeouts, crashes).
-            benign_skip_errors = {
-                "User already replied in thread",
-            }
-            real_failures = sum(
-                1 for d in result.drafts
-                if not d.success and d.error not in benign_skip_errors
-            )
-            if real_failures == 0:
+            if result.drafts_failed == 0:
                 result.status = "completed"
             elif result.drafts_generated > 0:
                 result.status = "partial_failure"
@@ -493,47 +354,18 @@ Do not include any text outside the JSON object."""
                 else:
                     result.status = "failed"
 
-            result.cross_references = cross_ref_clusters
-
-            # Capture individual draft errors for debugging
-            if result.drafts_failed > 0:
-                draft_errors = [
-                    f"{d.recipient_email}: {d.error}"
-                    for d in result.drafts
-                    if not d.success and d.error
-                ]
-                if draft_errors:
-                    result.error_message = "; ".join(draft_errors[:5])
-
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
-                "skipped_existing=%d | skipped_already_replied=%d | "
-                "deferred_active=%d | cross_refs=%d | status=%s | errors=%s",
+                "skipped_existing=%d | deferred_active=%d | skipped_learning=%d | status=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
-                emails_skipped_already_replied,
                 emails_deferred_active_conversation,
-                len(cross_ref_clusters),
+                emails_skipped_learning_mode,
                 result.status,
-                result.error_message,
             )
-
-            # Store Memory Delta: what ARIA learned from this email run
-            try:
-                await self._store_email_intelligence_delta(
-                    user_id=user_id,
-                    run_id=run_id,
-                    scan_result=scan_result,
-                    result=result,
-                )
-            except Exception as delta_err:
-                logger.warning(
-                    "[EMAIL_PIPELINE] Memory delta storage failed (non-fatal): %s",
-                    delta_err,
-                )
 
         except Exception as e:
             logger.error(
@@ -553,317 +385,6 @@ Do not include any text outside the JSON object."""
         return result
 
     # ------------------------------------------------------------------
-    # On-Demand Draft (from Chat)
-    # ------------------------------------------------------------------
-
-    async def draft_reply_on_demand(
-        self,
-        user_id: str,
-        email_data: dict[str, Any],
-        special_instructions: str | None = None,
-    ) -> dict[str, Any]:
-        """Draft a reply to a specific email on demand (triggered from chat).
-
-        Uses the full drafting pipeline: context gathering, style matching,
-        LLM generation, confidence scoring, and email client save.
-
-        Args:
-            user_id: The user's ID.
-            email_data: Dict with email_id, thread_id, sender_email,
-                        sender_name, subject, body, snippet, urgency.
-            special_instructions: Optional user instructions for the draft.
-
-        Returns:
-            Dict with draft details for chat display.
-        """
-        email = SimpleNamespace(**email_data)
-        user_name = await self._get_user_name(user_id)
-
-        try:
-            # a. Gather context (with fallback on error)
-            try:
-                context = await self._context_gatherer.gather_context(
-                    user_id=user_id,
-                    email_id=email.email_id,
-                    thread_id=email.thread_id,
-                    sender_email=email.sender_email,
-                    sender_name=email.sender_name,
-                    subject=email.subject,
-                )
-            except Exception as e:
-                logger.error(
-                    "ON_DEMAND_DRAFT: Context gathering failed: %s", e, exc_info=True,
-                )
-                context = DraftContext(
-                    user_id=user_id,
-                    email_id=email.email_id,
-                    thread_id=email.thread_id,
-                    sender_email=email.sender_email,
-                    subject=email.subject or "(no subject)",
-                    sources_used=["fallback_minimal"],
-                )
-
-            # a2. Extract lead intelligence (non-blocking)
-            lead_updates: list[dict] = []
-            try:
-                thread_summary = ""
-                if context.thread_context and context.thread_context.summary:
-                    thread_summary = context.thread_context.summary
-                lead_updates = await self._lead_intelligence.process_email_for_leads(
-                    user_id=user_id,
-                    email={
-                        "sender_email": email.sender_email,
-                        "subject": getattr(email, "subject", email_data.get("subject", "")),
-                        "body": getattr(email, "body", email_data.get("body", "")),
-                    },
-                    thread_summary=thread_summary,
-                )
-                if lead_updates:
-                    logger.info(
-                        "ON_DEMAND_DRAFT: Lead intel: %d signals from %s",
-                        len(lead_updates),
-                        email.sender_email,
-                    )
-            except Exception as e:
-                logger.warning("ON_DEMAND_DRAFT: Lead intel failed (non-fatal): %s", e)
-
-            # b. Get style guidelines
-            style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
-
-            # c. Get personality calibration (full object for traits)
-            calibration = await self._personality_calibrator.get_calibration(user_id)
-
-            # d. Generate draft via LLM
-            draft_content = await self._generate_reply_draft(
-                user_id, user_name, email, context,
-                style_guidelines, calibration,
-                special_instructions=special_instructions,
-            )
-
-            # d2. Check guardrails for unauthorized commitments
-            guardrail_warnings = await self._check_guardrails(draft_content.body, context)
-            if guardrail_warnings:
-                for warning in guardrail_warnings:
-                    logger.warning(
-                        "GUARDRAIL_WARNING: %s in on-demand draft for %s",
-                        warning,
-                        email.sender_email,
-                    )
-
-            # e. Score style match
-            style_score = await self._digital_twin.score_style_match(
-                user_id, draft_content.body,
-            )
-
-            # f. Calculate confidence (reduced by guardrail warnings)
-            confidence = self._calculate_confidence(context)
-            confidence = max(0.1, confidence - (len(guardrail_warnings) * 0.1))
-
-            # g. Generate ARIA notes (with guardrail warnings)
-            aria_notes, context_sources = await self._generate_aria_notes(
-                email, context, style_score, confidence,
-                lead_updates=lead_updates,
-                guardrail_warnings=guardrail_warnings,
-            )
-
-            # h. Save draft with metadata
-            draft_id = await self._save_draft_with_metadata(
-                user_id=user_id,
-                recipient_email=email.sender_email,
-                recipient_name=email.sender_name,
-                subject=draft_content.subject,
-                body=draft_content.body,
-                original_email_id=email.email_id,
-                thread_id=email.thread_id,
-                context_id=context.id,
-                style_match_score=style_score,
-                confidence_level=confidence,
-                aria_notes=aria_notes,
-                urgency=email.urgency,
-            )
-
-            # Update draft_context FK and store context_sources
-            if context.id:
-                await self._context_gatherer.update_draft_id(
-                    context.id, draft_id, context_sources=context_sources
-                )
-
-            # i. Notify user for review (HIGH risk — no auto-save to client)
-            try:
-                await ws_manager.send_to_user(
-                    user_id,
-                    ActionPendingEvent(
-                        action_id=draft_id,
-                        title="Email Draft Review",
-                        agent="scribe",
-                        risk_level="HIGH",
-                        description=f"Draft reply to {email.sender_name or email.sender_email}: {draft_content.subject}",
-                        payload={
-                            "action_type": "email_draft_review",
-                            "draft_id": draft_id,
-                            "subject": draft_content.subject,
-                            "recipient_name": email.sender_name,
-                            "recipient_email": email.sender_email,
-                            "confidence": confidence,
-                            "style_match": style_score,
-                            "preview": draft_content.body[:200],
-                            "aria_notes": aria_notes,
-                        },
-                    ),
-                )
-            except Exception as e:
-                logger.warning("ON_DEMAND_DRAFT: WS notification failed (non-fatal): %s", e)
-
-            # j. Log activity
-            try:
-                await self._activity_service.record(
-                    user_id=user_id,
-                    agent="scribe",
-                    activity_type="email_drafted",
-                    title=f"Drafted reply to {email.sender_name or email.sender_email}",
-                    description=f"Re: {draft_content.subject} (on-demand via chat)",
-                    reasoning=aria_notes,
-                    confidence=confidence,
-                    related_entity_type="email_draft",
-                    related_entity_id=draft_id,
-                    metadata={
-                        "recipient_email": email.sender_email,
-                        "style_match_score": style_score,
-                        "confidence_level": confidence,
-                        "original_email_id": email.email_id,
-                        "thread_id": email.thread_id,
-                        "trigger": "chat_request",
-                    },
-                )
-            except Exception as e:
-                logger.warning("ON_DEMAND_DRAFT: Activity log failed: %s", e)
-
-            sender_label = email.sender_name or email.sender_email
-            return {
-                "draft_id": draft_id,
-                "to": email.sender_email,
-                "to_name": email.sender_name,
-                "subject": draft_content.subject,
-                "body": draft_content.body,
-                "aria_notes": aria_notes,
-                "confidence": confidence,
-                "style_match": style_score,
-                "saved_to_client": False,
-                "message": (
-                    f"I've drafted a reply to {sender_label}'s email "
-                    f'about "{email.subject}" — it\'s ready for your review.'
-                ),
-            }
-
-        except Exception as e:
-            logger.error("ON_DEMAND_DRAFT: Failed: %s", e, exc_info=True)
-            return {
-                "error": f"Failed to generate draft: {e}",
-                "email_subject": email_data.get("subject", ""),
-            }
-
-    # ------------------------------------------------------------------
-    # Confidence Tier Assignment
-    # ------------------------------------------------------------------
-
-    async def _assign_draft_confidence_tier(
-        self,
-        user_id: str,
-        sender_email: str,
-    ) -> dict[str, Any]:
-        """Assign confidence tier based on data richness, not a gate.
-
-        Tiers:
-        - HIGH: Top contact with 5+ emails — strong style match likely.
-        - MEDIUM: Has recipient profile with 2+ emails.
-        - LOW: Has digital twin but new contact.
-        - MINIMAL: Very little data to work with.
-
-        Args:
-            user_id: The user's ID.
-            sender_email: The email sender to evaluate.
-
-        Returns:
-            Dict with tier, note, is_top_contact, and email_count.
-        """
-        has_recipient_profile = False
-        email_count = 0
-
-        try:
-            profile = (
-                self._db.table("recipient_writing_profiles")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("recipient_email", sender_email)
-                .maybe_single()
-                .execute()
-            )
-            has_recipient_profile = bool(profile.data)
-            email_count = profile.data.get("email_count", 0) if profile.data else 0
-        except Exception as e:
-            logger.debug("Confidence tier: recipient profile lookup failed: %s", e)
-
-        has_twin = False
-        try:
-            twin = (
-                self._db.table("digital_twin_profiles")
-                .select("id")
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            has_twin = bool(twin.data)
-        except Exception as e:
-            logger.debug("Confidence tier: digital twin lookup failed: %s", e)
-
-        top_contacts = await self._get_top_contacts(user_id)
-        is_top_contact = sender_email.lower() in {c.lower() for c in top_contacts}
-
-        if is_top_contact and email_count >= 5:
-            tier = "HIGH"
-            sender_label = sender_email.split("@")[0]
-            note = (
-                f"I have {email_count} of your past emails to "
-                f"{sender_label} to match your style."
-            )
-        elif has_recipient_profile and email_count >= 2:
-            tier = "MEDIUM"
-            note = (
-                f"I have {email_count} emails as style reference. "
-                f"My confidence will improve as we interact more."
-            )
-        elif has_twin:
-            tier = "LOW"
-            note = (
-                "This is a new contact — I used your general writing style. "
-                "Review this draft more carefully."
-            )
-        else:
-            tier = "MINIMAL"
-            note = (
-                "Limited style data available. I wrote a professional reply "
-                "but it may not match your voice perfectly."
-            )
-
-        return {
-            "tier": tier,
-            "note": note,
-            "is_top_contact": is_top_contact,
-            "email_count": email_count,
-        }
-
-    async def _get_top_contacts(self, user_id: str) -> list[str]:
-        """Get the top contacts for a user via LearningModeService.
-
-        Args:
-            user_id: The user whose top contacts to retrieve.
-
-        Returns:
-            List of top contact email addresses.
-        """
-        return await self._learning_mode.get_top_contacts(user_id)
-
-    # ------------------------------------------------------------------
     # Single Email Processing
     # ------------------------------------------------------------------
 
@@ -874,9 +395,6 @@ Do not include any text outside the JSON object."""
         email: Any,  # EmailCategory from email_analyzer
         is_learning_mode: bool = False,
         run_id: str | None = None,
-        confidence_tier: dict[str, Any] | None = None,
-        consolidated_from: list[dict[str, Any]] | None = None,
-        cross_references: list[TopicCluster] | None = None,
     ) -> DraftResult:
         """Process a single email and generate a reply draft.
 
@@ -935,66 +453,12 @@ Do not include any text outside the JSON object."""
                     email.email_id,
                 )
 
-            # a1b. Thread-based already-replied check (Tier 3)
-            # Catches manual replies the sent-folder query missed
-            if (
-                context.thread_context
-                and context.thread_context.messages
-                and self._user_replied_in_thread(context.thread_context.messages)
-            ):
-                logger.info(
-                    "SKIP_ALREADY_REPLIED_VIA_THREAD: email_id=%s thread_id=%s subject=%s",
-                    email.email_id,
-                    email.thread_id,
-                    email.subject,
-                )
-                return DraftResult(
-                    draft_id="",
-                    recipient_email=email.sender_email,
-                    recipient_name=email.sender_name,
-                    subject=email.subject or "",
-                    body="",
-                    style_match_score=0.0,
-                    confidence_level=0.0,
-                    aria_notes="Skipped: user already replied in thread",
-                    original_email_id=email.email_id,
-                    thread_id=email.thread_id,
-                    context_id=context.id,
-                    success=False,
-                    error="User already replied in thread",
-                )
-
-            # a2. Extract lead intelligence (non-blocking)
-            lead_updates: list[dict] = []
-            try:
-                thread_summary = ""
-                if context.thread_context and context.thread_context.summary:
-                    thread_summary = context.thread_context.summary
-                lead_updates = await self._lead_intelligence.process_email_for_leads(
-                    user_id=user_id,
-                    email={
-                        "sender_email": email.sender_email,
-                        "subject": email.subject,
-                        "body": getattr(email, "body", getattr(email, "snippet", "")),
-                    },
-                    thread_summary=thread_summary,
-                )
-                if lead_updates:
-                    logger.info(
-                        "[EMAIL_PIPELINE] Stage: lead_intel | email_id=%s | signals=%d",
-                        email.email_id,
-                        len(lead_updates),
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[EMAIL_PIPELINE] Lead intelligence extraction failed (non-fatal): %s", e,
-                )
-
             # b. Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # c. Get personality calibration (full object for traits)
+            # c. Get personality calibration
             calibration = await self._personality_calibrator.get_calibration(user_id)
+            tone_guidance = calibration.tone_guidance if calibration else ""
 
             # d. Generate draft via LLM
             logger.info(
@@ -1002,58 +466,28 @@ Do not include any text outside the JSON object."""
                 email.email_id,
             )
             draft_content = await self._generate_reply_draft(
-                user_id, user_name, email, context, style_guidelines, calibration,
-                consolidated_from=consolidated_from,
+                user_id, user_name, email, context, style_guidelines, tone_guidance
             )
-
-            # d2. Check guardrails for unauthorized commitments
-            guardrail_warnings = await self._check_guardrails(draft_content.body, context)
-            if guardrail_warnings:
-                for warning in guardrail_warnings:
-                    logger.warning(
-                        "GUARDRAIL_WARNING: %s in draft for email_id=%s",
-                        warning,
-                        email.email_id,
-                    )
 
             # e. Score style match
             style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
-            # f. Calculate confidence (reduced by guardrail warnings)
-            confidence = self._calculate_confidence(context)
-            confidence = max(0.1, confidence - (len(guardrail_warnings) * 0.1))
+            # f. Calculate confidence
+            confidence = self._calculate_confidence(context, style_score)
 
             logger.info(
-                "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f | guardrail_warnings=%d",
+                "[EMAIL_PIPELINE] Stage: draft_scored | email_id=%s | style_score=%.2f | confidence=%.2f",
                 email.email_id,
                 style_score,
                 confidence,
-                len(guardrail_warnings),
             )
 
-            # g. Generate ARIA notes (with confidence tier, learning mode, and guardrail warnings)
-            aria_notes, context_sources = await self._generate_aria_notes(
-                email, context, style_score, confidence, is_learning_mode,
-                lead_updates=lead_updates,
-                guardrail_warnings=guardrail_warnings,
-                confidence_tier=confidence_tier,
-                consolidated_from=consolidated_from,
-                cross_references=cross_references,
+            # g. Generate ARIA notes (add learning mode note if applicable)
+            aria_notes = await self._generate_aria_notes(
+                email, context, style_score, confidence, is_learning_mode
             )
 
-            # h. Determine risk policy via ActionGatekeeper
-            gatekeeper = get_action_gatekeeper()
-            policy = await gatekeeper.check_action("email_draft_generated")
-            gk_risk = policy["risk"]
-            auto_approve_at_iso: str | None = None
-            if policy.get("auto_execute_after_minutes") is not None:
-                auto_approve_at_iso = (
-                    datetime.now(UTC)
-                    + timedelta(minutes=policy["auto_execute_after_minutes"])
-                ).isoformat()
-
-            # h2. Save draft with all metadata (including confidence tier and gatekeeper fields)
-            tier_label = confidence_tier.get("tier", "LOW") if confidence_tier else "LOW"
+            # h. Save draft with all metadata
             draft_id = await self._save_draft_with_metadata(
                 user_id=user_id,
                 recipient_email=email.sender_email,
@@ -1069,53 +503,30 @@ Do not include any text outside the JSON object."""
                 urgency=email.urgency,
                 learning_mode_draft=is_learning_mode,
                 processing_run_id=run_id,
-                confidence_tier=tier_label,
-                auto_approve_at=auto_approve_at_iso,
-                risk_level=gk_risk,
             )
-
-            # h3. Update draft_context.draft_id FK now that draft exists, store context_sources
-            if context.id:
-                await self._context_gatherer.update_draft_id(
-                    context.id, draft_id, context_sources=context_sources
-                )
 
             logger.info(
-                "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s | risk=%s | auto_approve_at=%s",
+                "[EMAIL_PIPELINE] Stage: draft_saved_to_db | draft_id=%s | email_id=%s",
                 draft_id,
                 email.email_id,
-                gk_risk,
-                auto_approve_at_iso,
             )
 
-            # i. Notify user draft is pending review (no auto-save to client)
+            # i. Auto-save to email client (Gmail/Outlook)
+            # Non-fatal: draft stays in ARIA database even if client save fails
             try:
-                await ws_manager.send_to_user(
-                    user_id,
-                    ActionPendingEvent(
-                        action_id=draft_id,
-                        title="Email Draft Review",
-                        agent="scribe",
-                        risk_level=gk_risk,
-                        description=f"Draft reply to {email.sender_name or email.sender_email}: {draft_content.subject}",
-                        payload={
-                            "action_type": "email_draft_review",
-                            "draft_id": draft_id,
-                            "subject": draft_content.subject,
-                            "recipient_name": email.sender_name,
-                            "recipient_email": email.sender_email,
-                            "confidence": confidence,
-                            "style_match": style_score,
-                            "preview": draft_content.body[:200],
-                            "aria_notes": aria_notes,
-                            "auto_approve_at": auto_approve_at_iso,
-                            "risk_level": gk_risk,
-                        },
-                    ),
+                client_result = await self._client_writer.save_draft_to_client(
+                    user_id=user_id,
+                    draft_id=draft_id,
                 )
-            except Exception as e:
+                if client_result.get("success") and not client_result.get("already_saved"):
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: saving_to_client | draft_id=%s | provider=%s",
+                        draft_id,
+                        client_result.get("provider"),
+                    )
+            except DraftSaveError as e:
                 logger.warning(
-                    "[EMAIL_PIPELINE] Stage: ws_notification_failed | draft_id=%s | error=%s",
+                    "[EMAIL_PIPELINE] Stage: client_save_failed | draft_id=%s | error=%s",
                     draft_id,
                     e,
                 )
@@ -1171,7 +582,6 @@ Do not include any text outside the JSON object."""
                 thread_id=email.thread_id,
                 context_id=context.id,
                 success=True,
-                lead_updates=lead_updates,
             )
 
         except Exception as e:
@@ -1182,9 +592,8 @@ Do not include any text outside the JSON object."""
                 exc_info=True,
             )
             error_notes = f"Failed: {e}"
-            if confidence_tier:
-                tier = confidence_tier.get("tier", "UNKNOWN")
-                error_notes = f"[Confidence: {tier}] | {error_notes}"
+            if is_learning_mode:
+                error_notes = f"{self._learning_mode.get_learning_mode_note()} | {error_notes}"
             return DraftResult(
                 draft_id="",
                 recipient_email=email.sender_email,
@@ -1202,245 +611,6 @@ Do not include any text outside the JSON object."""
             )
 
     # ------------------------------------------------------------------
-    # Formatting Patterns
-    # ------------------------------------------------------------------
-
-    async def _get_formatting_patterns(self, user_id: str) -> dict[str, Any] | None:
-        """Fetch stored formatting patterns from digital_twin_profiles.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            Formatting patterns dict, or None if not available.
-        """
-        try:
-            result = (
-                self._db.table("digital_twin_profiles")
-                .select("formatting_patterns")
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            if result and result.data:
-                raw = result.data.get("formatting_patterns")
-                if isinstance(raw, str):
-                    return json.loads(raw)
-                if isinstance(raw, dict):
-                    return raw
-        except Exception as e:
-            logger.debug("DRAFT_ENGINE: Could not fetch formatting patterns: %s", e)
-        return None
-
-    async def _get_raw_writing_style(self, user_id: str) -> str | None:
-        """Fetch the raw writing_style description from digital_twin_profiles.
-
-        This is the descriptive prose about the user's writing style,
-        complementary to the structured style guidelines.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            Raw writing style string, or None if not available.
-        """
-        try:
-            result = (
-                self._db.table("digital_twin_profiles")
-                .select("writing_style")
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            if result and result.data:
-                return result.data.get("writing_style")
-        except Exception as e:
-            logger.debug("DRAFT_ENGINE: Could not fetch writing_style: %s", e)
-        return None
-
-    async def _get_recent_draft_feedback(
-        self,
-        user_id: str,
-        limit: int = 20,
-    ) -> dict[str, Any] | None:
-        """Fetch recent draft feedback to inform future drafts.
-
-        Queries the user's recent drafts that have been acted on
-        (approved, edited, rejected) and summarises patterns.
-
-        Args:
-            user_id: The user's ID.
-            limit: Max number of recent drafts to consider.
-
-        Returns:
-            Summary dict with counts and edit patterns, or None if no data.
-        """
-        try:
-            result = (
-                self._db.table("email_drafts")
-                .select("user_action, edit_distance, user_edited_body, body")
-                .eq("user_id", user_id)
-                .neq("user_action", "pending")
-                .order("action_detected_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            rows = result.data or []
-            if not rows:
-                return None
-
-            approved = sum(1 for r in rows if r["user_action"] == "approved")
-            edited = sum(1 for r in rows if r["user_action"] == "edited")
-            rejected = sum(1 for r in rows if r["user_action"] in ("rejected", "ignored"))
-
-            # Detect edit patterns from edited drafts
-            patterns: list[str] = []
-            edit_distances: list[float] = []
-            for r in rows:
-                if r["user_action"] == "edited" and r.get("edit_distance") is not None:
-                    edit_distances.append(r["edit_distance"])
-                    original_len = len(r.get("body") or "")
-                    edited_len = len(r.get("user_edited_body") or "")
-                    if original_len > 0 and edited_len > 0:
-                        ratio = edited_len / original_len
-                        if ratio < 0.8:
-                            patterns.append("shortened")
-                        elif ratio > 1.2:
-                            patterns.append("lengthened")
-
-            summary: dict[str, Any] = {
-                "total": len(rows),
-                "approved": approved,
-                "edited": edited,
-                "rejected": rejected,
-            }
-            if edit_distances:
-                summary["avg_edit_distance"] = sum(edit_distances) / len(edit_distances)
-            if patterns:
-                from collections import Counter
-                most_common = Counter(patterns).most_common(1)[0][0]
-                summary["common_edit_pattern"] = most_common
-
-            return summary
-
-        except Exception as e:
-            logger.debug("DRAFT_ENGINE: Could not fetch draft feedback: %s", e)
-            return None
-
-    def _detect_attachment_context(
-        self,
-        email: Any,
-        thread_summary: str | None = None,
-    ) -> str:
-        """Detect attachment references in email and thread.
-
-        Analyzes the incoming email for attachments and checks if the user
-        may have promised to send a document based on thread history.
-
-        Args:
-            email: The email object with body and attachment data.
-            thread_summary: Optional thread summary for context.
-
-        Returns:
-            A context string for the LLM prompt about attachments.
-        """
-        body = getattr(email, "body", "") or ""
-        if isinstance(body, dict):
-            body = body.get("content", "")
-
-        has_attachments = bool(
-            getattr(email, "hasAttachments", False)
-            or getattr(email, "attachments", None)
-        )
-
-        attachment_words = [
-            "attached", "attachment", "attaching", "enclosed",
-            "see attached", "find attached", "PFA", "please find",
-        ]
-        sender_mentioned = any(w in body.lower() for w in attachment_words)
-
-        parts: list[str] = []
-
-        if has_attachments:
-            attachments = getattr(email, "attachments", None) or []
-            names = [a.get("name", "file") if isinstance(a, dict) else str(a) for a in attachments]
-            parts.append(
-                f"Sender attached: {', '.join(names)}. "
-                f"Acknowledge the attachment in your reply."
-            )
-        elif sender_mentioned:
-            parts.append(
-                "Sender referenced an attachment but none was found. "
-                "Consider asking them to resend."
-            )
-
-        # Check if user promised to send something
-        thread = (thread_summary or "").lower()
-        promise_phrases = [
-            "i'll send", "i will send", "i'll attach",
-            "will share the", "send you the", "i'll get you",
-            "i'll forward", "let me send you",
-        ]
-        if any(p in thread for p in promise_phrases):
-            parts.append(
-                "⚠️ NOTE: Based on the thread, you may have promised to send "
-                "a document. Remember to attach it before sending this reply."
-            )
-
-        return "\n".join(parts) if parts else "No attachment context."
-
-    def _build_formatting_instructions(
-        self, formatting: dict[str, Any] | None,
-    ) -> str:
-        """Build HTML formatting instructions for the draft generation prompt.
-
-        Args:
-            formatting: Formatting patterns from digital_twin_profiles, or None.
-
-        Returns:
-            Prompt section with formatting rules.
-        """
-        if formatting and formatting.get("typical_structure"):
-            user_style = (
-                f"\nThe user's typical email format:\n"
-                f"- Structure: {formatting.get('typical_structure', 'greeting, 2-3 paragraphs, signoff')}\n"
-                f"- Average paragraphs per email: {formatting.get('avg_paragraph_count', 3)}\n"
-                f"- Uses bullet points: {'yes, occasionally' if formatting.get('uses_bullet_points') else 'rarely/never'}\n"
-                f"- Average paragraph length: {formatting.get('avg_paragraph_length_sentences', 2)} sentences\n"
-                f"- Match this formatting structure exactly."
-            )
-        else:
-            user_style = (
-                "Use standard professional email formatting: "
-                "greeting, 2-3 concise paragraphs, signoff."
-            )
-
-        return f"""## Email Formatting
-Output the reply as clean HTML for rendering in an email client.
-
-Structure rules:
-- Greeting on its own line: <p>{{greeting}}</p>
-- Each paragraph in <p> tags: <p>paragraph text</p>
-- If using bullet points: <ul><li>item</li></ul>
-- Signoff on its own line: <p>{{signoff}}<br>{{name}}</p>
-- Do NOT include <html>, <head>, <body>, or <style> tags
-- Do NOT include a signature block (the email client adds it)
-- Keep paragraphs short (2-3 sentences max unless the user writes longer)
-
-{user_style}
-
-Example of well-formatted output:
-<p>Hi Rob,</p>
-<p>Thanks for sending over the partnership overview. I've had a chance to review it and have a few thoughts.</p>
-<p>The proposed timeline works well on our end. A couple of things I'd like to discuss:</p>
-<ul>
-<li>The data migration scope in Section 3</li>
-<li>Integration testing windows for Q2</li>
-</ul>
-<p>Would Thursday afternoon work for a quick call to walk through these?</p>
-<p>Best,<br>Dhruv</p>"""
-
-    # ------------------------------------------------------------------
     # LLM Draft Generation
     # ------------------------------------------------------------------
 
@@ -1451,9 +621,7 @@ Example of well-formatted output:
         email: Any,
         context: DraftContext,
         style_guidelines: str,
-        calibration: Any | None,
-        special_instructions: str | None = None,
-        consolidated_from: list[dict[str, Any]] | None = None,
+        tone_guidance: str,
     ) -> ReplyDraftContent:
         """Generate reply draft via LLM with full context.
 
@@ -1463,28 +631,13 @@ Example of well-formatted output:
             email: Original email (EmailCategory).
             context: Full context from EmailContextGatherer.
             style_guidelines: Style guidelines from DigitalTwin.
-            calibration: PersonalityCalibration object with tone_guidance and traits.
-            special_instructions: Optional user instructions for the draft.
+            tone_guidance: Tone guidance from PersonalityCalibrator.
 
         Returns:
             ReplyDraftContent with subject and body.
         """
-        # Fetch formatting patterns for HTML output
-        formatting_patterns = await self._get_formatting_patterns(user_id)
-
-        # Fetch raw writing_style description from digital twin
-        raw_writing_style = await self._get_raw_writing_style(user_id)
-
-        # Fetch recent draft feedback for learning loop
-        feedback_context = await self._get_recent_draft_feedback(user_id)
-
         prompt = self._build_reply_prompt(
-            user_name, email, context, style_guidelines, calibration,
-            special_instructions=special_instructions,
-            formatting_patterns=formatting_patterns,
-            consolidated_from=consolidated_from,
-            raw_writing_style=raw_writing_style,
-            feedback_context=feedback_context,
+            user_name, email, context, style_guidelines, tone_guidance
         )
 
         # Primary: PersonaBuilder for system prompt
@@ -1507,85 +660,26 @@ Example of well-formatted output:
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=system_prompt,
-            temperature=0.4,
-            max_tokens=1200,
-            user_id=user_id,
-            task=TaskType.SCRIBE_DRAFT_EMAIL,
+            temperature=0.7,
         )
 
-        # Parse JSON response with robust extraction
-        parsed = self._parse_draft_json(response, email.subject, email.email_id)
-        return parsed
-
-    def _parse_draft_json(
-        self,
-        response: str,
-        original_subject: str,
-        email_id: str,
-    ) -> ReplyDraftContent:
-        """Parse LLM response into ReplyDraftContent with robust fallbacks.
-
-        Handles markdown code fences, embedded JSON, and plain-text responses.
-        Never returns raw JSON or markdown fences as draft body.
-        """
-        import re as _re
-
-        cleaned = response.strip()
-
-        # Strip ALL markdown code fences (handles multiple fence blocks)
-        if "```" in cleaned:
-            # Remove opening fence line (```json, ```JSON, ```, etc.)
-            cleaned = _re.sub(r"^```[a-zA-Z]*\s*\n?", "", cleaned)
-            # Remove closing fence
-            cleaned = _re.sub(r"\n?```\s*$", "", cleaned)
-            cleaned = cleaned.strip()
-
-        # Attempt 1: Direct JSON parse
+        # Parse JSON response
         try:
-            data = json.loads(cleaned)
-            subject = data.get("subject") or f"Re: {original_subject}"
-            body = data.get("body", "")
-            if body:
-                return ReplyDraftContent(subject=subject, body=body)
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-        # Attempt 2: Extract JSON object from within the response text
-        json_match = _re.search(r"\{[\s\S]*\"body\"\s*:\s*\"[\s\S]*?\"\s*\}", cleaned)
-        if json_match:
-            try:
-                data = json.loads(json_match.group())
-                subject = data.get("subject") or f"Re: {original_subject}"
-                body = data.get("body", "")
-                if body:
-                    logger.info(
-                        "DRAFT_ENGINE: Extracted JSON from mixed response for email %s",
-                        email_id,
-                    )
-                    return ReplyDraftContent(subject=subject, body=body)
-            except (json.JSONDecodeError, AttributeError):
-                pass
-
-        # Attempt 3: The response is plain text (not JSON at all)
-        # Strip any remaining JSON-like artifacts so the user never sees raw JSON
-        logger.warning(
-            "DRAFT_ENGINE: LLM returned non-JSON for email %s, using cleaned text as body",
-            email_id,
-        )
-        # Remove any stray JSON keys/braces that might be in the text
-        fallback_body = cleaned
-        if fallback_body.startswith("{") and "body" in fallback_body:
-            # Looks like malformed JSON — try to extract just the body value
-            body_match = _re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', fallback_body)
-            if body_match:
-                fallback_body = body_match.group(1)
-                # Unescape JSON string escapes
-                fallback_body = fallback_body.replace("\\n", "\n").replace('\\"', '"')
-
-        return ReplyDraftContent(
-            subject=f"Re: {original_subject}",
-            body=fallback_body,
-        )
+            data = json.loads(response.strip())
+            return ReplyDraftContent(
+                subject=data.get("subject", f"Re: {email.subject}"),
+                body=data.get("body", response),
+            )
+        except json.JSONDecodeError:
+            # Fallback: use raw response as body
+            logger.warning(
+                "DRAFT_ENGINE: LLM returned non-JSON for email %s, using fallback",
+                email.email_id,
+            )
+            return ReplyDraftContent(
+                subject=f"Re: {email.subject}",
+                body=response,
+            )
 
     def _build_reply_prompt(
         self,
@@ -1593,453 +687,103 @@ Example of well-formatted output:
         email: Any,
         context: DraftContext,
         style_guidelines: str,
-        calibration: Any | None,
-        special_instructions: str | None = None,
-        formatting_patterns: dict[str, Any] | None = None,
-        consolidated_from: list[dict[str, Any]] | None = None,
-        raw_writing_style: str | None = None,
-        feedback_context: dict[str, Any] | None = None,
+        tone_guidance: str,
     ) -> str:
         """Build comprehensive reply generation prompt.
 
-        Assembles all context sections into a structured prompt
-        with full voice matching, strategic guardrails, HTML formatting
-        instructions, and all available context sources.
+        Assembles all context sections into a structured prompt.
         """
         sections: list[str] = []
 
-        # Identity and voice matching (top of prompt for emphasis)
-        sections.append(f"""You are drafting an email reply AS {user_name}.
-You must match their exact writing style — they should not be able to tell
-this wasn't written by them. Do NOT sound like an AI assistant.""")
-
-        # Anti-hallucination instruction (critical — placed early for emphasis)
-        sections.append("""## CRITICAL: Anti-Hallucination Rule
-ONLY reference information present in the email and thread below.
-Do NOT invent topics, projects, details, or context the sender didn't mention.
-If the sender mentioned something specific, address it directly.
-If you don't have information about something, do NOT make it up — either
-skip it or suggest following up.""")
-
-        # Filler phrase prohibition
-        sections.append("""## Banned Phrases — Do NOT use any of these:
-- "I hope this email finds you well"
-- "I hope this finds you well"
-- "Thank you for reaching out"
-- "Thanks for reaching out"
-- "Please don't hesitate to"
-- "Don't hesitate to reach out"
-- "Looking forward to your response"
-- "I appreciate your time"
-- "Per our conversation"
-- "As per my last email"
-- "Just circling back"
-- "Just following up"
-- "I wanted to touch base"
-- "Let's circle back on this"
-- "At your earliest convenience"
-- "Synergy", "leverage" (as verb), "alignment", "bandwidth"
-- "Moving forward"
-- Any variation of these corporate filler phrases.
-Write like a real person, not a template.""")
-
-        # User's writing style guide
-        voice_section = f"## Writing Style Guide\n{style_guidelines}"
-        if raw_writing_style:
-            voice_section += f"\n\nVoice profile: {raw_writing_style}"
-        sections.append(voice_section)
-
-        # Recipient-specific writing style
-        if context.recipient_style and context.recipient_style.exists:
-            rs = context.recipient_style
-            recipient_label = email.sender_name or email.sender_email
-
-            # Helper to avoid literal "None" strings in prompt (BL-7)
-            def _clean_field(value: str | None, fallback: str) -> str:
-                if value is None or value == "None" or value == "":
-                    return fallback
-                return value
-
-            style_lines = [
-                f"## How {user_name} writes to {recipient_label}",
-                f"- Greeting style: {_clean_field(rs.greeting_style, 'Use global style above')}",
-                f"- Signoff style: {_clean_field(rs.signoff_style, 'Use global style above')}",
-                f"- Formality: {rs.formality_level:.1f}/1.0",
-                f"- Tone: {_clean_field(rs.tone, 'balanced')}",
-                f"- Uses emoji: {'Yes' if rs.uses_emoji else 'No'}",
-                f"- Emails exchanged: {rs.email_count}",
-            ]
-            sections.append("\n".join(style_lines))
-
-        # Tone guidance from personality calibrator (includes traits)
-        if calibration:
-            tone_guidance = calibration.tone_guidance if calibration else ""
-            if tone_guidance:
-                trait_parts = []
-                trait_parts.append(f"directness={calibration.directness:.1f}")
-                trait_parts.append(f"warmth={calibration.warmth:.1f}")
-                trait_parts.append(f"formality={calibration.formality:.1f}")
-                sections.append(f"""## Tone Guidance
-{tone_guidance}
-
-Personality traits: {', '.join(trait_parts)}""")
-
-        # HTML formatting instructions
-        sections.append(self._build_formatting_instructions(formatting_patterns))
-
-        # The original email being replied to
-        # body should always be populated after the email_analyzer fix;
-        # snippet (200 chars) is a last-resort fallback.
-        email_body = getattr(email, "body", None)
-        if not email_body:
-            email_body = getattr(email, "snippet", None) or ""
-            if email_body:
-                logger.warning(
-                    "BL-1: No full body for email '%s', using snippet (%d chars). "
-                    "Draft quality may be reduced.",
-                    email.subject,
-                    len(email_body),
-                )
-            else:
-                logger.error(
-                    "BL-1-CRITICAL: No body AND no snippet for email '%s'. "
-                    "Draft will likely hallucinate content.",
-                    email.subject,
-                )
-        sections.append(f"""## The email you're replying to
-From: {email.sender_name or 'Unknown'} <{email.sender_email}>
+        # Original email
+        sections.append(f"""=== ORIGINAL EMAIL ===
+From: {email.sender_name} <{email.sender_email}>
 Subject: {email.subject}
 Urgency: {email.urgency}
+Body: {email.snippet}""")
 
-{email_body}""")
-
-        # Earlier messages in thread that also need addressing (consolidation)
-        if consolidated_from:
-            earlier_lines = "\n".join(
-                f"- {m['sender']} ({m['date']}): {m['snippet']}"
-                for m in consolidated_from
-            )
-            sections.append(
-                f"## Earlier messages in this thread that also need addressing\n"
-                f"{earlier_lines}\n\n"
-                f"Address ALL of these messages in your single reply, in addition to the "
-                f"latest message above. Reference earlier points naturally — don't "
-                f"reply to each one separately like a checklist."
-            )
-
-        # Extract thread summary for attachment context
-        thread_summary = None
-        if context.thread_context and context.thread_context.summary:
-            thread_summary = context.thread_context.summary
-
-        # Attachment context
-        attachment_context = self._detect_attachment_context(email, thread_summary)
-        sections.append(f"""## Attachments
-{attachment_context}""")
-
-        # Full conversation thread
+        # Thread context
         if context.thread_context and context.thread_context.messages:
-            thread_summary_text = (
-                context.thread_context.summary
-                or f"{context.thread_context.message_count} messages in thread"
+            thread_summary = (
+                context.thread_context.summary or f"{context.thread_context.message_count} messages"
             )
-            recent_messages = context.thread_context.messages[-5:]
+            recent_messages = context.thread_context.messages[-3:]
             recent = "\n".join(
-                f"- {m.sender_name or m.sender_email}: "
-                f"{m.body[:300]}{'...' if len(m.body) > 300 else ''}"
+                f"- {m.sender_name}: {m.body[:200]}{'...' if len(m.body) > 200 else ''}"
                 for m in recent_messages
             )
-            sections.append(f"""## Full conversation thread (chronological)
-Summary: {thread_summary_text}
+            sections.append(f"""=== CONVERSATION THREAD ===
+Summary: {thread_summary}
 Recent messages:
 {recent}""")
-        else:
-            sections.append(
-                "## Full conversation thread\nNo prior thread — this is a first reply."
-            )
 
         # Recipient research
         if context.recipient_research:
             r = context.recipient_research
             info = []
-            if r.sender_name:
-                info.append(f"Name: {r.sender_name}")
             if r.sender_title:
                 info.append(f"Title: {r.sender_title}")
             if r.sender_company:
                 info.append(f"Company: {r.sender_company}")
-            if r.company_description:
-                desc = r.company_description[:300]
-                info.append(f"Company info: {desc}")
             if r.bio:
-                bio = r.bio[:400] + ("..." if len(r.bio) > 400 else "")
-                info.append(f"Bio: {bio}")
+                info.append(f"Bio: {r.bio[:300]}{'...' if len(r.bio) > 300 else ''}")
             if info:
-                sections.append("## Context about the recipient\n" + "\n".join(info))
-            else:
-                sections.append("## Context about the recipient\nNo research available.")
-        else:
-            sections.append("## Context about the recipient\nNo research available.")
+                sections.append("=== ABOUT THE RECIPIENT ===\n" + "\n".join(info))
 
         # Relationship history
-        if context.relationship_history and context.relationship_history.total_emails > 0:
-            rh = context.relationship_history
-            lines = [f"Total emails: {rh.total_emails}"]
-            if rh.relationship_type and rh.relationship_type != "unknown":
-                lines.append(f"Relationship: {rh.relationship_type}")
-            if rh.last_interaction:
-                lines.append(f"Last interaction: {rh.last_interaction}")
-            if rh.recent_topics:
-                lines.append(f"Recent topics: {', '.join(rh.recent_topics[:5])}")
-            if rh.memory_facts:
-                facts = rh.memory_facts[:5]
-                fact_lines = "\n".join(
-                    f"- {f.get('fact', str(f))}" for f in facts
-                )
-                lines.append(f"Key facts:\n{fact_lines}")
-            sections.append(
-                "## Your relationship with this person\n" + "\n".join(lines)
-            )
-        else:
-            sections.append(
-                "## Your relationship with this person\n"
-                "New contact — no prior interaction history."
-            )
+        if context.relationship_history and context.relationship_history.memory_facts:
+            facts = context.relationship_history.memory_facts[:3]
+            fact_lines = "\n".join(f"- {f.get('fact', str(f))}" for f in facts)
+            sections.append(f"""=== RELATIONSHIP HISTORY ===
+Total interactions: {context.relationship_history.total_emails}
+Key facts:
+{fact_lines}""")
 
-        # Outstanding commitments in this thread
-        if (
-            context.relationship_history
-            and context.relationship_history.commitments
-        ):
-            commitment_lines = "\n".join(
-                f"- {c}" for c in context.relationship_history.commitments[:5]
-            )
-            sections.append(
-                f"## Outstanding commitments in this thread\n"
-                f"{commitment_lines}\n\n"
-                f"Reference these naturally if relevant to the reply — "
-                f"e.g. acknowledge a promise you made or remind about "
-                f"something the sender committed to."
-            )
-        else:
-            sections.append(
-                "## Outstanding commitments in this thread\n"
-                "No commitments detected."
-            )
+        # Recipient style
+        if context.recipient_style and context.recipient_style.exists:
+            sections.append(f"""=== RECIPIENT'S COMMUNICATION STYLE ===
+Formality: {context.recipient_style.formality_level:.1f}/1.0
+Tone: {context.recipient_style.tone}
+Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
+
+        # User's style
+        sections.append(f"""=== YOUR WRITING STYLE (MATCH THIS) ===
+{style_guidelines}""")
+
+        # Tone guidance
+        if tone_guidance:
+            sections.append(f"""=== TONE GUIDANCE ===
+{tone_guidance}""")
 
         # Calendar context
-        if context.calendar_context and (
-            context.calendar_context.upcoming_meetings
-            or context.calendar_context.recent_meetings
-        ):
-            cal_lines = []
-            if context.calendar_context.upcoming_meetings:
-                for m in context.calendar_context.upcoming_meetings[:3]:
-                    cal_lines.append(
-                        f"- UPCOMING: {m.get('summary', 'Meeting')} "
-                        f"on {m.get('start', 'TBD')}"
-                    )
-            if context.calendar_context.recent_meetings:
-                for m in context.calendar_context.recent_meetings[:2]:
-                    cal_lines.append(
-                        f"- RECENT: {m.get('summary', 'Meeting')} "
-                        f"on {m.get('start', 'TBD')}"
-                    )
-            sections.append(
-                "## Upcoming/recent meetings with this person\n"
-                + "\n".join(cal_lines)
+        if context.calendar_context and context.calendar_context.upcoming_meetings:
+            meetings = context.calendar_context.upcoming_meetings[:2]
+            meeting_lines = "\n".join(
+                f"- {m.get('summary', 'Meeting')} on {m.get('start', 'TBD')}" for m in meetings
             )
-        else:
-            sections.append(
-                "## Upcoming/recent meetings with this person\n"
-                "No calendar data available."
-            )
+            sections.append(f"""=== UPCOMING MEETINGS ===
+{meeting_lines}""")
 
         # CRM context
         if context.crm_context and context.crm_context.connected:
-            crm_lines = []
+            crm_info = []
             if context.crm_context.lead_stage:
-                crm_lines.append(f"Lead stage: {context.crm_context.lead_stage}")
-            if context.crm_context.account_status:
-                crm_lines.append(f"Account status: {context.crm_context.account_status}")
+                crm_info.append(f"Lead stage: {context.crm_context.lead_stage}")
             if context.crm_context.deal_value:
-                crm_lines.append(
-                    f"Deal value: ${context.crm_context.deal_value:,.0f}"
-                )
-            if context.crm_context.recent_activities:
-                for act in context.crm_context.recent_activities[:2]:
-                    crm_lines.append(f"- {act.get('description', str(act))}")
-            if crm_lines:
-                sections.append(
-                    "## Deal/pipeline context\n" + "\n".join(crm_lines)
-                )
-            else:
-                sections.append("## Deal/pipeline context\nNo CRM data.")
-        else:
-            sections.append("## Deal/pipeline context\nNo CRM data.")
+                crm_info.append(f"Deal value: ${context.crm_context.deal_value:,.0f}")
+            if crm_info:
+                sections.append("=== CRM STATUS ===\n" + "\n".join(crm_info))
 
-        # Corporate memory
-        if context.corporate_memory and context.corporate_memory.facts:
-            fact_lines = "\n".join(
-                f"- {f.get('fact', str(f))}"
-                for f in context.corporate_memory.facts[:5]
-            )
-            sections.append(f"## Relevant company knowledge\n{fact_lines}")
-        else:
-            sections.append(
-                "## Relevant company knowledge\n"
-                "No corporate memory for this company."
-            )
+        # User info and task
+        sections.append(f"""=== YOUR INFO ===
+Your name: {user_name}
 
-        # Special instructions from user (on-demand drafts)
-        if special_instructions:
-            sections.append(
-                f"## Special Instructions from User\n{special_instructions}"
-            )
+=== TASK ===
+Write a reply to this email. Match the writing style exactly.
 
-        # Recent draft feedback (learning loop)
-        if feedback_context and feedback_context.get("total", 0) > 0:
-            fb = feedback_context
-            fb_lines = [
-                "## Recent Feedback on Your Drafts",
-                f"- {fb.get('approved', 0)} drafts approved without changes",
-                f"- {fb.get('edited', 0)} drafts edited before sending",
-                f"- {fb.get('rejected', 0)} drafts dismissed or ignored",
-            ]
-            if fb.get("avg_edit_distance") is not None:
-                fb_lines.append(
-                    f"- Average similarity after edits: {fb['avg_edit_distance']:.0%}"
-                )
-            if fb.get("common_edit_pattern"):
-                fb_lines.append(
-                    f"- Common edit pattern: user typically {fb['common_edit_pattern']} your drafts"
-                )
-            fb_lines.append(
-                "Adjust your drafting to reduce the need for edits."
-            )
-            sections.append("\n".join(fb_lines))
-
-        # Strategic guardrails (expanded version)
-        sections.append(STRATEGIC_GUARDRAILS)
-
-        # Final instructions
-        consolidation_instruction = ""
-        if consolidated_from:
-            consolidation_instruction = (
-                f"\n6. Addresses ALL {len(consolidated_from) + 1} messages in this "
-                f"thread in a single cohesive reply — don't reply to each separately"
-            )
-
-        sections.append(f"""## Step 1: Extract Key Points (do this mentally before writing)
-Before writing the reply, identify every specific point, question, date,
-request, or commitment from the sender's email above. Your reply MUST
-address each one. Do not skip any.
-
-## Step 2: Write the Reply
-Write a reply that:
-1. Addresses EVERY specific point the sender raised — dates, requests, questions, proposals
-2. Sounds EXACTLY like {user_name} — same greeting, tone, length, signoff
-3. References specific details from the sender's email (names, dates, topics they mentioned)
-4. Is direct and action-oriented — include next steps, dates, or asks where appropriate
-5. Is ready to send with minimal editing
-6. Uses clean HTML formatting as described in the Email Formatting section{consolidation_instruction}
-
-Sign off as {user_name}.
-Output ONLY the HTML email body. No JSON wrapper. No markdown.
-Use <p> tags for paragraphs. Start with a greeting. End with a signoff.
-
-Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Best,<br>{user_name}</p>"}}""")
+Respond with JSON: {{"subject": "...", "body": "..."}}""")
 
         return "\n\n".join(sections)
-
-    async def _check_guardrails(
-        self,
-        draft_body: str,
-        context: "DraftContext",
-    ) -> list[str]:
-        """Check draft for potential unauthorized commitments.
-
-        Scans the generated draft body for indicators of pricing, timeline,
-        meeting, or other commitments that may not have been authorized.
-
-        Args:
-            draft_body: The generated email body text.
-            context: The draft context containing thread summary and other info.
-
-        Returns:
-            List of warning strings for any detected issues.
-        """
-        warnings: list[str] = []
-        body_lower = draft_body.lower()
-
-        # Check for pricing language
-        price_indicators = [
-            "$", "€", "£", "price", "pricing", "discount",
-            "% off", "per unit", "per seat", "cost", "annual fee",
-            "subscription", "license fee",
-        ]
-        if any(p in body_lower for p in price_indicators):
-            # Check if pricing was in the thread context
-            thread_summary = ""
-            if context.thread_context and context.thread_context.summary:
-                thread_summary = context.thread_context.summary.lower()
-
-            # Also check thread messages for pricing context
-            has_pricing_context = "price" in thread_summary or "cost" in thread_summary
-            if not has_pricing_context and context.thread_context and context.thread_context.messages:
-                for msg in context.thread_context.messages:
-                    if msg.body and ("price" in msg.body.lower() or "cost" in msg.body.lower()):
-                        has_pricing_context = True
-                        break
-
-            if not has_pricing_context:
-                warnings.append(
-                    "PRICING_COMMITMENT: Draft mentions pricing but no pricing context in thread"
-                )
-
-        # Check for timeline commitments
-        timeline_indicators = [
-            "by friday", "by monday", "next week", "by end of",
-            "within 24 hours", "by tomorrow", "i'll have it",
-            "will have it by", "delivered by", "complete by",
-            "finish by", "ready by",
-        ]
-        if any(t in body_lower for t in timeline_indicators):
-            warnings.append(
-                "TIMELINE_COMMITMENT: Draft includes specific timeline promise"
-            )
-
-        # Check for meeting acceptance
-        meeting_indicators = [
-            "see you at", "confirmed for", "i'll be there",
-            "meeting is set", "booked for", "accepted the meeting",
-            "looking forward to meeting on", "see you on",
-        ]
-        if any(m in body_lower for m in meeting_indicators):
-            warnings.append(
-                "MEETING_COMMITMENT: Draft appears to confirm a meeting"
-            )
-
-        # Check for product claims that aren't backed by context
-        capability_indicators = [
-            "our platform can", "we support", "our system provides",
-            "arria can", "the software includes",
-        ]
-        if any(c in body_lower for c in capability_indicators):
-            # Check if corporate memory has product info
-            has_product_context = False
-            if context.corporate_memory and context.corporate_memory.facts:
-                for fact in context.corporate_memory.facts:
-                    fact_str = str(fact.get("fact", "")).lower()
-                    if any(kw in fact_str for kw in ["product", "feature", "capability", "platform"]):
-                        has_product_context = True
-                        break
-            if not has_product_context:
-                warnings.append(
-                    "PRODUCT_CLAIM: Draft makes product capability claims without context verification"
-                )
-
-        return warnings
 
     # ------------------------------------------------------------------
     # Confidence Calculation
@@ -2048,143 +792,52 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
     def _calculate_confidence(
         self,
         context: DraftContext,
+        style_score: float,
     ) -> float:
-        """Calculate confidence level (0.0-1.0) from context richness.
+        """Calculate confidence level (0.0-1.0).
 
-        Confidence varies per-draft based on:
-        - Context richness (how many of 7 context sources are available)
-        - Known contact (has per-recipient writing profile)
-        - Thread depth (message count in conversation)
+        Confidence is based on:
+        - Context richness (number of sources used)
+        - Thread history depth
+        - Recipient research availability
+        - Relationship history depth
+        - Style match score
         """
-        available_sources = 0
-        if context.thread_context and context.thread_context.summary:
-            available_sources += 1
+        score = 0.5  # Base confidence
+
+        # Context richness
+        num_sources = len(context.sources_used)
+        if num_sources >= 5:
+            score += 0.15
+        elif num_sources >= 3:
+            score += 0.10
+        elif num_sources >= 1:
+            score += 0.05
+
+        # Thread history
+        if context.thread_context and context.thread_context.message_count > 0:
+            score += 0.10
+            if context.thread_context.message_count >= 3:
+                score += 0.05
+
+        # Recipient research
         if context.recipient_research:
-            available_sources += 1
-        if context.relationship_history and context.relationship_history.total_emails > 0:
-            available_sources += 1
-        if context.calendar_context and context.calendar_context.connected:
-            available_sources += 1
-        if context.crm_context and context.crm_context.connected:
-            available_sources += 1
-        if context.corporate_memory and context.corporate_memory.facts:
-            available_sources += 1
-        if context.recipient_style and context.recipient_style.exists:
-            available_sources += 1
+            if context.recipient_research.bio:
+                score += 0.05
+            if context.recipient_research.company_description:
+                score += 0.05
 
-        # Base 0.4 + up to 0.42 from context + up to 0.1 from known contact + 0.08 thread depth
-        base = 0.4
-        context_score = (available_sources / 7) * 0.42
-        known_contact = 0.1 if (context.recipient_style and context.recipient_style.exists) else 0.0
-        msg_count = context.thread_context.message_count if context.thread_context else 1
-        thread_depth = min(msg_count * 0.02, 0.08)
+        # Relationship history
+        if context.relationship_history:
+            if context.relationship_history.total_emails >= 5:
+                score += 0.10
+            elif context.relationship_history.total_emails >= 2:
+                score += 0.05
 
-        return round(min(base + context_score + known_contact + thread_depth, 1.0), 3)
+        # Style match contribution
+        score += 0.15 * style_score
 
-    # ------------------------------------------------------------------
-    # Cross-Thread Topic Clustering
-    # ------------------------------------------------------------------
-
-    async def _cluster_emails_by_topic(
-        self,
-        needs_reply: list[Any],
-        fyi: list[Any],
-    ) -> list[TopicCluster]:
-        """Cluster related emails across threads by business topic.
-
-        Uses LLM to identify emails that share a common business topic
-        even if they come from different senders / threads.
-
-        Args:
-            needs_reply: Emails categorised as NEEDS_REPLY.
-            fyi: Emails categorised as FYI.
-
-        Returns:
-            List of TopicCluster objects (only clusters with 2+ emails).
-        """
-        all_emails = list(needs_reply) + list(fyi)
-        if len(all_emails) < 2:
-            return []
-
-        # Cap at 30 emails (NEEDS_REPLY first, then FYI)
-        capped = all_emails[:30]
-
-        # Build email list for prompt
-        email_lines: list[str] = []
-        for idx, email in enumerate(capped):
-            sender = email.sender_name or email.sender_email
-            subject = (email.subject or "(no subject)")[:80]
-            cat = getattr(email, "category", "UNKNOWN")
-            email_lines.append(f"{idx}. [{cat}] {sender}: {subject}")
-
-        prompt = (
-            "You are an email intelligence analyst. Given the following list of emails, "
-            "identify groups of 2 or more emails that share a common business topic — "
-            "even if they come from different senders or threads.\n\n"
-            "Emails:\n" + "\n".join(email_lines) + "\n\n"
-            "Return ONLY a JSON array. Each element must have:\n"
-            '- "topic": short topic label (3-6 words)\n'
-            '- "email_indices": array of integer indices from the list above\n'
-            '- "connection": one sentence explaining how these emails relate\n\n'
-            "Rules:\n"
-            "- Only include clusters with 2+ emails\n"
-            "- An email may appear in multiple clusters\n"
-            "- If no clusters exist, return []\n"
-            "- Return raw JSON only — no markdown fences, no commentary\n"
-        )
-
-        try:
-            response = await self._llm.generate_response(
-                prompt,
-                task_type=TaskType.ANALYST_SUMMARIZE,
-                max_tokens=500,
-                temperature=0.0,
-            )
-
-            # Strip markdown fences if present
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1]
-            if text.endswith("```"):
-                text = text.rsplit("```", 1)[0]
-            text = text.strip()
-
-            raw_clusters = json.loads(text)
-            if not isinstance(raw_clusters, list):
-                return []
-
-            clusters: list[TopicCluster] = []
-            for item in raw_clusters:
-                indices = item.get("email_indices", [])
-                # Bounds-check indices
-                valid_indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(capped)]
-                if len(valid_indices) < 2:
-                    continue
-
-                emails_in_cluster = [capped[i] for i in valid_indices]
-                clusters.append(
-                    TopicCluster(
-                        topic=str(item.get("topic", "Related emails")),
-                        email_ids=[e.email_id for e in emails_in_cluster],
-                        senders=[e.sender_name or e.sender_email for e in emails_in_cluster],
-                        subjects=[e.subject or "(no subject)" for e in emails_in_cluster],
-                        connection=str(item.get("connection", "")),
-                    )
-                )
-
-            logger.info(
-                "[EMAIL_PIPELINE] Stage: topic_clustering | emails=%d | clusters=%d",
-                len(capped),
-                len(clusters),
-            )
-            return clusters
-
-        except json.JSONDecodeError as e:
-            logger.warning("[EMAIL_PIPELINE] Topic clustering JSON parse failed: %s", e)
-            return []
-        except Exception as e:
-            logger.warning("[EMAIL_PIPELINE] Topic clustering failed: %s", e)
-            return []
+        return max(0.0, min(1.0, score))
 
     # ------------------------------------------------------------------
     # ARIA Notes Generation
@@ -2197,259 +850,34 @@ Respond with JSON: {{"subject": "Re: ...", "body": "<p>Hi ...</p><p>...</p><p>Be
         style_score: float,
         confidence: float,
         is_learning_mode: bool = False,
-        lead_updates: list[dict] | None = None,
-        guardrail_warnings: list[str] | None = None,
-        confidence_tier: dict[str, Any] | None = None,
-        consolidated_from: list[dict[str, Any]] | None = None,
-        cross_references: list[TopicCluster] | None = None,
-    ) -> tuple[str, list[str]]:
+    ) -> str:
         """Generate internal notes explaining ARIA's reasoning.
 
-        These notes help the user understand why ARIA drafted what it did,
-        which context sources were used, and what was missing.
-
-        Returns:
-            tuple of (aria_notes string, context_sources list for metadata)
+        These notes help the user understand why ARIA drafted what it did.
         """
-        sender_name = email.sender_name or email.sender_email
-        context_sources: list[str] = []
-
-        # ------------------------------------------------------------------
-        # Collect specific context sources for conversational notes
-        # ------------------------------------------------------------------
-
-        # Thread messages
-        if context.thread_context and context.thread_context.messages:
-            msg_count = len(context.thread_context.messages)
-            if msg_count > 0:
-                context_sources.append(
-                    f"your last {msg_count} emails with {sender_name}"
-                )
-
-        # Calendar context
-        if context.calendar_context and context.calendar_context.connected:
-            upcoming = context.calendar_context.upcoming_meetings or []
-            if upcoming:
-                # Get the first upcoming meeting
-                meeting = upcoming[0]
-                meeting_date = meeting.get("start", "")
-                meeting_title = meeting.get("title", "meeting")
-                # Parse date for readable format
-                if meeting_date:
-                    try:
-                        dt = datetime.fromisoformat(meeting_date.replace("Z", "+00:00"))
-                        readable_date = dt.strftime("%A, %B %d")
-                        context_sources.append(
-                            f"your upcoming {meeting_title.lower()} with {sender_name} on {readable_date}"
-                        )
-                    except Exception:
-                        context_sources.append(
-                            f"your upcoming meeting with {sender_name}"
-                        )
-                else:
-                    context_sources.append(f"your upcoming meeting with {sender_name}")
-
-        # Recipient research
-        if context.recipient_research and (
-            context.recipient_research.sender_title
-            or context.recipient_research.bio
-        ):
-            title = context.recipient_research.sender_title
-            company = context.recipient_research.sender_company
-            if title and company:
-                context_sources.append(f"{sender_name}'s role as {title} at {company}")
-            elif title:
-                context_sources.append(f"{sender_name}'s role as {title}")
-            elif context.recipient_research.bio:
-                context_sources.append(f"background on {sender_name}")
-
-        # CRM context
-        if context.crm_context and context.crm_context.connected:
-            lead_stage = context.crm_context.lead_stage
-            deal_value = context.crm_context.deal_value
-            if lead_stage:
-                context_sources.append(f"the {lead_stage} stage in your CRM")
-            if deal_value:
-                context_sources.append(f"the ${deal_value:,.0f} deal value")
-
-        # Corporate memory
-        if context.corporate_memory and context.corporate_memory.facts:
-            fact_count = len(context.corporate_memory.facts)
-            context_sources.append(f"{fact_count} corporate memory facts")
-
-        # Relationship history
-        if context.relationship_history and context.relationship_history.total_emails > 0:
-            total = context.relationship_history.total_emails
-            context_sources.append(f"your {total}-email history with {sender_name}")
-
-        # ------------------------------------------------------------------
-        # Generate conversational notes using LLM
-        # ------------------------------------------------------------------
-
-        conversational_note = ""
-        if context_sources:
-            try:
-                prompt = f"""Generate a brief 1-2 sentence note explaining what context you used to draft a reply to {sender_name}. Be specific and conversational, like a colleague would explain. Do not use bullet points or lists.
-
-Example good notes:
-- "Referenced your last 3 emails with Sarah, your Moderna meeting next Thursday, and the deal stage in your pipeline."
-- "Used your conversation history with John and his role as VP of Sales at Acme."
-- "Based on your upcoming meeting and the Negotiation stage in CRM."
-
-Available context sources I actually used: {', '.join(context_sources)}
-
-Generate the note:"""
-
-                response = await self._llm.generate_response(
-                    prompt,
-                    task_type=TaskType.EMAIL_DRAFT,
-                    max_tokens=100,
-                    temperature=0.3,
-                )
-                conversational_note = response.strip()
-            except Exception as e:
-                logger.warning("ARIA_NOTES: LLM generation failed, using fallback: %s", e)
-                conversational_note = f"Used: {', '.join(context_sources[:3])}"
-
-        # ------------------------------------------------------------------
-        # Build full notes with all metadata
-        # ------------------------------------------------------------------
         notes: list[str] = []
 
-        # Add conversational note first if available
-        if conversational_note:
-            notes.append(conversational_note)
-
-        # Add confidence tier note (replaces the old learning mode note)
-        if confidence_tier:
-            tier = confidence_tier.get("tier", "UNKNOWN")
-            tier_note = confidence_tier.get("note", "")
-            notes.append(f"[Confidence: {tier}] {tier_note}")
-        elif is_learning_mode:
+        # Add learning mode note first if applicable
+        if is_learning_mode:
             notes.append(self._learning_mode.get_learning_mode_note())
 
-        # Add thread consolidation note
-        if consolidated_from:
-            total_msgs = len(consolidated_from) + 1
-            senders = {m["sender"] for m in consolidated_from}
-            sender_label = ", ".join(senders)
-            notes.append(
-                f"This reply addresses {total_msgs} messages from {sender_label} "
-                f"in the same thread"
-            )
+        # Context sources used
+        if context.sources_used:
+            notes.append(f"Context sources: {', '.join(context.sources_used)}")
 
-        # Add cross-thread connection notes
-        if cross_references:
-            for cluster in cross_references:
-                other_senders = [
-                    s for s in cluster.senders
-                    if s != (email.sender_name or email.sender_email)
-                ]
-                if other_senders:
-                    notes.append(
-                        f"Note: {', '.join(other_senders[:2])} also emailed about "
-                        f"this topic — {cluster.connection}"
-                    )
-
-        # Add guardrail warnings prominently at the top if present
-        if guardrail_warnings:
-            warning_prefix = "⚠️ GUARDRAIL ALERT"
-            for warning in guardrail_warnings:
-                # Extract the warning type for cleaner display
-                warning_type = warning.split(":")[0] if ":" in warning else warning
-                notes.append(f"{warning_prefix}: {warning_type}")
-
-        # Context sources available vs missing (keep for completeness)
-        available: list[str] = []
-        missing: list[str] = []
-
-        if context.thread_context and context.thread_context.summary:
-            msg_count = context.thread_context.message_count
-            available.append(f"thread ({msg_count} msgs)")
-        else:
-            missing.append("thread history")
-
-        if context.recipient_research and (
-            context.recipient_research.sender_title
-            or context.recipient_research.bio
-        ):
-            available.append("recipient research")
-        else:
-            missing.append("recipient research")
-
+        # Relationship context
         if context.relationship_history and context.relationship_history.total_emails > 0:
-            available.append(
-                f"relationship ({context.relationship_history.total_emails} emails)"
-            )
+            notes.append(f"Prior relationship: {context.relationship_history.total_emails} emails")
         else:
-            missing.append("relationship history")
+            notes.append("New contact - no prior relationship data")
 
-        if context.recipient_style and context.recipient_style.exists:
-            available.append("per-recipient style")
-        else:
-            missing.append("per-recipient style")
-
-        if context.calendar_context and context.calendar_context.connected:
-            available.append("calendar")
-        else:
-            missing.append("calendar")
-
-        if context.crm_context and context.crm_context.connected:
-            available.append("CRM")
-        else:
-            missing.append("CRM")
-
-        if context.corporate_memory and context.corporate_memory.facts:
-            available.append(f"corporate memory ({len(context.corporate_memory.facts)} facts)")
-        else:
-            missing.append("corporate memory")
-
-        if available:
-            notes.append(f"Used: {', '.join(available)}")
-        if missing:
-            notes.append(f"Missing: {', '.join(missing)}")
-
-        # Style match quality
-        if style_score >= 0.8:
-            notes.append(f"Style match: strong ({style_score:.0%})")
-        elif style_score >= 0.7:
-            notes.append(f"Style match: good ({style_score:.0%})")
-        else:
-            notes.append(f"Style match: LOW ({style_score:.0%}) — review recommended")
+        # Style warning
+        if style_score < 0.7:
+            notes.append(f"WARNING: Style match is low ({style_score:.2f}). Review recommended.")
 
         # Urgency flag
         if email.urgency == "URGENT":
-            notes.append("URGENT — review carefully before sending")
-
-        # Attachment notes
-        body = getattr(email, "body", "") or ""
-        if isinstance(body, dict):
-            body = body.get("content", "")
-        has_attachments = bool(
-            getattr(email, "hasAttachments", False)
-            or getattr(email, "attachments", None)
-        )
-        if has_attachments:
-            attachments = getattr(email, "attachments", None) or []
-            names = [a.get("name", "file") if isinstance(a, dict) else str(a) for a in attachments]
-            notes.append(
-                f"{sender_name} attached '{names[0]}' — I acknowledged it in the reply"
-            )
-
-        # Check if user should attach something
-        thread = ""
-        if context.thread_context and context.thread_context.summary:
-            thread = context.thread_context.summary.lower()
-        promise_phrases = [
-            "i'll send", "i will send", "i'll attach",
-            "will share the", "send you the", "i'll get you",
-            "i'll forward", "let me send you",
-        ]
-        if any(p in thread for p in promise_phrases):
-            notes.append(
-                "⚠️ You may need to attach a document before sending — "
-                "the thread suggests you promised to send something"
-            )
+            notes.append("URGENT: User should review carefully before sending.")
 
         # Confidence level
         confidence_label = (
@@ -2457,26 +885,7 @@ Generate the note:"""
         )
         notes.append(f"Confidence: {confidence_label} ({confidence:.2f})")
 
-        # Lead intelligence signals
-        if lead_updates:
-            companies = set()
-            signal_summaries: list[str] = []
-            for update in lead_updates:
-                company = update.get("company", "unknown")
-                companies.add(company)
-                signal = update.get("signal", {})
-                category = signal.get("category", "")
-                detail = signal.get("detail", "")
-                if category and detail:
-                    signal_summaries.append(f"{company}: {detail}")
-
-            if signal_summaries:
-                notes.append(
-                    f"Lead intel ({len(signal_summaries)} signals): "
-                    + "; ".join(signal_summaries[:3])
-                )
-
-        return " | ".join(notes), context_sources
+        return " | ".join(notes)
 
     # ------------------------------------------------------------------
     # Persistence
@@ -2498,9 +907,6 @@ Generate the note:"""
         urgency: str,
         learning_mode_draft: bool = False,
         processing_run_id: str | None = None,
-        confidence_tier: str | None = None,
-        auto_approve_at: str | None = None,
-        risk_level: str = "HIGH",
     ) -> str:
         """Save draft with all metadata to email_drafts table."""
         draft_id = str(uuid4())
@@ -2508,7 +914,7 @@ Generate the note:"""
         # Safety: only reference draft_context_id if the context was actually saved
         safe_context_id = context_id if context_id else None
 
-        insert_data: dict[str, Any] = {
+        insert_data = {
             "id": draft_id,
             "user_id": user_id,
             "recipient_email": recipient_email,
@@ -2523,15 +929,10 @@ Generate the note:"""
             "style_match_score": style_match_score,
             "confidence_level": confidence_level,
             "aria_notes": aria_notes,
-            "status": "pending_review",
+            "status": "draft",
             "learning_mode_draft": learning_mode_draft,
             "processing_run_id": processing_run_id,
-            "confidence_tier": confidence_tier or "LOW",
-            "risk_level": risk_level,
         }
-
-        if auto_approve_at is not None:
-            insert_data["auto_approve_at"] = auto_approve_at
 
         try:
             result = self._db.table("email_drafts").insert(insert_data).execute()
@@ -2571,25 +972,21 @@ Generate the note:"""
 
         return "there"
 
-    async def _cleanup_stale_runs(self, user_id: str, timeout_minutes: int = 30) -> None:
-        """Mark zombie processing runs stuck in 'running' as failed."""
+    async def _cleanup_stale_runs(self, user_id: str) -> None:
+        """Mark runs stuck in 'running' for >10min as failed."""
         try:
-            cutoff = (datetime.now(UTC) - timedelta(minutes=timeout_minutes)).isoformat()
-            result = self._db.table("email_processing_runs").update(
+            from datetime import timedelta
+
+            cutoff = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+            self._db.table("email_processing_runs").update(
                 {
                     "status": "failed",
                     "completed_at": datetime.now(UTC).isoformat(),
-                    "error_message": f"Timed out after {timeout_minutes} minutes",
+                    "error_message": "Orphaned: server restart or timeout",
                 }
             ).eq("user_id", user_id).eq("status", "running").lt(
                 "started_at", cutoff
             ).execute()
-            if result.data:
-                logger.warning(
-                    "ZOMBIE_CLEANUP: Marked %d stale runs as failed for user %s",
-                    len(result.data),
-                    user_id,
-                )
         except Exception as e:
             logger.warning("DRAFT_ENGINE: Failed to cleanup stale runs: %s", e)
 
@@ -2674,437 +1071,8 @@ Generate the note:"""
             )
 
     # ------------------------------------------------------------------
-    # Memory Delta — email intelligence facts
-    # ------------------------------------------------------------------
-
-    async def _store_email_intelligence_delta(
-        self,
-        user_id: str,
-        run_id: str,
-        scan_result: Any,
-        result: ProcessingRunResult,
-    ) -> None:
-        """Store email intelligence facts in memory_semantic for Memory Delta.
-
-        After a full inbox processing run, this records what ARIA learned:
-        - Contacts who emailed and need attention
-        - Drafts prepared with confidence levels
-        - Lead matches and business intelligence signals
-
-        These facts are retrievable via MemoryDeltaPresenter.generate_delta()
-        and displayed in the frontend via the MemoryDelta component.
-        """
-        if not scan_result.needs_reply and not result.drafts:
-            return
-
-        facts_to_insert: list[dict[str, Any]] = []
-
-        # 1. Facts from emails needing reply (contact awareness)
-        for email in scan_result.needs_reply:
-            sender = email.sender_name or email.sender_email
-            subject = (email.subject or "")[:60]
-            facts_to_insert.append({
-                "user_id": user_id,
-                "fact": f"{sender} sent an email requiring attention ({subject})",
-                "confidence": 0.90 if email.category == "NEEDS_REPLY" else 0.70,
-                "source": "email_intelligence",
-                "metadata": {
-                    "category": "contact",
-                    "email_processing_run_id": run_id,
-                    "email_intelligence": True,
-                    "email_id": email.email_id,
-                },
-            })
-
-        # 2. Facts from generated drafts
-        for draft in result.drafts:
-            if not draft.success:
-                continue
-            recipient = draft.recipient_name or draft.recipient_email
-            facts_to_insert.append({
-                "user_id": user_id,
-                "fact": f"Draft reply prepared for {recipient}: {draft.subject[:60]}",
-                "confidence": draft.confidence_level,
-                "source": "email_intelligence",
-                "metadata": {
-                    "category": "contact",
-                    "email_processing_run_id": run_id,
-                    "email_intelligence": True,
-                    "draft_id": draft.draft_id,
-                },
-            })
-
-            # 3. Lead intelligence facts from each draft
-            for lead_update in draft.lead_updates:
-                match_confidence = lead_update.get("match_confidence", 0.70)
-                company = lead_update.get("company", "Unknown")
-                signal = lead_update.get("signal", {})
-                signal_detail = signal.get("detail", "")
-
-                fact_text = (
-                    f"Lead match: {company} — {signal_detail}"
-                    if signal_detail
-                    else f"Email activity detected from lead: {company}"
-                )
-
-                facts_to_insert.append({
-                    "user_id": user_id,
-                    "fact": fact_text,
-                    "confidence": match_confidence,
-                    "source": "email_intelligence",
-                    "metadata": {
-                        "category": "active_deal",
-                        "email_processing_run_id": run_id,
-                        "email_intelligence": True,
-                        "lead_id": lead_update.get("lead_id"),
-                        "signal_category": signal.get("category"),
-                    },
-                })
-
-        # 4. Cross-thread connection facts
-        for cluster in result.cross_references:
-            facts_to_insert.append({
-                "user_id": user_id,
-                "fact": (
-                    f"Connected: {' and '.join(cluster.subjects[:2])} "
-                    f"both relate to {cluster.topic}"
-                ),
-                "confidence": 0.70,
-                "source": "cross_email_analysis",
-                "metadata": {
-                    "category": "cross_reference",
-                    "email_processing_run_id": run_id,
-                    "email_intelligence": True,
-                    "email_ids": cluster.email_ids,
-                },
-            })
-
-        if not facts_to_insert:
-            return
-
-        # Batch-insert all facts into memory_semantic
-        self._db.table("memory_semantic").insert(facts_to_insert).execute()
-
-        logger.info(
-            "[EMAIL_PIPELINE] Stage: memory_delta_stored | run_id=%s | "
-            "facts_stored=%d | contacts=%d | drafts=%d | lead_signals=%d | cross_refs=%d",
-            run_id,
-            len(facts_to_insert),
-            len(scan_result.needs_reply),
-            sum(1 for d in result.drafts if d.success),
-            sum(len(d.lead_updates) for d in result.drafts),
-            len(result.cross_references),
-        )
-
-    # ------------------------------------------------------------------
     # Deduplication Methods
     # ------------------------------------------------------------------
-
-    async def _get_email_integration(
-        self, user_id: str
-    ) -> tuple[str | None, str | None, str | None]:
-        """Get the email provider, connection_id, and integration row ID for a user.
-
-        Prefers Outlook, falls back to Gmail.
-
-        Args:
-            user_id: The user ID.
-
-        Returns:
-            Tuple of (provider, connection_id, integration_id) or (None, None, None).
-        """
-        try:
-            result = (
-                self._db.table("user_integrations")
-                .select("id, integration_type, composio_connection_id")
-                .eq("user_id", user_id)
-                .eq("integration_type", "outlook")
-                .eq("status", "active")
-                .limit(1)
-                .execute()
-            )
-
-            if not result.data:
-                result = (
-                    self._db.table("user_integrations")
-                    .select("id, integration_type, composio_connection_id")
-                    .eq("user_id", user_id)
-                    .eq("integration_type", "gmail")
-                    .eq("status", "active")
-                    .limit(1)
-                    .execute()
-                )
-
-            if result and result.data:
-                integration = result.data[0]
-                return (
-                    integration.get("integration_type"),
-                    integration.get("composio_connection_id"),
-                    integration.get("id"),
-                )
-
-            logger.warning("DRAFT_ENGINE: No active email integration for user %s", user_id)
-            return None, None, None
-        except Exception:
-            return None, None, None
-
-    async def _fetch_sent_thread_ids(
-        self,
-        user_id: str,
-        since_hours: int = 24,
-    ) -> set[str]:
-        """Fetch thread IDs from the user's sent messages.
-
-        Makes a single Composio API call to list messages sent by the user
-        in the time window, then extracts thread/conversation IDs into a set
-        for O(1) lookup during the main processing loop.
-
-        For Outlook, uses OUTLOOK_LIST_MESSAGES with a from-address filter
-        (OUTLOOK_LIST_MAIL_FOLDER_MESSAGES does not exist in Composio).
-
-        Args:
-            user_id: The user whose sent messages to check.
-            since_hours: How far back to look.
-
-        Returns:
-            Set of thread IDs found in sent messages.
-        """
-        try:
-            provider, connection_id, integration_id = await self._get_email_integration(user_id)
-            if not provider or not connection_id:
-                return set()
-
-            from src.integrations.composio_client import execute_with_refresh_sync
-            from src.integrations.oauth import get_oauth_client
-
-            oauth_client = get_oauth_client()
-            since_date = (datetime.now(UTC) - timedelta(hours=since_hours)).isoformat()
-
-            if provider == "outlook":
-                # Get user's email address for the from-address filter
-                user_email = await self._get_user_email_address(user_id, provider)
-                if not user_email:
-                    logger.warning(
-                        "DRAFT_ENGINE: No user email found for sent-folder query, "
-                        "Tier 1 already-replied check will be skipped for user %s",
-                        user_id,
-                    )
-                    return set()
-
-                # Use OUTLOOK_LIST_MESSAGES with from-address filter
-                # (replaces non-existent OUTLOOK_LIST_MAIL_FOLDER_MESSAGES)
-                safe_email = user_email.replace("'", "''")
-                response = execute_with_refresh_sync(
-                    user_id=user_id,
-                    integration_id=integration_id or "",
-                    connection_id=connection_id,
-                    integration_type=provider,
-                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
-                    params={
-                        "$filter": (
-                            f"from/emailAddress/address eq '{safe_email}' "
-                            f"and sentDateTime ge {since_date}"
-                        ),
-                        "$top": 200,
-                        "$orderby": "sentDateTime desc",
-                        "$select": "conversationId",
-                    },
-                    oauth_client=oauth_client,
-                )
-                if response.get("successful") and response.get("data"):
-                    messages = response["data"].get("value", [])
-                    ids = {
-                        msg.get("conversationId")
-                        for msg in messages
-                        if msg.get("conversationId")
-                    }
-                    logger.info(
-                        "DRAFT_ENGINE: Fetched %d sent thread IDs for user %s (Outlook)",
-                        len(ids),
-                        user_id,
-                    )
-                    return ids
-                else:
-                    logger.warning(
-                        "DRAFT_ENGINE: Outlook sent-message query failed: successful=%s error=%s",
-                        response.get("successful"),
-                        response.get("error"),
-                    )
-            else:
-                response = execute_with_refresh_sync(
-                    user_id=user_id,
-                    integration_id=integration_id or "",
-                    connection_id=connection_id,
-                    integration_type=provider,
-                    action="GMAIL_FETCH_EMAILS",
-                    params={
-                        "label": "SENT",
-                        "max_results": 200,
-                    },
-                    oauth_client=oauth_client,
-                )
-                if response.get("successful") and response.get("data"):
-                    messages = response["data"].get("emails", [])
-                    ids = {
-                        msg.get("thread_id")
-                        for msg in messages
-                        if msg.get("thread_id")
-                    }
-                    logger.info(
-                        "DRAFT_ENGINE: Fetched %d sent thread IDs for user %s (Gmail)",
-                        len(ids),
-                        user_id,
-                    )
-                    return ids
-
-            return set()
-
-        except Exception as e:
-            logger.warning(
-                "DRAFT_ENGINE: Failed to fetch sent thread IDs for user %s: %s",
-                user_id,
-                e,
-            )
-            return set()
-
-    async def _user_already_replied(
-        self,
-        user_id: str,
-        thread_id: str,
-        sent_thread_ids: set[str],
-    ) -> bool:
-        """Check if the user already replied to this thread.
-
-        Two-tier check:
-        1. Fast: thread_id in pre-fetched sent folder thread IDs
-        2. Fallback: email_drafts has an approved/edited draft for this thread
-
-        Args:
-            user_id: The user's ID.
-            thread_id: The email thread/conversation ID.
-            sent_thread_ids: Pre-fetched set of thread IDs from sent folder.
-
-        Returns:
-            True if user already replied, False otherwise.
-        """
-        if not thread_id:
-            return False
-
-        # Tier 1: Check pre-fetched sent folder thread IDs
-        if thread_id in sent_thread_ids:
-            logger.info(
-                "ALREADY_REPLIED_TIER1_SENT_FOLDER: thread_id=%s",
-                thread_id,
-            )
-            return True
-
-        # Tier 2: Check email_drafts for drafts the user sent via ARIA
-        try:
-            result = (
-                self._db.table("email_drafts")
-                .select("id")
-                .eq("user_id", user_id)
-                .eq("thread_id", thread_id)
-                .in_("user_action", ["approved", "edited"])
-                .eq("status", "sent")
-                .limit(1)
-                .execute()
-            )
-            if result.data:
-                logger.info(
-                    "ALREADY_REPLIED_TIER2_DB_DRAFT: thread_id=%s draft_id=%s",
-                    thread_id,
-                    result.data[0].get("id"),
-                )
-                return True
-        except Exception as e:
-            logger.warning(
-                "DRAFT_ENGINE: DB check for already-replied failed for thread %s: %s",
-                thread_id,
-                e,
-            )
-
-        return False
-
-    async def _get_user_email_address(
-        self, user_id: str, provider: str,
-    ) -> str:
-        """Get the user's email address from their integration record.
-
-        Args:
-            user_id: The user ID.
-            provider: The email provider (outlook or gmail).
-
-        Returns:
-            The user's email address, or empty string if not found.
-        """
-        try:
-            result = (
-                self._db.table("user_integrations")
-                .select("account_email")
-                .eq("user_id", user_id)
-                .eq("integration_type", provider)
-                .eq("status", "active")
-                .limit(1)
-                .execute()
-            )
-            if result.data:
-                return result.data[0].get("account_email", "") or ""
-        except Exception as e:
-            logger.warning(
-                "DRAFT_ENGINE: Failed to get user email for %s: %s",
-                user_id,
-                e,
-            )
-        return ""
-
-    def _user_replied_in_thread(
-        self,
-        thread_messages: list,
-    ) -> bool:
-        """Check if the user already replied by examining thread messages.
-
-        Uses a simple heuristic: if the most recent message in the
-        chronologically-ordered thread is from the user, they have
-        already replied and no draft is needed.
-
-        Also checks if ANY user message appears among the last 3 messages
-        to catch cases where a quick automated notification arrived after
-        the user's reply.
-
-        Args:
-            thread_messages: List of ThreadMessage objects (chronological order).
-
-        Returns:
-            True if thread evidence shows the user already replied.
-        """
-        if not thread_messages:
-            return False
-
-        # Primary: last message is from user → they replied
-        if thread_messages[-1].is_from_user:
-            logger.info(
-                "ALREADY_REPLIED_TIER3_THREAD: Last message in thread is from user "
-                "(sender=%s, timestamp=%s)",
-                thread_messages[-1].sender_email,
-                thread_messages[-1].timestamp,
-            )
-            return True
-
-        # Secondary: check if user sent any of the last 3 messages
-        # (handles case where an auto-reply or notification landed after user's reply)
-        recent = thread_messages[-3:]
-        for msg in recent:
-            if msg.is_from_user:
-                logger.info(
-                    "ALREADY_REPLIED_TIER3_THREAD: User message found in recent "
-                    "thread messages (sender=%s, timestamp=%s)",
-                    msg.sender_email,
-                    msg.timestamp,
-                )
-                return True
-
-        return False
 
     async def _check_existing_draft(
         self,
@@ -3115,8 +1083,7 @@ Generate the note:"""
         """Check if a non-rejected draft already exists for this thread or emails.
 
         Checks across ALL processing runs (not just the current one) by matching
-        on thread_id OR original_email_id.  Finds any draft regardless of status,
-        excluding only explicitly rejected drafts.  Uses limit(1) instead of
+        on thread_id OR original_email_id.  Uses limit(1) instead of
         maybe_single() so that pre-existing duplicates don't throw and
         snowball into more duplicates.
 
@@ -3141,8 +1108,8 @@ Generate the note:"""
                 self._db.table("email_drafts")
                 .select("id")
                 .eq("user_id", user_id)
-                .neq("user_action", "rejected")
-                .neq("status", "cancelled")
+                .in_("status", ["draft", "saved_to_client"])
+                .is_("user_action", "null")
                 .or_(or_filter)
                 .limit(1)
                 .execute()
@@ -3265,7 +1232,7 @@ Generate the note:"""
             reason: The deferral reason ('active_conversation', etc.).
 
         Returns:
-            The ID of the deferred draft record (existing or new).
+            The ID of the deferred draft record.
         """
         from datetime import timedelta
 
@@ -3273,31 +1240,19 @@ Generate the note:"""
         deferred_until = datetime.now(UTC) + timedelta(minutes=30)
 
         try:
-            # Upsert on (user_id, thread_id) to prevent duplicate rows.
-            # If a pending deferred draft already exists for this thread,
-            # update it with the latest email info instead of inserting a new row.
-            result = (
-                self._db.table("deferred_email_drafts")
-                .upsert(
-                    {
-                        "id": deferred_id,
-                        "user_id": user_id,
-                        "thread_id": thread_id,
-                        "latest_email_id": email.email_id,
-                        "subject": email.subject,
-                        "sender_email": email.sender_email,
-                        "deferred_until": deferred_until.isoformat(),
-                        "reason": reason,
-                        "status": "pending",
-                    },
-                    on_conflict="user_id,thread_id",
-                )
-                .execute()
-            )
-
-            # Return the actual ID (existing row keeps its original ID on conflict)
-            if result.data:
-                deferred_id = result.data[0].get("id", deferred_id)
+            self._db.table("deferred_email_drafts").insert(
+                {
+                    "id": deferred_id,
+                    "user_id": user_id,
+                    "thread_id": thread_id,
+                    "latest_email_id": email.email_id,
+                    "subject": email.subject,
+                    "sender_email": email.sender_email,
+                    "deferred_until": deferred_until.isoformat(),
+                    "reason": reason,
+                    "status": "pending",
+                }
+            ).execute()
 
             logger.info(
                 "DRAFT_ENGINE: Deferred thread %s until %s (reason: %s)",
@@ -3311,7 +1266,6 @@ Generate the note:"""
                 "DRAFT_ENGINE: Failed to defer draft for thread %s: %s",
                 thread_id,
                 e,
-                exc_info=True,
             )
 
         return deferred_id
@@ -3356,144 +1310,6 @@ Generate the note:"""
                 thread_id,
                 e,
             )
-
-    # ------------------------------------------------------------------
-    # Draft Staleness Detection
-    # ------------------------------------------------------------------
-
-    async def check_draft_staleness(self, user_id: str) -> dict[str, int]:
-        """Check existing drafts for staleness — thread may have evolved.
-
-        A draft is considered stale if:
-        1. It's older than 6 hours
-        2. It's still in 'pending' user_action state
-        3. The thread has new messages since the draft was created
-
-        When stale, marks the draft with is_stale=True and adds a warning
-        to aria_notes so the user knows to review before sending.
-
-        Args:
-            user_id: The user whose drafts to check.
-
-        Returns:
-            Dict with stats: {'checked': N, 'stale': M}
-        """
-        stats = {"checked": 0, "stale": 0}
-
-        try:
-            # Get all pending drafts older than 6 hours
-            cutoff = (datetime.now(UTC) - timedelta(hours=6)).isoformat()
-
-            result = (
-                self._db.table("email_drafts")
-                .select("id, thread_id, created_at, aria_notes")
-                .eq("user_id", user_id)
-                .eq("status", "draft")
-                .eq("user_action", "pending")
-                .lt("created_at", cutoff)
-                .execute()
-            )
-
-            drafts = result.data or []
-            stats["checked"] = len(drafts)
-
-            if not drafts:
-                logger.debug(
-                    "STALE_CHECK: No pending drafts older than 6 hours for user %s",
-                    user_id,
-                )
-                return stats
-
-            logger.info(
-                "STALE_CHECK: Checking %d drafts for staleness (user %s)",
-                len(drafts),
-                user_id,
-            )
-
-            for draft in drafts:
-                draft_id = draft["id"]
-                thread_id = draft.get("thread_id")
-                created_at = draft.get("created_at", "")
-                existing_notes = draft.get("aria_notes", "") or ""
-
-                if not thread_id:
-                    # Can't check staleness without thread_id
-                    continue
-
-                # Check if new emails arrived in this thread since draft was created
-                try:
-                    new_in_thread = (
-                        self._db.table("email_scan_log")
-                        .select("id, sender_email, subject, scanned_at")
-                        .eq("user_id", user_id)
-                        .eq("thread_id", thread_id)
-                        .gt("scanned_at", created_at)
-                        .order("scanned_at", desc=True)
-                        .limit(10)
-                        .execute()
-                    )
-
-                    if new_in_thread.data:
-                        new_count = len(new_in_thread.data)
-                        latest_sender = new_in_thread.data[0].get("sender_email", "unknown")
-                        latest_subject = new_in_thread.data[0].get("subject", "")[:50]
-
-                        # Build stale reason with details
-                        stale_reason = (
-                            f"{new_count} new message(s) in thread since draft was created. "
-                            f"Latest from {latest_sender}: '{latest_subject}...'"
-                        )
-
-                        # Append staleness warning to aria_notes
-                        staleness_warning = (
-                            f"\n\n⚠️ STALE DRAFT: {new_count} new message(s) arrived after "
-                            f"I drafted this. Review the latest thread messages before sending."
-                        )
-                        updated_notes = existing_notes + staleness_warning
-
-                        # Mark as stale
-                        self._db.table("email_drafts").update(
-                            {
-                                "is_stale": True,
-                                "stale_reason": stale_reason,
-                                "aria_notes": updated_notes,
-                            }
-                        ).eq("id", draft_id).execute()
-
-                        stats["stale"] += 1
-                        logger.info(
-                            "STALE_DRAFT: Marked draft %s as stale — %d new messages in thread %s",
-                            draft_id,
-                            new_count,
-                            thread_id[:16] if thread_id else "?",
-                        )
-
-                except Exception as e:
-                    logger.warning(
-                        "STALE_CHECK: Failed to check thread %s for draft %s: %s",
-                        thread_id,
-                        draft_id,
-                        e,
-                    )
-                    continue
-
-            if stats["stale"] > 0:
-                logger.info(
-                    "STALE_CHECK: Complete for user %s — checked %d, marked %d as stale",
-                    user_id,
-                    stats["checked"],
-                    stats["stale"],
-                )
-
-        except Exception as e:
-            logger.error(
-                "STALE_CHECK: Failed to check draft staleness for user %s: %s",
-                user_id,
-                e,
-                exc_info=True,
-            )
-
-        return stats
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ describe('ApprovalCard', () => {
     item_type: 'task',
     title: 'Approve CRM Sync',
     description: 'Allow ARIA to sync with Salesforce.',
+    urgency: 'no_rush' as const,
   };
 
   it('renders title and description', () => {

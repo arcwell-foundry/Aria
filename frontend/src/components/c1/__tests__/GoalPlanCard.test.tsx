@@ -62,6 +62,7 @@ describe('GoalPlanCard', () => {
         goal_name="Minimal"
         goal_id="id-1"
         description="Desc"
+        steps={[]}
       />
     );
     expect(screen.getByText('Minimal')).toBeInTheDocument();

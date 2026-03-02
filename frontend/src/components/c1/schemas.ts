@@ -22,7 +22,7 @@ export const GoalPlanCardSchema = z.object({
   goal_name: z.string().describe("Name of the goal or plan"),
   goal_id: z.string().describe("Unique identifier for the goal"),
   description: z.string().describe("Brief description of what will be accomplished"),
-  steps: z.array(StepSchema).describe("Ordered list of execution steps"),
+  steps: z.array(StepSchema).optional().default([]).describe("Ordered list of execution steps"),
   estimated_duration: z.string().optional().describe("How long the plan will take"),
   ooda_phase: z.enum(["observe", "orient", "decide", "act"]).optional(),
 }).describe(
@@ -89,7 +89,7 @@ export const ApprovalCardSchema = z.object({
   title: z.string().describe("What needs approval"),
   description: z.string().describe("Context for the approval decision"),
   impact: z.string().optional().describe("What happens if approved"),
-  urgency: z.enum(["immediate", "today", "this_week", "no_rush"]).default("no_rush"),
+  urgency: z.enum(["immediate", "today", "this_week", "no_rush"]).optional().default("no_rush"),
 }).describe(
   "Renders a generic approval card for any action that requires user sign-off. Shows title, context, impact assessment, urgency indicator, and Approve/Reject buttons. Use this for any pending action, recommendation, or configuration change that ARIA needs the user to authorize."
 );

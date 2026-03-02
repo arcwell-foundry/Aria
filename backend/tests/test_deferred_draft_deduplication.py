@@ -162,7 +162,8 @@ class TestCheckExistingDraft:
         # Every chained method returns the same mock, ending with .execute()
         mock.select.return_value = mock
         mock.eq.return_value = mock
-        mock.neq.return_value = mock
+        mock.in_.return_value = mock
+        mock.is_.return_value = mock
         mock.or_.return_value = mock
         mock.limit.return_value = mock
         mock.execute.return_value = execute_result
@@ -415,8 +416,8 @@ class TestDeferDraft:
     """Tests for _defer_draft method."""
 
     @pytest.mark.asyncio
-    async def test_creates_deferred_record_via_upsert(self):
-        """Creates a deferred draft record using upsert with on_conflict."""
+    async def test_creates_deferred_record(self):
+        """Creates a deferred draft record with correct fields."""
         engine = AutonomousDraftEngine()
 
         email = MockEmailCategory(
@@ -426,10 +427,11 @@ class TestDeferDraft:
             subject="Test Subject",
         )
 
-        mock_upsert_result = MagicMock(data=[{"id": "deferred-123"}])
+        mock_execute = AsyncMock()
+        mock_execute.return_value = MagicMock(data=[{"id": "deferred-123"}])
 
         mock_table = MagicMock()
-        mock_table.upsert.return_value.execute.return_value = mock_upsert_result
+        mock_table.insert.return_value.execute = mock_execute
 
         original_table = engine._db.table
         engine._db.table = MagicMock(return_value=mock_table)
@@ -438,47 +440,14 @@ class TestDeferDraft:
             deferred_id = await engine._defer_draft(
                 "user-123", "thread-123", email, "active_conversation"
             )
-            assert deferred_id == "deferred-123"
-            mock_table.upsert.assert_called_once()
-            # Verify on_conflict parameter targets (user_id, thread_id)
-            call_kwargs = mock_table.upsert.call_args
-            assert call_kwargs[1]["on_conflict"] == "user_id,thread_id"
-        finally:
-            engine._db.table = original_table
-
-    @pytest.mark.asyncio
-    async def test_upsert_updates_existing_row(self):
-        """Upsert returns existing row ID when a deferred draft already exists."""
-        engine = AutonomousDraftEngine()
-
-        email = MockEmailCategory(
-            "email-456",
-            thread_id="thread-123",
-            sender_email="test@example.com",
-            subject="Updated Subject",
-        )
-
-        # Simulate upsert returning the pre-existing row's ID
-        mock_upsert_result = MagicMock(data=[{"id": "original-deferred-id"}])
-
-        mock_table = MagicMock()
-        mock_table.upsert.return_value.execute.return_value = mock_upsert_result
-
-        original_table = engine._db.table
-        engine._db.table = MagicMock(return_value=mock_table)
-
-        try:
-            deferred_id = await engine._defer_draft(
-                "user-123", "thread-123", email, "active_conversation"
-            )
-            # Should return the existing row's ID, not the newly generated one
-            assert deferred_id == "original-deferred-id"
+            assert deferred_id is not None
+            assert mock_execute.called
         finally:
             engine._db.table = original_table
 
     @pytest.mark.asyncio
     async def test_returns_id_even_on_error(self):
-        """Returns generated ID even if database upsert fails."""
+        """Returns generated ID even if database insert fails."""
         engine = AutonomousDraftEngine()
 
         email = MockEmailCategory("email-123", thread_id="thread-123")
