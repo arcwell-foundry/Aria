@@ -2779,12 +2779,16 @@ class GoalExecutionService:
 
                 tasks: list[dict[str, Any]] = []
                 for i, step in enumerate(template):
+                    agent_val = step.get("agent", "analyst")
+                    deps_val = step.get("depends_on", [])
                     tasks.append(
                         {
                             "title": step.get("title", f"Step {i + 1}"),
                             "description": step.get("description", ""),
-                            "agent": step.get("agent", "analyst"),
-                            "dependencies": step.get("depends_on", []),
+                            "agent": agent_val,
+                            "agent_type": agent_val,
+                            "dependencies": deps_val,
+                            "depends_on": deps_val,
                             "tools_needed": step.get("tools_needed", []),
                             "auth_required": step.get("auth_required", []),
                             "risk_level": step.get("risk_level", "LOW"),
@@ -2865,12 +2869,16 @@ class GoalExecutionService:
                 )
                 tasks: list[dict[str, Any]] = []
                 for i, step in enumerate(matching.steps):
+                    agent_val = step.get("agent_type", step.get("agent", "analyst"))
+                    deps_val = step.get("depends_on", step.get("dependencies", []))
                     tasks.append(
                         {
                             "title": step.get("title", f"Step {i + 1}"),
                             "description": step.get("description", ""),
-                            "agent": step.get("agent_type", "analyst"),
-                            "dependencies": step.get("depends_on", []),
+                            "agent": agent_val,
+                            "agent_type": agent_val,
+                            "dependencies": deps_val,
+                            "depends_on": deps_val,
                             "tools_needed": step.get("tools_needed", []),
                             "auth_required": step.get("auth_required", []),
                             "risk_level": step.get("risk_level", "LOW"),
@@ -3083,12 +3091,15 @@ class GoalExecutionService:
             logger.warning(
                 "Failed to parse plan JSON for goal %s, using fallback", goal_id
             )
+            fallback_agent = goal.get("config", {}).get("agent_type", "analyst")
             plan_data = {
                 "tasks": [
                     {
                         "title": goal.get("title", "Execute goal"),
-                        "agent": goal.get("config", {}).get("agent_type", "analyst"),
+                        "agent": fallback_agent,
+                        "agent_type": fallback_agent,
                         "dependencies": [],
+                        "depends_on": [],
                         "tools_needed": [],
                         "auth_required": [],
                         "risk_level": "LOW",
@@ -3102,6 +3113,14 @@ class GoalExecutionService:
             }
 
         tasks_json = plan_data.get("tasks", [])
+        # Normalize keys: LLM returns "agent" / "dependencies" but
+        # execution code expects "agent_type" / "depends_on".
+        # Add canonical keys so both old and new code works.
+        for t in tasks_json:
+            if "agent" in t and "agent_type" not in t:
+                t["agent_type"] = t["agent"]
+            if "dependencies" in t and "depends_on" not in t:
+                t["depends_on"] = t["dependencies"]
         missing_integrations = plan_data.get("missing_integrations", [])
         approval_points = plan_data.get("approval_points", [])
         estimated_total = plan_data.get(
@@ -3467,6 +3486,16 @@ class GoalExecutionService:
             if plan_result.data:
                 tasks_raw = plan_result.data.get("tasks", "[]")
                 tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
+                # Normalize task dicts: plan_goal() stores "agent" and
+                # "dependencies" but execution code expects "agent_type"
+                # and "depends_on".  Canonicalize here so all downstream
+                # code (dependency layers, execute_task_with_events,
+                # handoff logic) works regardless of which key was stored.
+                for t in tasks:
+                    if "agent" in t and "agent_type" not in t:
+                        t["agent_type"] = t["agent"]
+                    if "dependencies" in t and "depends_on" not in t:
+                        t["depends_on"] = t["dependencies"]
                 # Extract execution_mode from stored plan or plan JSON
                 execution_mode = plan_result.data.get("execution_mode", "sequential")
                 if not execution_mode or execution_mode == "sequential":
