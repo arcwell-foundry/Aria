@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PRICE_ID: str = ""  # Default price ID for annual subscription
 
+    # Thesys C1 Generative UI
+    THESYS_ENABLED: bool = False
+    THESYS_API_KEY: SecretStr = SecretStr("")
+    THESYS_BASE_URL: str = "https://api.thesys.dev/v1/visualize"
+    THESYS_MODEL: str = "c1/anthropic/claude-sonnet-4/v-20251230"
+    THESYS_TIMEOUT: float = 30.0
+
     # Resend Email Configuration (US-934)
     RESEND_API_KEY: SecretStr = SecretStr("")
     FROM_EMAIL: str = "ARIA <aria@luminone.com>"
@@ -166,6 +173,11 @@ class Settings(BaseSettings):
     def exa_configured(self) -> bool:
         """Check if Exa API is configured for web enrichment."""
         return bool(self.EXA_API_KEY)
+
+    @property
+    def thesys_configured(self) -> bool:
+        """Check if Thesys C1 is enabled and API key is set."""
+        return self.THESYS_ENABLED and bool(self.THESYS_API_KEY.get_secret_value())
 
     async def check_exa_credits(self) -> tuple[bool, str]:
         """Check if Exa API has available credits.
