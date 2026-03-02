@@ -353,6 +353,9 @@ async def _handle_user_message(
     thinking = ThinkingEvent()
     await websocket.send_json(thinking.to_ws_dict())
 
+    # Track whether stream_complete was sent so the finally block can guarantee it
+    _stream_complete_sent = False
+
     try:
         service = ChatService()
         memory_types = DEFAULT_MEMORY_TYPES
@@ -750,6 +753,7 @@ async def _handle_user_message(
             )
 
         # Signal stream complete with metadata (no duplicate content)
+        _stream_complete_sent = True
         await websocket.send_json(
             {
                 "type": "aria.stream_complete",
@@ -795,16 +799,37 @@ async def _handle_user_message(
 
     except Exception as chat_err:
         logger.exception("WebSocket chat error: %s", chat_err)
-        await websocket.send_json(
-            {
-                "type": "aria.message",
-                "message": "I encountered an error processing your message. Please try again.",
-                "rich_content": [],
-                "ui_commands": [],
-                "suggestions": ["Try again", "What can you help with?"],
-                "conversation_id": conversation_id,
-            }
-        )
+        try:
+            await websocket.send_json(
+                {
+                    "type": "aria.message",
+                    "message": "I encountered an error processing your message. Please try again.",
+                    "rich_content": [],
+                    "ui_commands": [],
+                    "suggestions": ["Try again", "What can you help with?"],
+                    "conversation_id": conversation_id,
+                }
+            )
+        except Exception:
+            logger.debug("Failed to send error message to WebSocket", exc_info=True)
+    finally:
+        # GUARANTEE the frontend receives a stream_complete event so it
+        # never hangs waiting for the stream to finish.
+        if not _stream_complete_sent:
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "aria.stream_complete",
+                        "payload": {
+                            "conversation_id": conversation_id,
+                            "rich_content": [],
+                            "ui_commands": [],
+                            "suggestions": ["Try again", "What can you help with?"],
+                        },
+                    }
+                )
+            except Exception:
+                logger.debug("Failed to send fallback stream_complete", exc_info=True)
 
 
 async def _maybe_deliver_first_conversation(user_id: str) -> bool:

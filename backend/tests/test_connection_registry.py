@@ -207,3 +207,39 @@ class TestConnectionRegistry:
 
             # Cache should be invalidated (key removed)
             assert "u1:gmail" not in registry._cache
+
+    async def test_get_all_connections_queries_user_connections_with_status(self) -> None:
+        """get_all_connections queries user_connections table with status='active'."""
+        with patch(_SUPABASE) as mock_cls:
+            rows = [
+                {"id": "c1", "user_id": "u1", "toolkit_slug": "gmail", "status": "active"},
+                {"id": "c2", "user_id": "u1", "toolkit_slug": "slack", "status": "active"},
+            ]
+            mock_db = _mock_supabase_chain(rows)
+            mock_cls.get_client.return_value = mock_db
+
+            from src.integrations.connection_registry import ConnectionRegistryService
+
+            registry = ConnectionRegistryService()
+            result = await registry.get_all_connections("u1")
+
+            assert len(result) == 2
+            assert result[0]["toolkit_slug"] == "gmail"
+            # Verify it queries user_connections (NOT active_connections view)
+            mock_db.table.assert_any_call("user_connections")
+            # Verify status='active' filter is applied
+            chain = mock_db.table.return_value
+            chain.eq.assert_any_call("user_id", "u1")
+            chain.eq.assert_any_call("status", "active")
+
+    async def test_get_all_connections_returns_empty_on_error(self) -> None:
+        """get_all_connections returns [] when DB query fails."""
+        with patch(_SUPABASE) as mock_cls:
+            mock_cls.get_client.side_effect = Exception("DB down")
+
+            from src.integrations.connection_registry import ConnectionRegistryService
+
+            registry = ConnectionRegistryService()
+            result = await registry.get_all_connections("u1")
+
+            assert result == []

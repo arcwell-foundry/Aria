@@ -91,9 +91,10 @@ class ConnectionRegistryService:
         try:
             client = SupabaseClient.get_client()
             result = (
-                client.table("active_connections")
+                client.table("user_connections")
                 .select("*")
                 .eq("user_id", user_id)
+                .eq("status", "active")
                 .execute()
             )
             return cast(list[dict[str, Any]], result.data) if result.data else []
