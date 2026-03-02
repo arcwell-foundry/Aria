@@ -1376,6 +1376,122 @@ async def _cleanup_stale_goal_agents() -> None:
         logger.exception("Stale goal agents cleanup failed")
 
 
+async def _run_connection_health_check() -> None:
+    """Daily job: verify active connections still work.
+
+    For each active connection, makes a lightweight API call through
+    the session manager. If it fails with 401/403, marks the connection
+    as expired and sends a Pulse notification to the user.
+
+    Runs once daily, staggered to avoid rate limits.
+    """
+    import asyncio
+
+    logger.info("Connection health check starting")
+
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+        from src.integrations.connection_registry import get_connection_registry
+
+        registry = get_connection_registry()
+        db = SupabaseClient.get_client()
+
+        # Get all active connections not verified in last 24h
+        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+        result = (
+            db.table("user_connections")
+            .select("id, user_id, toolkit_slug, composio_connection_id, last_health_check_at, failure_count")
+            .eq("status", "active")
+            .or_(f"last_health_check_at.is.null,last_health_check_at.lt.{cutoff}")
+            .limit(100)  # batch size
+            .execute()
+        )
+
+        connections = result.data or []
+        logger.info("Checking health of %d connections", len(connections))
+
+        for conn in connections:
+            user_id = conn["user_id"]
+            toolkit = conn["toolkit_slug"]
+            connection_id = conn.get("composio_connection_id")
+
+            try:
+                # Attempt a lightweight action through the session
+                test_action = _get_health_check_action(toolkit)
+                if test_action and connection_id:
+                    from src.integrations.composio_sessions import get_session_manager
+
+                    session_mgr = get_session_manager()
+                    await session_mgr.execute_action(
+                        user_id=user_id,
+                        action=test_action,
+                        params={"limit": 1},
+                        connection_id=connection_id,
+                    )
+
+                # Success — update last_health_check_at
+                db.table("user_connections").update({
+                    "last_health_check_at": datetime.now(UTC).isoformat(),
+                    "failure_count": 0,
+                }).eq("id", conn["id"]).execute()
+
+            except Exception as e:
+                error_str = str(e).lower()
+                if "401" in error_str or "403" in error_str or "token" in error_str:
+                    # Auth failure — mark as expired
+                    logger.warning(
+                        "Connection expired: user=%s toolkit=%s: %s",
+                        user_id, toolkit, e,
+                    )
+                    await registry.mark_connection_expired(user_id, toolkit)
+
+                    # Send Pulse notification
+                    try:
+                        from src.core.ws import ws_manager
+
+                        await ws_manager.send_to_user(user_id, {
+                            "type": "integration_expired",
+                            "toolkit_slug": toolkit,
+                            "message": (
+                                f"Your {toolkit.replace('_', ' ').title()} connection "
+                                f"has expired. Reconnect to keep ARIA working smoothly."
+                            ),
+                        })
+                    except Exception:
+                        pass
+                else:
+                    # Transient error — increment failure count but don't expire
+                    db.table("user_connections").update({
+                        "last_health_check_at": datetime.now(UTC).isoformat(),
+                        "failure_count": (conn.get("failure_count") or 0) + 1,
+                    }).eq("id", conn["id"]).execute()
+
+            # Small delay to avoid rate limits
+            await asyncio.sleep(0.5)
+
+    except Exception:
+        logger.exception("Connection health check failed")
+
+    logger.info("Connection health check complete")
+
+
+def _get_health_check_action(toolkit_slug: str) -> str | None:
+    """Map toolkit to a lightweight read-only action for health checks."""
+    health_check_actions = {
+        "OUTLOOK365": "OUTLOOK365_LIST_MESSAGES",
+        "GMAIL": "GMAIL_LIST_MESSAGES",
+        "SALESFORCE": "SALESFORCE_GET_USER_INFO",
+        "HUBSPOT": "HUBSPOT_GET_ACCOUNT_INFO",
+        "GOOGLECALENDAR": "GOOGLECALENDAR_LIST_CALENDARS",
+        "GOOGLE_CALENDAR": "GOOGLE_CALENDAR_LIST_CALENDARS",
+        "SLACK": "SLACK_AUTH_TEST",
+        "ZOOM": "ZOOM_GET_USER",
+    }
+    return health_check_actions.get(toolkit_slug.upper())
+
+
 async def _run_reconciliation_sweep() -> None:
     """Safety net: Check for events that webhooks might have missed.
 
@@ -1652,6 +1768,14 @@ async def start_scheduler() -> None:
             id="reconciliation_sweep",
             name="Event reconciliation sweep",
             replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_connection_health_check,
+            trigger=CronTrigger(hour=4, minute=0),  # 4 AM daily
+            id="connection_health_check",
+            name="Daily connection health verification",
+            replace_existing=True,
+            misfire_grace_time=3600,
         )
         _scheduler.start()
         logger.info(

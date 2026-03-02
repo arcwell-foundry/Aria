@@ -259,6 +259,67 @@ class ConnectionRegistryService:
             return 0
 
     # ------------------------------------------------------------------
+    # Connection lifecycle
+    # ------------------------------------------------------------------
+
+    async def get_recently_added_connections(
+        self, user_id: str, hours: int = 24
+    ) -> list[dict[str, Any]]:
+        """Get connections activated within the last *hours*.
+
+        Used by OODA Orient to detect tools connected since a goal was planned.
+
+        Args:
+            user_id: The user's ID.
+            hours: Look-back window in hours (default 24).
+
+        Returns:
+            List of recently activated connection dicts.
+        """
+        try:
+            client = SupabaseClient.get_client()
+            cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+            result = (
+                client.table("user_connections")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .gte("updated_at", cutoff)
+                .execute()
+            )
+            return cast(list[dict[str, Any]], result.data) if result.data else []
+        except Exception:
+            logger.exception("Failed to fetch recently added connections")
+            return []
+
+    async def mark_connection_expired(
+        self, user_id: str, toolkit_slug: str
+    ) -> None:
+        """Mark a connection as expired (e.g. token revoked or health check failed).
+
+        Args:
+            user_id: The user's ID.
+            toolkit_slug: The toolkit slug.
+        """
+        try:
+            client = SupabaseClient.get_client()
+            client.table("user_connections").update(
+                {"status": "expired", "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("user_id", user_id).eq("toolkit_slug", toolkit_slug).execute()
+
+            self._invalidate(user_id, toolkit_slug)
+
+            await self._audit(
+                user_id=user_id,
+                action="mark_expired",
+                toolkit_slug=toolkit_slug,
+                detail={"status": "expired", "reason": "health_check_failure"},
+            )
+        except Exception:
+            logger.exception("Failed to mark connection as expired")
+            raise
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

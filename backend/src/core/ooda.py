@@ -672,6 +672,17 @@ If graph context is available, identify implication chains — non-obvious multi
             },
         )
 
+        # --- Connection awareness: detect newly connected tools ---
+        if self._user_id:
+            try:
+                orientation = await self._orient_with_connections(
+                    goal_id=state.goal_id,
+                    user_id=self._user_id,
+                    existing_orientation=orientation,
+                )
+            except Exception as e:
+                logger.warning("Connection awareness check failed (non-fatal): %s", e)
+
         # Evaluate high-urgency implication chains for proactive goal proposals
         if self._user_id and orientation:
             try:
@@ -771,6 +782,112 @@ If graph context is available, identify implication chains — non-obvious multi
 
         return "\n\n".join(parts) if parts else ""
 
+    async def _orient_with_connections(
+        self,
+        goal_id: str,
+        user_id: str,
+        existing_orientation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Enhance orientation with connection awareness.
+
+        Checks if any tools were connected since the goal was planned
+        that could resolve capability gaps on blocked tasks.
+
+        Args:
+            goal_id: The active goal being monitored.
+            user_id: Goal owner.
+            existing_orientation: The orientation dict from the standard Orient phase.
+
+        Returns:
+            Enhanced orientation dict with connection_changes field.
+        """
+        from src.integrations.connection_registry import get_connection_registry
+
+        registry = get_connection_registry()
+
+        connection_changes: dict[str, Any] = {
+            "new_connections_detected": False,
+            "resolved_gaps": [],
+            "still_blocked": [],
+            "recommendation": None,
+        }
+
+        try:
+            client = __import__("src.db.supabase", fromlist=["SupabaseClient"]).SupabaseClient.get_client()
+
+            goal_result = (
+                client.table("goals")
+                .select("config, status")
+                .eq("id", goal_id)
+                .maybe_single()
+                .execute()
+            )
+            if not goal_result.data:
+                return {**existing_orientation, "connection_changes": connection_changes}
+
+            goal_config = goal_result.data.get("config", {}) or {}
+            capability_gaps = goal_config.get("capability_gaps", [])
+            assessed_at = goal_config.get("capability_assessed_at")
+
+            if not capability_gaps:
+                return {**existing_orientation, "connection_changes": connection_changes}
+
+            # Check for connections added since the assessment
+            if assessed_at:
+                assessed_dt = datetime.fromisoformat(assessed_at)
+                hours_since = (datetime.now(UTC) - assessed_dt).total_seconds() / 3600
+                recent = await registry.get_recently_added_connections(
+                    user_id, hours=max(int(hours_since) + 1, 1)
+                )
+            else:
+                recent = await registry.get_recently_added_connections(user_id, hours=24)
+
+            if not recent:
+                connection_changes["still_blocked"] = [
+                    g["capability"] if isinstance(g, dict) else g
+                    for g in capability_gaps
+                    if (isinstance(g, dict) and g.get("severity") == "blocking") or isinstance(g, str)
+                ]
+                return {**existing_orientation, "connection_changes": connection_changes}
+
+            # Check which gaps are now resolved via CapabilityGraphService
+            from src.db.supabase import SupabaseClient as SBClient
+            from src.services.capability_provisioning import CapabilityGraphService
+
+            graph = CapabilityGraphService(SBClient.get_client())
+
+            blocked_capabilities = [
+                g["capability"] if isinstance(g, dict) else g
+                for g in capability_gaps
+                if (isinstance(g, dict) and g.get("severity") == "blocking") or isinstance(g, str)
+            ]
+
+            resolved_gaps: list[str] = []
+            still_blocked: list[str] = []
+            for cap_name in blocked_capabilities:
+                best = await graph.get_best_available(cap_name, user_id)
+                if best is not None:
+                    resolved_gaps.append(cap_name)
+                else:
+                    still_blocked.append(cap_name)
+
+            connection_changes["new_connections_detected"] = True
+            connection_changes["resolved_gaps"] = resolved_gaps
+            connection_changes["still_blocked"] = still_blocked
+
+            if resolved_gaps:
+                connection_changes["recommendation"] = "resume_blocked_tasks"
+                logger.info(
+                    "OODA Orient: Goal %s has %d resolved gaps — recommending task resumption",
+                    goal_id,
+                    len(resolved_gaps),
+                )
+
+        except Exception as e:
+            logger.warning("OODA Orient connection check failed for goal %s: %s", goal_id, e)
+
+        return {**existing_orientation, "connection_changes": connection_changes}
+
     async def decide(
         self,
         state: OODAState,
@@ -791,6 +908,44 @@ If graph context is available, identify implication chains — non-obvious multi
         import json
 
         start_time = time.perf_counter()
+
+        # --- Pre-LLM check: auto-resume blocked tasks if Orient detected resolved gaps ---
+        connection_changes = state.orientation.get("connection_changes", {})
+        if connection_changes.get("recommendation") == "resume_blocked_tasks":
+            resolved_gaps = connection_changes.get("resolved_gaps", [])
+            if resolved_gaps:
+                logger.info(
+                    "OODA Decide: Auto-selecting resume_blocked_tasks for goal %s, "
+                    "resolved: %s",
+                    state.goal_id,
+                    resolved_gaps,
+                )
+                decision: dict[str, Any] = {
+                    "action": "resume_blocked_tasks",
+                    "agent": None,
+                    "parameters": {},
+                    "reasoning": (
+                        f"New tool connections detected. Previously blocked capabilities "
+                        f"now available: {', '.join(resolved_gaps)}"
+                    ),
+                    "resolved_capabilities": resolved_gaps,
+                    "confidence": 0.95,
+                }
+                state.decision = decision
+                state.current_phase = OODAPhase.ACT
+
+                duration_ms = int((time.perf_counter() - start_time) * 1000)
+                state.phase_logs.append(
+                    OODAPhaseLogEntry(
+                        phase=OODAPhase.DECIDE,
+                        iteration=state.iteration,
+                        input_summary=f"Connection changes detected: {len(resolved_gaps)} resolved",
+                        output_summary="Decision: resume_blocked_tasks (deterministic)",
+                        tokens_used=0,
+                        duration_ms=duration_ms,
+                    )
+                )
+                return state
 
         # Build prompt for decision
         orientation_summary = json.dumps(state.orientation, indent=2, default=str)
@@ -1101,6 +1256,35 @@ Select the best action to make progress toward the goal."""
         agent = decision.get("agent")
         parameters = decision.get("parameters", {})
 
+        # Handle resume_blocked_tasks action (from connection-aware Decide)
+        if action == "resume_blocked_tasks":
+            try:
+                result = await self._resume_blocked_tasks(
+                    goal_id=state.goal_id,
+                    user_id=self._user_id or self.working.user_id,
+                    resolved_capabilities=decision.get("resolved_capabilities", []),
+                )
+                state.action_result = result
+            except Exception as e:
+                logger.error("Failed to resume blocked tasks: %s", e)
+                state.action_result = {"success": False, "error": str(e)}
+
+            state.current_phase = OODAPhase.OBSERVE
+            state.iteration += 1
+
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            state.phase_logs.append(
+                OODAPhaseLogEntry(
+                    phase=OODAPhase.ACT,
+                    iteration=state.iteration - 1,
+                    input_summary=f"Action: resume_blocked_tasks, resolved: {decision.get('resolved_capabilities', [])}",
+                    output_summary=f"Resumed: {state.action_result.get('resumed_count', 0) if isinstance(state.action_result, dict) else 0}",
+                    tokens_used=0,
+                    duration_ms=duration_ms,
+                )
+            )
+            return state
+
         # Execute action via agent executor
         try:
             if hasattr(self, "agent_executor") and self.agent_executor:
@@ -1168,6 +1352,135 @@ Select the best action to make progress toward the goal."""
         )
 
         return state
+
+    async def _resume_blocked_tasks(
+        self,
+        goal_id: str,
+        user_id: str,
+        resolved_capabilities: list[str],
+    ) -> dict[str, Any]:
+        """Resume tasks that were blocked by missing tool connections.
+
+        Finds blocked goal_agents for this goal, updates their status,
+        triggers re-execution via GoalExecutionService, updates the goal
+        config to remove resolved gaps, and notifies the user.
+
+        Args:
+            goal_id: Goal with blocked tasks.
+            user_id: Goal owner.
+            resolved_capabilities: Capabilities that are now available.
+
+        Returns:
+            Act result dict with status and resumed_count.
+        """
+        from src.db.supabase import SupabaseClient
+
+        try:
+            client = SupabaseClient.get_client()
+
+            # Find blocked goal_agents for this goal
+            blocked_agents = (
+                client.table("goal_agents")
+                .select("id, agent_type, agent_config")
+                .eq("goal_id", goal_id)
+                .eq("status", "blocked")
+                .execute()
+            )
+
+            blocked_for_goal = blocked_agents.data or []
+
+            if not blocked_for_goal:
+                logger.info("OODA Act: No blocked tasks found for goal %s", goal_id)
+                return {"status": "no_blocked_tasks", "resumed_count": 0}
+
+            # Resume blocked tasks whose blocking capability is now resolved
+            resumed_count = 0
+            for agent_row in blocked_for_goal:
+                agent_config = agent_row.get("agent_config", {}) or {}
+                blocked_by = agent_config.get("blocked_by")
+
+                # If blocked_by is specified, check if it's in resolved list
+                if blocked_by and blocked_by not in resolved_capabilities:
+                    continue
+
+                # Update status to 'running'
+                client.table("goal_agents").update({
+                    "status": "running",
+                }).eq("id", agent_row["id"]).execute()
+
+                resumed_count += 1
+
+            # Trigger re-execution through GoalExecutionService
+            if resumed_count > 0:
+                try:
+                    from src.services.goal_execution import GoalExecutionService
+
+                    execution_service = GoalExecutionService()
+                    await execution_service.resume_blocked_tasks(
+                        goal_id=goal_id,
+                        user_id=user_id,
+                        resolved_capabilities=resolved_capabilities,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "GoalExecutionService.resume_blocked_tasks failed: %s", e
+                    )
+
+            # Update goal config — remove resolved gaps
+            try:
+                goal_result = (
+                    client.table("goals")
+                    .select("config")
+                    .eq("id", goal_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if goal_result.data:
+                    config = goal_result.data.get("config", {}) or {}
+                    gaps = config.get("capability_gaps", [])
+                    updated_gaps = [
+                        g for g in gaps
+                        if (isinstance(g, dict) and g.get("capability") not in resolved_capabilities)
+                        or (isinstance(g, str) and g not in resolved_capabilities)
+                    ]
+                    config["capability_gaps"] = updated_gaps
+                    config["last_gap_resolution"] = datetime.now(UTC).isoformat()
+                    client.table("goals").update({"config": config}).eq("id", goal_id).execute()
+            except Exception as e:
+                logger.warning("Failed to update goal gaps: %s", e)
+
+            # Notify user via WebSocket
+            try:
+                from src.core.ws import ws_manager
+
+                await ws_manager.send_to_user(user_id, {
+                    "type": "goal.tasks_resumed",
+                    "goal_id": goal_id,
+                    "resumed_count": resumed_count,
+                    "resolved_capabilities": resolved_capabilities,
+                    "message": (
+                        f"Great news! {resumed_count} previously blocked task(s) "
+                        f"can now proceed with your new tool connections."
+                    ),
+                })
+            except Exception:
+                pass  # User may not be connected
+
+            logger.info(
+                "OODA Act: Resumed %d blocked tasks for goal %s. "
+                "Resolved capabilities: %s",
+                resumed_count, goal_id, resolved_capabilities,
+            )
+
+            return {
+                "status": "tasks_resumed",
+                "resumed_count": resumed_count,
+                "resolved_capabilities": resolved_capabilities,
+            }
+
+        except Exception as e:
+            logger.error("Failed to resume blocked tasks for goal %s: %s", goal_id, e)
+            return {"status": "error", "message": str(e), "resumed_count": 0}
 
     async def run(self, goal: str) -> OODAState:
         """Execute OODA loop until goal achieved, blocked, or limit exceeded.

@@ -637,3 +637,119 @@ async def trigger_email_bootstrap(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to trigger email bootstrap: {str(e)}",
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Composio webhook handler (Phase 4C)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/webhooks/composio/connections")
+async def composio_connection_webhook(request: Request) -> dict[str, str]:
+    """Handle Composio webhook for connection events.
+
+    Composio sends this when:
+    - A new connection is created for an ARIA entity
+    - A connection is updated (token refresh)
+    - A connection is deleted
+
+    Belt-and-suspenders sync alongside the OAuth callback.
+    No JWT required — authenticated by Composio webhook signature.
+    """
+    try:
+        payload = await request.json()
+        event_type = payload.get("event", "")
+        connection_data = payload.get("data", {})
+
+        entity_id = connection_data.get("entity_id", "")
+        connection_id = connection_data.get("connection_id", "")
+        toolkit = connection_data.get("app_name", "").lower()
+        webhook_status = connection_data.get("status", "")
+
+        # Resolve entity_id back to ARIA user_id
+        user_id = await _resolve_entity_to_user(entity_id)
+        if not user_id:
+            logger.warning("Composio webhook: Unknown entity %s", entity_id)
+            return {"status": "ignored", "reason": "unknown entity"}
+
+        registry = get_connection_registry()
+
+        if event_type in ("connection.created", "connection.updated"):
+            if webhook_status == "active":
+                await registry.register_connection(
+                    user_id=user_id,
+                    toolkit_slug=toolkit,
+                    composio_connection_id=connection_id,
+                    composio_entity_id=entity_id,
+                    status="active",
+                    metadata={
+                        "synced_via": "composio_webhook",
+                        "event_type": event_type,
+                    },
+                )
+                # Notify user if online
+                try:
+                    from src.core.ws import ws_manager
+
+                    await ws_manager.send_to_user(user_id, {
+                        "type": "integration_connected",
+                        "toolkit_slug": toolkit,
+                        "status": "active",
+                    })
+                except Exception:
+                    pass
+
+        elif event_type == "connection.deleted":
+            await registry.disconnect(user_id, toolkit)
+
+        logger.info(
+            "Composio webhook processed: event=%s toolkit=%s user=%s",
+            event_type, toolkit, user_id,
+        )
+        return {"status": "ok"}
+
+    except Exception as e:
+        logger.error("Composio webhook error: %s", e)
+        return {"status": "error", "reason": str(e)[:200]}
+
+
+async def _resolve_entity_to_user(entity_id: str) -> str | None:
+    """Resolve a Composio entity ID back to an ARIA user UUID.
+
+    Entity format: aria_user_{uuid_prefix}
+    Looks up user_connections for the mapping.
+    """
+    if not entity_id or not entity_id.startswith("aria_user_"):
+        return None
+
+    prefix = entity_id[len("aria_user_"):]
+    try:
+        from src.db.supabase import SupabaseClient
+
+        client = SupabaseClient.get_client()
+
+        # Search by entity_id in user_connections
+        result = (
+            client.table("user_connections")
+            .select("user_id")
+            .eq("composio_entity_id", entity_id)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if result.data:
+            return result.data["user_id"]
+
+        # Fallback: search user_profiles by ID prefix
+        result = (
+            client.table("user_profiles")
+            .select("id")
+            .like("id", f"{prefix}%")
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        return result.data["id"] if result.data else None
+    except Exception:
+        logger.warning("Failed to resolve entity %s to user", entity_id, exc_info=True)
+        return None
