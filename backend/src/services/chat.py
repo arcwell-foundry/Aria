@@ -3199,14 +3199,27 @@ class ChatService:
         current_messages = list(messages)
 
         for _round in range(max_rounds):
-            response = await self._llm_client.generate_response_with_tools(
-                messages=current_messages,
-                tools=tools,
-                system_prompt=system_prompt,
-                user_id=user_id,
-                task=TaskType.CHAT_RESPONSE,
-                agent_id="chat",
-            )
+            # LLM call with 60s timeout to prevent hanging
+            try:
+                response = await asyncio.wait_for(
+                    self._llm_client.generate_response_with_tools(
+                        messages=current_messages,
+                        tools=tools,
+                        system_prompt=system_prompt,
+                        user_id=user_id,
+                        task=TaskType.CHAT_RESPONSE,
+                        agent_id="chat",
+                    ),
+                    timeout=60.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "LLM call timed out in tool loop round %d for user %s",
+                    _round,
+                    user_id,
+                )
+                # Break out of loop and fall through to final response without tools
+                break
 
             # If no tool calls, return the text response
             if not response.tool_calls:
@@ -3232,12 +3245,25 @@ class ChatService:
 
             for tc in response.tool_calls:
                 logger.info("Executing tool %s for user %s", tc.name, user_id)
-                result = await dispatch_tool_call(
-                    user_id=user_id,
-                    tool_name=tc.name,
-                    tool_input=tc.input,
-                    email_integration=email_integration,
-                )
+                # Tool execution with 60s timeout as safety net
+                # (tool_assembly.py already has 30s internal timeout)
+                try:
+                    result = await asyncio.wait_for(
+                        dispatch_tool_call(
+                            user_id=user_id,
+                            tool_name=tc.name,
+                            tool_input=tc.input,
+                            email_integration=email_integration,
+                        ),
+                        timeout=60.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Tool %s timed out after 60s in tool loop for user %s",
+                        tc.name,
+                        user_id,
+                    )
+                    result = {"error": f"Tool '{tc.name}' timed out after 60 seconds"}
 
                 tool_results.append({
                     "type": "tool_result",
@@ -3247,12 +3273,20 @@ class ChatService:
 
             current_messages.append({"role": "user", "content": tool_results})
 
-        # If we exhausted rounds, do one final call without tools
-        final_response = await self._llm_client.generate_response(
-            messages=current_messages,
-            system_prompt=system_prompt,
-            task=TaskType.CHAT_RESPONSE,
-        )
+        # If we exhausted rounds or timed out, do one final call without tools
+        # Final LLM call also has 60s timeout
+        try:
+            final_response = await asyncio.wait_for(
+                self._llm_client.generate_response(
+                    messages=current_messages,
+                    system_prompt=system_prompt,
+                    task=TaskType.CHAT_RESPONSE,
+                ),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Final LLM call timed out for user %s", user_id)
+            return "I ran into a delay processing that request. Please try again."
         return final_response
 
     async def _query_relevant_memories(

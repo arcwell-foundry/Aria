@@ -182,13 +182,15 @@ class CircuitBreaker:
         self,
         func: Callable[..., Awaitable[T]],
         *args: Any,
+        timeout: float = 60.0,
         **kwargs: Any,
     ) -> T:
-        """Execute an async function through the circuit breaker.
+        """Execute an async function through the circuit breaker with timeout.
 
         Args:
             func: Async callable to execute.
             *args: Positional arguments.
+            timeout: Maximum seconds to wait for the call (default 60s).
             **kwargs: Keyword arguments.
 
         Returns:
@@ -196,11 +198,23 @@ class CircuitBreaker:
 
         Raises:
             CircuitBreakerOpen: If the circuit is open.
+            asyncio.TimeoutError: If the call exceeds the timeout.
             Exception: Any exception raised by *func* (after recording the failure).
         """
         self.check()
         try:
-            result = await func(*args, **kwargs)
+            result = await asyncio.wait_for(
+                func(*args, **kwargs),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Circuit breaker call to %s timed out after %.1fs",
+                self.service_name,
+                timeout,
+            )
+            self.record_failure()
+            raise
         except Exception:
             self.record_failure()
             raise

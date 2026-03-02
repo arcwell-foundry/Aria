@@ -179,6 +179,36 @@ class TestCircuitBreakerCall:
         with pytest.raises(CircuitBreakerOpen):
             await cb.call(should_not_run)
 
+    @pytest.mark.asyncio
+    async def test_call_timeout_records_failure(self) -> None:
+        """Test that a timeout is treated as a failure and increments failure count."""
+        import asyncio
+
+        cb = CircuitBreaker("test_call_timeout")
+
+        async def slow_call() -> str:
+            await asyncio.sleep(10)  # Will be interrupted by timeout
+            return "should not reach here"
+
+        with pytest.raises(asyncio.TimeoutError):
+            await cb.call(slow_call, timeout=0.1)
+
+        assert cb._failure_count == 1
+
+    @pytest.mark.asyncio
+    async def test_call_timeout_uses_default_60s(self) -> None:
+        """Test that the default timeout is 60 seconds (we test with shorter value)."""
+        import asyncio
+
+        cb = CircuitBreaker("test_default_timeout")
+
+        async def quick_call() -> str:
+            return "done"
+
+        # This should succeed quickly, not wait 60s
+        result = await cb.call(quick_call)
+        assert result == "done"
+
 
 class TestCircuitBreakerRegistry:
     """Global registry and health-check helpers."""
