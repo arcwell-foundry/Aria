@@ -5014,3 +5014,128 @@ class GoalExecutionService:
         logger.info("Goal cancelled", extra={"goal_id": goal_id, "user_id": user_id})
 
         return {"goal_id": goal_id, "status": "cancelled"}
+
+    # ------------------------------------------------------------------
+    # Blocked task resumption (Phase 4C)
+    # ------------------------------------------------------------------
+
+    async def resume_blocked_tasks(
+        self,
+        goal_id: str,
+        user_id: str,
+        resolved_capabilities: list[str],
+    ) -> None:
+        """Resume previously blocked tasks after new tool connections.
+
+        Called by OODA Act phase when it detects resolved capability gaps.
+        Re-assesses blocked goal_agents using CapabilityGraphService, then
+        executes those that are now ready.
+
+        Args:
+            goal_id: Goal with blocked tasks.
+            user_id: Goal owner.
+            resolved_capabilities: Capabilities that are now available.
+        """
+        try:
+            # Get blocked agents for this goal
+            blocked_agents = (
+                self._db.table("goal_agents")
+                .select("id, agent_type, agent_config")
+                .eq("goal_id", goal_id)
+                .in_("status", ["blocked", "running"])
+                .execute()
+            )
+
+            if not blocked_agents.data:
+                logger.info(
+                    "No blocked/running agents to resume for goal %s", goal_id
+                )
+                return
+
+            # Get the goal dict for execution
+            goal_result = (
+                self._db.table("goals")
+                .select("*")
+                .eq("id", goal_id)
+                .maybe_single()
+                .execute()
+            )
+            if not goal_result.data:
+                logger.warning("Goal %s not found for task resumption", goal_id)
+                return
+
+            goal = goal_result.data
+
+            # Gather execution context
+            context = await self._gather_execution_context(user_id)
+
+            for agent_row in blocked_agents.data:
+                agent_type = agent_row.get("agent_type", "analyst")
+                agent_config = agent_row.get("agent_config", {}) or {}
+                blocked_by = agent_config.get("blocked_by")
+
+                # Only resume agents blocked by now-resolved capabilities
+                if blocked_by and blocked_by not in resolved_capabilities:
+                    continue
+
+                logger.info(
+                    "Resuming blocked task %s (agent: %s) for goal %s",
+                    agent_row["id"], agent_type, goal_id,
+                )
+
+                try:
+                    # Update status to running
+                    self._db.table("goal_agents").update({
+                        "status": "running",
+                    }).eq("id", agent_row["id"]).execute()
+
+                    # Execute the agent
+                    await self._execute_agent(
+                        user_id=user_id,
+                        goal=goal,
+                        agent_type=agent_type,
+                        context=context,
+                        goal_agent_id=agent_row["id"],
+                    )
+
+                    # Mark agent as complete
+                    self._db.table("goal_agents").update({
+                        "status": "complete",
+                    }).eq("id", agent_row["id"]).execute()
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to resume agent %s for goal %s: %s",
+                        agent_row["id"], goal_id, e,
+                    )
+                    # Mark as failed rather than leaving in running state
+                    self._db.table("goal_agents").update({
+                        "status": "failed",
+                    }).eq("id", agent_row["id"]).execute()
+
+            # Recalculate goal progress
+            try:
+                all_agents = (
+                    self._db.table("goal_agents")
+                    .select("status")
+                    .eq("goal_id", goal_id)
+                    .execute()
+                )
+                agents = all_agents.data or []
+                if agents:
+                    complete_count = sum(
+                        1 for a in agents if a.get("status") == "complete"
+                    )
+                    progress = int((complete_count / len(agents)) * 100)
+                    self._db.table("goals").update({
+                        "progress": progress,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }).eq("id", goal_id).execute()
+            except Exception as e:
+                logger.warning("Failed to recalculate goal progress: %s", e)
+
+        except Exception as e:
+            logger.error(
+                "Failed to resume blocked tasks for goal %s: %s",
+                goal_id, e,
+            )
