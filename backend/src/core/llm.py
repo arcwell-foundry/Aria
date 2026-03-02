@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -32,8 +33,23 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # LiteLLM / Langfuse configuration
 # ---------------------------------------------------------------------------
-litellm.success_callback = ["langfuse"]
-litellm.failure_callback = ["langfuse"]
+# Only enable Langfuse callbacks when the package is installed AND configured
+# via LANGFUSE_PUBLIC_KEY env var.  Without this guard, every LLM call crashes
+# with a pydantic import error when langfuse is not installed.
+try:
+    import langfuse  # noqa: F401
+
+    if os.environ.get("LANGFUSE_PUBLIC_KEY"):
+        litellm.success_callback = ["langfuse"]
+        litellm.failure_callback = ["langfuse"]
+    else:
+        litellm.success_callback = []
+        litellm.failure_callback = []
+except Exception:
+    # Catches ImportError (not installed) and pydantic.v1 ConfigError
+    # (langfuse incompatible with Python 3.14's pydantic)
+    litellm.success_callback = []
+    litellm.failure_callback = []
 litellm.set_verbose = False  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
