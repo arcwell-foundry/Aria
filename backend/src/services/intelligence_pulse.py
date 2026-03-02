@@ -422,6 +422,7 @@ class IntelligencePulseEngine:
                     ),
                     "action": {"type": "connect_tool", "toolkit_slug": suggested_app},
                     "metadata": {
+                        "capability_name": capability,
                         "demand_count": times_needed,
                         "current_quality": avg_quality,
                         "potential_quality": 0.95,

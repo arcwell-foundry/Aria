@@ -1220,6 +1220,9 @@ async def _run_capability_demand_check() -> None:
 
     When a user has needed a capability 3+ times without direct access,
     generate a proactive pulse signal suggesting they connect the tool.
+
+    Delegates to IntelligencePulseEngine.generate_tool_suggestion_pulses()
+    for the actual pulse generation logic.
     """
     try:
         from src.db.supabase import SupabaseClient
@@ -1228,59 +1231,66 @@ async def _run_capability_demand_check() -> None:
         db = SupabaseClient.get_client()
         pulse_engine = get_pulse_engine()
 
-        # Get all users with unresolved demand
+        # Get unique users with unresolved demand (the actual pulse generation
+        # logic is delegated to generate_tool_suggestion_pulses)
         demands_result = (
             db.table("capability_demand")
-            .select("*")
+            .select("user_id")
             .gte("times_needed", 3)
             .eq("suggestion_threshold_reached", False)
             .execute()
         )
 
-        for demand in demands_result.data or []:
-            fallback_uses = (
-                demand.get("times_used_composite", 0)
-                + demand.get("times_used_fallback", 0)
-            )
-            if fallback_uses < 3:
-                continue
+        # Get unique user IDs
+        user_ids = {d["user_id"] for d in (demands_result.data or [])}
 
-            avg_quality = demand.get("avg_quality_achieved", 0.5) or 0.5
-            ideal_quality = demand.get("quality_with_ideal_provider", 0.95) or 0.95
+        for user_id in user_ids:
+            try:
+                # Delegate pulse generation to the engine method
+                pulses = await pulse_engine.generate_tool_suggestion_pulses(user_id)
 
-            await pulse_engine.process_signal(
-                user_id=demand["user_id"],
-                signal={
-                    "pulse_type": "intelligent",
-                    "source": "capability_demand",
-                    "title": f"Improve your {demand['capability_name']} accuracy",
-                    "content": (
-                        f"You've needed {demand['capability_name']} "
-                        f"{demand['times_needed']} times. Currently getting "
-                        f"~{int(avg_quality * 100)}% accuracy. Connecting the "
-                        f"right tool would get you to ~{int(ideal_quality * 100)}%."
-                    ),
-                    "signal_category": "capability",
-                    "raw_data": demand,
-                },
-            )
+                for pulse in pulses:
+                    # Convert to process_signal format and persist
+                    await pulse_engine.process_signal(
+                        user_id=user_id,
+                        signal={
+                            "pulse_type": "intelligent",
+                            "source": "capability_demand",
+                            "title": pulse["title"],
+                            "content": pulse["message"],
+                            "signal_category": "capability",
+                            "raw_data": {
+                                "action": pulse.get("action"),
+                                "metadata": pulse.get("metadata"),
+                            },
+                        },
+                    )
 
-            # Mark threshold reached
-            (
-                db.table("capability_demand")
-                .update({"suggestion_threshold_reached": True})
-                .eq("id", demand["id"])
-                .execute()
-            )
+                    # Mark threshold reached for this capability
+                    capability_name = pulse.get("metadata", {}).get("capability_name")
+                    if capability_name:
+                        (
+                            db.table("capability_demand")
+                            .update({"suggestion_threshold_reached": True})
+                            .eq("user_id", user_id)
+                            .eq("capability_name", capability_name)
+                            .execute()
+                        )
 
-            logger.info(
-                "Capability demand pulse generated",
-                extra={
-                    "user_id": demand["user_id"],
-                    "capability": demand["capability_name"],
-                    "times_needed": demand["times_needed"],
-                },
-            )
+                    logger.info(
+                        "Capability demand pulse generated",
+                        extra={
+                            "user_id": user_id,
+                            "title": pulse["title"],
+                        },
+                    )
+
+            except Exception:
+                logger.warning(
+                    "Capability demand check failed for user",
+                    extra={"user_id": user_id},
+                    exc_info=True,
+                )
 
     except Exception:
         logger.exception("Capability demand check scheduler run failed")
