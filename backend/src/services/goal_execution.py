@@ -2222,6 +2222,13 @@ class GoalExecutionService:
         agent_lower = agent_type.lower()
         now = datetime.now(UTC).isoformat()
 
+        logger.warning(
+            "[PERSIST] _persist_structured_output called: agent=%s, content_type=%s, content_keys=%s",
+            agent_type,
+            type(content).__name__,
+            list(content.keys()) if isinstance(content, dict) else "N/A",
+        )
+
         try:
             if agent_lower == "hunter":
                 await self._persist_hunter_leads(user_id, content, goal_id, now)
