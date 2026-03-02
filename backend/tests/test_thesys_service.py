@@ -118,3 +118,52 @@ class TestIsAvailable:
         with patch("src.services.thesys_service.thesys_circuit_breaker") as mock_cb:
             mock_cb.check.return_value = None
             assert svc.is_available is True
+
+
+class TestCustomActionsIntegration:
+    @pytest.mark.asyncio
+    @patch("src.services.thesys_service.settings")
+    async def test_visualize_includes_custom_actions_in_metadata(
+        self, mock_settings: MagicMock
+    ) -> None:
+        """C1 calls include custom actions in metadata."""
+        mock_settings.thesys_configured = True
+        mock_settings.THESYS_API_KEY = MagicMock()
+        mock_settings.THESYS_API_KEY.get_secret_value.return_value = "k"
+        mock_settings.THESYS_BASE_URL = "https://api.thesys.dev/v1/visualize"
+        mock_settings.THESYS_MODEL = "c1/test"
+        mock_settings.THESYS_TIMEOUT = 10.0
+
+        from src.services.thesys_service import ThesysService
+
+        svc = ThesysService()
+        svc._enabled = True
+
+        # Track what was passed to the API
+        captured_metadata: dict = {}
+
+        async def mock_create(**kwargs):
+            captured_metadata.update(kwargs.get("metadata", {}))
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "<div>Rendered</div>"
+            return mock_response
+
+        with patch("src.services.thesys_service.thesys_circuit_breaker") as mock_cb:
+            mock_cb.check.return_value = None
+            mock_cb.record_success.return_value = None
+
+            if svc._client:
+                svc._client.chat.completions.create = mock_create
+
+            result = await svc.visualize("Test content", "system prompt")
+
+        # Verify custom actions were included
+        import json
+
+        assert "thesys" in captured_metadata
+        thesys_meta = json.loads(captured_metadata["thesys"])
+        assert "c1_custom_actions" in thesys_meta
+        actions = thesys_meta["c1_custom_actions"]
+        assert "approve_goal" in actions
+        assert "approve_email" in actions

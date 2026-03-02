@@ -5,6 +5,7 @@ protection and graceful fallback to raw markdown when the service is
 unavailable.
 """
 
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -14,6 +15,7 @@ from openai import AsyncOpenAI
 
 from src.core.config import settings
 from src.core.resilience import CircuitBreakerOpen, thesys_circuit_breaker
+from src.services.thesys_actions import get_aria_custom_actions
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +88,20 @@ class ThesysService:
         """Internal non-streaming call to the C1 Visualize endpoint."""
         assert self._client is not None
 
+        # Build metadata with custom actions
+        metadata: dict[str, Any] = {
+            "thesys": json.dumps({
+                "c1_custom_actions": get_aria_custom_actions(),
+            }),
+        }
+
         response = await self._client.chat.completions.create(
             model=settings.THESYS_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
             ],
+            metadata=metadata,
             stream=False,
             timeout=settings.THESYS_TIMEOUT,
         )
@@ -119,12 +129,20 @@ class ThesysService:
 
         start = time.perf_counter()
         try:
+            # Build metadata with custom actions
+            metadata: dict[str, Any] = {
+                "thesys": json.dumps({
+                    "c1_custom_actions": get_aria_custom_actions(),
+                }),
+            }
+
             stream = await self._client.chat.completions.create(
                 model=settings.THESYS_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": content},
                 ],
+                metadata=metadata,
                 stream=True,
                 timeout=settings.THESYS_TIMEOUT,
             )
