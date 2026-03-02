@@ -46,6 +46,9 @@ const DebriefsListPage = lazy(() =>
 const AdminDashboardPage = lazy(() =>
   import('@/components/pages/AdminDashboardPage').then(m => ({ default: m.AdminDashboardPage }))
 );
+const AdminToolsPage = lazy(() =>
+  import('@/components/pages/AdminToolsPage').then(m => ({ default: m.AdminToolsPage }))
+);
 
 function PageLoadingSkeleton() {
   return (
@@ -83,6 +86,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <AdminDashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/tools"
+          element={
+            <ProtectedRoute>
+              <AdminToolsPage />
             </ProtectedRoute>
           }
         />
