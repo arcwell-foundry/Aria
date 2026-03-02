@@ -646,6 +646,7 @@ async def _handle_user_message(
             if all_tools:
                 # Tool-capable path (non-streaming, mirrors REST chat.py:2705-2711)
                 try:
+                    logger.info("TOOL_LOOP_TIMEOUT: Starting with 120s timeout for user %s", user_id)
                     full_content = await asyncio.wait_for(
                         service._run_tool_loop(
                             messages=conversation_messages,

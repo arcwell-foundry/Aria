@@ -2994,6 +2994,7 @@ class ChatService:
             )
 
             try:
+                logger.info("TOOL_LOOP_TIMEOUT: Starting with 120s timeout for user %s", user_id)
                 response_text = await asyncio.wait_for(
                     self._run_tool_loop(
                         messages=conversation_messages,
