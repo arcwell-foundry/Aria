@@ -211,7 +211,7 @@ class HunterAgent(SkillAwareAgent):
         # OODA ACT: Log skill consideration before native execution
         await self._log_skill_consideration()
 
-        logger.info("Hunter agent starting lead discovery task")
+        logger.warning("[HUNTER] execute() called — starting lead discovery")
 
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
@@ -222,6 +222,11 @@ class HunterAgent(SkillAwareAgent):
 
         # Check if Exa (our primary search tool) is available
         exa_available = settings.EXA_API_KEY or self._check_tool_connected(resource_status, "exa")
+        logger.warning(
+            "[HUNTER] Exa available: %s (api_key_set=%s)",
+            exa_available,
+            bool(settings.EXA_API_KEY),
+        )
 
         # Extract task parameters
         icp = task["icp"]
@@ -457,15 +462,21 @@ class HunterAgent(SkillAwareAgent):
 
         # Strategy 1: Try Exa API if key is configured
         if settings.EXA_API_KEY:
+            logger.warning("[HUNTER] Attempting Exa API search for query='%s'", query)
             try:
                 companies = await self._search_companies_via_exa(query, limit)
                 if companies:
-                    logger.info(
-                        f"Exa search returned {len(companies)} companies for query='{query}'"
+                    logger.warning(
+                        "[HUNTER] Exa search SUCCESS: %d companies for query='%s'",
+                        len(companies),
+                        query,
                     )
                     return companies
+                logger.warning("[HUNTER] Exa search returned empty results")
             except Exception as exc:
-                logger.warning(f"Exa search failed, falling back to LLM: {exc}")
+                logger.warning("[HUNTER] Exa search FAILED, falling back to LLM: %s", exc)
+        else:
+            logger.warning("[HUNTER] EXA_API_KEY not set, skipping Exa search")
 
         # Strategy 2: Fall back to Claude LLM
         try:

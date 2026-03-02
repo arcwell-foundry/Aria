@@ -1319,25 +1319,58 @@ class GoalExecutionService:
         try:
             agent = self._create_agent_instance(agent_type, user_id)
             if agent is None:
+                logger.warning(
+                    "[GOAL-EXEC] _try_skill_execution: agent creation returned None for %s",
+                    agent_type,
+                )
                 return None
 
             task = self._build_agent_task(agent_type, goal, context, resource_status)
             if task is None:
+                logger.warning(
+                    "[GOAL-EXEC] _try_skill_execution: _build_agent_task returned None for %s",
+                    agent_type,
+                )
                 return None
 
+            logger.warning(
+                "[GOAL-EXEC] _try_skill_execution: calling execute_with_skills for %s",
+                agent_type,
+            )
             # execute_with_skills handles both skill-augmented and native paths:
             # - If skills are needed: routes through skill orchestrator
             # - If skills aren't needed: calls agent.execute() directly,
             #   which uses real APIs (Exa, PubMed, FDA, Composio, etc.)
             result = await agent.execute_with_skills(task)
-            if result.success and result.data:
+            logger.warning(
+                "[GOAL-EXEC] _try_skill_execution: %s returned success=%s, has_data=%s, data_type=%s",
+                agent_type,
+                result.success,
+                result.data is not None,
+                type(result.data).__name__ if result.data is not None else "None",
+            )
+            # Use `is not None` instead of truthiness to avoid treating
+            # empty lists/dicts as failures (e.g., Hunter returns [])
+            if result.success and result.data is not None:
                 return result.data if isinstance(result.data, dict) else {"result": result.data}
 
+            # Log why we're returning None
+            if not result.success:
+                logger.warning(
+                    "[GOAL-EXEC] _try_skill_execution: %s returned success=False, error=%s",
+                    agent_type,
+                    result.error,
+                )
+            elif result.data is None:
+                logger.warning(
+                    "[GOAL-EXEC] _try_skill_execution: %s returned success=True but data=None",
+                    agent_type,
+                )
             return None
 
         except Exception as e:
             logger.warning(
-                "Agent skill-aware execution failed for %s, falling back to prompt-based: %s",
+                "[GOAL-EXEC] _try_skill_execution: %s EXCEPTION, falling back to prompt-based: %s",
                 agent_type,
                 e,
                 exc_info=True,
@@ -1656,8 +1689,10 @@ class GoalExecutionService:
         Returns:
             Dict with agent_type, success, and content.
         """
-        logger.info(
-            "Executing agent analysis",
+        logger.warning(
+            "[GOAL-EXEC] _execute_agent called: agent=%s goal=%s",
+            agent_type,
+            goal.get("title", "?"),
             extra={
                 "user_id": user_id,
                 "agent_type": agent_type,
@@ -1798,6 +1833,10 @@ class GoalExecutionService:
             return result
 
         # Step 2: Fall back to prompt-based LLM analysis
+        logger.warning(
+            "[GOAL-EXEC] Agent %s: skill execution returned None, using PROMPT-BASED fallback",
+            agent_type,
+        )
         prompt_builder = {
             "scout": self._build_scout_prompt,
             "analyst": self._build_analyst_prompt,
@@ -3524,6 +3563,14 @@ class GoalExecutionService:
                         t["agent_type"] = t["agent"]
                     if "dependencies" in t and "depends_on" not in t:
                         t["depends_on"] = t["dependencies"]
+
+                logger.warning(
+                    "[GOAL-EXEC] Loaded %d tasks from plan: %s",
+                    len(tasks),
+                    [t.get("agent_type", t.get("agent", "?")) for t in tasks],
+                    extra={"goal_id": goal_id},
+                )
+
                 # Extract execution_mode from stored plan or plan JSON
                 execution_mode = plan_result.data.get("execution_mode", "sequential")
                 if not execution_mode or execution_mode == "sequential":
@@ -3541,6 +3588,13 @@ class GoalExecutionService:
                     extra={"goal_id": goal_id},
                 )
                 return  # Don't auto-execute — wait for user approval
+
+            logger.warning(
+                "[GOAL-EXEC] execution_mode=%s, task_count=%d",
+                execution_mode,
+                len(tasks),
+                extra={"goal_id": goal_id},
+            )
 
             if not tasks:
                 await event_bus.publish(
@@ -3592,29 +3646,76 @@ class GoalExecutionService:
             total_tasks = len(tasks)
             completed_tasks = 0
 
-            if execution_mode in ("parallel", "reused_workflow"):
+            if execution_mode in ("parallel", "reused_workflow", "playbook"):
                 # Parallel execution: group tasks by dependency layers
                 layers = self._build_dependency_layers(tasks)
+                logger.warning(
+                    "[GOAL-EXEC] Built %d dependency layers: %s",
+                    len(layers),
+                    [
+                        [t.get("agent_type", t.get("agent", "?")) for t in layer]
+                        for layer in layers
+                    ],
+                    extra={"goal_id": goal_id},
+                )
                 # Limit concurrency to 4 agents and 5 min timeout per agent
                 _AGENT_TIMEOUT = 300  # seconds
                 _MAX_CONCURRENT = 4
                 _semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
 
                 async def _run_with_guard(t: dict[str, Any]) -> dict[str, Any]:
+                    _agent = t.get("agent_type", t.get("agent", "?"))
+                    logger.warning(
+                        "[GOAL-EXEC] Dispatching agent: %s", _agent,
+                        extra={"goal_id": goal_id},
+                    )
                     async with _semaphore:
-                        return await asyncio.wait_for(
-                            self._execute_task_with_events(
-                                task=t,
-                                goal_id=goal_id,
-                                user_id=user_id,
-                                goal=goal,
-                                context=context,
-                                conversation_id=plan_conversation_id,
-                            ),
-                            timeout=_AGENT_TIMEOUT,
-                        )
+                        try:
+                            result = await asyncio.wait_for(
+                                self._execute_task_with_events(
+                                    task=t,
+                                    goal_id=goal_id,
+                                    user_id=user_id,
+                                    goal=goal,
+                                    context=context,
+                                    conversation_id=plan_conversation_id,
+                                ),
+                                timeout=_AGENT_TIMEOUT,
+                            )
+                            logger.warning(
+                                "[GOAL-EXEC] Agent %s completed: success=%s",
+                                _agent,
+                                result.get("success") if isinstance(result, dict) else "?",
+                                extra={"goal_id": goal_id},
+                            )
+                            return result
+                        except asyncio.TimeoutError:
+                            logger.error(
+                                "[GOAL-EXEC] Agent %s TIMED OUT after %ds",
+                                _agent,
+                                _AGENT_TIMEOUT,
+                                extra={"goal_id": goal_id},
+                            )
+                            raise
+                        except Exception as exc:
+                            logger.error(
+                                "[GOAL-EXEC] Agent %s EXCEPTION: %s",
+                                _agent,
+                                exc,
+                                extra={"goal_id": goal_id},
+                                exc_info=True,
+                            )
+                            raise
 
-                for layer in layers:
+                for layer_idx, layer in enumerate(layers):
+                    logger.warning(
+                        "[GOAL-EXEC] Executing layer %d/%d with %d tasks: %s",
+                        layer_idx + 1,
+                        len(layers),
+                        len(layer),
+                        [t.get("agent_type", t.get("agent", "?")) for t in layer],
+                        extra={"goal_id": goal_id},
+                    )
                     # Execute all tasks in this layer concurrently
                     layer_results = await asyncio.gather(
                         *[_run_with_guard(t) for t in layer],
@@ -3625,39 +3726,67 @@ class GoalExecutionService:
                     for lr in layer_results:
                         if isinstance(lr, BaseException):
                             logger.error(
-                                "Unexpected exception in parallel task",
-                                extra={"goal_id": goal_id, "error": str(lr)},
+                                "[GOAL-EXEC] Exception in parallel task: %s",
+                                lr,
+                                extra={"goal_id": goal_id},
                             )
                         else:
                             completed_tasks += 1
 
                             progress = int((completed_tasks / total_tasks) * 100)
-                            await event_bus.publish(
-                                GoalEvent(
-                                    goal_id=goal_id,
-                                    user_id=user_id,
-                                    event_type="progress.update",
-                                    data={
-                                        "progress": progress,
-                                        "completed": completed_tasks,
-                                        "total": total_tasks,
-                                        "last_agent": lr.get("agent_type", ""),
-                                    },
+                            try:
+                                await event_bus.publish(
+                                    GoalEvent(
+                                        goal_id=goal_id,
+                                        user_id=user_id,
+                                        event_type="progress.update",
+                                        data={
+                                            "progress": progress,
+                                            "completed": completed_tasks,
+                                            "total": total_tasks,
+                                            "last_agent": lr.get("agent_type", ""),
+                                        },
+                                    )
                                 )
-                            )
+                            except Exception:
+                                logger.debug("Failed to publish progress event", exc_info=True)
 
+                    logger.warning(
+                        "[GOAL-EXEC] Layer %d/%d complete: %d/%d tasks done",
+                        layer_idx + 1,
+                        len(layers),
+                        completed_tasks,
+                        total_tasks,
+                        extra={"goal_id": goal_id},
+                    )
                     # Update goal progress in DB once per layer
-                    layer_progress = int((completed_tasks / total_tasks) * 100)
-                    self._db.table("goals").update(
-                        {
-                            "progress": layer_progress,
-                            "updated_at": datetime.now(UTC).isoformat(),
-                        }
-                    ).eq("id", goal_id).execute()
+                    try:
+                        layer_progress = int((completed_tasks / total_tasks) * 100)
+                        self._db.table("goals").update(
+                            {
+                                "progress": layer_progress,
+                                "updated_at": datetime.now(UTC).isoformat(),
+                            }
+                        ).eq("id", goal_id).execute()
+                    except Exception:
+                        logger.debug("Failed to update goal progress in DB", exc_info=True)
             else:
                 # Sequential execution: one task at a time
+                logger.warning(
+                    "[GOAL-EXEC] Sequential execution: %d tasks",
+                    len(tasks),
+                    extra={"goal_id": goal_id},
+                )
                 prev_task_result: dict[str, Any] | None = None
                 for task_idx, task in enumerate(tasks):
+                    logger.warning(
+                        "[GOAL-EXEC] Sequential task %d/%d: agent=%s title=%s",
+                        task_idx + 1,
+                        len(tasks),
+                        task.get("agent_type", task.get("agent", "?")),
+                        task.get("title", "?"),
+                        extra={"goal_id": goal_id},
+                    )
                     # Send handoff message between sequential agents
                     if prev_task_result is not None and task_idx < len(tasks):
                         try:
@@ -3678,37 +3807,67 @@ class GoalExecutionService:
                         except Exception:
                             logger.debug("Failed to send handoff message", exc_info=True)
 
-                    task_result = await self._execute_task_with_events(
-                        task=task,
-                        goal_id=goal_id,
-                        user_id=user_id,
-                        goal=goal,
-                        context=context,
-                        conversation_id=plan_conversation_id,
-                    )
+                    try:
+                        task_result = await self._execute_task_with_events(
+                            task=task,
+                            goal_id=goal_id,
+                            user_id=user_id,
+                            goal=goal,
+                            context=context,
+                            conversation_id=plan_conversation_id,
+                        )
+                    except Exception as task_exc:
+                        logger.error(
+                            "[GOAL-EXEC] Sequential task %d EXCEPTION: %s",
+                            task_idx + 1,
+                            task_exc,
+                            extra={"goal_id": goal_id},
+                            exc_info=True,
+                        )
+                        task_result = {
+                            "task_title": task.get("title", ""),
+                            "agent_type": task.get("agent_type", "?"),
+                            "success": False,
+                            "error": str(task_exc),
+                        }
                     prev_task_result = task_result
 
                     completed_tasks += 1
                     progress = int((completed_tasks / total_tasks) * 100)
 
-                    await event_bus.publish(
-                        GoalEvent(
-                            goal_id=goal_id,
-                            user_id=user_id,
-                            event_type="progress.update",
-                            data={
-                                "progress": progress,
-                                "completed": completed_tasks,
-                                "total": total_tasks,
-                                "last_agent": task_result.get("agent_type", ""),
-                            },
+                    try:
+                        await event_bus.publish(
+                            GoalEvent(
+                                goal_id=goal_id,
+                                user_id=user_id,
+                                event_type="progress.update",
+                                data={
+                                    "progress": progress,
+                                    "completed": completed_tasks,
+                                    "total": total_tasks,
+                                    "last_agent": task_result.get("agent_type", ""),
+                                },
+                            )
                         )
-                    )
+                    except Exception:
+                        logger.debug("Failed to publish progress event", exc_info=True)
 
                     # Update goal progress in DB
-                    self._db.table("goals").update(
-                        {"progress": progress, "updated_at": datetime.now(UTC).isoformat()}
-                    ).eq("id", goal_id).execute()
+                    try:
+                        self._db.table("goals").update(
+                            {"progress": progress, "updated_at": datetime.now(UTC).isoformat()}
+                        ).eq("id", goal_id).execute()
+                    except Exception:
+                        logger.debug("Failed to update goal progress in DB", exc_info=True)
+
+                    logger.warning(
+                        "[GOAL-EXEC] Sequential task %d/%d complete: agent=%s success=%s",
+                        task_idx + 1,
+                        len(tasks),
+                        task_result.get("agent_type", "?"),
+                        task_result.get("success", "?"),
+                        extra={"goal_id": goal_id},
+                    )
 
             # All tasks done — complete the goal
             await self.complete_goal_with_retro(goal_id, user_id)

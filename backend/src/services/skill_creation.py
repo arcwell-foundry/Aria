@@ -295,6 +295,6 @@ class SkillCreationEngine:
                 .execute()
             )
             return config_result.data if config_result.data else None
-        except Exception:
-            logger.warning("Failed to load tenant config", exc_info=True)
+        except Exception as e:
+            logger.debug("Failed to load tenant config: %s", e)
             return None

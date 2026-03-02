@@ -326,9 +326,12 @@ class ResolutionEngine:
             # Return as a simple namespace object
             from types import SimpleNamespace
             return SimpleNamespace(**config_result.data)
-        except Exception:
-            logger.warning(
-                "Failed to load tenant capability config",
+        except Exception as e:
+            # Downgrade to debug: this table may not exist yet (migration pending)
+            # and the caller handles None gracefully (skips tenant filtering).
+            logger.debug(
+                "Failed to load tenant capability config: %s",
+                e,
                 extra={"user_id": user_id},
             )
             return None
