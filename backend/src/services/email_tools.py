@@ -617,3 +617,67 @@ async def _check_email_decision(
             exc_info=True,
         )
         return {"error": f"Failed to look up email decision: {str(e)}"}
+
+
+async def get_email_context_for_chat(user_id: str) -> str | None:
+    """Build a system-prompt snippet summarizing recent email activity.
+
+    Queries ``email_scan_log`` for the most recent scanned emails and
+    ``email_drafts`` for pending-review drafts.  Returns a formatted string
+    suitable for injection into the chat system prompt, or *None* when no
+    email data exists for this user.
+    """
+    try:
+        client = SupabaseClient.get_client()
+
+        # Recent scans (last 5)
+        scans_result = (
+            client.table("email_scan_log")
+            .select("sender_name,sender_email,subject,category,urgency,scanned_at")
+            .eq("user_id", user_id)
+            .order("scanned_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        scans = scans_result.data if scans_result.data else []
+
+        # Pending-review drafts
+        drafts_result = (
+            client.table("email_drafts")
+            .select("recipient_email,recipient_name,subject,status")
+            .eq("user_id", user_id)
+            .eq("status", "pending_review")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        drafts = drafts_result.data if drafts_result.data else []
+
+        if not scans and not drafts:
+            return None
+
+        parts: list[str] = ["\n\n## Recent Email Activity"]
+
+        if scans:
+            parts.append("Recently scanned emails:")
+            for s in scans:
+                name = s.get("sender_name") or s.get("sender_email", "unknown")
+                subj = s.get("subject", "(no subject)")
+                cat = s.get("category", "")
+                urg = s.get("urgency", "")
+                parts.append(f"- From {name}: \"{subj}\" [{cat}, {urg}]")
+
+        if drafts:
+            parts.append(
+                f"\nYou have {len(drafts)} draft(s) awaiting the user's review:"
+            )
+            for d in drafts:
+                rname = d.get("recipient_name") or d.get("recipient_email", "unknown")
+                dsubj = d.get("subject", "(no subject)")
+                parts.append(f"- To {rname}: \"{dsubj}\"")
+
+        return "\n".join(parts)
+
+    except Exception as e:
+        logger.warning("Failed to build email context for chat: %s", e)
+        return None

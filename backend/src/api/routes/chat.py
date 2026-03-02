@@ -15,6 +15,7 @@ from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.services.chat import DEFAULT_MEMORY_TYPES, ChatService
 from src.services.conversations import ConversationService
+from src.services.email_tools import get_email_context_for_chat, get_email_integration
 
 logger = logging.getLogger(__name__)
 
@@ -471,90 +472,91 @@ async def chat_stream(
         except Exception as e:
             logger.warning("SSE cognitive friction check failed (proceeding): %s", e)
 
-        # --- Web grounding (fail-open) ---
-        web_context = None
-        try:
-            if service._web_grounding is None:
-                from src.services.chat import WebGroundingService
-
-                service._web_grounding = WebGroundingService()
-            web_context = await service._web_grounding.detect_and_ground(request.message)
-        except Exception as e:
-            logger.warning("SSE web grounding failed: %s", e)
-
-        # Get proactive insights
-        proactive_insights = await service._get_proactive_insights(
-            user_id=current_user.id,
-            current_message=request.message,
-            conversation_messages=conversation_messages,
-        )
-
-        # --- Causal reasoning + user mental model (fail-open, parallel) ---
+        # --- Parallel context gathering (fail-open, 5s timeout per subsystem) ---
         import asyncio as _aio
 
-        causal_actions = []
-        user_mental_model = None
-        try:
-            if service._causal_reasoning is None:
-                from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+        _CTX_TIMEOUT = 5.0
 
-                service._causal_reasoning = SalesCausalReasoningEngine(
-                    db_client=get_supabase_client()
-                )
-            if service._user_model_service is None:
-                from src.intelligence.user_model import UserModelService
+        async def _safe(coro, default=None, label="unknown"):
+            try:
+                return await _aio.wait_for(coro, timeout=_CTX_TIMEOUT)
+            except Exception as e:
+                logger.warning("SSE %s failed (%.1fs): %s", label, _CTX_TIMEOUT, e)
+                return default
 
-                service._user_model_service = UserModelService(
-                    db_client=get_supabase_client()
-                )
+        # Lazy-init services (synchronous, cheap)
+        if service._web_grounding is None:
+            from src.services.chat import WebGroundingService
 
-            causal_task = _aio.create_task(
-                service._causal_reasoning.analyze_recent_signals(
-                    current_user.id, limit=3, hours_back=24
-                )
+            service._web_grounding = WebGroundingService()
+        if service._causal_reasoning is None:
+            from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+
+            service._causal_reasoning = SalesCausalReasoningEngine(
+                db_client=get_supabase_client()
             )
-            model_task = _aio.create_task(
-                service._user_model_service.get_model(current_user.id)
-            )
-            causal_actions, user_mental_model = await _aio.gather(
-                causal_task, model_task
-            )
-        except Exception as e:
-            logger.warning("SSE causal/model failed (proceeding): %s", e)
+        if service._user_model_service is None:
+            from src.intelligence.user_model import UserMentalModelService
 
-        # --- Companion Orchestrator (fail-open) ---
-        companion_ctx = None
-        try:
-            if service._companion_orchestrator is None:
-                from src.companion.factory import create_companion_orchestrator
+            service._user_model_service = UserMentalModelService(
+                db_client=get_supabase_client()
+            )
+        if service._companion_orchestrator is None:
+            from src.companion.factory import create_companion_orchestrator
 
-                service._companion_orchestrator = create_companion_orchestrator()
-            companion_ctx = await service._companion_orchestrator.build_full_context(
+            service._companion_orchestrator = create_companion_orchestrator()
+
+        (
+            web_context,
+            proactive_insights,
+            causal_result,
+            user_mental_model,
+            companion_ctx,
+            email_integration,
+            email_activity_ctx,
+            priming_context,
+            active_goals,
+            digital_twin_calibration,
+            capability_context,
+        ) = await _aio.gather(
+            _safe(service._web_grounding.detect_and_ground(request.message), None, "web_grounding"),
+            _safe(service._get_proactive_insights(
+                user_id=current_user.id,
+                current_message=request.message,
+                conversation_messages=conversation_messages,
+            ), [], "proactive"),
+            _safe(service._causal_reasoning.analyze_recent_signals(
+                current_user.id, limit=3, hours_back=24,
+            ), None, "causal"),
+            _safe(service._user_model_service.get_model(current_user.id), None, "user_model"),
+            _safe(service._companion_orchestrator.build_full_context(
                 user_id=current_user.id,
                 message=request.message,
                 conversation_history=conversation_messages,
                 session_id=conversation_id,
-            )
-        except Exception as e:
-            logger.warning("SSE companion orchestrator failed, falling back: %s", e)
+            ), None, "companion"),
+            _safe(get_email_integration(current_user.id), None, "email_integration"),
+            _safe(get_email_context_for_chat(current_user.id), None, "email_context"),
+            _safe(service._get_priming_context(current_user.id, request.message), None, "priming"),
+            _safe(service._get_active_goals(current_user.id), [], "goals"),
+            _safe(service._get_digital_twin_calibration(current_user.id), None, "digital_twin"),
+            _safe(service._get_capability_context(current_user.id), None, "capability"),
+        )
 
-        # Fall back to individual calls if orchestrator failed
+        # Extract causal actions from result
+        causal_actions = (
+            causal_result.actions
+            if causal_result and hasattr(causal_result, "actions")
+            else []
+        )
+
+        # Fall back to individual calls if companion orchestrator failed
         if companion_ctx is not None:
             personality = None
             style_guidelines = None
         else:
-            # Load Digital Twin personality calibration
             personality = await service._get_personality_calibration(current_user.id)
-            # Fetch Digital Twin writing style fingerprint
             style_guidelines = await service._get_style_guidelines(current_user.id)
-
-        # Prime conversation with recent episodes, open threads, salient facts
-        priming_context = await service._get_priming_context(current_user.id, request.message)
-
-        # Query active goals and digital twin calibration for prompt injection
-        active_goals = await service._get_active_goals(current_user.id)
-        digital_twin_calibration = await service._get_digital_twin_calibration(current_user.id)
-        capability_context = await service._get_capability_context(current_user.id)
 
         # Build system prompt — use PersonaBuilder (v2) for full ARIA identity
         if service._use_persona_builder:
@@ -598,6 +600,27 @@ async def chat_stream(
                 f"Surface this concern naturally alongside your response: "
                 f"{friction_decision.user_message}"
             )
+
+        # Inject email awareness into system prompt
+        if email_integration:
+            provider_name = email_integration.get("integration_type", "email").title()
+            system_prompt += (
+                f"\n\n## Email Access\n"
+                f"You have access to the user's {provider_name} email. "
+                f"When they ask about emails, inbox, messages, or anything email-related, "
+                f"you CAN see their emails. Do NOT say you can't access emails.\n"
+                f"You can also DRAFT replies to emails."
+                f"\n\n## Email Intelligence Rules\n"
+                f"1. FACTS you can state directly: sender name, subject line, date, "
+                f"direct quotes from email content.\n"
+                f"2. INFERENCES you must hedge: any connection between an email and "
+                f"a goal, deal, or lead.\n"
+                f"3. When presenting email summaries, distinguish what you read in "
+                f"the email from what you are inferring about its significance.\n"
+                f"4. If you are uncertain about a connection, say so."
+            )
+        if email_activity_ctx:
+            system_prompt += email_activity_ctx
 
         # Inject pending plan context for discuss/unrelated plan interactions
         pending_plan_ctx = await service._get_pending_plan_context(current_user.id)

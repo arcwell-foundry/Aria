@@ -34,6 +34,7 @@ from src.onboarding.personality_calibrator import PersonalityCalibration, Person
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     execute_email_tool,
+    get_email_context_for_chat,
     get_email_integration,
 )
 from src.services.extraction import ExtractionService
@@ -2468,97 +2469,78 @@ class ChatService:
             session_id=conversation_id,
         )
 
-        # Query relevant memories with timing
-        memory_start = time.perf_counter()
-        memories = await self._query_relevant_memories(
-            user_id=user_id,
-            query=message,
-            memory_types=memory_types,
+        # --- Parallel context gathering (fail-open, 5s timeout per subsystem) ---
+        import asyncio
+
+        _CTX_TIMEOUT = 5.0
+
+        async def _safe(coro, default=None, label="unknown"):
+            try:
+                return await asyncio.wait_for(coro, timeout=_CTX_TIMEOUT)
+            except Exception as e:
+                logger.warning("Context %s failed (%.1fs): %s", label, _CTX_TIMEOUT, e)
+                return default
+
+        # Lazy-init services (synchronous, cheap)
+        if self._web_grounding is None:
+            self._web_grounding = WebGroundingService()
+        if self._causal_reasoning is None:
+            from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
+
+            self._causal_reasoning = SalesCausalReasoningEngine(
+                db_client=get_supabase_client()
+            )
+        if self._user_model_service is None:
+            from src.intelligence.user_model import UserMentalModelService
+
+            self._user_model_service = UserMentalModelService(
+                db_client=get_supabase_client()
+            )
+
+        context_start = time.perf_counter()
+        (
+            memories,
+            web_context,
+            email_integration,
+            email_activity_ctx,
+            proactive_insights,
+            causal_result,
+            user_mental_model,
+        ) = await asyncio.gather(
+            _safe(self._query_relevant_memories(
+                user_id=user_id, query=message, memory_types=memory_types,
+            ), [], "memory"),
+            _safe(self._web_grounding.detect_and_ground(message), None, "web_grounding"),
+            _safe(get_email_integration(user_id), None, "email_integration"),
+            _safe(get_email_context_for_chat(user_id), None, "email_context"),
+            _safe(self._get_proactive_insights(
+                user_id=user_id,
+                current_message=message,
+                conversation_messages=conversation_messages,
+            ), [], "proactive"),
+            _safe(self._causal_reasoning.analyze_recent_signals(
+                user_id, limit=3, hours_back=24,
+            ), None, "causal"),
+            _safe(self._user_model_service.get_model(user_id), None, "user_model"),
         )
-        memory_ms = (time.perf_counter() - memory_start) * 1000
+        context_ms = (time.perf_counter() - context_start) * 1000
 
-        # Web grounding: Detect and fetch real-time web data
-        web_grounding_start = time.perf_counter()
-        web_context: dict[str, Any] | None = None
-        try:
-            if self._web_grounding is None:
-                self._web_grounding = WebGroundingService()
-            web_context = await self._web_grounding.detect_and_ground(message)
-        except Exception as e:
-            logger.warning("Web grounding failed: %s", e)
-        web_grounding_ms = (time.perf_counter() - web_grounding_start) * 1000
-
-        # Check if user has email integration (for tool-based email access)
-        email_check_start = time.perf_counter()
-        email_integration: dict[str, Any] | None = None
-        try:
-            email_integration = await get_email_integration(user_id)
-        except Exception as e:
-            logger.warning("Email integration check failed: %s", e)
-        email_check_ms = (time.perf_counter() - email_check_start) * 1000
-
-        # Get proactive insights to volunteer
-        proactive_start = time.perf_counter()
-        proactive_insights = await self._get_proactive_insights(
-            user_id=user_id,
-            current_message=message,
-            conversation_messages=conversation_messages,
+        # Unpack causal result
+        causal_actions: list[Any] = (
+            causal_result.actions
+            if causal_result and hasattr(causal_result, "actions")
+            else []
         )
-        proactive_ms = (time.perf_counter() - proactive_start) * 1000
+        if isinstance(user_mental_model, Exception):
+            user_mental_model = None
 
-        # --- Causal Reasoning + User Mental Model (fail-open) ---
-        causal_actions: list[Any] = []
-        causal_ms = 0.0
-        user_mental_model: Any = None
-        user_model_ms = 0.0
-        try:
-            import asyncio
-
-            causal_start = time.perf_counter()
-
-            # Lazy init causal reasoning engine
-            if self._causal_reasoning is None:
-                from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
-
-                self._causal_reasoning = SalesCausalReasoningEngine(
-                    db_client=get_supabase_client()
-                )
-
-            # Lazy init user model service
-            if self._user_model_service is None:
-                from src.intelligence.user_model import UserMentalModelService
-
-                self._user_model_service = UserMentalModelService(
-                    db_client=get_supabase_client()
-                )
-
-            # Run both in parallel
-            causal_task = asyncio.create_task(
-                self._causal_reasoning.analyze_recent_signals(user_id, limit=3, hours_back=24)
-            )
-            model_task = asyncio.create_task(
-                self._user_model_service.get_model(user_id)
-            )
-
-            causal_result, user_mental_model = await asyncio.gather(
-                causal_task, model_task, return_exceptions=True
-            )
-
-            causal_ms = (time.perf_counter() - causal_start) * 1000
-
-            if isinstance(causal_result, Exception):
-                logger.warning("Causal reasoning failed (fail-open): %s", causal_result)
-                causal_actions = []
-            else:
-                causal_actions = causal_result.actions if causal_result else []
-
-            if isinstance(user_mental_model, Exception):
-                logger.warning("User model failed (fail-open): %s", user_mental_model)
-                user_mental_model = None
-
-            user_model_ms = causal_ms  # combined timing
-        except Exception as e:
-            logger.warning("Causal reasoning / user model init failed (fail-open): %s", e)
+        # Timing placeholders (parallelized — individual times ≈ total)
+        memory_ms = context_ms
+        web_grounding_ms = context_ms
+        email_check_ms = context_ms
+        proactive_ms = context_ms
+        causal_ms = context_ms
+        user_model_ms = context_ms
 
         # --- Cognitive Friction: evaluate before any action routing ---
         friction_ms = 0.0
@@ -2700,21 +2682,30 @@ class ChatService:
                     load_state=load_state,
                 )
 
-        # Build companion context (replaces personality calibration + style guidelines)
-        companion_ctx = None
-        try:
-            if self._companion_orchestrator is None:
-                from src.companion.factory import create_companion_orchestrator
+        # --- Parallel Phase 2: companion + prompt context (fail-open) ---
+        if self._companion_orchestrator is None:
+            from src.companion.factory import create_companion_orchestrator
 
-                self._companion_orchestrator = create_companion_orchestrator()
-            companion_ctx = await self._companion_orchestrator.build_full_context(
+            self._companion_orchestrator = create_companion_orchestrator()
+
+        (
+            companion_ctx,
+            priming_context,
+            active_goals,
+            digital_twin_calibration,
+            capability_context,
+        ) = await asyncio.gather(
+            _safe(self._companion_orchestrator.build_full_context(
                 user_id=user_id,
                 message=message,
                 conversation_history=conversation_messages,
                 session_id=conversation_id,
-            )
-        except Exception as e:
-            logger.warning("Companion orchestrator failed, falling back: %s", e)
+            ), None, "companion"),
+            _safe(self._get_priming_context(user_id, message), None, "priming"),
+            _safe(self._get_active_goals(user_id), [], "goals"),
+            _safe(self._get_digital_twin_calibration(user_id), None, "digital_twin"),
+            _safe(self._get_capability_context(user_id), None, "capability"),
+        )
 
         # Fall back to individual calls if orchestrator failed
         if companion_ctx is not None:
@@ -2723,14 +2714,6 @@ class ChatService:
         else:
             personality = await self._get_personality_calibration(user_id)
             style_guidelines = await self._get_style_guidelines(user_id)
-
-        # Prime conversation with recent episodes, open threads, and salient facts
-        priming_context = await self._get_priming_context(user_id, message)
-
-        # Query active goals, digital twin calibration, and capability context
-        active_goals = await self._get_active_goals(user_id)
-        digital_twin_calibration = await self._get_digital_twin_calibration(user_id)
-        capability_context = await self._get_capability_context(user_id)
 
         # Build system prompt with all context layers
         if self._use_persona_builder:
@@ -2974,6 +2957,10 @@ class ChatService:
                 "Incorporate these simulation results into your response."
             )
             system_prompt = system_prompt + whatif_context
+
+        # Inject email activity context (recent scans + pending drafts)
+        if email_activity_ctx:
+            system_prompt += email_activity_ctx
 
         # Generate response from LLM with timing (with optional email tools)
         llm_start = time.perf_counter()
