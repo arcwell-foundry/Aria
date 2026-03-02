@@ -14,7 +14,8 @@ import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { useBriefingStatus } from '@/hooks/useBriefingStatus';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
-import { useTodayBriefing, useGenerateBriefing } from '@/hooks/useBriefing';
+import { useTodayBriefing } from '@/hooks/useBriefing';
+import { streamBriefingC1 } from '@/api/briefings';
 import { VideoBriefingCard } from '@/components/briefing';
 
 // Module-level flag to prevent re-injecting briefing across remounts within the same session.
@@ -37,9 +38,8 @@ export function ARIAWorkspace() {
   const streamingIdRef = useRef<string | null>(null);
   const conversationLoadedRef = useRef(false);
   const briefingInjectedRef = useRef(false);
-  const briefingGenerateCalledRef = useRef(false);
-  const { data: briefing, isLoading: briefingLoading } = useTodayBriefing();
-  const generateBriefing = useGenerateBriefing();
+  const briefingStreamAbortRef = useRef<AbortController | null>(null);
+  const { data: briefingFallback } = useTodayBriefing();
 
   // Video briefing status
   const {
@@ -107,24 +107,16 @@ export function ARIAWorkspace() {
       });
   }, []);
 
-  // Inject daily briefing as ARIA's first message when available
+  // Inject daily briefing as ARIA's first message via streaming C1 pipeline
   useEffect(() => {
     if (briefingInjectedRef.current || briefingInjectedForSession) return;
-    if (briefingLoading) return;
-
-    // If no briefing exists yet, generate one (only once per session)
-    if (!briefing && !briefingGenerateCalledRef.current && !generateBriefing.isPending) {
-      briefingGenerateCalledRef.current = true;
-      generateBriefing.mutate(undefined);
-      return;
-    }
-
-    if (!briefing) return;
 
     // Check if a briefing message already exists in the store (dedup guard)
     const store = useConversationStore.getState();
     const hasBriefing = store.messages.some(
-      (msg) => msg.role === 'aria' && msg.rich_content?.some((rc) => rc.type === 'briefing'),
+      (msg) =>
+        msg.role === 'aria' &&
+        (msg.rich_content?.some((rc) => rc.type === 'briefing') || msg.render_mode === 'c1'),
     );
     if (hasBriefing) {
       briefingInjectedRef.current = true;
@@ -135,25 +127,122 @@ export function ARIAWorkspace() {
     briefingInjectedRef.current = true;
     briefingInjectedForSession = true;
 
-    // Time-appropriate greeting
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const abortController = new AbortController();
+    briefingStreamAbortRef.current = abortController;
 
-    store.addMessage({
-      role: 'aria',
-      content: `${greeting}. Here's your intelligence briefing for today.`,
-      rich_content: [
-        {
-          type: 'briefing',
-          data: briefing as unknown as Record<string, unknown>,
-        },
-      ],
-      ui_commands: [],
-      suggestions: ['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health'],
-    });
+    let streamingMsgId: string | null = null;
 
-    store.setCurrentSuggestions(['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health']);
-  }, [briefing, briefingLoading, generateBriefing]);
+    (async () => {
+      try {
+        const response = await streamBriefingC1();
+        if (abortController.signal.aborted) return;
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (abortController.signal.aborted) {
+            reader.cancel();
+            return;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+
+            if (jsonStr === '[DONE]') {
+              // Stream complete — finalize streaming state
+              if (streamingMsgId) {
+                const s = useConversationStore.getState();
+                s.setStreaming(false);
+              }
+              return;
+            }
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === 'token') {
+                if (!streamingMsgId) {
+                  // Create the initial streaming message
+                  const s = useConversationStore.getState();
+                  s.addMessage({
+                    role: 'aria',
+                    content: event.content || '',
+                    rich_content: [],
+                    ui_commands: [],
+                    suggestions: [],
+                    isStreaming: true,
+                  });
+                  const msgs = useConversationStore.getState().messages;
+                  streamingMsgId = msgs[msgs.length - 1]?.id ?? null;
+                  if (streamingMsgId) {
+                    const s2 = useConversationStore.getState();
+                    s2.setStreaming(true, streamingMsgId);
+                  }
+                } else {
+                  appendToMessage(streamingMsgId, event.content || '');
+                }
+              } else if (event.type === 'complete') {
+                if (streamingMsgId) {
+                  updateMessageMetadata(streamingMsgId, {
+                    rich_content: event.rich_content || [],
+                    suggestions: event.suggestions || [],
+                    render_mode: event.render_mode || 'markdown',
+                    c1_response: event.c1_response || null,
+                  });
+                }
+                if (event.suggestions?.length) {
+                  setCurrentSuggestions(event.suggestions);
+                }
+              }
+              // metadata events are ignored — we already have the message_id
+            } catch {
+              // Skip unparseable lines
+            }
+          }
+        }
+      } catch {
+        // Stream failed — fall back to static briefing injection
+        if (abortController.signal.aborted) return;
+
+        if (briefingFallback) {
+          const hour = new Date().getHours();
+          const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+          const s = useConversationStore.getState();
+          s.addMessage({
+            role: 'aria',
+            content: `${greeting}. Here's your intelligence briefing for today.`,
+            rich_content: [
+              {
+                type: 'briefing',
+                data: briefingFallback as unknown as Record<string, unknown>,
+              },
+            ],
+            ui_commands: [],
+            suggestions: ['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health'],
+          });
+          s.setCurrentSuggestions(['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health']);
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [briefingFallback, appendToMessage, updateMessageMetadata, setCurrentSuggestions]);
 
   // Wire up event listeners
   useEffect(() => {

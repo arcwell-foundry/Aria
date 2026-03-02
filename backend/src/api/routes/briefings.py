@@ -1,14 +1,22 @@
 """Briefing API routes for daily morning briefings."""
 
+import json
 import logging
+import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.core.llm import LLMClient
+from src.core.task_types import TaskType
+from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services.briefing import BriefingService
+from src.services.thesys_service import get_thesys_service
+from src.services.thesys_system_prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +59,324 @@ class GenerateBriefingRequest(BaseModel):
     """Request body for generating a briefing."""
 
     briefing_date: str | None = Field(None, description="ISO date string (e.g., 2026-02-01)")
+
+
+def _sse_event(data: dict[str, Any] | str) -> str:
+    """Format a server-sent event line."""
+    if isinstance(data, str):
+        return f"data: {data}\n\n"
+    return f"data: {json.dumps(data)}\n\n"
+
+
+async def _generate_briefing_narrative(
+    content: dict[str, Any],
+    user_id: str,
+) -> str:
+    """Transform structured briefing data into a Claude narrative for C1 rendering.
+
+    Takes the briefing content dict and produces a structured text narrative
+    that C1 can visualize as an interactive dashboard.
+    """
+    # Determine time-appropriate greeting
+    hour = datetime.now().hour
+    if hour < 12:
+        greeting = "Good morning"
+    elif hour < 17:
+        greeting = "Good afternoon"
+    else:
+        greeting = "Good evening"
+
+    # Check if user has any data at all
+    calendar = content.get("calendar", {})
+    leads = content.get("leads", {})
+    signals = content.get("signals", {})
+    tasks = content.get("tasks", {})
+    email_data = content.get("email_summary", {})
+    causal_actions = content.get("causal_actions", [])
+    intelligence_insights = content.get("intelligence_insights", [])
+
+    meeting_count = calendar.get("meeting_count", 0)
+    hot_leads = leads.get("hot_leads", [])
+    attention_leads = leads.get("needs_attention", [])
+    company_news = signals.get("company_news", [])
+    market_trends = signals.get("market_trends", [])
+    competitive_intel = signals.get("competitive_intel", [])
+    overdue_tasks = tasks.get("overdue", [])
+    due_today_tasks = tasks.get("due_today", [])
+    emails_needing_attention = email_data.get("needs_attention", [])
+    total_emails = email_data.get("total_received", 0)
+    drafts_waiting = email_data.get("drafts_waiting", 0)
+
+    total_activity = (
+        meeting_count
+        + len(hot_leads)
+        + len(attention_leads)
+        + len(company_news)
+        + len(market_trends)
+        + len(competitive_intel)
+        + len(overdue_tasks)
+        + len(due_today_tasks)
+        + total_emails
+    )
+
+    if total_activity == 0:
+        # New user with no data — return simple welcome
+        return (
+            f"{greeting}. Your intelligence feeds are still initializing. "
+            "Connect your calendar, email, and CRM so I can start building "
+            "your daily intelligence briefing."
+        )
+
+    # Build structured sections for the LLM
+    sections: list[str] = []
+
+    # Calendar section
+    if meeting_count > 0:
+        meetings_text = f"## Calendar\n{meeting_count} meetings today.\n"
+        for m in calendar.get("key_meetings", [])[:8]:
+            attendees = ", ".join(m.get("attendees", [])[:3])
+            meetings_text += f"- {m.get('time', '')} — {m.get('title', 'Meeting')}"
+            if attendees:
+                meetings_text += f" (with {attendees})"
+            meetings_text += "\n"
+        sections.append(meetings_text)
+
+    # Email section
+    if total_emails > 0 or drafts_waiting > 0:
+        email_text = f"## Emails\n{total_emails} received"
+        if drafts_waiting > 0:
+            email_text += f", {drafts_waiting} drafts waiting for your review"
+        email_text += ".\n"
+        for e in emails_needing_attention[:5]:
+            draft_id_str = f" [draft_id:{e.get('draft_id', '')}]" if e.get("draft_id") else ""
+            email_text += (
+                f"- From {e.get('sender', 'Unknown')} ({e.get('company', '')}) — "
+                f"\"{e.get('subject', '')}\" — urgency: {e.get('urgency', 'normal')}"
+                f"{draft_id_str}\n"
+            )
+            if e.get("aria_notes"):
+                email_text += f"  ARIA note: {e['aria_notes']}\n"
+        sections.append(email_text)
+
+    # Leads section
+    if hot_leads or attention_leads:
+        leads_text = "## Pipeline & Leads\n"
+        if hot_leads:
+            leads_text += f"{len(hot_leads)} hot leads:\n"
+            for ld in hot_leads[:5]:
+                health = f" (health: {ld.get('health_score', '—')})" if ld.get("health_score") else ""
+                leads_text += (
+                    f"- {ld.get('name', 'Unknown')} at {ld.get('company', '')} "
+                    f"[lead_id:{ld.get('id', '')}]{health}\n"
+                )
+        if attention_leads:
+            leads_text += f"{len(attention_leads)} need attention:\n"
+            for ld in attention_leads[:5]:
+                health = f" (health: {ld.get('health_score', '—')})" if ld.get("health_score") else ""
+                leads_text += (
+                    f"- {ld.get('name', 'Unknown')} at {ld.get('company', '')} "
+                    f"[lead_id:{ld.get('id', '')}]{health}\n"
+                )
+        sections.append(leads_text)
+
+    # Signals section
+    all_signals = company_news + market_trends + competitive_intel
+    if all_signals:
+        signals_text = f"## Market Signals\n{len(all_signals)} signals detected.\n"
+        for sig in all_signals[:6]:
+            severity = sig.get("relevance", 0)
+            severity_label = "High" if severity >= 80 else "Medium" if severity >= 50 else "Low"
+            signals_text += (
+                f"- [{severity_label}] {sig.get('title', 'Signal')} "
+                f"[signal_id:{sig.get('id', '')}] — {sig.get('summary', '')}\n"
+            )
+        sections.append(signals_text)
+
+    # Tasks section
+    if overdue_tasks or due_today_tasks:
+        tasks_text = "## Tasks\n"
+        if overdue_tasks:
+            tasks_text += f"{len(overdue_tasks)} overdue:\n"
+            for t in overdue_tasks[:5]:
+                priority = f" (priority: {t.get('priority', 'normal')})" if t.get("priority") else ""
+                tasks_text += f"- {t.get('title', 'Task')} [task_id:{t.get('id', '')}]{priority}\n"
+        if due_today_tasks:
+            tasks_text += f"{len(due_today_tasks)} due today:\n"
+            for t in due_today_tasks[:5]:
+                priority = f" (priority: {t.get('priority', 'normal')})" if t.get("priority") else ""
+                tasks_text += f"- {t.get('title', 'Task')} [task_id:{t.get('id', '')}]{priority}\n"
+        sections.append(tasks_text)
+
+    # Causal actions section
+    if causal_actions:
+        causal_text = "## Recommended Actions\n"
+        for action in causal_actions[:3]:
+            causal_text += (
+                f"- {action.get('recommended_action', '')} "
+                f"(urgency: {action.get('urgency', 'normal')}, "
+                f"timing: {action.get('timing', 'flexible')})\n"
+            )
+        sections.append(causal_text)
+
+    # Intelligence insights section
+    if intelligence_insights:
+        insights_text = "## Intelligence Insights\n"
+        for insight in intelligence_insights[:3]:
+            insights_text += f"- {insight.get('title', insight.get('message', ''))}\n"
+        sections.append(insights_text)
+
+    structured_data = "\n".join(sections)
+
+    # Get personality calibration for tone
+    tone_guidance = ""
+    try:
+        calibrator = PersonalityCalibrator()
+        calibration = await calibrator.get_calibration(user_id)
+        if calibration:
+            tone_guidance = calibration.tone_guidance
+    except Exception:
+        logger.debug("Personality calibration unavailable for briefing narrative", extra={"user_id": user_id})
+
+    prompt = f"""Write a structured morning briefing narrative based on this data. The narrative will be rendered as an interactive dashboard by a UI component, so:
+
+1. Use markdown headers (##) to separate sections — the UI will create distinct card groups for each section.
+2. Keep IDs in brackets (e.g. [draft_id:xxx], [lead_id:xxx], [signal_id:xxx], [task_id:xxx]) — the UI uses these to wire action buttons.
+3. For emails with drafts, clearly indicate which ones have drafts ready for approval.
+4. For signals, include the severity level so the UI can render appropriate badges.
+5. For leads, include health scores so the UI can show status indicators.
+6. Skip any section that has no data — do not mention empty sections.
+7. Be concise and professional. Do not use emojis.
+8. Start with "{greeting}." and a brief 1-sentence executive summary before the sections.
+
+Data:
+{structured_data}"""
+
+    if tone_guidance:
+        prompt = f"TONE: {tone_guidance}\n\n{prompt}"
+
+    llm = LLMClient()
+    try:
+        narrative = await llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            task=TaskType.ANALYST_SUMMARIZE,
+            agent_id="briefing",
+            user_id=user_id,
+        )
+        return narrative
+    except Exception:
+        logger.warning(
+            "LLM narrative generation failed, using existing summary",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
+        return content.get("summary", f"{greeting}. Your briefing is ready.")
+
+
+@router.post("/stream")
+async def stream_briefing(
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    """Stream today's briefing as a C1-rendered interactive dashboard.
+
+    Generates or retrieves the cached briefing, transforms it into a
+    Claude narrative, and streams it through C1 for interactive rendering.
+    Falls back to markdown if C1 is unavailable.
+    """
+
+    async def event_stream():  # noqa: C901
+        message_id = str(uuid.uuid4())
+
+        # Emit metadata event
+        yield _sse_event({
+            "type": "metadata",
+            "message_id": message_id,
+            "conversation_id": "briefing",
+        })
+
+        try:
+            # Get briefing data (cached, 1hr TTL)
+            service = BriefingService()
+            content = await service.get_or_generate_briefing(current_user.id)
+        except Exception:
+            logger.exception(
+                "BriefingService failed during streaming",
+                extra={"user_id": current_user.id},
+            )
+            # Minimal greeting on total failure
+            hour = datetime.now().hour
+            greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
+            fallback = f"{greeting}. I'm having trouble loading your briefing right now. Please try refreshing."
+            yield _sse_event({"type": "token", "content": fallback})
+            yield _sse_event({
+                "type": "complete",
+                "render_mode": "markdown",
+                "suggestions": ["Refresh briefing", "Show me today's meetings"],
+            })
+            yield _sse_event("[DONE]")
+            return
+
+        # Generate narrative from structured data
+        narrative = await _generate_briefing_narrative(content, current_user.id)
+
+        # Try C1 streaming
+        thesys = get_thesys_service()
+        c1_system_prompt = build_system_prompt("briefing")
+
+        try:
+            c1_chunks: list[str] = []
+            async for chunk in thesys.visualize_stream(narrative, c1_system_prompt):
+                c1_chunks.append(chunk)
+                yield _sse_event({"type": "token", "content": chunk})
+
+            c1_response = "".join(c1_chunks)
+
+            # Build suggestions from briefing content
+            suggestions = content.get("suggestions", [
+                "Show me today's meetings",
+                "Any urgent signals?",
+                "Check pipeline health",
+            ])
+
+            yield _sse_event({
+                "type": "complete",
+                "render_mode": "c1",
+                "c1_response": c1_response,
+                "suggestions": suggestions[:4],
+            })
+        except Exception:
+            logger.warning(
+                "C1 streaming failed, falling back to markdown",
+                extra={"user_id": current_user.id},
+                exc_info=True,
+            )
+            # Markdown fallback — emit narrative as single token
+            yield _sse_event({"type": "token", "content": narrative})
+
+            suggestions = content.get("suggestions", [
+                "Show me today's meetings",
+                "Any urgent signals?",
+                "Check pipeline health",
+            ])
+
+            yield _sse_event({
+                "type": "complete",
+                "render_mode": "markdown",
+                "rich_content": [{"type": "briefing", "data": content}],
+                "suggestions": suggestions[:4],
+            })
+
+        yield _sse_event("[DONE]")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/today")

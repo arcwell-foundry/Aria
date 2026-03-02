@@ -176,3 +176,26 @@ export async function getTextBriefing(briefingId: string): Promise<string> {
   const response = await apiClient.get<{ text: string; briefing_id: string }>(`/briefings/${briefingId}/text`, backgroundConfig);
   return response.data.text;
 }
+
+/**
+ * Stream a C1-rendered briefing dashboard via SSE.
+ * Returns the raw Response object — caller handles stream reading.
+ */
+export async function streamBriefingC1(): Promise<Response> {
+  const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const token = localStorage.getItem("access_token");
+
+  const response = await fetch(`${baseUrl}/api/v1/briefings/stream`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Briefing stream failed: ${response.status}`);
+  }
+
+  return response;
+}
