@@ -536,14 +536,18 @@ class GoalExecutionService:
                     )
                     # Send via WebSocket as provisioning options
                     try:
-                        await ws_manager.send_to_user(
+                        await ws_manager.send_aria_message(
                             user_id=user_id,
-                            event_type="provisioning_options",
-                            data={
-                                "goal_id": goal_id,
-                                "message": gap_message,
-                                "gaps": [g.model_dump() for g in gaps],
-                            },
+                            message=gap_message,
+                            rich_content=[
+                                {
+                                    "type": "provisioning_options",
+                                    "data": {
+                                        "goal_id": goal_id,
+                                        "gaps": [g.model_dump() for g in gaps],
+                                    },
+                                }
+                            ],
                         )
                     except Exception:
                         logger.debug("Failed to send provisioning options via WS")
@@ -1199,6 +1203,7 @@ class GoalExecutionService:
         goal: dict[str, Any],
         context: dict[str, Any],
         resource_status: list[dict[str, Any]] | None = None,
+        system_notes: str = "",
     ) -> dict[str, Any] | None:
         """Build a task dict compatible with an agent's execute() method.
 
@@ -1209,6 +1214,7 @@ class GoalExecutionService:
             goal: The goal dict.
             context: Gathered execution context.
             resource_status: List of resource status dicts from the task.
+            system_notes: Capability degradation notes to inject into agent context.
 
         Returns:
             Task dict or None if the agent type isn't supported.
@@ -1288,6 +1294,10 @@ class GoalExecutionService:
         if task is not None and resource_status:
             task["resource_status"] = resource_status
 
+        # Inject system_notes for capability degradation context
+        if task is not None and system_notes:
+            task["system_notes"] = system_notes
+
         return task
 
     async def _try_skill_execution(
@@ -1297,6 +1307,7 @@ class GoalExecutionService:
         agent_type: str,
         context: dict[str, Any],
         resource_status: list[dict[str, Any]] | None = None,
+        system_notes: str = "",
     ) -> dict[str, Any] | None:
         """Execute using the agent's native execute() method with optional skill augmentation.
 
@@ -1312,6 +1323,7 @@ class GoalExecutionService:
             agent_type: The agent type string.
             context: Gathered execution context.
             resource_status: List of resource status dicts from the task.
+            system_notes: Capability degradation notes to inject into agent context.
 
         Returns:
             Result data dict if agent execution succeeded, None otherwise.
@@ -1325,7 +1337,7 @@ class GoalExecutionService:
                 )
                 return None
 
-            task = self._build_agent_task(agent_type, goal, context, resource_status)
+            task = self._build_agent_task(agent_type, goal, context, resource_status, system_notes)
             if task is None:
                 logger.warning(
                     "[GOAL-EXEC] _try_skill_execution: _build_agent_task returned None for %s",
@@ -1672,6 +1684,7 @@ class GoalExecutionService:
         goal_agent_id: str | None = None,
         conversation_id: str | None = None,
         resource_status: list[dict[str, Any]] | None = None,
+        system_notes: str = "",
     ) -> dict[str, Any]:
         """Execute a single agent's analysis.
 
@@ -1685,6 +1698,8 @@ class GoalExecutionService:
             context: Gathered execution context (enrichment data, facts, etc.).
             goal_agent_id: Optional goal_agent row ID for execution tracking.
             conversation_id: Optional conversation ID for persisting messages.
+            resource_status: List of resource status dicts from the task.
+            system_notes: Capability degradation notes to inject into agent context.
 
         Returns:
             Dict with agent_type, success, and content.
@@ -1729,6 +1744,7 @@ class GoalExecutionService:
             agent_type=agent_type,
             context=context,
             resource_status=resource_status,
+            system_notes=system_notes,
         )
 
         if skill_result is not None:
@@ -1852,6 +1868,10 @@ class GoalExecutionService:
             return {"agent_type": agent_type, "success": False, "error": "Unknown agent type"}
 
         prompt = builder(goal, context)
+
+        # Inject capability degradation notes into prompt
+        if system_notes:
+            prompt += f"\n\n[System Note: {system_notes}]"
 
         try:
             # Build role context from user profile
@@ -3256,6 +3276,44 @@ class GoalExecutionService:
             round((connected_tools / total_tools) * 100) if total_tools > 0 else 100
         )
 
+        # Capability assessment: annotate each task with capability_status
+        capability_result: dict[str, Any] = {
+            "has_blocking": False,
+            "has_degraded": False,
+            "gap_count": 0,
+            "gap_message": "",
+        }
+        try:
+            from src.services.goal_capability_assessor import GoalCapabilityAssessor
+
+            assessor = GoalCapabilityAssessor(self._db)
+            cap_assessment = await assessor.assess_plan(
+                tasks_json, user_id, goal.get("title", "")
+            )
+
+            # Annotate each task dict with capability info
+            for task_dict, report in zip(
+                tasks_json, cap_assessment["task_reports"]
+            ):
+                task_dict["capability_status"] = report.capability_status
+                task_dict["capability_gaps"] = [
+                    g.model_dump() for g in report.gaps
+                ]
+                task_dict["degradation_notes"] = report.degradation_notes
+                task_dict["blocking_capabilities"] = report.blocking_capabilities
+
+            capability_result = {
+                "has_blocking": cap_assessment["has_blocking"],
+                "has_degraded": cap_assessment["has_degraded"],
+                "gap_count": len(cap_assessment["all_gaps"]),
+                "gap_message": cap_assessment["gap_message"],
+            }
+        except Exception:
+            logger.debug(
+                "Capability assessment failed (non-fatal), defaulting all tasks to ready",
+                exc_info=True,
+            )
+
         # Store plan in goal_execution_plans
         self._db.table("goal_execution_plans").insert(
             {
@@ -3320,6 +3378,7 @@ class GoalExecutionService:
             "readiness_score": readiness_score,
             "connected_integrations": active_integrations,
             "reasoning": plan_data.get("reasoning", ""),
+            "capability_report": capability_result,
         }
 
         # Transition goal to plan_ready — pauses execution until user approves
@@ -3355,6 +3414,21 @@ class GoalExecutionService:
                 plan_message += (
                     f" Readiness is at {readiness_score}% — "
                     f"some tools aren't connected yet."
+                )
+            # Capability-aware messaging
+            if capability_result["has_blocking"]:
+                blocked_count = sum(
+                    1 for t in tasks_json
+                    if t.get("capability_status") == "blocked"
+                )
+                plan_message += (
+                    f" {blocked_count} step(s) need integrations I don't have yet"
+                    " — I'll skip those and flag them."
+                )
+            if capability_result["has_degraded"]:
+                plan_message += (
+                    " Some steps will run with limited accuracy since"
+                    " not all integrations are connected."
                 )
             plan_message += " Here's what I'd do — review the plan and approve when ready."
 
@@ -3717,6 +3791,44 @@ class GoalExecutionService:
 
                 async def _run_with_guard(t: dict[str, Any]) -> dict[str, Any]:
                     _agent = t.get("agent_type", t.get("agent", "?"))
+
+                    # Capability gate: skip blocked tasks, annotate degraded
+                    cap_status = t.get("capability_status", "ready")
+                    if cap_status == "blocked":
+                        blocking = t.get("blocking_capabilities", [])
+                        logger.warning(
+                            "[GOAL-EXEC] Skipping blocked task: agent=%s caps=%s",
+                            _agent,
+                            blocking,
+                            extra={"goal_id": goal_id},
+                        )
+                        try:
+                            await ws_manager.send_aria_message(
+                                user_id=user_id,
+                                message=(
+                                    f"Skipping **{t.get('title', _agent)}** — "
+                                    f"missing: {', '.join(blocking)}."
+                                ),
+                            )
+                        except Exception:
+                            logger.debug("Failed to send blocked-task WS message")
+                        return {
+                            "task_title": t.get("title", ""),
+                            "agent_type": _agent,
+                            "success": False,
+                            "skipped": True,
+                            "reason": "blocked_capability",
+                            "blocking_capabilities": blocking,
+                        }
+
+                    if cap_status == "degraded":
+                        notes = t.get("degradation_notes", [])
+                        if notes:
+                            t["system_notes"] = (
+                                "Note: this task is running with degraded capabilities. "
+                                + "; ".join(notes)
+                            )
+
                     logger.warning(
                         "[GOAL-EXEC] Dispatching agent: %s", _agent,
                         extra={"goal_id": goal_id},
@@ -3839,6 +3951,45 @@ class GoalExecutionService:
                         task.get("title", "?"),
                         extra={"goal_id": goal_id},
                     )
+                    # Capability gate: skip blocked tasks, annotate degraded
+                    seq_cap_status = task.get("capability_status", "ready")
+                    if seq_cap_status == "blocked":
+                        seq_blocking = task.get("blocking_capabilities", [])
+                        logger.warning(
+                            "[GOAL-EXEC] Skipping blocked sequential task: agent=%s caps=%s",
+                            task.get("agent_type", "?"),
+                            seq_blocking,
+                            extra={"goal_id": goal_id},
+                        )
+                        try:
+                            await ws_manager.send_aria_message(
+                                user_id=user_id,
+                                message=(
+                                    f"Skipping **{task.get('title', 'task')}** — "
+                                    f"missing: {', '.join(seq_blocking)}."
+                                ),
+                            )
+                        except Exception:
+                            logger.debug("Failed to send blocked-task WS message")
+                        prev_task_result = {
+                            "task_title": task.get("title", ""),
+                            "agent_type": task.get("agent_type", "?"),
+                            "success": False,
+                            "skipped": True,
+                            "reason": "blocked_capability",
+                            "blocking_capabilities": seq_blocking,
+                        }
+                        completed_tasks += 1
+                        continue
+
+                    if seq_cap_status == "degraded":
+                        seq_notes = task.get("degradation_notes", [])
+                        if seq_notes:
+                            task["system_notes"] = (
+                                "Note: this task is running with degraded capabilities. "
+                                + "; ".join(seq_notes)
+                            )
+
                     # Send handoff message between sequential agents
                     if prev_task_result is not None and task_idx < len(tasks):
                         try:
@@ -4278,8 +4429,9 @@ class GoalExecutionService:
             logger.debug("Failed to send agent starting message", exc_info=True)
 
         try:
-            # Extract resource_status from the task to pass to agent for graceful degradation
+            # Extract resource_status and system_notes from the task
             resource_status = task.get("resource_status", [])
+            system_notes = task.get("system_notes", "")
 
             # Look up the goal_agent_id so execution is tracked against the
             # correct goal_agents row (instead of _store_execution guessing).
@@ -4306,6 +4458,7 @@ class GoalExecutionService:
                 goal_agent_id=_ga_id,
                 conversation_id=conversation_id,
                 resource_status=resource_status,
+                system_notes=system_notes,
             )
 
             await self._handle_agent_result(

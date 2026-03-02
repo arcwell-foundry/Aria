@@ -99,3 +99,13 @@ class CapabilityGap(BaseModel):
     auto_resolved: bool = False
     resolved_with: Optional[ResolutionStrategy] = None
     resolutions: list[ResolutionStrategy] = Field(default_factory=list)
+
+
+class TaskCapabilityReport(BaseModel):
+    """Per-task capability assessment result."""
+
+    task_title: str
+    capability_status: str  # "ready", "degraded", "blocked"
+    gaps: list[CapabilityGap] = Field(default_factory=list)
+    degradation_notes: list[str] = Field(default_factory=list)
+    blocking_capabilities: list[str] = Field(default_factory=list)
