@@ -1,5 +1,6 @@
 """WebSocket endpoint for ARIA real-time communication."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -20,6 +21,27 @@ from src.services.email_tools import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
+
+_KEEPALIVE_INTERVAL = 25  # seconds — under Render's 30s proxy idle timeout
+
+
+def _start_keepalive(websocket: WebSocket, interval: float = _KEEPALIVE_INTERVAL) -> asyncio.Task:
+    """Start a background task that sends periodic pings to keep the WS alive."""
+    async def _ping_loop():
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await websocket.send_json({"type": "ping", "payload": {}})
+        except Exception:
+            pass  # Connection closed — stop pinging
+
+    return asyncio.create_task(_ping_loop())
+
+
+def _stop_keepalive(task: asyncio.Task | None) -> None:
+    """Cancel the keepalive background task."""
+    if task and not task.done():
+        task.cancel()
 
 
 async def _authenticate_ws_token(token: str) -> Any | None:
@@ -91,6 +113,7 @@ async def websocket_endpoint(
 
     # Accept connection
     await websocket.accept()
+    keepalive_task = _start_keepalive(websocket)
     await ws_manager.connect(user_id, websocket, session_id=resolved_session_id)
     logger.info("WS connected: user=%s session=%s", user_id, resolved_session_id)
 
@@ -178,6 +201,7 @@ async def websocket_endpoint(
             extra={"user_id": user_id, "error": str(e)},
         )
     finally:
+        _stop_keepalive(keepalive_task)
         ws_manager.disconnect(user_id, websocket)
 
 
