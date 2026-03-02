@@ -8,3 +8,5 @@ export { TimeDivider } from './TimeDivider';
 export { UnreadIndicator } from './UnreadIndicator';
 export { BackgroundWorkIndicator } from './BackgroundWorkIndicator';
 export { CollapsibleCard } from './CollapsibleCard';
+export { C1MessageRenderer } from './C1MessageRenderer';
+export type { C1MessageRendererProps } from './C1MessageRenderer';
