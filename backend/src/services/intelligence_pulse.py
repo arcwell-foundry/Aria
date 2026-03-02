@@ -373,6 +373,101 @@ class IntelligencePulseEngine:
         except Exception:
             logger.debug("Pulse: failed to mark signal as delivered")
 
+    # ------------------------------------------------------------------
+    # Tool suggestion pulses (Phase 4D)
+    # ------------------------------------------------------------------
+
+    async def generate_tool_suggestion_pulses(self, user_id: str) -> list[dict[str, Any]]:
+        """Generate proactive tool connection suggestions from capability demand.
+
+        Queries capability_demand for capabilities needed >= 3 times where
+        suggestion_threshold_reached is False, checks if the suggested
+        Composio toolkit is connected, and generates pulse signals for
+        unmet gaps.
+        """
+        pulses: list[dict[str, Any]] = []
+
+        try:
+            demand_result = (
+                self._db.table("capability_demand")
+                .select("capability_name, times_needed, avg_quality_achieved, suggestion_threshold_reached")
+                .eq("user_id", user_id)
+                .eq("suggestion_threshold_reached", False)
+                .gte("times_needed", 3)
+                .execute()
+            )
+
+            for row in (demand_result.data or []):
+                capability = row["capability_name"]
+                times_needed = row.get("times_needed", 0)
+                avg_quality = row.get("avg_quality_achieved", 0.0) or 0.0
+
+                suggested_app = await self._lookup_composio_app(capability)
+                if not suggested_app:
+                    continue
+
+                if await self._is_toolkit_connected(user_id, suggested_app):
+                    continue
+
+                app_display = suggested_app.replace("_", " ").title()
+
+                pulses.append({
+                    "type": "tool_suggestion",
+                    "priority": "medium" if times_needed >= 5 else "low",
+                    "title": f"Connect {app_display} for better {capability.replace('_', ' ')}",
+                    "message": (
+                        f"You've needed {capability.replace('_', ' ')} {times_needed} times "
+                        f"in the past 2 weeks. Current accuracy: ~{avg_quality:.0%}. "
+                        f"Connecting {app_display} would improve this to ~95%."
+                    ),
+                    "action": {"type": "connect_tool", "toolkit_slug": suggested_app},
+                    "metadata": {
+                        "demand_count": times_needed,
+                        "current_quality": avg_quality,
+                        "potential_quality": 0.95,
+                    },
+                })
+
+        except Exception:
+            logger.warning("Failed to generate tool suggestion pulses", extra={"user_id": user_id})
+
+        return pulses
+
+    async def _lookup_composio_app(self, capability_name: str) -> str | None:
+        """Find the best Composio app for a capability from capability_graph."""
+        try:
+            result = (
+                self._db.table("capability_graph")
+                .select("composio_app_name")
+                .eq("capability_name", capability_name)
+                .in_("provider_type", ["composio_oauth", "composio_api_key"])
+                .eq("is_active", True)
+                .order("quality_score", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return result.data[0].get("composio_app_name")
+        except Exception:
+            pass
+        return None
+
+    async def _is_toolkit_connected(self, user_id: str, toolkit_slug: str) -> bool:
+        """Check if user has an active connection for this toolkit."""
+        try:
+            result = (
+                self._db.table("user_connections")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("toolkit_slug", toolkit_slug)
+                .eq("status", "active")
+                .maybe_single()
+                .execute()
+            )
+            return result.data is not None
+        except Exception:
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience: lazy singleton
