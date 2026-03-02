@@ -31,6 +31,10 @@ from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
+from src.services.composio_tools import (
+    COMPOSIO_META_TOOL_NAMES,
+    execute_composio_meta_tool,
+)
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     execute_email_tool,
@@ -3164,7 +3168,7 @@ class ChatService:
         system_prompt: str,
         tools: list[dict[str, Any]],
         user_id: str,
-        email_integration: dict[str, Any],
+        email_integration: dict[str, Any] | None = None,
         max_rounds: int = 3,
     ) -> str:
         """Run the LLM with tools, executing tool calls in a loop.
@@ -3178,7 +3182,8 @@ class ChatService:
             system_prompt: The system prompt.
             tools: Tool definitions (Anthropic format).
             user_id: The user's ID.
-            email_integration: The user's email integration record.
+            email_integration: The user's email integration record
+                (``None`` when only Composio meta tools are available).
             max_rounds: Max tool-call round-trips.
 
         Returns:
@@ -3217,17 +3222,25 @@ class ChatService:
             # Execute each tool call and build tool_result messages
             tool_results: list[dict[str, Any]] = []
             for tc in response.tool_calls:
-                logger.info(
-                    "Executing email tool %s for user %s",
-                    tc.name,
-                    user_id,
-                )
-                result = await execute_email_tool(
-                    tool_name=tc.name,
-                    params=tc.input,
-                    user_id=user_id,
-                    integration=email_integration,
-                )
+                if tc.name in COMPOSIO_META_TOOL_NAMES:
+                    logger.info("Executing Composio meta tool %s for user %s", tc.name, user_id)
+                    result = await execute_composio_meta_tool(
+                        user_id=user_id,
+                        tool_name=tc.name,
+                        tool_input=tc.input,
+                    )
+                elif email_integration is not None:
+                    logger.info("Executing email tool %s for user %s", tc.name, user_id)
+                    result = await execute_email_tool(
+                        tool_name=tc.name,
+                        params=tc.input,
+                        user_id=user_id,
+                        integration=email_integration,
+                    )
+                else:
+                    logger.warning("Tool %s called but no handler available for user %s", tc.name, user_id)
+                    result = {"error": f"Tool '{tc.name}' is not available."}
+
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tc.id,

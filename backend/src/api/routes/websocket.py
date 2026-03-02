@@ -11,6 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
+from src.services.composio_tools import get_composio_meta_tool_definitions
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     get_calendar_context_for_chat,
@@ -592,10 +593,11 @@ async def _handle_user_message(
 
         # Gather email/calendar context — all use _safe() with timeout
         # so a slow Supabase call never blocks the chat path.
-        email_integration, email_activity_ctx, calendar_ctx = await _aio.gather(
+        email_integration, email_activity_ctx, calendar_ctx, meta_tool_defs = await _aio.gather(
             _safe(get_email_integration(user_id), None, "email_integration"),
             _safe(get_email_context_for_chat(user_id), "", "email_context"),
             _safe(get_calendar_context_for_chat(user_id), "", "calendar_context"),
+            _safe(get_composio_meta_tool_definitions(user_id), [], "meta_tools"),
         )
 
         if email_integration:
@@ -632,17 +634,38 @@ async def _handle_user_message(
         # Calendar context is ALWAYS injected (same — Supabase only).
         system_prompt += calendar_ctx
 
+        if meta_tool_defs:
+            system_prompt += (
+                "\n\n## Integration Tools\n"
+                "You have access to Composio integration tools that let you:\n"
+                "- Search for available integrations (COMPOSIO_SEARCH_TOOLS)\n"
+                "- Manage integration connections (COMPOSIO_MANAGE_CONNECTIONS)\n"
+                "- Execute actions across connected apps (COMPOSIO_MULTI_EXECUTE_TOOL)\n"
+                "- Use a remote workbench for complex operations (COMPOSIO_REMOTE_WORKBENCH)\n"
+                "- Run bash commands remotely (COMPOSIO_REMOTE_BASH_TOOL)\n\n"
+                "When the user asks about connecting services, discovering integrations, "
+                "or performing actions across their apps, use these tools.\n"
+                "For existing connected tools (like email), prefer the dedicated email tools "
+                "over meta tools — they're faster and more reliable.\n"
+            )
+
+        # Build combined tool set
+        all_tools: list[dict] = []
+        if email_integration:
+            all_tools.extend(EMAIL_TOOL_DEFINITIONS)
+        all_tools.extend(meta_tool_defs)  # already [] if unavailable
+
         # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
         try:
-            if email_integration:
+            if all_tools:
                 # Tool-capable path (non-streaming, mirrors REST chat.py:2705-2711)
                 full_content = await service._run_tool_loop(
                     messages=conversation_messages,
                     system_prompt=system_prompt,
-                    tools=EMAIL_TOOL_DEFINITIONS,
+                    tools=all_tools,
                     user_id=user_id,
-                    email_integration=email_integration,
+                    email_integration=email_integration,  # may be None
                 )
                 # Content sent after post-processing to avoid duplication
             else:
@@ -721,7 +744,7 @@ async def _handle_user_message(
             display_content, conversation_messages[-4:], user_id,
         )
 
-        if email_integration:
+        if all_tools:
             # Tool path: send complete content as a single token event
             await websocket.send_json(
                 {

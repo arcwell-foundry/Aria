@@ -201,6 +201,62 @@ class ComposioSessionManager:
             user_id=user_id,
         )
 
+    async def execute_meta_tool(
+        self,
+        user_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute a Composio meta tool within a user's session.
+
+        Meta tools are session-level operations (search, connect, execute)
+        that don't require a ``connection_id`` — they route through the
+        ``execute_meta`` HTTP endpoint instead of ``oauth.py``.
+
+        Args:
+            user_id: The ARIA user ID.
+            tool_name: Meta tool slug (e.g. ``'COMPOSIO_SEARCH_TOOLS'``).
+            arguments: Tool-specific parameters.
+
+        Returns:
+            Dict with ``data``, ``error``, and ``successful`` keys.
+        """
+        session = await self.get_session(user_id)
+
+        composio_circuit_breaker.check()
+
+        http_client = self._client.client  # HttpClient instance
+
+        def _execute() -> dict[str, Any]:
+            response = http_client.tool_router.session.execute_meta(
+                session_id=session.session_id,
+                slug=tool_name,
+                arguments=arguments,
+            )
+            return {
+                "data": response.data if hasattr(response, "data") else {},
+                "error": response.error if hasattr(response, "error") else None,
+                "successful": not (hasattr(response, "error") and response.error),
+            }
+
+        try:
+            result = await asyncio.to_thread(_execute)
+        except Exception:
+            composio_circuit_breaker.record_failure()
+            raise
+
+        composio_circuit_breaker.record_success()
+        logger.info(
+            "Composio meta tool executed",
+            extra={
+                "user_id": user_id,
+                "tool_name": tool_name,
+                "session_id": session.session_id,
+                "successful": result.get("successful"),
+            },
+        )
+        return result
+
     async def close(self) -> None:
         """Clean up sessions and SDK client."""
         self._sessions.clear()
