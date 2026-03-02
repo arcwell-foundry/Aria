@@ -289,6 +289,13 @@ async def lifespan(_app: FastAPI) -> Any:
     from src.services.scheduler import stop_scheduler as stop_ambient_scheduler
 
     await stop_ambient_scheduler()
+    # Close Composio session manager
+    try:
+        from src.integrations.composio_sessions import get_session_manager
+
+        await get_session_manager().close()
+    except Exception:
+        logger.debug("Composio session cleanup skipped")
     if GraphitiClient.is_initialized():
         await GraphitiClient.close()
         logger.info("Graphiti connection closed")
