@@ -954,15 +954,18 @@ class ChatService:
     async def _classify_plan_action(
         self, user_id: str, message: str
     ) -> dict[str, Any] | None:
-        """Classify user message when a plan_ready goal exists.
+        """Classify user message when a plan_ready or stuck draft goal exists.
 
         Determines whether the user wants to approve, modify, discuss,
-        or ignore the pending plan.  Returns a dict with ``action``,
-        ``goal_id``, ``goal``, and ``plan_tasks`` on success, or ``None``
-        if no plan_ready goal exists.
+        or ignore the pending plan.  Also detects draft goals that failed
+        planning and offers to retry.
+
+        Returns a dict with ``action``, ``goal_id``, ``goal``, and
+        ``plan_tasks`` on success, or ``None`` if no actionable goal exists.
         """
         try:
             db = get_supabase_client()
+            # Check for plan_ready goals first
             plan_ready = (
                 db.table("goals")
                 .select("id, title, description, status")
@@ -972,6 +975,27 @@ class ChatService:
                 .execute()
             )
             if not plan_ready.data:
+                # Check for draft goals that failed planning (stuck drafts)
+                draft_goals = (
+                    db.table("goals")
+                    .select("id, title, description, status")
+                    .eq("user_id", user_id)
+                    .eq("status", "draft")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if draft_goals.data:
+                    draft = draft_goals.data[0]
+                    # Check if user is asking to retry planning
+                    retry_words = ("try again", "retry", "replan", "re-plan", "plan again")
+                    if any(w in message.lower() for w in retry_words):
+                        return {
+                            "action": "retry_plan",
+                            "goal_id": draft["id"],
+                            "goal": draft,
+                            "plan_tasks": [],
+                        }
                 return None
 
             goal = plan_ready.data[0]
@@ -1506,33 +1530,92 @@ class ChatService:
         from src.services.goal_execution import GoalExecutionService
         from src.services.goal_service import GoalService
 
-        # Map goal_type string to enum
-        goal_type_str = intent.get("goal_type", "research")
-        try:
-            goal_type = GoalType(goal_type_str)
-        except ValueError:
-            goal_type = GoalType.RESEARCH
+        # Reuse existing goal if retrying a failed plan
+        existing_goal_id = intent.get("existing_goal_id")
+        if existing_goal_id:
+            goal_id = existing_goal_id
+            logger.info(
+                "Retrying plan for existing draft goal",
+                extra={"goal_id": goal_id, "user_id": user_id},
+            )
+        else:
+            # Map goal_type string to enum
+            goal_type_str = intent.get("goal_type", "research")
+            try:
+                goal_type = GoalType(goal_type_str)
+            except ValueError:
+                goal_type = GoalType.RESEARCH
 
-        goal_data = GoalCreate(
-            title=intent.get("goal_title", message[:100]),
-            description=intent.get("goal_description", message),
-            goal_type=goal_type,
-        )
+            goal_data = GoalCreate(
+                title=intent.get("goal_title", message[:100]),
+                description=intent.get("goal_description", message),
+                goal_type=goal_type,
+            )
 
-        goal_svc = GoalService()
-        goal = await goal_svc.create_goal(user_id, goal_data)
-        goal_id = goal["id"]
+            goal_svc = GoalService()
+            goal = await goal_svc.create_goal(user_id, goal_data)
+            goal_id = goal["id"]
+
         logger.info(
             "Goal created from inline intent detection",
             extra={"goal_id": goal_id, "user_id": user_id, "title": goal_data.title},
         )
 
         # Generate execution plan (also emits via WebSocket + persists plan message)
+        title = intent.get("goal_title", goal_data.title)
         exec_svc = GoalExecutionService()
-        plan_result = await exec_svc.plan_goal(goal_id, user_id)
+        try:
+            plan_result = await exec_svc.plan_goal(goal_id, user_id)
+        except Exception as plan_err:
+            logger.exception(
+                "plan_goal failed — goal stuck in draft",
+                extra={"goal_id": goal_id, "user_id": user_id},
+            )
+            # Return a graceful error so the SSE stream completes normally
+            error_text = (
+                f"I created the goal **{title}**, but hit a problem building "
+                f"the execution plan. You can retry from the Actions page or "
+                f"ask me to try again."
+            )
+            working_memory.add_message("assistant", error_text)
+            await self.persist_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message=message,
+                assistant_message=error_text,
+                assistant_metadata={
+                    "intent_detected": "goal",
+                    "goal_id": goal_id,
+                    "plan_error": str(plan_err),
+                },
+                conversation_context=conversation_messages[-2:],
+            )
+            return {
+                "message": error_text,
+                "citations": [],
+                "conversation_id": conversation_id,
+                "rich_content": [],
+                "ui_commands": [{"action": "navigate", "route": "/actions"}],
+                "suggestions": [
+                    "Try planning again",
+                    "What went wrong?",
+                    "Show me my goals",
+                ],
+                "timing": {
+                    "memory_query_ms": 0,
+                    "llm_response_ms": 0,
+                    "total_ms": 0,
+                },
+                "cognitive_load": {
+                    "level": load_state.level.value,
+                    "score": round(load_state.score, 3),
+                    "recommendation": load_state.recommendation,
+                },
+                "proactive_insights": [],
+                "intent_detected": "goal",
+            }
 
         # Build brief ARIA response text
-        title = intent.get("goal_title", goal_data.title)
         response_text = (
             f"Let me break this down. Here's my proposed plan for **{title}**:"
         )
@@ -2567,8 +2650,25 @@ class ChatService:
 
         # --- Check for pending plan interactions ---
         plan_action = await self._classify_plan_action(user_id, message)
-        if plan_action and plan_action["action"] in ("approve", "modify"):
-            if plan_action["action"] == "approve":
+        if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
+            if plan_action["action"] == "retry_plan":
+                # Re-attempt planning for a stuck draft goal
+                return await self._handle_goal_intent(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    intent={
+                        "is_goal": True,
+                        "goal_title": plan_action["goal"].get("title", message[:100]),
+                        "goal_type": plan_action["goal"].get("goal_type", "research"),
+                        "goal_description": plan_action["goal"].get("description", message),
+                        "existing_goal_id": plan_action["goal_id"],
+                    },
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                    load_state=load_state,
+                )
+            elif plan_action["action"] == "approve":
                 return await self._handle_plan_approval_from_chat(
                     user_id=user_id,
                     conversation_id=conversation_id,

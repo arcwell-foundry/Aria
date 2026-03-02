@@ -2909,8 +2909,31 @@ class GoalExecutionService:
             )
 
         # Gather user-specific resources and execution context
-        resources = await self._gather_user_resources(user_id)
-        context = await self._gather_execution_context(user_id)
+        try:
+            resources = await self._gather_user_resources(user_id)
+        except Exception as e:
+            logger.warning("Failed to gather user resources for planning: %s", e)
+            resources = {
+                "integrations": [],
+                "trust_profiles": [],
+                "company_facts": [],
+                "company_id": None,
+            }
+        try:
+            context = await self._gather_execution_context(user_id)
+        except Exception as e:
+            logger.warning("Failed to gather execution context for planning: %s", e)
+            context = {
+                "profile": {},
+                "company": {},
+                "company_name": "the company",
+                "company_domain": "",
+                "classification": {},
+                "facts": [],
+                "facts_full": [],
+                "gaps": [],
+                "readiness": {},
+            }
 
         # Build integration summary for the prompt
         active_integrations = [

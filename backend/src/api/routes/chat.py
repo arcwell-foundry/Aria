@@ -265,15 +265,42 @@ async def chat_stream(
             yield f"data: {json.dumps(metadata)}\n\n"
 
             # Handle goal creation + planning
-            goal_response = await service._handle_goal_intent(
-                user_id=current_user.id,
-                conversation_id=conversation_id,
-                message=request.message,
-                intent=intent_result,
-                working_memory=working_memory,
-                conversation_messages=conversation_messages,
-                load_state=load_state,
-            )
+            try:
+                goal_response = await service._handle_goal_intent(
+                    user_id=current_user.id,
+                    conversation_id=conversation_id,
+                    message=request.message,
+                    intent=intent_result,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                    load_state=load_state,
+                )
+            except Exception:
+                logger.exception(
+                    "Goal intent handling failed",
+                    extra={
+                        "user_id": current_user.id,
+                        "conversation_id": conversation_id,
+                    },
+                )
+                error_event = {
+                    "type": "token",
+                    "content": (
+                        "I understood your request but ran into a problem setting "
+                        "it up. Please try again or check the Actions page."
+                    ),
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                complete_event = {
+                    "type": "complete",
+                    "rich_content": [],
+                    "ui_commands": [{"action": "navigate", "route": "/actions"}],
+                    "suggestions": ["Try again", "Show me my goals"],
+                    "intent_detected": "goal",
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
             # Emit the brief ARIA text as token events
             for token_chunk in [goal_response["message"]]:
@@ -298,7 +325,7 @@ async def chat_stream(
 
         # --- Check for pending plan interactions ---
         plan_action = await service._classify_plan_action(current_user.id, request.message)
-        if plan_action and plan_action["action"] in ("approve", "modify"):
+        if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
             # Short-circuit: handle plan action
             metadata = {
                 "type": "metadata",
@@ -307,27 +334,70 @@ async def chat_stream(
             }
             yield f"data: {json.dumps(metadata)}\n\n"
 
-            if plan_action["action"] == "approve":
-                plan_response = await service._handle_plan_approval_from_chat(
-                    user_id=current_user.id,
-                    conversation_id=conversation_id,
-                    message=request.message,
-                    goal_id=plan_action["goal_id"],
-                    goal=plan_action["goal"],
-                    working_memory=working_memory,
-                    load_state=load_state,
+            try:
+                if plan_action["action"] == "retry_plan":
+                    plan_response = await service._handle_goal_intent(
+                        user_id=current_user.id,
+                        conversation_id=conversation_id,
+                        message=request.message,
+                        intent={
+                            "is_goal": True,
+                            "goal_title": plan_action["goal"].get("title", request.message[:100]),
+                            "goal_type": plan_action["goal"].get("goal_type", "research"),
+                            "goal_description": plan_action["goal"].get("description", request.message),
+                            "existing_goal_id": plan_action["goal_id"],
+                        },
+                        working_memory=working_memory,
+                        conversation_messages=conversation_messages,
+                        load_state=load_state,
+                    )
+                elif plan_action["action"] == "approve":
+                    plan_response = await service._handle_plan_approval_from_chat(
+                        user_id=current_user.id,
+                        conversation_id=conversation_id,
+                        message=request.message,
+                        goal_id=plan_action["goal_id"],
+                        goal=plan_action["goal"],
+                        working_memory=working_memory,
+                        load_state=load_state,
+                    )
+                else:
+                    plan_response = await service._handle_plan_modification(
+                        user_id=current_user.id,
+                        conversation_id=conversation_id,
+                        message=request.message,
+                        goal_id=plan_action["goal_id"],
+                        goal=plan_action["goal"],
+                        current_tasks=plan_action["plan_tasks"],
+                        working_memory=working_memory,
+                        load_state=load_state,
+                    )
+            except Exception:
+                logger.exception(
+                    "Plan action handling failed",
+                    extra={
+                        "user_id": current_user.id,
+                        "goal_id": plan_action["goal_id"],
+                        "action": plan_action["action"],
+                    },
                 )
-            else:
-                plan_response = await service._handle_plan_modification(
-                    user_id=current_user.id,
-                    conversation_id=conversation_id,
-                    message=request.message,
-                    goal_id=plan_action["goal_id"],
-                    goal=plan_action["goal"],
-                    current_tasks=plan_action["plan_tasks"],
-                    working_memory=working_memory,
-                    load_state=load_state,
-                )
+                error_event = {
+                    "type": "token",
+                    "content": (
+                        "I ran into a problem processing your plan action. "
+                        "Please try again."
+                    ),
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                complete_event = {
+                    "type": "complete",
+                    "rich_content": [],
+                    "ui_commands": [],
+                    "suggestions": ["Try again", "Show me the plan"],
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
             # Emit response as token + complete events
             token_event = {"type": "token", "content": plan_response["message"]}

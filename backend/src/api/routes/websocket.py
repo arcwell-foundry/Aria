@@ -461,15 +461,36 @@ async def _handle_user_message(
                     "WS intent classified as GOAL, routing to plan",
                     extra={"user_id": user_id, "goal_title": intent_result.get("goal_title")},
                 )
-                goal_response = await service._handle_goal_intent(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    message=message_text,
-                    intent=intent_result,
-                    working_memory=working_memory,
-                    conversation_messages=conversation_messages,
-                    load_state=load_state,
-                )
+                try:
+                    goal_response = await service._handle_goal_intent(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message=message_text,
+                        intent=intent_result,
+                        working_memory=working_memory,
+                        conversation_messages=conversation_messages,
+                        load_state=load_state,
+                    )
+                except Exception:
+                    logger.exception(
+                        "WS goal intent handling failed",
+                        extra={"user_id": user_id},
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "aria.message",
+                            "message": (
+                                "I understood your request but ran into a problem "
+                                "building the plan. Please try again."
+                            ),
+                            "rich_content": [],
+                            "ui_commands": [],
+                            "suggestions": ["Try again", "Show me my goals"],
+                            "conversation_id": conversation_id,
+                            "intent_detected": "goal",
+                        }
+                    )
+                    return
                 # Send the goal response via WebSocket
                 await websocket.send_json(
                     {
