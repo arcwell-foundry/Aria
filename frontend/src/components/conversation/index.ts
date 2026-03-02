@@ -1,5 +1,6 @@
 export { ConversationThread } from './ConversationThread';
 export { MessageBubble } from './MessageBubble';
+export { C1MessageRenderer } from './C1MessageRenderer';
 export { InputBar } from './InputBar';
 export { SuggestionChips } from './SuggestionChips';
 export { MessageAvatar } from './MessageAvatar';
