@@ -7,8 +7,14 @@
  * - Loading and error states
  */
 
+import { useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { C1Component } from '@thesysai/genui-sdk';
 import { Loader2 } from 'lucide-react';
+import { approveGoalPlan, startGoal } from '@/api/goals';
+import { dismissDraft, sendDraft } from '@/api/drafts';
+import { markSignalRead } from '@/api/signals';
+import { wsManager } from '@/core/WebSocketManager';
 import {
   GoalPlanCard,
   EmailDraftCard,
@@ -30,8 +36,8 @@ export interface C1MessageRendererProps {
   c1Response: string;
   /** Whether the response is still streaming */
   isStreaming?: boolean;
-  /** Handler for user actions from C1 components */
-  onAction?: (humanMessage: string, llmMessage: string) => void;
+  /** Handler for user actions from C1 components (sends message to conversation) */
+  onSendMessage?: (message: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -51,25 +57,154 @@ const customComponents = {
 export function C1MessageRenderer({
   c1Response,
   isStreaming = false,
-  onAction,
+  onSendMessage,
   className = '',
 }: C1MessageRendererProps) {
-  // Handle actions from C1 components
-  const handleAction = (event: C1ActionEvent) => {
-    // Extract messages from the action event params (new format) or directly (legacy format)
-    const humanMessage = event.params?.humanFriendlyMessage as string | undefined
-      || event.humanFriendlyMessage
-      || '';
-    const llmMessage = event.params?.llmFriendlyMessage as string | undefined
-      || event.llmFriendlyMessage
-      || '';
+  const navigate = useNavigate();
 
-    if (onAction) {
-      onAction(humanMessage, llmMessage);
-    }
-    // Log for debugging
-    console.log('[C1Action]', { type: event.type, humanMessage, llmMessage, params: event.params });
-  };
+  const handleAction = useCallback(
+    async (event: C1ActionEvent) => {
+      // C1Action has optional type and params - handle missing type
+      if (!event.type) {
+        // Default to continue_conversation behavior
+        const params = event.params ?? {};
+        const message =
+          (params.llmFriendlyMessage as string) ||
+          (params.humanFriendlyMessage as string) ||
+          event.llmFriendlyMessage ||
+          event.humanFriendlyMessage ||
+          '';
+        if (message && onSendMessage) {
+          onSendMessage(message);
+        }
+        return;
+      }
+
+      const params = event.params ?? {};
+
+      try {
+        switch (event.type) {
+          // --- Goal Actions ---
+          case 'approve_goal':
+          case 'approve_plan': {
+            const goalId = params.goal_id as string;
+            await approveGoalPlan(goalId);
+            navigate(`/goals/${goalId}`);
+            break;
+          }
+
+          case 'modify_goal':
+          case 'modify_plan': {
+            const goalId = params.goal_id as string;
+            if (onSendMessage) {
+              onSendMessage(`I'd like to modify the plan for goal ${goalId}`);
+            }
+            break;
+          }
+
+          case 'start_goal': {
+            const goalId = params.goal_id as string;
+            await startGoal(goalId);
+            navigate(`/goals/${goalId}`);
+            break;
+          }
+
+          // --- Email Actions ---
+          case 'approve_email':
+          case 'send_email': {
+            const draftId = params.email_draft_id as string;
+            await sendDraft(draftId);
+            break;
+          }
+
+          case 'edit_email': {
+            const draftId = params.email_draft_id as string;
+            if (onSendMessage) {
+              onSendMessage(`I'd like to edit email draft ${draftId}`);
+            }
+            break;
+          }
+
+          case 'dismiss_email': {
+            const draftId = params.email_draft_id as string;
+            await dismissDraft(draftId);
+            break;
+          }
+
+          case 'save_to_client': {
+            const draftId = params.email_draft_id as string;
+            console.log('[C1MessageRenderer] save_to_client for draft:', draftId);
+            break;
+          }
+
+          // --- Signal Actions ---
+          case 'investigate_signal': {
+            const signalId = params.signal_id as string;
+            await markSignalRead(signalId);
+            navigate(`/intelligence/signals?highlight=${signalId}`);
+            break;
+          }
+
+          case 'dismiss_signal': {
+            const signalId = params.signal_id as string;
+            await markSignalRead(signalId);
+            break;
+          }
+
+          // --- Navigation Actions ---
+          case 'view_lead_detail': {
+            const leadId = params.lead_id as string;
+            navigate(`/pipeline/leads/${leadId}`);
+            break;
+          }
+
+          case 'view_battle_card': {
+            const competitorId = params.competitor_id as string;
+            navigate(`/intelligence/battle-cards/${competitorId}`);
+            break;
+          }
+
+          case 'view_goal_detail': {
+            const goalId = params.goal_id as string;
+            navigate(`/goals/${goalId}`);
+            break;
+          }
+
+          // --- Task Actions ---
+          case 'execute_task': {
+            const taskId = params.task_id as string;
+            console.log('[C1MessageRenderer] execute_task:', taskId);
+            wsManager.send('task.execute', { task_id: taskId });
+            break;
+          }
+
+          // --- C1 Built-in Actions ---
+          case 'open_url': {
+            const url = params.url as string;
+            window.open(url, '_blank', 'noopener,noreferrer');
+            break;
+          }
+
+          case 'continue_conversation':
+          default: {
+            const message =
+              (params.llmFriendlyMessage as string) ||
+              (params.humanFriendlyMessage as string) ||
+              event.llmFriendlyMessage ||
+              event.humanFriendlyMessage ||
+              '';
+            if (message && onSendMessage) {
+              onSendMessage(message);
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        console.error('[C1MessageRenderer] Action failed:', event.type, error);
+      }
+    },
+    [navigate, onSendMessage]
+  );
 
   // Loading state while streaming
   if (isStreaming && !c1Response) {
@@ -82,7 +217,7 @@ export function C1MessageRenderer({
   }
 
   // Empty state
-  if (!c1Response) {
+  if (!c1Response || c1Response.trim() === '') {
     return null;
   }
 

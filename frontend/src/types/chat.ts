@@ -17,6 +17,8 @@ export interface Message {
   suggestions: string[];
   timestamp: string;
   isStreaming?: boolean;
+  render_mode?: 'c1' | 'markdown'; // Determines which renderer to use
+  c1_response?: string | null; // The C1 visualized content (JSON string)
 }
 
 // === WebSocket Event Types ===
@@ -66,6 +68,8 @@ export interface AriaMessagePayload {
   message_id?: string;
   avatar_script?: string;
   voice_emotion?: 'neutral' | 'excited' | 'concerned' | 'warm';
+  render_mode?: 'c1' | 'markdown';
+  c1_response?: string | null;
 }
 
 export interface AriaThinkingPayload {

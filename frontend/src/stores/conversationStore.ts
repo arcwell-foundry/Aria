@@ -31,6 +31,8 @@ export interface ConversationState {
       rich_content?: RichContent[];
       ui_commands?: UICommand[];
       suggestions?: string[];
+      render_mode?: 'c1' | 'markdown';
+      c1_response?: string | null;
     },
   ) => void;
   setMessages: (messages: Message[]) => void;
@@ -95,6 +97,8 @@ export const useConversationStore = create<ConversationState>((set) => ({
               rich_content: metadata.rich_content ?? msg.rich_content,
               ui_commands: metadata.ui_commands ?? msg.ui_commands,
               suggestions: metadata.suggestions ?? msg.suggestions,
+              render_mode: metadata.render_mode ?? msg.render_mode,
+              c1_response: metadata.c1_response ?? msg.c1_response,
               isStreaming: false,
             }
           : msg,

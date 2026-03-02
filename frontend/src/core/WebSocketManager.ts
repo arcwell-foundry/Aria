@@ -314,12 +314,14 @@ class WebSocketManagerImpl {
               messageId = event.message_id;
               conversationId = event.conversation_id;
             } else if (event.type === 'complete') {
-              if (event.rich_content || event.ui_commands || event.suggestions) {
+              if (event.rich_content || event.ui_commands || event.suggestions || event.render_mode) {
                 this.emit('aria.metadata', {
                   message_id: messageId,
                   rich_content: event.rich_content || [],
                   ui_commands: event.ui_commands || [],
                   suggestions: event.suggestions || [],
+                  render_mode: event.render_mode || 'markdown',
+                  c1_response: event.c1_response || null,
                 });
               }
             } else if (event.type === 'error') {

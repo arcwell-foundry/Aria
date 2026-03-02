@@ -1,10 +1,15 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/types/chat';
 import { MessageAvatar } from './MessageAvatar';
 import { RichContentRenderer } from '@/components/rich/RichContentRenderer';
 import { SpeakButton } from './SpeakButton';
 import { useMessageSpeech } from '@/hooks/useMessageSpeech';
+import { useThesys } from '@/contexts/ThesysContext';
+import { C1MessageRenderer } from './C1MessageRenderer';
+import { useConversationStore } from '@/stores/conversationStore';
+import { wsManager } from '@/core/WebSocketManager';
+import { WS_EVENTS } from '@/types/chat';
 
 interface MessageBubbleProps {
   message: Message;
@@ -69,6 +74,8 @@ const markdownComponents = {
 
 export const MessageBubble = memo(function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleProps) {
   const isAria = message.role === 'aria';
+  const { enabled: thesysEnabled } = useThesys();
+  const addMessage = useConversationStore((s) => s.addMessage);
 
   const {
     speakMessage,
@@ -82,7 +89,32 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
   const isSpeaking = isThisMessageSpeaking(message.id);
   const isPaused = isThisMessagePaused(message.id);
 
+  const handleSendMessage = useCallback((msg: string) => {
+    // Add user message to store
+    addMessage({
+      role: 'user',
+      content: msg,
+      rich_content: [],
+      ui_commands: [],
+      suggestions: [],
+    });
+
+    // Send via WebSocket
+    const activeConversationId = useConversationStore.getState().activeConversationId;
+
+    wsManager.send(WS_EVENTS.USER_MESSAGE, {
+      message: msg,
+      conversation_id: activeConversationId,
+    });
+  }, [addMessage]);
+
   if (isAria) {
+    // Check if we should render with C1
+    const shouldUseC1 =
+      thesysEnabled &&
+      message.render_mode === 'c1' &&
+      message.c1_response &&
+      message.c1_response.trim() !== '';
     return (
       <div
         className={`group flex items-start gap-3 justify-start ${
@@ -96,14 +128,25 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
         <MessageAvatar role="aria" visible={isFirstInGroup} />
 
         <div className="relative max-w-[85%] border-l-2 border-accent pl-4 py-2">
-          <div className="prose-aria">
-            <ReactMarkdown
-              components={markdownComponents}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
+          {shouldUseC1 ? (
+            // C1 rendering mode
+            <C1MessageRenderer
+              c1Response={message.c1_response!}
+              isStreaming={message.isStreaming || false}
+              onSendMessage={handleSendMessage}
+            />
+          ) : (
+            // Markdown rendering mode (fallback)
+            <div className="prose-aria">
+              <ReactMarkdown
+                components={markdownComponents}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
 
+          {/* Rich content renders after main content in both modes */}
           {message.rich_content.length > 0 && (
             <RichContentRenderer items={message.rich_content} />
           )}
