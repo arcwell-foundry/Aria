@@ -28,6 +28,7 @@ class GoalStatus(str, Enum):
 
     DRAFT = "draft"
     PLAN_READY = "plan_ready"
+    PLAN_FAILED = "plan_failed"
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETE = "complete"

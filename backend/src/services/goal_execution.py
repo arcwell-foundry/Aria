@@ -3158,21 +3158,43 @@ class GoalExecutionService:
             f'}}'
         )
 
-        response = await self._llm.generate_response(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt=(
-                "You are ARIA's resource-aware planning engine. You create detailed, "
-                "actionable execution plans that account for the user's connected "
-                "integrations, trust levels, and company context. "
-                "Each task must have a clear agent assignment and resource requirements. "
-                "Be realistic about time estimates. "
-                "Respond with valid JSON only — no markdown code fences or commentary."
-            ),
-            max_tokens=4096,
-            temperature=0.3,
-            user_id=user_id,
-            task=TaskType.STRATEGIST_PLAN,
-        )
+        try:
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are ARIA's resource-aware planning engine. You create detailed, "
+                    "actionable execution plans that account for the user's connected "
+                    "integrations, trust levels, and company context. "
+                    "Each task must have a clear agent assignment and resource requirements. "
+                    "Be realistic about time estimates. "
+                    "Respond with valid JSON only — no markdown code fences or commentary."
+                ),
+                max_tokens=4096,
+                temperature=0.3,
+                user_id=user_id,
+                task=TaskType.STRATEGIST_PLAN,
+            )
+        except Exception as llm_err:
+            logger.error(
+                "LLM call failed during plan generation for goal %s: %s",
+                goal_id,
+                llm_err,
+                exc_info=True,
+            )
+            try:
+                self._db.table("goals").update(
+                    {
+                        "status": "plan_failed",
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "config": {
+                            **goal.get("config", {}),
+                            "_plan_error": str(llm_err)[:500],
+                        },
+                    }
+                ).eq("id", goal_id).eq("user_id", user_id).execute()
+            except Exception:
+                logger.warning("Failed to mark goal %s as plan_failed", goal_id)
+            raise
 
         # Strip markdown fences if present
         cleaned = response.strip()

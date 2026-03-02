@@ -80,7 +80,10 @@ async def create_goal(
         plan_result = await exec_service.plan_goal(result["id"], current_user.id)
         result["execution_plan"] = plan_result
     except Exception as e:
-        logger.warning("Auto-plan failed for goal %s: %s", result["id"], e)
+        logger.error("Auto-plan failed for goal %s: %s", result["id"], e, exc_info=True)
+        result["plan_error"] = (
+            "Plan generation failed. The goal has been saved — you can retry planning later."
+        )
 
     return result
 
