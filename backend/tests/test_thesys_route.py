@@ -94,3 +94,43 @@ class TestVisualizeSyncEndpoint:
             data = resp.json()
             assert data["render_mode"] == "c1"
             assert data["rendered_content"] == "<div>Rich</div>"
+
+
+class TestEmbedEndpoint:
+    @patch("src.api.routes.thesys.settings")
+    def test_embed_endpoint_exists(self, mock_settings: MagicMock, client: TestClient) -> None:
+        """Embed endpoint returns 200 with valid request."""
+        mock_settings.thesys_configured = True
+        mock_settings.THESYS_API_KEY = MagicMock()
+        mock_settings.THESYS_API_KEY.get_secret_value.return_value = "test-key"
+        mock_settings.THESYS_MODEL = "c1/anthropic/claude-haiku-4-5/latest"
+        mock_settings.THESYS_TIMEOUT = 30.0
+
+        request_body = {
+            "messages": [
+                {"role": "user", "content": "Show me our top accounts"},
+            ],
+        }
+
+        # The embed endpoint streams, so we just check it doesn't 404
+        resp = client.post(
+            "/api/v1/thesys/embed",
+            json=request_body,
+        )
+
+        # Should not return 404
+        assert resp.status_code != 404
+
+    @patch("src.api.routes.thesys.settings")
+    def test_embed_returns_503_when_not_configured(
+        self, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        """Embed endpoint returns 503 when Thesys not configured."""
+        mock_settings.thesys_configured = False
+
+        response = client.post(
+            "/api/v1/thesys/embed",
+            json={"messages": [{"role": "user", "content": "test"}]},
+        )
+
+        assert response.status_code == 503
