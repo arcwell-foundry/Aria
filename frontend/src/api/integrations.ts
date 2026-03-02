@@ -99,11 +99,21 @@ export async function disconnectIntegration(
   return response.data;
 }
 
+export async function getAuthUrlPopup(
+  integrationType: IntegrationType
+): Promise<AuthUrlResponse> {
+  const response = await apiClient.post<AuthUrlResponse>(
+    `/integrations/${integrationType}/auth-url-popup`
+  );
+  return response.data;
+}
+
 // Convenience object for imports
 export const integrationsApi = {
   listIntegrations,
   listAvailableIntegrations,
   getAuthUrl,
+  getAuthUrlPopup,
   connectIntegration,
   disconnectIntegration,
 };

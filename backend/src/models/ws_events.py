@@ -23,6 +23,7 @@ class WSEventType(str, Enum):
     STEP_RETRYING = "execution.step_retrying"
     EXECUTION_COMPLETE = "execution.complete"
     RECOMMENDATION_NEW = "recommendation.new"
+    INTEGRATION_CONNECTED = "integration.connected"
     CONNECTED = "connected"
     PONG = "pong"
 
@@ -183,6 +184,16 @@ class ActionUndoneEvent(WSEvent):
     title: str
     success: bool
     message: str | None = None
+
+
+class IntegrationConnectedEvent(WSEvent):
+    """An integration was connected or updated via OAuth."""
+
+    type: WSEventType = WSEventType.INTEGRATION_CONNECTED
+    toolkit_slug: str
+    status: str
+    display_name: str | None = None
+    account_email: str | None = None
 
 
 class PongEvent(WSEvent):

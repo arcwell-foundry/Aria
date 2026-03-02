@@ -20,6 +20,7 @@ import { ExecutionProgressCard } from './ExecutionProgressCard';
 import type { ExecutionProgressData } from '@/types/execution';
 import { ChallengeCard, type ChallengeCardProps } from '@/components/friction';
 import { IntegrationRequestCard, type IntegrationRequestData } from './IntegrationRequestCard';
+import { ConnectToolCard, type ConnectToolData } from './ConnectToolCard';
 import { GoalCompletionCard, type GoalCompletionData } from './GoalCompletionCard';
 import { ExecutionSummaryCard, type ExecutionSummaryData } from './ExecutionSummaryCard';
 import { MemoryDeltaCard, type MemoryDeltaData } from './MemoryDeltaCard';
@@ -132,6 +133,8 @@ function RichContentItem({ item }: { item: RichContent }) {
       return <ExecutionProgressCard data={item.data as unknown as ExecutionProgressData} />;
     case 'integration_request':
       return <IntegrationRequestCard data={item.data as unknown as IntegrationRequestData} />;
+    case 'connect_tool':
+      return <ConnectToolCard data={item.data as unknown as ConnectToolData} />;
     case 'goal_completion':
       return <GoalCompletionCard data={item.data as unknown as GoalCompletionData} />;
     case 'execution_summary':

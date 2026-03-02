@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
+from src.integrations.connection_registry import get_connection_registry
 from src.integrations.domain import INTEGRATION_CONFIGS, IntegrationType
 from src.integrations.oauth import get_oauth_client
 from src.integrations.service import get_integration_service
@@ -179,6 +182,210 @@ async def get_auth_url(
         ) from e
 
 
+@router.post("/{integration_type}/auth-url-popup", response_model=AuthUrlResponse)
+async def get_auth_url_popup(
+    integration_type: str,
+    current_user: CurrentUser,
+    request: Request,
+) -> dict[str, Any]:
+    """Generate OAuth URL for popup-based connection flow.
+
+    Unlike the standard auth-url endpoint, this uses the backend's own
+    ``/oauth/callback`` as the redirect URI so the popup can close itself
+    via ``postMessage`` after OAuth completes.
+
+    Args:
+        integration_type: Type of integration to connect.
+        current_user: The authenticated user.
+        request: FastAPI request (used to derive the server's base URL).
+
+    Returns:
+        Authorization URL and metadata.
+    """
+    try:
+        try:
+            integration_type_enum = IntegrationType(integration_type)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid integration type: {integration_type}",
+            ) from e
+
+        config = INTEGRATION_CONFIGS.get(integration_type_enum)
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No configuration for integration type: {integration_type}",
+            )
+
+        # Build callback URL pointing to our own server
+        base_url = str(request.base_url).rstrip("/")
+        callback_url = (
+            f"{base_url}/api/v1/integrations/oauth/callback"
+            f"?integration_type={integration_type}"
+        )
+
+        oauth_client = get_oauth_client()
+        auth_url, connection_id = await oauth_client.generate_auth_url_with_connection_id(
+            user_id=current_user.id,
+            integration_type=integration_type_enum,
+            redirect_uri=callback_url,
+        )
+
+        # Create pending connection row
+        registry = get_connection_registry()
+        await registry.register_connection(
+            user_id=str(current_user.id),
+            toolkit_slug=integration_type,
+            composio_connection_id=connection_id,
+            status="pending",
+        )
+
+        return {
+            "authorization_url": auth_url,
+            "integration_type": integration_type,
+            "display_name": config.display_name,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error generating popup auth URL")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate authorization URL",
+        ) from e
+
+
+@router.get("/oauth/callback", response_class=HTMLResponse)
+async def oauth_callback(
+    connected_account_id: str = Query("", alias="connected_account_id"),
+    integration_type: str = Query("", alias="integration_type"),
+) -> HTMLResponse:
+    """OAuth callback for popup flow — returns HTML that posts a message and closes.
+
+    No JWT required — the browser is redirected here by the OAuth provider.
+    We identify the user from the pending ``user_connections`` row.
+
+    Args:
+        connected_account_id: Composio connection ID from the OAuth redirect.
+        integration_type: The integration type (passed via our callback URL).
+    """
+    # Fallback error HTML
+    def _error_html(msg: str) -> HTMLResponse:
+        return HTMLResponse(
+            content=f"""<!DOCTYPE html>
+<html><head><title>Connection Failed</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:40px">
+<h2>Connection Failed</h2><p>{msg}</p>
+<script>
+  window.opener && window.opener.postMessage({{type:'aria_oauth_error',error:'{msg}'}}, '*');
+  setTimeout(function(){{ window.close(); }}, 3000);
+</script>
+</body></html>""",
+            status_code=200,
+        )
+
+    if not connected_account_id:
+        return _error_html("Missing connected_account_id parameter")
+
+    try:
+        # Look up the pending connection row
+        registry = get_connection_registry()
+        pending = await registry.lookup_by_composio_connection_id(connected_account_id)
+
+        if not pending:
+            return _error_html("No pending connection found")
+
+        user_id = pending["user_id"]
+
+        # Verify the row was created recently (10-minute window)
+        created_at = pending.get("created_at")
+        if created_at:
+            if isinstance(created_at, str):
+                created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            else:
+                created_dt = created_at
+            if datetime.now(UTC) - created_dt > timedelta(minutes=10):
+                return _error_html("Connection request expired")
+
+        # Exchange with Composio to verify ACTIVE status
+        oauth_client = get_oauth_client()
+        toolkit_slug = integration_type or pending.get("toolkit_slug", "")
+        connection_data = await oauth_client.exchange_code_for_connection(
+            user_id=str(user_id),
+            code=connected_account_id,
+            integration_type=toolkit_slug,
+        )
+
+        account_email = connection_data.get("account_email", "")
+        display_name = account_email or toolkit_slug
+
+        config = INTEGRATION_CONFIGS.get(IntegrationType(toolkit_slug)) if toolkit_slug else None
+        if config:
+            display_name = config.display_name
+
+        # Activate the connection in the registry (includes dual-write)
+        await registry.register_connection(
+            user_id=str(user_id),
+            toolkit_slug=toolkit_slug,
+            composio_connection_id=connected_account_id,
+            account_email=account_email,
+            display_name=display_name,
+            status="active",
+        )
+
+        # Send WebSocket event
+        try:
+            from src.core.ws import ws_manager
+
+            await ws_manager.send_integration_connected(
+                user_id=str(user_id),
+                toolkit_slug=toolkit_slug,
+                status="active",
+                display_name=display_name,
+                account_email=account_email,
+            )
+        except Exception:
+            logger.warning("Failed to send WS integration.connected event", exc_info=True)
+
+        # Trigger email bootstrap for email integrations
+        if toolkit_slug in ("gmail", "outlook"):
+            try:
+                from src.onboarding.email_bootstrap import PriorityEmailIngestion
+
+                bootstrap = PriorityEmailIngestion()
+                asyncio.create_task(bootstrap.run_bootstrap(str(user_id)))
+                logger.info("Email bootstrap triggered after popup OAuth for %s", toolkit_slug)
+            except Exception:
+                logger.warning("Failed to trigger email bootstrap after popup OAuth", exc_info=True)
+
+        # Return HTML that signals the opener and closes the popup
+        return HTMLResponse(
+            content=f"""<!DOCTYPE html>
+<html><head><title>Connected</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:40px">
+<h2>Connected!</h2>
+<p>You can close this window.</p>
+<script>
+  window.opener && window.opener.postMessage({{
+    type: 'aria_oauth_success',
+    toolkit_slug: '{toolkit_slug}',
+    status: 'active',
+    display_name: '{display_name}',
+    account_email: '{account_email}'
+  }}, '*');
+  setTimeout(function(){{ window.close(); }}, 1500);
+</script>
+</body></html>""",
+            status_code=200,
+        )
+
+    except Exception as e:
+        logger.exception("OAuth callback error")
+        return _error_html(f"An error occurred: {str(e)[:100]}")
+
+
 @router.post(
     "/{integration_type}/connect",
     response_model=IntegrationResponse,
@@ -238,6 +445,20 @@ async def connect_integration(
                 "integration_type": integration_type,
             },
         )
+
+        # Dual-write to user_connections registry (non-fatal)
+        try:
+            registry = get_connection_registry()
+            await registry.register_connection(
+                user_id=str(current_user.id),
+                toolkit_slug=integration_type,
+                composio_connection_id=connection_data.get("connection_id", ""),
+                account_email=connection_data.get("account_email"),
+                display_name=connection_data.get("account_email"),
+                status="active",
+            )
+        except Exception:
+            logger.warning("Registry dual-write failed (non-fatal)", exc_info=True)
 
         # Trigger email bootstrap for email integrations (Gmail/Outlook)
         if integration_type in ("gmail", "outlook"):
@@ -299,6 +520,13 @@ async def disconnect_integration(
 
         service = get_integration_service()
         await service.disconnect_integration(current_user.id, integration_type_enum)
+
+        # Dual-write to user_connections registry (non-fatal)
+        try:
+            registry = get_connection_registry()
+            await registry.disconnect(str(current_user.id), integration_type)
+        except Exception:
+            logger.warning("Registry disconnect dual-write failed (non-fatal)", exc_info=True)
 
         logger.info(
             "Integration disconnected successfully",

@@ -15,6 +15,7 @@ from src.models.ws_events import (
     ActionUndoneEvent,
     AriaMessageEvent,
     ExecutionCompleteEvent,
+    IntegrationConnectedEvent,
     ProgressUpdateEvent,
     RecommendationEvent,
     SignalEvent,
@@ -401,6 +402,23 @@ class ConnectionManager:
             steps_completed=steps_completed,
             steps_total=steps_total,
             summary=summary,
+        )
+        await self.send_to_user(user_id, event)
+
+    async def send_integration_connected(
+        self,
+        user_id: str,
+        toolkit_slug: str,
+        status: str,
+        display_name: str | None = None,
+        account_email: str | None = None,
+    ) -> None:
+        """Send an integration connected/updated event."""
+        event = IntegrationConnectedEvent(
+            toolkit_slug=toolkit_slug,
+            status=status,
+            display_name=display_name,
+            account_email=account_email,
         )
         await self.send_to_user(user_id, event)
 

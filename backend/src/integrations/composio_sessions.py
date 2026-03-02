@@ -97,6 +97,22 @@ class ComposioSessionManager:
         if cached is not None:
             return cached
 
+        # If no connected_accounts provided, try loading from ConnectionRegistry
+        if connected_accounts is None:
+            try:
+                from src.integrations.connection_registry import get_connection_registry
+
+                registry = get_connection_registry()
+                connections = await registry.get_all_connections(user_id)
+                if connections:
+                    connected_accounts = {
+                        c["toolkit_slug"]: c["composio_connection_id"]
+                        for c in connections
+                        if c.get("composio_connection_id")
+                    }
+            except Exception:
+                logger.debug("Registry lookup for session failed (non-fatal)", exc_info=True)
+
         composio_circuit_breaker.check()
 
         entity_id = self._entity_id(user_id)

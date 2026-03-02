@@ -118,9 +118,25 @@ async def handle_composio_webhook(
 
 
 def _resolve_user_id(db: Any, connected_account_id: str) -> str | None:
-    """Look up ARIA user_id from Composio connected_account_id."""
+    """Look up ARIA user_id from Composio connected_account_id.
+
+    Checks user_connections first (canonical), then falls back to
+    user_integrations for backward compatibility.
+    """
     try:
-        # Check composio_connection_id in user_integrations
+        # Check user_connections first (canonical registry)
+        result = db.table("user_connections") \
+            .select("user_id") \
+            .eq("composio_connection_id", connected_account_id) \
+            .limit(1) \
+            .execute()
+        if result.data:
+            return result.data[0]["user_id"]
+    except Exception as e:
+        logger.debug("user_connections lookup failed (table may not exist yet): %s", e)
+
+    try:
+        # Fallback: check composio_connection_id in user_integrations
         result = db.table("user_integrations") \
             .select("user_id") \
             .eq("composio_connection_id", connected_account_id) \

@@ -3,6 +3,7 @@ import {
   connectIntegration,
   disconnectIntegration,
   getAuthUrl,
+  getAuthUrlPopup,
   listAvailableIntegrations,
   listIntegrations,
   type ConnectIntegrationRequest,
@@ -62,6 +63,14 @@ export function useGetAuthUrl() {
       integrationType: IntegrationType;
       redirectUri: string;
     }) => getAuthUrl(integrationType, redirectUri),
+  });
+}
+
+// Get OAuth auth URL for popup flow
+export function useGetAuthUrlPopup() {
+  return useMutation({
+    mutationFn: (integrationType: IntegrationType) =>
+      getAuthUrlPopup(integrationType),
   });
 }
 

@@ -13,7 +13,11 @@ import {
   useGetAuthUrl,
   useConnectIntegration,
   useDisconnectIntegration,
+  integrationKeys,
 } from '@/hooks/useIntegrations';
+import { useQueryClient } from '@tanstack/react-query';
+import { wsManager } from '@/core/WebSocketManager';
+import { WS_EVENTS } from '@/types/chat';
 import type { IntegrationType } from '@/api/integrations';
 
 type IntegrationCardConfig = {
@@ -77,10 +81,22 @@ export function IntegrationsSection() {
   const getAuthUrl = useGetAuthUrl();
   const connectMutation = useConnectIntegration();
   const disconnectMutation = useDisconnectIntegration();
+  const queryClient = useQueryClient();
 
   const [connectingType, setConnectingType] = useState<string | null>(null);
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Listen for WS integration.connected events (cross-flow: popup or other tab)
+  useEffect(() => {
+    const handleConnected = () => {
+      queryClient.invalidateQueries({ queryKey: integrationKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: integrationKeys.available() });
+    };
+
+    wsManager.on(WS_EVENTS.INTEGRATION_CONNECTED, handleConnected);
+    return () => wsManager.off(WS_EVENTS.INTEGRATION_CONNECTED, handleConnected as (p: unknown) => void);
+  }, [queryClient]);
 
   // Handle OAuth callback: detect code/connected_account_id in URL params
   useEffect(() => {

@@ -41,6 +41,7 @@ export const WS_EVENTS = {
   STEP_RETRYING: 'execution.step_retrying',
   EXECUTION_COMPLETE: 'execution.complete',
   RECOMMENDATION_NEW: 'recommendation.new',
+  INTEGRATION_CONNECTED: 'integration.connected',
 
   // Client → Server
   USER_MESSAGE: 'user.message',
