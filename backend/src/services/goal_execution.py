@@ -738,15 +738,25 @@ class GoalExecutionService:
         except Exception:
             logger.debug("Failed to record goal_completed activity", exc_info=True)
 
-        # Ensure all goal agents are marked complete
-        try:
-            self._db.table("goal_agents").update(
-                {"status": "complete", "updated_at": now}
-            ).eq("goal_id", goal_id).in_(
-                "status", ["pending", "running"]
-            ).execute()
-        except Exception:
-            logger.debug("Failed to finalize goal agent statuses", exc_info=True)
+        # Mark executed agents as complete (only those that succeeded).
+        # _store_execution already marks individual agents, but agents
+        # that were skipped or failed should NOT be force-marked complete.
+        executed_agent_types = [
+            r.get("agent_type", "").lower()
+            for r in results
+            if r.get("success") and r.get("agent_type")
+        ]
+        if executed_agent_types:
+            try:
+                self._db.table("goal_agents").update(
+                    {"status": "complete", "updated_at": now}
+                ).eq("goal_id", goal_id).in_(
+                    "agent_type", executed_agent_types
+                ).in_(
+                    "status", ["pending", "running"]
+                ).execute()
+            except Exception:
+                logger.debug("Failed to finalize goal agent statuses", exc_info=True)
 
         # Route goal completion through Intelligence Pulse Engine
         try:
@@ -1175,7 +1185,12 @@ class GoalExecutionService:
             )
 
         except Exception as e:
-            logger.debug(f"Failed to create agent instance for {agent_type}: {e}")
+            logger.warning(
+                "Failed to create agent instance for %s: %s",
+                agent_type,
+                e,
+                exc_info=True,
+            )
             return None
 
     def _build_agent_task(
@@ -1321,7 +1336,12 @@ class GoalExecutionService:
             return None
 
         except Exception as e:
-            logger.debug(f"Agent execution attempt failed for {agent_type}: {e}")
+            logger.warning(
+                "Agent skill-aware execution failed for %s, falling back to prompt-based: %s",
+                agent_type,
+                e,
+                exc_info=True,
+            )
             return None
 
     async def _verify_and_adapt(
@@ -2062,6 +2082,7 @@ class GoalExecutionService:
         agent_type: str,
         content: dict[str, Any],
         goal_agent_id: str | None = None,
+        tokens_used: int | None = None,
     ) -> None:
         """Store agent execution result in agent_executions table.
 
@@ -2071,6 +2092,7 @@ class GoalExecutionService:
             agent_type: The agent type.
             content: The execution output.
             goal_agent_id: Optional goal_agent row ID.
+            tokens_used: Actual token count if known; estimated from output size otherwise.
         """
         now = datetime.now(UTC).isoformat()
 
@@ -2104,6 +2126,12 @@ class GoalExecutionService:
                 if insert_result.data:
                     goal_agent_id = insert_result.data[0]["id"]
 
+        # Estimate tokens from output size when not provided
+        if tokens_used is None:
+            output_str = json.dumps(content, default=str)
+            # Rough estimate: ~4 chars per token for input+output
+            tokens_used = max(len(output_str) // 4, 1)
+
         if goal_agent_id:
             # Store in agent_executions table
             self._db.table("agent_executions").insert(
@@ -2112,7 +2140,7 @@ class GoalExecutionService:
                     "input": {"goal_id": goal_id, "agent_type": agent_type_lower},
                     "output": content,
                     "status": "complete",
-                    "tokens_used": 0,
+                    "tokens_used": tokens_used,
                     "started_at": now,
                     "completed_at": now,
                 }
@@ -3685,15 +3713,43 @@ class GoalExecutionService:
             # All tasks done — complete the goal
             await self.complete_goal_with_retro(goal_id, user_id)
 
-            # Ensure all goal agents are marked complete
-            try:
-                self._db.table("goal_agents").update(
-                    {"status": "complete", "updated_at": datetime.now(UTC).isoformat()}
-                ).eq("goal_id", goal_id).in_(
-                    "status", ["pending", "running"]
-                ).execute()
-            except Exception:
-                logger.debug("Failed to finalize goal agent statuses", exc_info=True)
+            # Mark only agents that appeared in execution plan tasks as complete.
+            # Agents NOT in the plan should remain in their current status so
+            # callers can see which agents actually executed vs. which didn't.
+            executed_agent_types = list(
+                {t.get("agent_type", t.get("agent", "")).lower() for t in tasks}
+                - {""}
+            )
+            if executed_agent_types:
+                try:
+                    self._db.table("goal_agents").update(
+                        {"status": "complete", "updated_at": datetime.now(UTC).isoformat()}
+                    ).eq("goal_id", goal_id).in_(
+                        "agent_type", executed_agent_types
+                    ).in_(
+                        "status", ["pending", "running"]
+                    ).execute()
+                except Exception:
+                    logger.debug("Failed to finalize goal agent statuses", exc_info=True)
+
+            # Log which agents were NOT executed so the gap is visible
+            all_ga_result = (
+                self._db.table("goal_agents")
+                .select("agent_type, status")
+                .eq("goal_id", goal_id)
+                .execute()
+            )
+            non_executed = [
+                ga["agent_type"]
+                for ga in (all_ga_result.data or [])
+                if ga.get("status") in ("pending", "running")
+            ]
+            if non_executed:
+                logger.warning(
+                    "Goal completed but these agents never executed: %s",
+                    non_executed,
+                    extra={"goal_id": goal_id},
+                )
 
             # Record goal_completed activity
             try:
@@ -4013,11 +4069,30 @@ class GoalExecutionService:
         try:
             # Extract resource_status from the task to pass to agent for graceful degradation
             resource_status = task.get("resource_status", [])
+
+            # Look up the goal_agent_id so execution is tracked against the
+            # correct goal_agents row (instead of _store_execution guessing).
+            _ga_id: str | None = None
+            try:
+                _ga_lookup = (
+                    self._db.table("goal_agents")
+                    .select("id")
+                    .eq("goal_id", goal_id)
+                    .eq("agent_type", agent_type.lower())
+                    .limit(1)
+                    .execute()
+                )
+                if _ga_lookup.data:
+                    _ga_id = _ga_lookup.data[0]["id"]
+            except Exception:
+                logger.debug("Failed to look up goal_agent_id for %s", agent_type)
+
             result = await self._execute_agent(
                 user_id=user_id,
                 goal=goal,
                 agent_type=agent_type,
                 context=context,
+                goal_agent_id=_ga_id,
                 conversation_id=conversation_id,
                 resource_status=resource_status,
             )

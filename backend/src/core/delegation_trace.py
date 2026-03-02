@@ -80,23 +80,41 @@ class DelegationTrace:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DelegationTrace:
-        """Create from a database row dict."""
+        """Create from a database row dict.
+
+        Handles both the actual DB column names (id, delegating_agent,
+        receiving_agent, metadata, result, cost_cents) and the domain
+        model names (trace_id, delegator, delegatee, inputs, outputs,
+        cost_usd) so serialized dicts and raw DB rows both work.
+        """
+        # cost: DB stores cost_cents (int), domain model uses cost_usd (float)
+        cost_usd = float(data.get("cost_usd", 0))
+        if cost_usd == 0:
+            cost_usd = float(data.get("cost_cents", 0)) / 100.0
+
+        # dct_permissions → capability_token reconstruction
+        capability_token = data.get("capability_token")
+        if capability_token is None:
+            dct_perms = data.get("dct_permissions")
+            if dct_perms:
+                capability_token = {"allowed_actions": dct_perms}
+
         return cls(
-            trace_id=data["trace_id"],
+            trace_id=data.get("trace_id") or data.get("id", ""),
             goal_id=data.get("goal_id"),
             parent_trace_id=data.get("parent_trace_id"),
-            user_id=data["user_id"],
-            delegator=data["delegator"],
-            delegatee=data["delegatee"],
-            task_description=data["task_description"],
+            user_id=data.get("user_id", ""),
+            delegator=data.get("delegator") or data.get("delegating_agent", ""),
+            delegatee=data.get("delegatee") or data.get("receiving_agent", ""),
+            task_description=data.get("task_description", ""),
             task_characteristics=data.get("task_characteristics"),
-            capability_token=data.get("capability_token"),
-            inputs=data.get("inputs", {}),
-            outputs=data.get("outputs"),
-            thinking_trace=data.get("thinking_trace"),
+            capability_token=capability_token,
+            inputs=data.get("inputs") or data.get("metadata") or {},
+            outputs=data.get("outputs") or data.get("result"),
+            thinking_trace=data.get("thinking_trace") or data.get("reasoning"),
             verification_result=data.get("verification_result"),
             approval_record=data.get("approval_record"),
-            cost_usd=float(data.get("cost_usd", 0)),
+            cost_usd=cost_usd,
             status=data.get("status", "dispatched"),
             started_at=_parse_dt(data.get("started_at")),
             completed_at=_parse_dt(data.get("completed_at")),
