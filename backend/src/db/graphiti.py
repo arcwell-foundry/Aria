@@ -58,10 +58,25 @@ class GraphitiClient:
     async def _initialize(cls) -> None:
         """Initialize the Graphiti client with Neo4j connection.
 
-        Fast-fails when OPENAI_API_KEY is missing or when Neo4j is
-        unreachable within ``_NEO4J_INIT_TIMEOUT`` seconds, preventing
-        the retry storm that would otherwise hang the server.
+        Fast-fails when NEO4J is not configured, OPENAI_API_KEY is
+        missing, or when Neo4j is unreachable within
+        ``_NEO4J_INIT_TIMEOUT`` seconds, preventing the retry storm
+        that would otherwise hang the server.
         """
+        # Early bail-out: skip if NEO4J_URI is not explicitly configured
+        neo4j_uri = settings.NEO4J_URI
+        neo4j_password = settings.NEO4J_PASSWORD.get_secret_value()
+        if not neo4j_uri or (neo4j_uri == "bolt://localhost:7687" and not neo4j_password):
+            cls._init_failed = True
+            logger.info(
+                "Neo4j not configured (NEO4J_URI unset or default with no password), "
+                "skipping Graphiti initialization"
+            )
+            raise GraphitiConnectionError(
+                "Neo4j not configured — NEO4J_URI not set or using localhost default "
+                "with no password"
+            )
+
         # Early bail-out: OPENAI_API_KEY is required for the embedder
         openai_key = os.environ.get("OPENAI_API_KEY", "") or (
             settings.OPENAI_API_KEY.get_secret_value()
