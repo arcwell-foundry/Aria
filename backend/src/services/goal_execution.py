@@ -2245,9 +2245,32 @@ class GoalExecutionService:
         """Persist Hunter agent leads to discovered_leads table."""
         from uuid import uuid4
 
-        # Content may be a list of leads directly or wrapped in {"result": [...]}
-        leads = content if isinstance(content, list) else content.get("result", [])
-        if not isinstance(leads, list) or not leads:
+        # Content may be:
+        # 1. A list of leads directly (from agent returning list)
+        # 2. Wrapped in {"result": [...]} (from _try_skill_execution wrapping)
+        # 3. Prompt-based fallback with {"prospect_profiles": [...]} schema
+        if isinstance(content, list):
+            leads = content
+        elif "result" in content and isinstance(content.get("result"), list):
+            leads = content["result"]
+        elif "prospect_profiles" in content and isinstance(content.get("prospect_profiles"), list):
+            # Prompt-based fallback schema — normalize to lead format
+            leads = []
+            for profile in content["prospect_profiles"]:
+                leads.append({
+                    "company": {
+                        "name": profile.get("company_name", profile.get("company_type", "Unknown")),
+                    },
+                    "contacts": [],
+                    "fit_score": 0.5,
+                    "fit_reasons": [profile.get("why_good_fit", "")],
+                    "gaps": [],
+                    "source": "hunter_prompt_fallback",
+                })
+        else:
+            leads = []
+
+        if not leads:
             return
 
         persisted = 0
