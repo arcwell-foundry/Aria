@@ -26,6 +26,7 @@ class WSEventType(str, Enum):
     INTEGRATION_CONNECTED = "integration.connected"
     CONNECTED = "connected"
     PONG = "pong"
+    C1_RENDER = "aria.c1_render"
 
 
 class WSEvent(BaseModel):
@@ -201,3 +202,12 @@ class PongEvent(WSEvent):
 
     type: WSEventType = WSEventType.PONG
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
+class C1RenderEvent(WSEvent):
+    """C1-rendered content replacing streamed markdown."""
+
+    type: WSEventType = WSEventType.C1_RENDER
+    content: str
+    conversation_id: str
+    render_mode: str = "c1"

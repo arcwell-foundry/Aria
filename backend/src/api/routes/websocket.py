@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from src.core.config import settings
 from src.core.task_types import TaskType
 from src.core.ws import ws_manager
 from src.models.ws_events import ConnectedEvent, PongEvent, ThinkingEvent
@@ -294,6 +295,34 @@ async def _send_return_greeting(user_id: str) -> None:
     except Exception:
         # Return greeting is best-effort — don't break the WebSocket connection
         logger.debug("Return greeting failed for user %s", user_id, exc_info=True)
+
+
+async def _apply_thesys_c1(content: str) -> tuple[str, str]:
+    """Apply Thesys C1 visualization if content is eligible.
+
+    Returns (display_content, render_mode) where render_mode is
+    "c1", "c1_eligible", or "markdown".
+    """
+    if not settings.thesys_configured:
+        return content, "markdown"
+
+    from src.services.thesys_classifier import ThesysRoutingClassifier
+    from src.services.thesys_service import get_thesys_service
+    from src.services.thesys_system_prompt import build_system_prompt
+
+    should, content_type = ThesysRoutingClassifier.classify(content)
+    if not should:
+        return content, "markdown"
+
+    service = get_thesys_service()
+    if not service.is_available:
+        return content, "c1_eligible"
+
+    system_prompt = build_system_prompt(content_type)
+    rendered = await service.visualize(content, system_prompt)
+    if rendered != content:
+        return rendered, "c1"
+    return content, "c1_eligible"
 
 
 async def _handle_user_message(
@@ -743,12 +772,14 @@ async def _handle_user_message(
             display_content, conversation_messages[-4:], user_id,
         )
 
+        render_mode = "markdown"
         if all_tools:
-            # Tool path: send complete content as a single token event
+            # Tool path: full content available — apply C1 if eligible
+            c1_content, render_mode = await _apply_thesys_c1(display_content)
             await websocket.send_json(
                 {
                     "type": "aria.token",
-                    "payload": {"content": display_content, "conversation_id": conversation_id},
+                    "payload": {"content": c1_content, "conversation_id": conversation_id},
                 }
             )
 
@@ -762,9 +793,35 @@ async def _handle_user_message(
                     "rich_content": rich_content,
                     "ui_commands": ui_commands,
                     "suggestions": suggestions,
+                    "render_mode": render_mode,
                 },
             }
         )
+
+        # --- Thesys C1 post-processing for streamed responses ---
+        if render_mode == "markdown" and not all_tools and settings.thesys_configured:
+            from src.services.thesys_classifier import ThesysRoutingClassifier
+
+            should_viz, content_type = ThesysRoutingClassifier.classify(display_content)
+            if should_viz:
+                render_mode = "c1_eligible"
+                from src.services.thesys_service import get_thesys_service
+                from src.services.thesys_system_prompt import build_system_prompt
+
+                svc = get_thesys_service()
+                if svc.is_available:
+                    sys_prompt = build_system_prompt(content_type)
+                    c1_rendered = await svc.visualize(display_content, sys_prompt)
+                    if c1_rendered != display_content:
+                        render_mode = "c1"
+                        await websocket.send_json({
+                            "type": "aria.c1_render",
+                            "payload": {
+                                "conversation_id": conversation_id,
+                                "content": c1_rendered,
+                                "render_mode": "c1",
+                            },
+                        })
 
         # --- Trigger plan execution if approved via chat ---
         if plan_approved_via_chat and pending_plan_goal_id:
