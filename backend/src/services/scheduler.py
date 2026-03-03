@@ -69,11 +69,20 @@ async def _run_calendar_meeting_checks() -> None:
 
         db = SupabaseClient.get_client()
 
-        # Find users with active Google Calendar integrations
+        # Find users with active calendar integrations (any provider)
         result = (
             db.table("user_integrations")
             .select("user_id")
-            .eq("integration_type", "google_calendar")
+            .in_(
+                "integration_type",
+                [
+                    "google_calendar",
+                    "googlecalendar",
+                    "outlook",
+                    "outlook365calendar",
+                    "microsoft_calendar",
+                ],
+            )
             .eq("status", "active")
             .execute()
         )

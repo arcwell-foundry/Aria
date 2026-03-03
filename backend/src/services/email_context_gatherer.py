@@ -1547,6 +1547,16 @@ Summary:"""
                     user_id, connection_id, start_date, end_date, sender_email
                 )
 
+            # Sync fetched events to local cache
+            source = "google" if "google" in provider else "outlook"
+            synced = await self._sync_events_to_cache(user_id, events, source)
+            if synced:
+                logger.info(
+                    "CONTEXT_GATHERER: Synced %d calendar events to cache for user %s",
+                    synced,
+                    user_id,
+                )
+
             for event in events:
                 event_time_str = event.get("start", "")
                 if event_time_str:
@@ -1575,26 +1585,26 @@ Summary:"""
         return context
 
     async def _get_calendar_integration(self, user_id: str) -> dict[str, Any] | None:
-        """Get user's calendar integration."""
+        """Get user's calendar integration.
+
+        Checks all known calendar integration type variants. The 'outlook'
+        integration provides both email AND calendar via Microsoft Graph OAuth.
+        """
         try:
             result = (
                 self._db.table("user_integrations")
                 .select("*")
                 .eq("user_id", user_id)
-                .eq("integration_type", "googlecalendar")
-                .eq("status", "active")
-                .limit(1)
-                .execute()
-            )
-            record = result.data[0] if result and result.data else None
-            if record:
-                return record
-
-            result = (
-                self._db.table("user_integrations")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("integration_type", "outlook365calendar")
+                .in_(
+                    "integration_type",
+                    [
+                        "google_calendar",
+                        "googlecalendar",
+                        "outlook",
+                        "outlook365calendar",
+                        "microsoft_calendar",
+                    ],
+                )
                 .eq("status", "active")
                 .limit(1)
                 .execute()
@@ -1647,6 +1657,9 @@ Summary:"""
                             "title": event.get("summary", ""),
                             "start": event.get("start", {}).get("dateTime", ""),
                             "end": event.get("end", {}).get("dateTime", ""),
+                            "attendees_list": [
+                                a.get("email", "") for a in attendees
+                            ],
                         })
 
         except Exception as e:
@@ -1695,6 +1708,10 @@ Summary:"""
                             "title": event.get("subject", ""),
                             "start": event.get("start", {}).get("dateTime", ""),
                             "end": event.get("end", {}).get("dateTime", ""),
+                            "attendees_list": [
+                                a.get("emailAddress", {}).get("address", "")
+                                for a in attendees
+                            ],
                         })
 
         except Exception as e:
@@ -1704,6 +1721,53 @@ Summary:"""
             )
 
         return events
+
+    async def _sync_events_to_cache(
+        self,
+        user_id: str,
+        events: list[dict[str, Any]],
+        source: str,
+    ) -> int:
+        """Sync fetched calendar events to the local calendar_events table.
+
+        Uses upsert on (user_id, external_id) to avoid duplicates.
+
+        Args:
+            user_id: The user's ID.
+            events: List of event dicts with id, title, start, end keys.
+            source: Provider name ('google' or 'outlook').
+
+        Returns:
+            Number of events synced.
+        """
+        synced = 0
+        for event in events:
+            ext_id = event.get("id")
+            if not ext_id:
+                continue
+            try:
+                attendees = event.get("attendees_list", [])
+                self._db.table("calendar_events").upsert(
+                    {
+                        "user_id": user_id,
+                        "title": event.get("title", ""),
+                        "start_time": event.get("start", ""),
+                        "end_time": event.get("end", ""),
+                        "attendees": json.dumps(attendees),
+                        "source": source,
+                        "external_id": ext_id,
+                        "metadata": json.dumps(event),
+                    },
+                    on_conflict="user_id,external_id",
+                ).execute()
+                synced += 1
+            except Exception as e:
+                logger.warning(
+                    "CONTEXT_GATHERER: Failed to cache calendar event %s: %s",
+                    ext_id,
+                    e,
+                )
+        return synced
 
     # ------------------------------------------------------------------
     # CRM Context

@@ -1199,14 +1199,34 @@ Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
             sections.append(f"""=== TONE GUIDANCE ===
 {tone_guidance}""")
 
-        # Calendar context
-        if context.calendar_context and context.calendar_context.upcoming_meetings:
-            meetings = context.calendar_context.upcoming_meetings[:2]
-            meeting_lines = "\n".join(
-                f"- {m.get('summary', 'Meeting')} on {m.get('start', 'TBD')}" for m in meetings
-            )
-            sections.append(f"""=== UPCOMING MEETINGS ===
-{meeting_lines}""")
+        # Calendar context — full free/busy for scheduling emails
+        if context.calendar_context and context.calendar_context.connected:
+            cal = context.calendar_context
+            all_meetings = cal.upcoming_meetings + cal.recent_meetings
+
+            if all_meetings:
+                # Build busy blocks
+                busy_lines = []
+                for m in sorted(all_meetings, key=lambda x: x.get("start", "")):
+                    start_str = m.get("start", "TBD")
+                    end_str = m.get("end", "")
+                    title = m.get("title") or m.get("summary") or "Meeting"
+                    if end_str:
+                        busy_lines.append(f"- {start_str} to {end_str}: {title}")
+                    else:
+                        busy_lines.append(f"- {start_str}: {title}")
+
+                busy_block = "\n".join(busy_lines) if busy_lines else "No meetings found."
+
+                sections.append(f"""=== YOUR CALENDAR (NEXT 7 DAYS) ===
+BUSY:
+{busy_block}
+
+When suggesting meeting times, ONLY suggest times that do NOT conflict with the BUSY blocks above. Prefer suggesting 2-3 specific available windows.""")
+            else:
+                sections.append("""=== CALENDAR ===
+Your calendar is connected but no upcoming meetings were found in the next 7 days.
+You can suggest meeting times freely.""")
 
         # CRM context
         if context.crm_context and context.crm_context.connected:

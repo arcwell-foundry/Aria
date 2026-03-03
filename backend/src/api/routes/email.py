@@ -6,6 +6,7 @@ Provides endpoints for:
 - Email bootstrap trigger for memory/digital twin population
 """
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -684,6 +685,170 @@ async def get_relationship_health(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to analyze relationship health. Please try again.",
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Calendar Integration Test
+# ---------------------------------------------------------------------------
+
+
+@router.get("/calendar/test")
+async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]:
+    """Test endpoint to verify calendar integration fetches real events.
+
+    Returns calendar events from the user's connected calendar provider
+    for the next 7 days. Also syncs fetched events to the local
+    calendar_events table.
+    """
+    from datetime import timedelta
+
+    from src.db.supabase import SupabaseClient
+    from src.integrations.oauth import get_oauth_client
+
+    user_id = current_user.id
+    db = SupabaseClient.get_client()
+
+    # 1. Find active calendar integration
+    result = (
+        db.table("user_integrations")
+        .select("*")
+        .eq("user_id", user_id)
+        .in_(
+            "integration_type",
+            [
+                "google_calendar",
+                "googlecalendar",
+                "outlook",
+                "outlook365calendar",
+                "microsoft_calendar",
+            ],
+        )
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        return {
+            "success": False,
+            "error": "No active calendar integration found",
+            "events": [],
+            "synced": 0,
+        }
+
+    integration = result.data[0]
+    connection_id = integration.get("composio_connection_id")
+    integration_type = integration.get("integration_type", "").lower()
+
+    if not connection_id:
+        return {
+            "success": False,
+            "error": "Integration found but no composio_connection_id",
+            "events": [],
+            "synced": 0,
+        }
+
+    # 2. Fetch calendar events from provider
+    now = datetime.now(UTC)
+    end = now + timedelta(days=7)
+    oauth_client = get_oauth_client()
+
+    try:
+        if "google" in integration_type:
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="GOOGLECALENDAR_GET_EVENTS",
+                params={
+                    "timeMin": now.isoformat() + "Z",
+                    "timeMax": end.isoformat() + "Z",
+                    "maxResults": 50,
+                },
+                user_id=user_id,
+            )
+            raw_events = response.get("data", {}).get("items", [])
+            events = [
+                {
+                    "external_id": ev.get("id", ""),
+                    "title": ev.get("summary", "No title"),
+                    "start_time": ev.get("start", {}).get("dateTime", ""),
+                    "end_time": ev.get("end", {}).get("dateTime", ""),
+                    "attendees": [
+                        a.get("email", "") for a in ev.get("attendees", [])
+                    ],
+                }
+                for ev in raw_events
+            ]
+        else:
+            # Outlook
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_GET_CALENDAR_VIEW",
+                params={
+                    "startDateTime": now.isoformat() + "Z",
+                    "endDateTime": end.isoformat() + "Z",
+                    "$top": 50,
+                },
+                user_id=user_id,
+            )
+            raw_events = response.get("data", {}).get("value", [])
+            events = [
+                {
+                    "external_id": ev.get("id", ""),
+                    "title": ev.get("subject", "No title"),
+                    "start_time": ev.get("start", {}).get("dateTime", ""),
+                    "end_time": ev.get("end", {}).get("dateTime", ""),
+                    "attendees": [
+                        a.get("emailAddress", {}).get("address", "")
+                        for a in ev.get("attendees", [])
+                    ],
+                }
+                for ev in raw_events
+            ]
+    except Exception as e:
+        logger.error("Calendar test fetch failed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "connection_id": connection_id,
+            "integration_type": integration_type,
+            "events": [],
+            "synced": 0,
+        }
+
+    # 3. Sync events to local calendar_events table
+    synced = 0
+    source = "google" if "google" in integration_type else "outlook"
+    for ev in events:
+        if not ev.get("external_id"):
+            continue
+        try:
+            db.table("calendar_events").upsert(
+                {
+                    "user_id": user_id,
+                    "title": ev["title"],
+                    "start_time": ev["start_time"],
+                    "end_time": ev.get("end_time"),
+                    "attendees": json.dumps(ev.get("attendees", [])),
+                    "source": source,
+                    "external_id": ev["external_id"],
+                    "metadata": json.dumps(ev),
+                },
+                on_conflict="user_id,external_id",
+            ).execute()
+            synced += 1
+        except Exception as e:
+            logger.warning(
+                "Failed to sync calendar event %s: %s", ev.get("external_id"), e
+            )
+
+    return {
+        "success": True,
+        "connection_id": connection_id,
+        "integration_type": integration_type,
+        "events": events,
+        "event_count": len(events),
+        "synced": synced,
+    }
 
 
 # ---------------------------------------------------------------------------

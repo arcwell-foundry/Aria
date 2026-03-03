@@ -565,7 +565,16 @@ class CalendarIntelligenceCapability(BaseCapability):
                 client.table("user_integrations")
                 .select("*")
                 .eq("user_id", user_id)
-                .eq("integration_type", "google_calendar")
+                .in_(
+                    "integration_type",
+                    [
+                        "google_calendar",
+                        "googlecalendar",
+                        "outlook",
+                        "outlook365calendar",
+                        "microsoft_calendar",
+                    ],
+                )
                 .eq("status", "active")
                 .limit(1)
                 .execute()
