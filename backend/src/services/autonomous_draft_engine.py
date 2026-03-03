@@ -1141,9 +1141,12 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         """Check if a non-rejected draft already exists for this thread or emails.
 
         Checks across ALL processing runs (not just the current one) by matching
-        on thread_id OR original_email_id.  Uses limit(1) instead of
-        limit(1) so that pre-existing duplicates don't throw and
-        snowball into more duplicates.
+        on thread_id OR original_email_id. Uses limit(1) so that pre-existing
+        duplicates don't throw and snowball into more duplicates.
+
+        A draft is considered "existing" if:
+        - status is 'draft' or 'saved_to_client' (not edited, sent, or rejected)
+        - user_action is NOT 'edited', 'sent', or 'rejected'
 
         Args:
             user_id: The user's ID.
@@ -1162,18 +1165,26 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 or_parts.append(f"original_email_id.in.({escaped})")
             or_filter = ",".join(or_parts)
 
+            # Check for drafts that haven't been rejected/edited/sent
+            # user_action can be: null, 'pending', 'edited', 'sent', 'rejected'
+            # We only want to skip if user hasn't taken action (null or pending)
             result = (
                 self._db.table("email_drafts")
                 .select("id")
                 .eq("user_id", user_id)
                 .in_("status", ["draft", "saved_to_client"])
-                .is_("user_action", "null")
                 .or_(or_filter)
                 .limit(1)
                 .execute()
             )
             if result.data:
-                return result.data[0]["id"]
+                existing_id = result.data[0]["id"]
+                logger.info(
+                    "DEDUP_HIT: Found existing draft %s for thread %s",
+                    existing_id,
+                    thread_id,
+                )
+                return existing_id
             return None
         except Exception as e:
             logger.warning(
