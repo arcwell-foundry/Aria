@@ -267,13 +267,13 @@ class WritingAnalysisService:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             current_prefs: dict[str, Any] = {}
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 current_prefs = row.get("preferences", {}) or {}
 
             # Merge digital_twin data
@@ -367,11 +367,11 @@ class WritingAnalysisService:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 prefs: dict[str, Any] = row.get("preferences", {}) or {}
                 dt = prefs.get("digital_twin", {})
                 ws = dt.get("writing_style")
@@ -578,12 +578,12 @@ class WritingAnalysisService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("recipient_email", recipient_email.lower().strip())
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             if result and result.data:
-                data = cast(dict[str, Any], result.data)
+                data = cast(dict[str, Any], result.data[0])
                 profile = RecipientWritingProfile(
                     recipient_email=data.get("recipient_email", recipient_email),
                     recipient_name=data.get("recipient_name"),

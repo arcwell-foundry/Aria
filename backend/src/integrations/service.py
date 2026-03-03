@@ -65,13 +65,14 @@ class IntegrationService:
                 .eq("user_id", user_id)
                 .eq("integration_type", integration_type.value)
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result is None or result.data is None:
+            record = result.data[0] if result and result.data else None
+            if record is None:
                 return None
-            return cast(dict[str, Any], result.data)
+            return cast(dict[str, Any], record)
 
         except Exception:
             logger.exception("Failed to fetch integration")
@@ -95,13 +96,14 @@ class IntegrationService:
                 client.table("user_integrations")
                 .select("*")
                 .eq("id", integration_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result is None or result.data is None:
+            record = result.data[0] if result and result.data else None
+            if record is None:
                 return None
-            return cast(dict[str, Any], result.data)
+            return cast(dict[str, Any], record)
 
         except Exception:
             logger.exception("Failed to fetch integration by id")

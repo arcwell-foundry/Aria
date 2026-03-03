@@ -60,11 +60,12 @@ def get_user_timezone(user_id: str) -> str:
             db.table("user_preferences")
             .select("timezone")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result and result.data:
-            tz = result.data.get("timezone")
+        record = result.data[0] if result and result.data else None
+        if record:
+            tz = record.get("timezone")
             if tz:
                 return str(tz)
     except Exception:

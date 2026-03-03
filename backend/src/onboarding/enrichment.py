@@ -269,11 +269,12 @@ class CompanyEnrichmentEngine:
                     db.table("onboarding_state")
                     .select("step_data")
                     .eq("user_id", user_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if state_result.data:
-                    step_data = state_result.data.get("step_data", {})
+                state_record = state_result.data[0] if state_result and state_result.data else None
+                if state_record:
+                    step_data = state_record.get("step_data", {})
                     step_data["enrichment_delta"] = delta_data
                     db.table("onboarding_state").update({"step_data": step_data}).eq(
                         "user_id", user_id
@@ -1177,12 +1178,13 @@ Respond ONLY with the JSON array, no additional text."""
                 self._db.table("companies")
                 .select("settings")
                 .eq("id", company_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             existing_confidence = 0.0
-            if existing.data:
-                existing_settings = existing.data.get("settings") or {}
+            existing_record = existing.data[0] if existing and existing.data else None
+            if existing_record:
+                existing_settings = existing_record.get("settings") or {}
                 existing_classification = existing_settings.get("classification") or {}
                 existing_confidence = existing_classification.get("confidence", 0.0)
 
@@ -1306,11 +1308,12 @@ Respond ONLY with the JSON array, no additional text."""
                     self._db.table("companies")
                     .select("name")
                     .eq("id", company_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if company_row.data and company_row.data.get("name"):
-                    company_name = company_row.data["name"]
+                company_record = company_row.data[0] if company_row and company_row.data else None
+                if company_record and company_record.get("name"):
+                    company_name = company_record["name"]
             except Exception:
                 pass
 
@@ -1357,11 +1360,12 @@ Respond ONLY with the JSON array, no additional text."""
                         self._db.table("companies")
                         .select("name")
                         .eq("id", company_id)
-                        .maybe_single()
+                        .limit(1)
                         .execute()
                     )
-                    if co_row.data and co_row.data.get("name"):
-                        co_name = co_row.data["name"]
+                    co_record = co_row.data[0] if co_row and co_row.data else None
+                    if co_record and co_record.get("name"):
+                        co_name = co_record["name"]
                 except Exception:
                     pass
 

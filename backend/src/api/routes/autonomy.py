@@ -183,12 +183,13 @@ async def set_autonomy_level(
             db.table("user_settings")
             .select("preferences")
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        record = result.data[0] if result and result.data else None
 
-        if result and result.data:
-            preferences = result.data.get("preferences", {})
+        if record:
+            preferences = record.get("preferences", {})
             preferences["autonomy_level"] = requested_level
             db.table("user_settings").update(
                 {"preferences": preferences}

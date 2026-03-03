@@ -385,18 +385,19 @@ class ActionQueueService:
             .select("*")
             .eq("id", action_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if result is None or result.data is None:
+        action_record = result.data[0] if result and result.data else None
+        if action_record is None:
             logger.warning(
                 "Action not found",
                 extra={"action_id": action_id, "user_id": user_id},
             )
             return None
 
-        return cast(dict[str, Any], result.data)
+        return cast(dict[str, Any], action_record)
 
     async def execute_action(
         self,

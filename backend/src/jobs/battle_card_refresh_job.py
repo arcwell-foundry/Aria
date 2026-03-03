@@ -52,12 +52,13 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
                 db.table("user_profiles")
                 .select("company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            profile = profile_result.data[0] if profile_result and profile_result.data else None
             company_id: str | None = None
-            if profile_result and profile_result.data:
-                company_id = profile_result.data.get("company_id")
+            if profile:
+                company_id = profile.get("company_id")
             if not company_id:
                 continue
 
@@ -66,13 +67,14 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
                 db.table("user_preferences")
                 .select("tracked_competitors")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            prefs = prefs_result.data[0] if prefs_result and prefs_result.data else None
 
             competitors: list[str] = []
-            if prefs_result and prefs_result.data:
-                tracked = prefs_result.data.get("tracked_competitors") or []
+            if prefs:
+                tracked = prefs.get("tracked_competitors") or []
                 if isinstance(tracked, list):
                     competitors = [c for c in tracked if isinstance(c, str)]
 

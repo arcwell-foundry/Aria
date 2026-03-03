@@ -66,12 +66,13 @@ async def _get_admin_company_id(admin_user: Any) -> str:
         db.table("user_profiles")
         .select("company_id")
         .eq("id", str(admin_user.id))
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not result.data or not result.data.get("company_id"):
+    record = result.data[0] if result and result.data else None
+    if not record or not record.get("company_id"):
         raise HTTPException(status_code=400, detail="Admin has no company association")
-    return result.data["company_id"]
+    return record["company_id"]
 
 
 # ------------------------------------------------------------------
@@ -251,13 +252,12 @@ async def review_access_request(
         .select("*")
         .eq("id", request_id)
         .eq("tenant_id", company_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not req_result.data:
+    request_data = req_result.data[0] if req_result and req_result.data else None
+    if not request_data:
         raise HTTPException(status_code=404, detail="Request not found")
-
-    request_data = req_result.data
     user_id = request_data["user_id"]
     toolkit_slug = request_data["toolkit_slug"]
 

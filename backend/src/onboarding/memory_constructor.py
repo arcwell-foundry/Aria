@@ -276,13 +276,14 @@ class MemoryConstructionOrchestrator:
             self._db.table("onboarding_state")
             .select("readiness_scores")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not state.data:
+        state_record = state.data[0] if state and state.data else None
+        if not state_record:
             return {}
 
-        scores: dict[str, Any] = state.data.get("readiness_scores", {})
+        scores: dict[str, Any] = state_record.get("readiness_scores", {})
 
         # Calculate overall weighted score
         overall = sum(

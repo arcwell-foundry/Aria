@@ -172,7 +172,7 @@ class StakeholderStepService:
                 client.table("onboarding_state")
                 .select("*")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
@@ -181,8 +181,9 @@ class StakeholderStepService:
                     f"No onboarding state found for user {user_id}, skipping step_data update"
                 )
             else:
+                state_record = state_response.data[0]
                 # Update step_data with stakeholders
-                current_step_data: dict[str, Any] = state_response.data.get("step_data", {}) or {}
+                current_step_data: dict[str, Any] = state_record.get("step_data", {}) or {}
                 current_step_data["stakeholders"] = [
                     model.to_dict() for model in stakeholder_models
                 ]
@@ -193,7 +194,7 @@ class StakeholderStepService:
 
                 # Update readiness scores
                 current_readiness: dict[str, Any] = (
-                    state_response.data.get("readiness_scores", {}) or {}
+                    state_record.get("readiness_scores", {}) or {}
                 )
                 current_graph_score = current_readiness.get("relationship_graph", 0)
                 if isinstance(current_graph_score, (int, float)):
@@ -275,14 +276,15 @@ class StakeholderStepService:
                 client.table("onboarding_state")
                 .select("step_data")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             if not response.data:
                 return []
 
-            step_data: dict[str, Any] = response.data.get("step_data", {}) or {}
+            state_record = response.data[0]
+            step_data: dict[str, Any] = state_record.get("step_data", {}) or {}
             stakeholders_data_list = step_data.get("stakeholders", [])
 
             stakeholders = []

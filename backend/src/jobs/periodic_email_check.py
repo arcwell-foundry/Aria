@@ -230,18 +230,18 @@ def _calculate_hours_since_last_run(db: Any, user_id: str) -> float:
             .eq("status", "completed")
             .order("completed_at", desc=True)
             .limit(1)
-            .maybe_single()
             .execute()
         )
+        record = result.data[0] if result and result.data else None
 
-        if not result.data or not result.data.get("completed_at"):
+        if not record or not record.get("completed_at"):
             logger.debug(
                 "PERIODIC_EMAIL_CHECK: No previous run for user %s, using default 24h",
                 user_id,
             )
             return 24.0
 
-        completed_at_str = result.data["completed_at"]
+        completed_at_str = record["completed_at"]
         completed_at = datetime.fromisoformat(
             completed_at_str.replace("Z", "+00:00")
         )

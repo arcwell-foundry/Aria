@@ -123,12 +123,13 @@ class AccountPlanningService:
             .select("*")
             .eq("id", lead_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if lead_result is None or lead_result.data is None:
+        lead_record = lead_result.data[0] if lead_result and lead_result.data else None
+        if lead_record is None:
             return None
-        lead = cast(dict[str, Any], lead_result.data)
+        lead = cast(dict[str, Any], lead_record)
 
         # Check for existing plan
         plan_result = (
@@ -136,11 +137,12 @@ class AccountPlanningService:
             .select("*")
             .eq("user_id", user_id)
             .eq("lead_memory_id", lead_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if plan_result is not None and plan_result.data is not None:
-            return cast(dict[str, Any], plan_result.data)
+        plan_record = plan_result.data[0] if plan_result and plan_result.data else None
+        if plan_record is not None:
+            return cast(dict[str, Any], plan_record)
 
         # Generate new plan with LLM
         return await self._generate_plan(user_id, lead_id, lead)

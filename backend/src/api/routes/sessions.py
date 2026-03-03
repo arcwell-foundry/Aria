@@ -68,14 +68,14 @@ def _detect_pk_col(db: Any) -> str:
 
 
 def _select_by_pk(db: Any, session_id: str, user_id: str) -> Any:
-    """Select a session by PK + user_id guard. Returns execute() result."""
+    """Select a session by PK + user_id guard. Returns execute() result (list)."""
     pk = _detect_pk_col(db)
     return (
         db.table("user_sessions")
         .select("*")
         .eq(pk, session_id)
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
@@ -229,12 +229,13 @@ async def create_session(
         .eq("user_id", current_user.id)
         .eq("day_date", today)
         .eq("is_active", True)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
-    if existing and existing.data:
-        return _row_to_response(existing.data)
+    existing_record = existing.data[0] if existing and existing.data else None
+    if existing_record:
+        return _row_to_response(existing_record)
 
     # Archive previous active sessions
     (
@@ -295,12 +296,13 @@ async def get_active_session(
             .eq("user_id", current_user.id)
             .eq("day_date", today)
             .eq("is_active", True)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if result and result.data:
-            return _row_to_response(result.data)
+        record = result.data[0] if result and result.data else None
+        if record:
+            return _row_to_response(record)
 
         logger.info(
             "No active session found for user",

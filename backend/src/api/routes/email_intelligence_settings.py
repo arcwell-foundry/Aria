@@ -80,15 +80,16 @@ class EmailIntelligenceSettingsService:
                 self._db.table("user_settings")
                 .select("preferences, integrations")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             prefs: dict[str, Any] = {}
             integrations: dict[str, Any] = {}
 
-            if result and result.data:
-                settings = cast(dict[str, Any], result.data)
+            settings_record = result.data[0] if result and result.data else None
+            if settings_record:
+                settings = cast(dict[str, Any], settings_record)
                 prefs = settings.get("preferences", {}) or {}
                 integrations = settings.get("integrations", {}) or {}
 
@@ -207,12 +208,13 @@ class EmailIntelligenceSettingsService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                settings = cast(dict[str, Any], result.data)
+            settings_record = result.data[0] if result and result.data else None
+            if settings_record:
+                settings = cast(dict[str, Any], settings_record)
                 prefs = settings.get("preferences", {}) or {}
                 prefs.update(update_data)
 

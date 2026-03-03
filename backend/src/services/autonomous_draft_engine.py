@@ -961,12 +961,13 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 self._db.table("user_profiles")
                 .select("full_name")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                return result.data.get("full_name", "there")
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record.get("full_name", "there")
         except Exception as e:
             logger.warning("DRAFT_ENGINE: Failed to get user name: %s", e)
 
@@ -1084,7 +1085,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
 
         Checks across ALL processing runs (not just the current one) by matching
         on thread_id OR original_email_id.  Uses limit(1) instead of
-        maybe_single() so that pre-existing duplicates don't throw and
+        limit(1) so that pre-existing duplicates don't throw and
         snowball into more duplicates.
 
         Args:

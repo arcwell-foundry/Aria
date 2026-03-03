@@ -140,12 +140,13 @@ class ActivityService:
             .select("*")
             .eq("id", activity_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result is None or result.data is None:
+        record = result.data[0] if result and result.data else None
+        if record is None:
             return None
-        return cast(dict[str, Any], result.data)
+        return cast(dict[str, Any], record)
 
     async def get_agent_status(self, user_id: str) -> dict[str, Any]:
         """Get current status of each agent.

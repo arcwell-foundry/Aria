@@ -89,13 +89,14 @@ class GoalLearningService:
                 self._db.table("goal_playbooks")
                 .select("*")
                 .eq("id", playbook_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not result or not result.data:
+            pb_record = result.data[0] if result and result.data else None
+            if not pb_record:
                 return
 
-            pb = result.data
+            pb = pb_record
             source_ids = pb.get("source_goal_ids", []) or []
             if goal_id not in source_ids:
                 source_ids.append(goal_id)
@@ -377,13 +378,14 @@ class GoalLearningService:
                 self._db.table("goal_playbooks")
                 .select("negative_patterns, times_failed")
                 .eq("id", playbook_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not result or not result.data:
+            playbook_record = result.data[0] if result and result.data else None
+            if not playbook_record:
                 return
 
-            patterns = result.data.get("negative_patterns", []) or []
+            patterns = playbook_record.get("negative_patterns", []) or []
             patterns.append({
                 "goal_id": goal_id,
                 "root_cause": failure_data.get("root_cause", ""),
@@ -392,7 +394,7 @@ class GoalLearningService:
                 "recorded_at": datetime.now(UTC).isoformat(),
             })
 
-            times_failed = result.data.get("times_failed", 0) + 1
+            times_failed = playbook_record.get("times_failed", 0) + 1
 
             update: dict[str, Any] = {
                 "negative_patterns": patterns,
@@ -401,7 +403,7 @@ class GoalLearningService:
             }
 
             # Deactivate playbook if failure ratio is too high
-            times_succeeded = result.data.get("times_succeeded", 0)
+            times_succeeded = playbook_record.get("times_succeeded", 0)
             total = times_succeeded + times_failed
             if total >= 3 and times_failed / total > 0.5:
                 update["is_active"] = False
@@ -607,11 +609,11 @@ class GoalLearningService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            if plan_result and plan_result.data:
-                playbook_id = plan_result.data.get("playbook_id")
+            plan_record = plan_result.data[0] if plan_result and plan_result.data else None
+            if plan_record:
+                playbook_id = plan_record.get("playbook_id")
         except Exception:
             pass
 
@@ -625,11 +627,12 @@ class GoalLearningService:
                 .select("goal_type")
                 .eq("id", goal_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if goal_result and goal_result.data:
-                feedback_context["goal_type"] = goal_result.data.get("goal_type")
+            goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+            if goal_record:
+                feedback_context["goal_type"] = goal_record.get("goal_type")
         except Exception:
             pass
 
@@ -678,14 +681,15 @@ class GoalLearningService:
                 self._db.table("goal_playbooks")
                 .select("positive_feedback_count, negative_feedback_count")
                 .eq("id", playbook_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not result or not result.data:
+            feedback_record = result.data[0] if result and result.data else None
+            if not feedback_record:
                 return
 
-            pos = result.data.get("positive_feedback_count", 0)
-            neg = result.data.get("negative_feedback_count", 0)
+            pos = feedback_record.get("positive_feedback_count", 0)
+            neg = feedback_record.get("negative_feedback_count", 0)
 
             update: dict[str, Any] = {"updated_at": datetime.now(UTC).isoformat()}
             if rating == "up":
@@ -718,10 +722,11 @@ class GoalLearningService:
                 .select("*")
                 .eq("id", goal_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            return result.data if result and result.data else None
+            record = result.data[0] if result and result.data else None
+            return record if record else None
         except Exception as e:
             logger.debug("Failed to fetch goal %s: %s", goal_id, e)
             return None
@@ -735,13 +740,13 @@ class GoalLearningService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            if not result or not result.data:
+            plan_record = result.data[0] if result and result.data else None
+            if not plan_record:
                 return None
 
-            data = result.data
+            data = plan_record
             plan_raw = data.get("plan") or data.get("tasks", "{}")
             plan = json.loads(plan_raw) if isinstance(plan_raw, str) else plan_raw
 

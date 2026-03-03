@@ -1019,10 +1019,10 @@ class ChatService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            raw_tasks = (plan_row.data or {}).get("tasks", "[]")
+            plan_record = plan_row.data[0] if plan_row and plan_row.data else None
+            raw_tasks = (plan_record or {}).get("tasks", "[]")
             plan_tasks: list[dict[str, Any]] = (
                 json.loads(raw_tasks) if isinstance(raw_tasks, str) else raw_tasks
             )
@@ -1348,20 +1348,21 @@ class ChatService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            plan_message_id = (plan_row.data or {}).get("plan_message_id")
+            plan_record = plan_row.data[0] if plan_row and plan_row.data else None
+            plan_message_id = (plan_record or {}).get("plan_message_id")
             if plan_message_id:
                 msg_result = (
                     db.table("messages")
                     .select("metadata")
                     .eq("id", str(plan_message_id))
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if msg_result.data:
-                    meta = msg_result.data.get("metadata", {})
+                msg_record = msg_result.data[0] if msg_result and msg_result.data else None
+                if msg_record:
+                    meta = msg_record.get("metadata", {})
                     if isinstance(meta, str):
                         meta = json.loads(meta)
                     if "data" in meta and isinstance(meta["data"], dict):
@@ -1490,10 +1491,10 @@ class ChatService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            raw_tasks = (plan_row.data or {}).get("tasks", "[]")
+            plan_record = plan_row.data[0] if plan_row and plan_row.data else None
+            raw_tasks = (plan_record or {}).get("tasks", "[]")
             tasks: list[dict[str, Any]] = (
                 json.loads(raw_tasks) if isinstance(raw_tasks, str) else raw_tasks
             )
@@ -3491,11 +3492,12 @@ class ChatService:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                prefs = result.data.get("preferences", {}) or {}
+            settings_record = result.data[0] if result and result.data else None
+            if settings_record:
+                prefs = settings_record.get("preferences", {}) or {}
                 dt = prefs.get("digital_twin", {})
                 cal = dt.get("personality_calibration")
                 if cal:
@@ -3783,11 +3785,12 @@ class ChatService:
                         db.table("user_profiles")
                         .select("company_id")
                         .eq("id", user_id)
-                        .maybe_single()
+                        .limit(1)
                         .execute()
                     )
-                    if _profile and _profile.data:
-                        _company_id = _profile.data.get("company_id")
+                    _profile_record = _profile.data[0] if _profile and _profile.data else None
+                    if _profile_record:
+                        _company_id = _profile_record.get("company_id")
                 except Exception as e:
                     logger.warning("Team intelligence company_id lookup failed (fail-open): %s", e)
 

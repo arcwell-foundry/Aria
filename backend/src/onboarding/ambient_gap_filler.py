@@ -300,32 +300,33 @@ class AmbientGapFiller:
             Prompt dict or None if no pending prompts.
         """
         try:
-            maybe_single = (
+            query = (
                 self._db.table("ambient_prompts")
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("status", "pending")
                 .order("created_at", desc=False)
                 .limit(1)
-                .maybe_single()
             )
-            response = maybe_single.execute() if maybe_single else None
-            if response and response.data and isinstance(response.data, dict):
-                # Mark as delivered
-                prompt_id = response.data.get("id")
-                if prompt_id:
-                    (
-                        self._db.table("ambient_prompts")
-                        .update(
-                            {
-                                "status": "delivered",
-                                "delivered_at": datetime.now(UTC).isoformat(),
-                            }
+            response = query.execute()
+            if response and response.data and len(response.data) > 0:
+                prompt_data = response.data[0]
+                if isinstance(prompt_data, dict):
+                    # Mark as delivered
+                    prompt_id = prompt_data.get("id")
+                    if prompt_id:
+                        (
+                            self._db.table("ambient_prompts")
+                            .update(
+                                {
+                                    "status": "delivered",
+                                    "delivered_at": datetime.now(UTC).isoformat(),
+                                }
+                            )
+                            .eq("id", prompt_id)
+                            .execute()
                         )
-                        .eq("id", prompt_id)
-                        .execute()
-                    )
-                return dict(response.data)
+                    return dict(prompt_data)
             return None
         except Exception:
             logger.exception(
@@ -358,26 +359,28 @@ class AmbientGapFiller:
             # For engaged outcomes, record to procedural memory
             if outcome == "engaged":
                 # Fetch prompt details for context
-                maybe_prompt = (
-                    self._db.table("ambient_prompts").select("*").eq("id", prompt_id).maybe_single()
+                prompt_query = (
+                    self._db.table("ambient_prompts").select("*").eq("id", prompt_id).limit(1)
                 )
-                prompt_response = maybe_prompt.execute() if maybe_prompt else None
+                prompt_response = prompt_query.execute()
                 if (
                     prompt_response
                     and prompt_response.data
-                    and isinstance(prompt_response.data, dict)
+                    and len(prompt_response.data) > 0
                 ):
-                    domain = prompt_response.data.get("domain", "unknown")
-                    self._db.table("procedural_insights").insert(
-                        {
-                            "insight": (
-                                f"Ambient gap-fill prompt for {domain} was effective — user engaged"
-                            ),
-                            "insight_type": "ambient_gap_fill",
-                            "evidence_count": 1,
-                            "confidence": 0.6,
-                        }
-                    ).execute()
+                    prompt_data = prompt_response.data[0]
+                    if isinstance(prompt_data, dict):
+                        domain = prompt_data.get("domain", "unknown")
+                        self._db.table("procedural_insights").insert(
+                            {
+                                "insight": (
+                                    f"Ambient gap-fill prompt for {domain} was effective — user engaged"
+                                ),
+                                "insight_type": "ambient_gap_fill",
+                                "evidence_count": 1,
+                                "confidence": 0.6,
+                            }
+                        ).execute()
 
             logger.info(
                 "Ambient prompt outcome recorded",

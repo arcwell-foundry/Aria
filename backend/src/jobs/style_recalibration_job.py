@@ -431,12 +431,13 @@ async def _get_current_fingerprint(user_id: str) -> dict[str, Any] | None:
             db.table("user_settings")
             .select("preferences")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        record = result.data[0] if result and result.data else None
 
-        if result and result.data:
-            prefs = result.data.get("preferences", {}) or {}
+        if record:
+            prefs = record.get("preferences", {}) or {}
             digital_twin = prefs.get("digital_twin", {})
             return digital_twin.get("writing_style")
 

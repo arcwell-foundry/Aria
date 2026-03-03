@@ -639,11 +639,12 @@ class DraftService:
                 .eq("user_id", user_id)
                 .eq("integration_type", "gmail")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return cast(dict[str, Any], result.data)
+            record = result.data[0] if result and result.data else None
+            if record:
+                return cast(dict[str, Any], record)
 
             # Try Outlook
             result = (
@@ -652,11 +653,12 @@ class DraftService:
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return cast(dict[str, Any], result.data)
+            record = result.data[0] if result and result.data else None
+            if record:
+                return cast(dict[str, Any], record)
 
             logger.warning("No active email integration for user %s", user_id)
             return None
@@ -938,12 +940,12 @@ class DraftService:
                     .eq("email_id", original_email_id)
                     .order("created_at", desc=True)
                     .limit(1)
-                    .maybe_single()
                     .execute()
                 )
-                if result.data:
+                record = result.data[0] if result and result.data else None
+                if record:
                     return self._build_reply_context_from_draft_context(
-                        cast(dict[str, Any], result.data)
+                        cast(dict[str, Any], record)
                     )
 
             # Fall back to thread_id
@@ -954,12 +956,12 @@ class DraftService:
                     .eq("thread_id", thread_id)
                     .order("created_at", desc=True)
                     .limit(1)
-                    .maybe_single()
                     .execute()
                 )
-                if result.data:
+                record = result.data[0] if result and result.data else None
+                if record:
                     return self._build_reply_context_from_draft_context(
-                        cast(dict[str, Any], result.data)
+                        cast(dict[str, Any], record)
                     )
 
         except Exception:

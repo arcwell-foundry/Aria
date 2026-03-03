@@ -360,14 +360,15 @@ async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> Non
             db.table("user_preferences")
             .select("video_briefing_enabled")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        prefs = prefs_result.data[0] if prefs_result and prefs_result.data else None
 
-        if not prefs_result or not prefs_result.data:
+        if not prefs:
             return
 
-        if not prefs_result.data.get("video_briefing_enabled", False):
+        if not prefs.get("video_briefing_enabled", False):
             return
 
         from src.services.briefing import BriefingService

@@ -65,13 +65,14 @@ class ConnectionRegistryService:
                 .eq("user_id", user_id)
                 .eq("toolkit_slug", toolkit_slug)
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result is None or result.data is None:
+            row = result.data[0] if result and result.data else None
+            if row is None:
                 return None
 
-            row = cast(dict[str, Any], result.data)
+            row = cast(dict[str, Any], row)
             self._cache[cache_key] = row
             return row
 

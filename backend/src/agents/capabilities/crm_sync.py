@@ -305,15 +305,14 @@ class CRMDeepSyncCapability(BaseCapability):
                     .select("*")
                     .eq("user_id", user_id)
                     .eq("crm_id", crm_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
 
-                if not lead_resp.data:
+                lead = lead_resp.data[0] if lead_resp and lead_resp.data else None
+                if not lead:
                     # No local lead — skip (will be created via DeepSyncService)
                     continue
-
-                lead = lead_resp.data
                 lead_id = str(lead["id"])
                 updates: dict[str, Any] = {}
 
@@ -712,12 +711,13 @@ class CRMDeepSyncCapability(BaseCapability):
                 .select("target_value, actual_value")
                 .eq("user_id", user_id)
                 .eq("period", current_period)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if quota_resp.data:
-                quota_target = float(quota_resp.data.get("target_value", 0))
-                actual_value = float(quota_resp.data.get("actual_value", 0))
+            quota_record = quota_resp.data[0] if quota_resp and quota_resp.data else None
+            if quota_record:
+                quota_target = float(quota_record.get("target_value", 0))
+                actual_value = float(quota_record.get("actual_value", 0))
                 if quota_target > 0:
                     quota_attainment_pct = round((actual_value / quota_target) * 100, 1)
         except Exception as exc:
@@ -755,11 +755,12 @@ class CRMDeepSyncCapability(BaseCapability):
                 .eq("user_id", user_id)
                 .eq("integration_type", provider)
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp.data and resp.data.get("composio_connection_id"):
-                return provider, str(resp.data["composio_connection_id"])
+            record = resp.data[0] if resp and resp.data else None
+            if record and record.get("composio_connection_id"):
+                return provider, str(record["composio_connection_id"])
 
         raise CRMConnectionError(
             provider="crm",
@@ -839,9 +840,10 @@ class CRMDeepSyncCapability(BaseCapability):
                 .select("id")
                 .eq("user_id", user_id)
                 .eq("integration_type", integration_type.value)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            existing_record = existing.data[0] if existing and existing.data else None
 
             data: dict[str, Any] = {
                 "user_id": user_id,
@@ -853,7 +855,7 @@ class CRMDeepSyncCapability(BaseCapability):
                 "updated_at": now.isoformat(),
             }
 
-            if existing.data:
+            if existing_record:
                 client.table("integration_sync_state").update(data).eq("user_id", user_id).eq(
                     "integration_type", integration_type.value
                 ).execute()

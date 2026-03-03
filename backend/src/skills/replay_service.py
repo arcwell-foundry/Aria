@@ -207,10 +207,11 @@ class ReplayService:
                 .select("*")
                 .eq("id", execution_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            return response.data  # type: ignore[return-value]
+            record = response.data[0] if response and response.data else None
+            return record  # type: ignore[return-value]
         except Exception:
             logger.exception(
                 "Failed to fetch audit entry",
@@ -242,11 +243,12 @@ class ReplayService:
                     .select("*")
                     .eq("user_id", user_id)
                     .eq("id", task_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if response.data:
-                    return response.data  # type: ignore[return-value]
+                record = response.data[0] if response and response.data else None
+                if record:
+                    return record  # type: ignore[return-value]
 
             # Fallback: closest plan by timestamp
             audit_ts = audit_entry.get("timestamp") or audit_entry.get("created_at")
@@ -258,11 +260,11 @@ class ReplayService:
                     .lte("created_at", audit_ts)
                     .order("created_at", desc=True)
                     .limit(1)
-                    .maybe_single()
                     .execute()
                 )
-                if response.data:
-                    return response.data  # type: ignore[return-value]
+                record = response.data[0] if response and response.data else None
+                if record:
+                    return record  # type: ignore[return-value]
 
             return None
         except Exception:

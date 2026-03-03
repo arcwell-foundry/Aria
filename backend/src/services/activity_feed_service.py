@@ -288,11 +288,12 @@ class ActivityFeedService:
                 self._db.table(table_name)
                 .select(f"id, {name_column}")
                 .eq("id", entity_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                return {"entity_name": result.data[name_column]}
+            record = result.data[0] if result and result.data else None
+            if record:
+                return {"entity_name": record[name_column]}
         except Exception:
             logger.warning(
                 "Failed to look up entity",

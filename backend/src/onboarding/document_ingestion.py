@@ -283,10 +283,11 @@ class DocumentIngestionService:
                     self._db.table("company_documents")
                     .select("filename")
                     .eq("id", doc_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                filename = (doc_result.data or {}).get("filename", "document")
+                doc_record = doc_result.data[0] if doc_result and doc_result.data else None
+                filename = (doc_record or {}).get("filename", "document")
 
                 await ActivityService().record(
                     user_id=user_id,
@@ -865,11 +866,12 @@ class DocumentIngestionService:
                 self._db.table("onboarding_state")
                 .select("readiness_scores")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if current.data:
-                scores = current.data.get("readiness_scores", {})
+            current_record = current.data[0] if current and current.data else None
+            if current_record:
+                scores = current_record.get("readiness_scores", {})
                 new_score = min(100.0, scores.get("corporate_memory", 0) + boost)
                 await orch.update_readiness_scores(user_id, {"corporate_memory": new_score})
         except Exception as e:

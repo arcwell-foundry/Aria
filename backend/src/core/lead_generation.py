@@ -76,13 +76,14 @@ class LeadGenerationService:
             client.table("lead_icp_profiles")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        existing_record = existing.data[0] if existing and existing.data else None
 
-        if existing.data:
+        if existing_record:
             # Update existing ICP: increment version
-            new_version = existing.data["version"] + 1
+            new_version = existing_record["version"] + 1
             updated = (
                 client.table("lead_icp_profiles")
                 .update(
@@ -92,7 +93,7 @@ class LeadGenerationService:
                         "updated_at": now,
                     }
                 )
-                .eq("id", existing.data["id"])
+                .eq("id", existing_record["id"])
                 .execute()
             )
             row = updated.data[0]
@@ -148,14 +149,13 @@ class LeadGenerationService:
             client.table("lead_icp_profiles")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        row = result.data[0] if result and result.data else None
 
-        if not result.data:
+        if not row:
             return None
-
-        row = result.data
         return ICPResponse(
             id=row["id"],
             user_id=row["user_id"],
@@ -199,14 +199,15 @@ class LeadGenerationService:
             .select("*")
             .eq("id", icp_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        icp_record = icp_row.data[0] if icp_row and icp_row.data else None
 
-        if not icp_row.data:
+        if not icp_record:
             raise ValueError(f"ICP profile not found: {icp_id}")
 
-        icp_def = ICPDefinition(**icp_row.data["icp_data"])
+        icp_def = ICPDefinition(**icp_record["icp_data"])
 
         # Build Hunter agent task from ICP fields
         size_str = ""
@@ -522,11 +523,12 @@ class LeadGenerationService:
             .select("*")
             .eq("id", lead_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        existing_record = existing.data[0] if existing and existing.data else None
 
-        if not existing.data:
+        if not existing_record:
             return None
 
         update_data: dict[str, Any] = {
@@ -540,7 +542,7 @@ class LeadGenerationService:
             lead_memory_service = LeadMemoryService()
             lead_memory = await lead_memory_service.create(
                 user_id=user_id,
-                company_name=existing.data["company_name"],
+                company_name=existing_record["company_name"],
                 trigger=TriggerType.MANUAL,
             )
             update_data["lead_memory_id"] = lead_memory.id
@@ -596,14 +598,15 @@ class LeadGenerationService:
             .select("score_breakdown")
             .eq("id", lead_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        record = result.data[0] if result and result.data else None
 
-        if not result.data or not result.data.get("score_breakdown"):
+        if not record or not record.get("score_breakdown"):
             return None
 
-        breakdown_data = result.data["score_breakdown"]
+        breakdown_data = record["score_breakdown"]
         # Handle both string and dict representations
         if isinstance(breakdown_data, str):
             breakdown_data = json.loads(breakdown_data)
@@ -718,21 +721,23 @@ class LeadGenerationService:
             .select("id")
             .eq("id", lead_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        discovered_record = discovered.data[0] if discovered and discovered.data else None
 
-        if not discovered.data:
+        if not discovered_record:
             # Check lead_memories
             lead_memory = (
                 client.table("lead_memories")
                 .select("id")
                 .eq("id", lead_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not lead_memory.data:
+            lead_memory_record = lead_memory.data[0] if lead_memory and lead_memory.data else None
+            if not lead_memory_record:
                 return None
 
         now = datetime.now(UTC)

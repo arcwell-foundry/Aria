@@ -86,11 +86,12 @@ class OnboardingCompletionOrchestrator:
                 self._db.table("user_profiles")
                 .select("role")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile_result.data:
-                user_role = (profile_result.data.get("role") or "").lower()
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if profile_record:
+                user_role = (profile_record.get("role") or "").lower()
         except Exception:
             pass
 
@@ -164,11 +165,12 @@ class OnboardingCompletionOrchestrator:
                     self._db.table("user_profiles")
                     .select("companies(settings)")
                     .eq("id", user_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if profile_result2 and profile_result2.data:
-                    company = profile_result2.data.get("companies")
+                profile_record2 = profile_result2.data[0] if profile_result2 and profile_result2.data else None
+                if profile_record2:
+                    company = profile_record2.get("companies")
                     if company:
                         company_settings = company.get("settings") or {}
                         classification = company_settings.get("classification")
@@ -887,20 +889,21 @@ class OnboardingCompletionOrchestrator:
             self._db.table("onboarding_state")
             .select("readiness_scores")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        readiness = (state_result.data or {}).get("readiness_scores", {})
+        state_record = state_result.data[0] if state_result and state_result.data else None
+        readiness = (state_record or {}).get("readiness_scores", {})
 
         # 5. User profile
         profile_result = (
             self._db.table("user_profiles")
             .select("full_name, title")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        profile = profile_result.data or {}
+        profile = (profile_result.data or [{}])[0]
 
         # Build briefing summary via LLM
         facts_text = "\n".join(
@@ -945,11 +948,12 @@ class OnboardingCompletionOrchestrator:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            settings_record = settings_result.data[0] if settings_result and settings_result.data else None
             tone_guidance = (
-                (settings_result.data or {})
+                (settings_record or {})
                 .get("preferences", {})
                 .get("digital_twin", {})
                 .get("personality_calibration", {})

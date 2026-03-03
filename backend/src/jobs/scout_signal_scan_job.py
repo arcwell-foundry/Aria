@@ -205,11 +205,12 @@ async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
             db.table("user_preferences")
             .select("tracked_competitors")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if prefs_result and prefs_result.data:
-            competitors = prefs_result.data.get("tracked_competitors") or []
+        prefs = prefs_result.data[0] if prefs_result and prefs_result.data else None
+        if prefs:
+            competitors = prefs.get("tracked_competitors") or []
             if isinstance(competitors, list):
                 entities.update(c for c in competitors if isinstance(c, str))
     except Exception:

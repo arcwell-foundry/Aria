@@ -206,7 +206,7 @@ class WebsetService:
                     .select("id")
                     .eq("user_id", user_id)
                     .eq("company_name", lead_record["company_name"])
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
 
@@ -443,10 +443,11 @@ class WebsetService:
 
         # Find the job for this webset
         result = (
-            db.table("webset_jobs").select("*").eq("webset_id", webset_id).maybe_single().execute()
+            db.table("webset_jobs").select("*").eq("webset_id", webset_id).limit(1).execute()
         )
 
-        if not result.data:
+        job_record = result.data[0] if result and result.data else None
+        if not job_record:
             logger.warning(
                 "WebsetService: No job found for webset %s",
                 webset_id,
@@ -458,13 +459,13 @@ class WebsetService:
                 error="Job not found",
             )
 
-        job_data = result.data  # type: ignore[assignment]
+        job_data = job_record  # type: ignore[assignment]
 
         exa = self._get_exa_provider()
         if not exa:
             return ImportResult(
                 webset_id=webset_id,
-                job_id=result.data["id"],
+                job_id=job_record["id"],
                 status="failed",
                 error="Exa provider not available",
             )

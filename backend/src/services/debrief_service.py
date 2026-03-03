@@ -360,11 +360,12 @@ class DebriefService:
                 .select("id")
                 .eq("user_id", user_id)
                 .eq("meeting_id", event["id"])
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            debrief_record = debrief_result.data[0] if debrief_result and debrief_result.data else None
 
-            if not debrief_result.data:
+            if not debrief_record:
                 meetings_needing_debrief.append(event)
 
         logger.info(
@@ -550,12 +551,13 @@ class DebriefService:
             .select("*")
             .eq("id", meeting_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        event_record = result.data[0] if result and result.data else None
 
-        if result.data:
-            event = cast(dict[str, Any], result.data)
+        if event_record:
+            event = cast(dict[str, Any], event_record)
             return {
                 "title": event.get("title", "Meeting"),
                 "start_time": event.get("start_time"),
@@ -618,12 +620,13 @@ class DebriefService:
                 self.db.table("lead_memory_stakeholders")
                 .select("lead_memory_id")
                 .eq("contact_email", email)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            stakeholder_record = result.data[0] if result and result.data else None
 
-            if result.data:
-                return cast(dict[str, Any], result.data)["lead_memory_id"]
+            if stakeholder_record:
+                return cast(dict[str, Any], stakeholder_record)["lead_memory_id"]
 
         return None
 

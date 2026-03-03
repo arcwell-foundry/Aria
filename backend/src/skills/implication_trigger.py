@@ -344,11 +344,12 @@ class ImplicationAwareSkillTrigger:
                 client.table("user_profiles")
                 .select("company_id, companies(name, settings)")
                 .eq("id", self._user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile_resp and profile_resp.data:
-                company_data = profile_resp.data.get("companies")
+            profile = profile_resp.data[0] if profile_resp and profile_resp.data else None
+            if profile:
+                company_data = profile.get("companies")
                 if company_data and isinstance(company_data, dict):
                     context["company_name"] = company_data.get("name", "")
                     # Products and therapeutic areas from company settings

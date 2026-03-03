@@ -38,10 +38,11 @@ async def _get_user_tenant_id(user_id: str) -> str:
         db.table("user_profiles")
         .select("company_id")
         .eq("id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    return result.data.get("company_id", "") if result.data else ""
+    record = result.data[0] if result and result.data else None
+    return record.get("company_id", "") if record else ""
 
 
 async def _is_toolkit_approved(tenant_id: str, toolkit_slug: str) -> bool:
@@ -54,10 +55,11 @@ async def _is_toolkit_approved(tenant_id: str, toolkit_slug: str) -> bool:
         .eq("tenant_id", tenant_id)
         .eq("toolkit_slug", toolkit_slug.upper())
         .eq("status", "approved")
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    return result.data is not None
+    record = result.data[0] if result and result.data else None
+    return record is not None
 
 
 async def _has_pending_request(user_id: str, toolkit_slug: str) -> bool:
@@ -68,10 +70,11 @@ async def _has_pending_request(user_id: str, toolkit_slug: str) -> bool:
         .eq("user_id", user_id)
         .eq("toolkit_slug", toolkit_slug.upper())
         .eq("status", "pending")
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    return result.data is not None
+    record = result.data[0] if result and result.data else None
+    return record is not None
 
 
 async def _create_request(user_id: str, tenant_id: str, body: ToolRequestCreate) -> dict[str, Any]:

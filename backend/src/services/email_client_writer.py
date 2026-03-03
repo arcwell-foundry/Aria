@@ -310,10 +310,11 @@ class EmailClientWriter:
                 self._db.table("email_drafts")
                 .select("*")
                 .eq("id", draft_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            return result.data if result else None
+            record = result.data[0] if result and result.data else None
+            return record if record else None
         except Exception as e:
             logger.error("EMAIL_CLIENT: Failed to get draft %s: %s", draft_id, e)
             return None

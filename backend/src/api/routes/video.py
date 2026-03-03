@@ -73,11 +73,11 @@ async def build_aria_context(user_id: str, session_type: str, lead_id: str | Non
             db.table("user_profiles")
             .select("full_name, title, role, companies(name)")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if profile_result and profile_result.data:
-            profile = profile_result.data
+        profile = profile_result.data[0] if profile_result and profile_result.data else None
+        if profile:
             name = profile.get("full_name", "")
             role = profile.get("title") or profile.get("role", "")
             # Company from joined companies table

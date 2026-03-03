@@ -327,11 +327,11 @@ class PersonalityCalibrator:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 prefs: dict[str, Any] = row.get("preferences", {}) or {}
                 dt: dict[str, Any] = prefs.get("digital_twin", {})
                 ws: dict[str, Any] | None = dt.get("writing_style")
@@ -346,11 +346,11 @@ class PersonalityCalibrator:
                 self._db.table("digital_twin_profiles")
                 .select("tone, writing_style, vocabulary_patterns, formality_level")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 if row.get("writing_style") or row.get("tone"):
                     fp = self._synthesize_fingerprint_from_profile(row)
                     logger.info(
@@ -438,13 +438,13 @@ class PersonalityCalibrator:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             current_prefs: dict[str, Any] = {}
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 current_prefs = row.get("preferences", {}) or {}
 
             digital_twin = current_prefs.get("digital_twin", {})
@@ -540,11 +540,11 @@ class PersonalityCalibrator:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 prefs: dict[str, Any] = row.get("preferences", {}) or {}
                 dt = prefs.get("digital_twin", {})
                 cal_data = dt.get("personality_calibration")
@@ -559,11 +559,11 @@ class PersonalityCalibrator:
                 self._db.table("digital_twin_profiles")
                 .select("tone, writing_style, vocabulary_patterns, formality_level")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 if row.get("writing_style") or row.get("tone"):
                     fp = self._synthesize_fingerprint_from_profile(row)
                     cal = PersonalityCalibration(

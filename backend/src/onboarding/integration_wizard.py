@@ -334,7 +334,7 @@ class IntegrationWizardService:
                 .select("composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", integration_type)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
@@ -344,7 +344,7 @@ class IntegrationWizardService:
                     "message": "Integration not connected",
                 }
 
-            connection_id = result.data.get("composio_connection_id")
+            connection_id = result.data[0].get("composio_connection_id")
 
             # Disconnect via Composio if we have a connection_id
             if connection_id:
@@ -403,11 +403,12 @@ class IntegrationWizardService:
             self._db.table("user_settings")
             .select("integrations")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        existing_record = existing.data[0] if existing and existing.data else None
         merged_integrations = (
-            existing.data.get("integrations", {}) if existing and existing.data else {}
+            existing_record.get("integrations", {}) if existing_record else {}
         )
         merged_integrations["slack_channels"] = preferences.slack_channels
         merged_integrations["notification_enabled"] = preferences.notification_enabled
@@ -538,12 +539,13 @@ class IntegrationWizardService:
             self._db.table("user_settings")
             .select("integrations")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if result and result.data and result.data.get("integrations"):
-            integrations = result.data["integrations"]
+        settings_record = result.data[0] if result and result.data else None
+        if settings_record and settings_record.get("integrations"):
+            integrations = settings_record["integrations"]
             return IntegrationPreferences(
                 slack_channels=integrations.get("slack_channels", []),
                 notification_enabled=integrations.get("notification_enabled", True),

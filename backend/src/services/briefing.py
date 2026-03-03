@@ -1404,11 +1404,11 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 .eq("user_id", user_id)
                 .in_("integration_type", ["gmail", "outlook"])
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
-            )
-
-            if not integration_result or not integration_result.data:
+ )
+            integration_record = integration_result.data[0] if integration_result and integration_result.data else None
+            if not integration_record:
                 logger.debug(
                     "No email integration for user, skipping email summary",
                     extra={"user_id": user_id},
@@ -1717,11 +1717,12 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 self._db.table("user_profiles")
                 .select("full_name")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
-            )
-            if profile_result and profile_result.data:
-                full_name = profile_result.data.get("full_name", "")
+ )
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if profile_record:
+                full_name = profile_record.get("full_name", "")
                 if full_name:
                     user_name = full_name.split()[0]  # First name only
         except Exception:
@@ -1917,13 +1918,13 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 self._db.table("user_preferences")
                 .select("video_briefing_enabled")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
-            )
+ )
+            prefs_record = prefs_result.data[0] if prefs_result and prefs_result.data else None
             if (
-                prefs_result
-                and prefs_result.data
-                and not prefs_result.data.get("video_briefing_enabled", False)
+                prefs_record
+                and not prefs_record.get("video_briefing_enabled", False)
             ):
                 logger.info(
                     "Video briefing not enabled for user",

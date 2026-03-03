@@ -149,14 +149,15 @@ class MemoryDeltaPresenter:
             .select("*")
             .eq("id", correction.fact_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if response is None or not response.data:
+        data = response.data[0] if response and response.data else None
+        if not data:
             return {"status": "not_found"}
 
-        data = cast(dict[str, Any], response.data)
+        data = cast(dict[str, Any], data)
         original_fact = str(data.get("fact", ""))
         original_metadata = cast(dict[str, Any], data.get("metadata") or {})
 

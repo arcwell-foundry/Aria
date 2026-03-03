@@ -462,10 +462,11 @@ class IntelligencePulseEngine:
                 .eq("user_id", user_id)
                 .eq("toolkit_slug", toolkit_slug)
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            return result.data is not None
+            record = result.data[0] if result and result.data else None
+            return record is not None
         except Exception:
             return False
 

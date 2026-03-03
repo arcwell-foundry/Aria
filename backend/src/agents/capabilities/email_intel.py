@@ -381,13 +381,12 @@ class EmailIntelligenceCapability(BaseCapability):
             .select("id, company_name, primary_contact_email")
             .eq("id", lead_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not lead_resp.data:
+        lead = lead_resp.data[0] if lead_resp and lead_resp.data else None
+        if not lead:
             raise NotFoundError("Lead memory", lead_id)
-
-        lead = lead_resp.data
         recipient_email = str(lead.get("primary_contact_email", ""))
         sequence_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -537,10 +536,10 @@ class EmailIntelligenceCapability(BaseCapability):
                     .eq("lead_memory_id", lead_memory_id)
                     .eq("source", "gmail")
                     .eq("source_id", message_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if existing.data:
+                if existing and existing.data:
                     continue
 
             received_at_raw = message.get("date") or message.get("internalDate")
@@ -616,15 +615,16 @@ class EmailIntelligenceCapability(BaseCapability):
             .select("id")
             .eq("user_id", user_id)
             .eq("primary_contact_email", recipient_email)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        lead_record = lead_resp.data[0] if lead_resp and lead_resp.data else None
 
-        if not lead_resp.data:
+        if not lead_record:
             # No lead history — return default (next business day 10am UTC)
             return self._next_business_day_default(now)
 
-        lead_id = str(lead_resp.data["id"])
+        lead_id = str(lead_record["id"])
 
         # Get all email events for this lead
         events_resp = (
@@ -708,11 +708,12 @@ class EmailIntelligenceCapability(BaseCapability):
                     .eq("user_id", user_id)
                     .eq("integration_type", provider)
                     .eq("status", "active")
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if resp.data and resp.data.get("composio_connection_id"):
-                    return resp.data
+                record = resp.data[0] if resp and resp.data else None
+                if record and record.get("composio_connection_id"):
+                    return record
             except Exception:
                 continue
 

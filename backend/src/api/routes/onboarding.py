@@ -147,27 +147,29 @@ async def get_enrichment_status(
     db = SupabaseClient.get_client()
 
     # Get user's company
-    profile = (
+    profile_result = (
         db.table("user_profiles")
         .select("company_id")
         .eq("id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not profile or not profile.data or not profile.data.get("company_id"):
+    profile = profile_result.data[0] if profile_result and profile_result.data else None
+    if not profile or not profile.get("company_id"):
         return {"status": "no_company"}
 
-    company = (
+    company_result = (
         db.table("companies")
         .select("settings")
-        .eq("id", profile.data["company_id"])
-        .maybe_single()
+        .eq("id", profile["company_id"])
+        .limit(1)
         .execute()
     )
-    if not company or not company.data:
+    company = company_result.data[0] if company_result and company_result.data else None
+    if not company:
         return {"status": "not_found"}
 
-    company_settings = company.data.get("settings", {})
+    company_settings = company.get("settings", {})
     if "enrichment_quality_score" in company_settings:
         return {
             "status": "complete",
@@ -189,17 +191,18 @@ async def get_enrichment_delta(
     so the frontend can display what ARIA learned about the company.
     """
     db = SupabaseClient.get_client()
-    state = (
+    state_result = (
         db.table("onboarding_state")
         .select("step_data")
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not state or not state.data:
+    state = state_result.data[0] if state_result and state_result.data else None
+    if not state:
         return []
 
-    step_data = state.data.get("step_data", {})
+    step_data = state.get("step_data", {})
     return step_data.get("enrichment_delta", [])
 
 
@@ -219,18 +222,19 @@ async def re_run_enrichment(
     db = SupabaseClient.get_client()
 
     # Get user's company
-    profile = (
+    profile_result = (
         db.table("user_profiles")
         .select("company_id, companies(name, domain, website)")
         .eq("id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not profile or not profile.data or not profile.data.get("company_id"):
+    profile = profile_result.data[0] if profile_result and profile_result.data else None
+    if not profile or not profile.get("company_id"):
         raise HTTPException(status_code=400, detail="No company associated with user")
 
-    company_id = profile.data["company_id"]
-    company = profile.data.get("companies", {})
+    company_id = profile["company_id"]
+    company = profile.get("companies", {})
     company_name = company.get("name", "")
     website = company.get("website", company.get("domain", ""))
 
@@ -338,17 +342,18 @@ async def upload_document(
     db = SupabaseClient.get_client()
 
     # Get user's company
-    profile = (
+    profile_result = (
         db.table("user_profiles")
         .select("company_id")
         .eq("id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not profile or not profile.data or not profile.data.get("company_id"):
+    profile = profile_result.data[0] if profile_result and profile_result.data else None
+    if not profile or not profile.get("company_id"):
         raise HTTPException(status_code=400, detail="No company associated with user")
 
-    company_id = profile.data["company_id"]
+    company_id = profile["company_id"]
     content = await file.read()
     doc_service = _get_doc_service()
 
@@ -381,14 +386,15 @@ async def get_documents(
         db.table("user_profiles")
         .select("company_id")
         .eq("id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not profile or not profile.data or not profile.data.get("company_id"):
+    profile_record = profile.data[0] if profile and profile.data else None
+    if not profile_record or not profile_record.get("company_id"):
         return []
 
     doc_service = _get_doc_service()
-    return await doc_service.get_company_documents(profile.data["company_id"])
+    return await doc_service.get_company_documents(profile_record["company_id"])
 
 
 @router.get("/documents/{doc_id}/status")
@@ -403,12 +409,13 @@ async def get_document_status(
         db.table("company_documents")
         .select("processing_status, processing_progress, chunk_count, entity_count, quality_score")
         .eq("id", doc_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not result or not result.data:
+    doc_record = result.data[0] if result and result.data else None
+    if not doc_record:
         raise HTTPException(status_code=404, detail="Document not found")
-    return result.data
+    return doc_record
 
 
 # Stakeholder mapping endpoints (US-905)
@@ -758,13 +765,14 @@ async def get_email_preferences(
         db.table("user_settings")
         .select("integrations")
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not result or not result.data:
+    record = result.data[0] if result and result.data else None
+    if not record:
         return {}
 
-    integrations = result.data.get("integrations", {})
+    integrations = record.get("integrations", {})
     email_prefs = integrations.get("email", {})
     return email_prefs
 
@@ -788,14 +796,15 @@ async def email_bootstrap_status(
         db.table("onboarding_state")
         .select("metadata")
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
+    record = result.data[0] if result and result.data else None
 
-    if not result or not result.data:
+    if not record:
         return {"status": "not_started"}
 
-    metadata: dict[str, Any] = result.data.get("metadata", {})  # type: ignore[union-attr]
+    metadata: dict[str, Any] = record.get("metadata", {})  # type: ignore[union-attr]
     bootstrap_data = metadata.get("email_bootstrap")
 
     if not bootstrap_data:
@@ -1056,15 +1065,16 @@ async def get_first_goal_suggestions(
 
     # Get user profile to determine role for templates
     db = SupabaseClient.get_client()
-    profile = (
+    profile_result = (
         db.table("user_profiles")
         .select("role, department")
         .eq("id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
+    profile = profile_result.data[0] if profile_result and profile_result.data else None
 
-    user_role = profile.data.get("role") if profile and profile.data else None
+    user_role = profile.get("role") if profile else None
 
     # Get suggestions
     suggestions = await service.suggest_goals(current_user.id)
@@ -1154,17 +1164,18 @@ async def _get_enrichment_context(user_id: str) -> dict[str, Any] | None:
 
     try:
         # Get company classification
-        profile = (
+        profile_result = (
             db.table("user_profiles")
             .select("companies(*)")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        profile = profile_result.data[0] if profile_result and profile_result.data else None
 
         company_data = None
-        if profile and profile.data:
-            company = profile.data.get("companies")
+        if profile:
+            company = profile.get("companies")
             if company:
                 settings = company.get("settings", {})
                 company_data = {
@@ -1217,12 +1228,11 @@ async def activate_aria(
 
     # Read current onboarding state
     result = (
-        db.table("onboarding_state").select("*").eq("user_id", user_id).maybe_single().execute()
+        db.table("onboarding_state").select("*").eq("user_id", user_id).limit(1).execute()
     )
-    if not result or not result.data:
+    state = result.data[0] if result and result.data else None
+    if not state:
         raise HTTPException(status_code=400, detail="No onboarding state found")
-
-    state = result.data
     if state["current_step"] != "activation":
         raise HTTPException(
             status_code=400,
@@ -1441,14 +1451,15 @@ async def get_activation_status(
         # No activation goals yet — check if onboarding is complete.
         # If so, background tasks are still creating goals → return "pending"
         # to keep the frontend polling.
-        state = (
+        state_result = (
             db.table("onboarding_state")
             .select("completed_at")
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if state and state.data and state.data.get("completed_at"):
+        state = state_result.data[0] if state_result and state_result.data else None
+        if state and state.get("completed_at"):
             overall = "pending"
             logger.info(
                 "[AGENT_DEPLOY] Stage: awaiting_goal_creation | user=%s",
@@ -1536,17 +1547,18 @@ async def answer_injected_question(
     so ARIA can incorporate this intelligence into memory construction.
     """
     db = SupabaseClient.get_client()
-    state = await (
+    state_result = await (
         db.table("onboarding_state")
         .select("step_data")
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not state or not state.data:
+    state = state_result.data[0] if state_result and state_result.data else None
+    if not state:
         raise HTTPException(status_code=404, detail="No onboarding state found")
 
-    step_data = state.data.get("step_data", {})
+    step_data = state.get("step_data", {})
     ooda_answers = step_data.get("ooda_answers", {})
     if not isinstance(ooda_answers, dict):
         ooda_answers = {}

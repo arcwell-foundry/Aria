@@ -364,11 +364,12 @@ class ReturnGreetingService:
                 db.table("user_profiles")
                 .select("full_name")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                full_name = result.data.get("full_name", "")
+            record = result.data[0] if result and result.data else None
+            if record:
+                full_name = record.get("full_name", "")
                 return full_name.split()[0] if full_name else ""
         except Exception:
             logger.debug("Failed to get user name for greeting", exc_info=True)

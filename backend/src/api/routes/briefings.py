@@ -530,11 +530,11 @@ async def mark_briefing_viewed(
             .select("content")
             .eq("id", briefing_id)
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-
-        content = result.data.get("content", {}) if result and result.data else {}
+        record = result.data[0] if result and result.data else None
+        content = record.get("content", {}) if record and result.data else None
         summary = content.get("summary", "") if isinstance(content, dict) else ""
 
         return {
@@ -575,14 +575,14 @@ async def get_briefing_text(
             .select("content")
             .eq("id", briefing_id)
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-
-        if not result or not result.data:
+        record = result.data[0] if result and result.data else None
+        if not record:
             raise HTTPException(status_code=404, detail="Briefing not found")
 
-        content = result.data.get("content", {})
+        content = record.get("content", {})
         summary = content.get("summary", "") if isinstance(content, dict) else ""
 
         if not summary:

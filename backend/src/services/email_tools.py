@@ -200,11 +200,12 @@ async def get_email_integration(user_id: str) -> dict[str, Any] | None:
                 .eq("user_id", user_id)
                 .eq("integration_type", provider)
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data and result.data.get("composio_connection_id"):
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record and record.get("composio_connection_id"):
+                return record
         return None
     except Exception as e:
         logger.warning("Failed to check email integration for user %s: %s", user_id, e)

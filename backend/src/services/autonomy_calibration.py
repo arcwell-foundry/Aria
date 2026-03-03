@@ -284,11 +284,12 @@ class AutonomyCalibrationService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                preferences = result.data.get("preferences", {})
+            record = result.data[0] if result and result.data else None
+            if record:
+                preferences = record.get("preferences", {})
                 return int(preferences.get("autonomy_level", 1))
         except Exception:
             logger.warning(
@@ -311,11 +312,12 @@ class AutonomyCalibrationService:
                 self._db.table("user_profiles")
                 .select("created_at")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data and result.data.get("created_at"):
-                created_str = result.data["created_at"]
+            record = result.data[0] if result and result.data else None
+            if record and record.get("created_at"):
+                created_str = record["created_at"]
                 created_at = datetime.fromisoformat(created_str)
                 delta = datetime.now(UTC) - created_at
                 return max(0, delta.days)

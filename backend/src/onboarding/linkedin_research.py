@@ -198,13 +198,13 @@ Respond ONLY with the JSON object, no additional text."""
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             current_prefs: dict[str, Any] = {}
             if result and result.data:
-                row = cast(dict[str, Any], result.data)
+                row = cast(dict[str, Any], result.data[0])
                 current_prefs = row.get("preferences", {}) or {}
 
             digital_twin = current_prefs.get("digital_twin", {})
@@ -321,12 +321,13 @@ Respond ONLY with the JSON object, no additional text."""
                 self._db.table("onboarding_state")
                 .select("step_data")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if state_result.data:
-                step_data = state_result.data.get("step_data", {}) or {}
+            state_record = state_result.data[0] if state_result and state_result.data else None
+            if state_record:
+                step_data = state_record.get("step_data", {}) or {}
                 step_data["linkedin_summary"] = summary
                 (
                     self._db.table("onboarding_state")

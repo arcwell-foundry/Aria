@@ -1546,11 +1546,11 @@ async def extract_conversation_episode(
         .select("id")
         .eq("user_id", current_user.id)
         .eq("conversation_id", body.conversation_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
-    if existing.data:
+    if existing and existing.data:
         raise HTTPException(
             status_code=409,
             detail="Episode already exists for this conversation",

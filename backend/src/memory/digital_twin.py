@@ -516,12 +516,12 @@ class DigitalTwin:
                 db.table("digital_twin_profiles")
                 .select("tone, writing_style, vocabulary_patterns, formality_level")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            row = result.data[0] if result and result.data else None
 
-            if result and result.data:
-                row = result.data
+            if row:
                 lines = []
                 tone = row.get("tone", "professional")
                 formality = row.get("formality_level", "business")
@@ -573,12 +573,13 @@ class DigitalTwin:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not result or not result.data:
+            record = result.data[0] if result and result.data else None
+            if not record:
                 return None
-            prefs = result.data.get("preferences") or {}
+            prefs = record.get("preferences") or {}
             dt = prefs.get("digital_twin") or {}
             fp = dt.get("writing_style")
             if fp and isinstance(fp, dict) and fp.get("confidence", 0) > 0:
@@ -1120,14 +1121,13 @@ class DigitalTwin:
                 db.table("digital_twin_profiles")
                 .select("tone, writing_style, vocabulary_patterns, formality_level")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if not result or not result.data:
+            row = result.data[0] if result and result.data else None
+            if not row:
                 return None
-
-            row = result.data
             writing_style = row.get("writing_style", "")
             if not writing_style and not row.get("formality_level") and not row.get("tone"):
                 return None

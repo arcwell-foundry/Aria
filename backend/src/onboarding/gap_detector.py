@@ -493,11 +493,11 @@ class KnowledgeGapDetector:
             self.db.table("user_settings")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if result and result.data:
-            return cast(dict[str, Any], result.data)
+            return cast(dict[str, Any], result.data[0])
         return None
 
     async def _get_integrations(self, user_id: str) -> list[dict[str, Any]]:
@@ -530,11 +530,11 @@ class KnowledgeGapDetector:
             self.db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if result and result.data:
-            return cast(dict[str, Any], result.data)
+            return cast(dict[str, Any], result.data[0])
         return None
 
     async def _get_company_classification(self, user_id: str) -> dict[str, Any] | None:
@@ -553,23 +553,25 @@ class KnowledgeGapDetector:
             self.db.table("user_profiles")
             .select("company_id")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not profile or not profile.data:
+        profile_record = profile.data[0] if profile and profile.data else None
+        if not profile_record:
             return None
-        profile_data = cast(dict[str, Any], profile.data)
+        profile_data = cast(dict[str, Any], profile_record)
         if not profile_data.get("company_id"):
             return None
         company = (
             self.db.table("companies")
             .select("settings")
             .eq("id", profile_data["company_id"])
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if company and company.data:
-            company_data = cast(dict[str, Any], company.data)
+        company_record = company.data[0] if company and company.data else None
+        if company_record:
+            company_data = cast(dict[str, Any], company_record)
             return cast(
                 dict[str, Any] | None,
                 company_data.get("settings", {}).get("classification"),

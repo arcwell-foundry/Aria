@@ -215,10 +215,11 @@ async def get_goal_plan(
         .select("id, title, status, user_id")
         .eq("id", goal_id)
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not goal_result.data:
+    goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+    if not goal_record:
         raise HTTPException(status_code=404, detail="Goal not found")
 
     # Fetch latest plan
@@ -228,13 +229,11 @@ async def get_goal_plan(
         .eq("goal_id", goal_id)
         .order("created_at", desc=True)
         .limit(1)
-        .maybe_single()
         .execute()
     )
-    if not plan_result.data:
+    plan_row = plan_result.data[0] if plan_result and plan_result.data else None
+    if not plan_row:
         raise HTTPException(status_code=404, detail="No execution plan found for this goal")
-
-    plan_row = plan_result.data
     tasks_raw = plan_row.get("tasks", "[]")
     tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
 
@@ -324,13 +323,12 @@ async def approve_goal_plan(
         .select("id, title, status, user_id")
         .eq("id", goal_id)
         .eq("user_id", current_user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not goal_result.data:
+    goal = goal_result.data[0] if goal_result and goal_result.data else None
+    if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
-
-    goal = goal_result.data
 
     # Validate goal is in an approvable state
     if goal["status"] not in ("plan_ready", "draft"):
@@ -349,18 +347,18 @@ async def approve_goal_plan(
     plan_message_id = None
     conversation_id = None
     try:
-        plan_row = (
+        plan_result = (
             db.table("goal_execution_plans")
             .select("plan_message_id, conversation_id")
             .eq("goal_id", goal_id)
             .order("created_at", desc=True)
             .limit(1)
-            .maybe_single()
             .execute()
         )
-        if plan_row.data:
-            plan_message_id = plan_row.data.get("plan_message_id")
-            conversation_id = plan_row.data.get("conversation_id")
+        plan_row = plan_result.data[0] if plan_result and plan_result.data else None
+        if plan_row:
+            plan_message_id = plan_row.get("plan_message_id")
+            conversation_id = plan_row.get("conversation_id")
 
         db.table("goal_execution_plans").update(
             {"status": "approved", "approved_at": now, "updated_at": now}
@@ -375,11 +373,12 @@ async def approve_goal_plan(
                 db.table("messages")
                 .select("metadata")
                 .eq("id", str(plan_message_id))
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if msg_result.data:
-                current_meta = msg_result.data.get("metadata", {})
+            msg_record = msg_result.data[0] if msg_result and msg_result.data else None
+            if msg_record:
+                current_meta = msg_record.get("metadata", {})
                 if isinstance(current_meta, str):
                     current_meta = json.loads(current_meta)
                 if "data" in current_meta and isinstance(current_meta["data"], dict):
@@ -1147,14 +1146,15 @@ async def test_plan_pipeline_noauth(
             db.table("profiles")
             .select("id, email")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not user_check.data:
+        user_record = user_check.data[0] if user_check and user_check.data else None
+        if not user_record:
             step("verify_user", {"error": f"No profile found for user_id={user_id}"})
             results["status"] = "failed_at_user_check"
             return results
-        step("verify_user", {"email": user_check.data.get("email", "?")})
+        step("verify_user", {"email": user_record.get("email", "?")})
     except Exception as e:
         step("verify_user", {"error": str(e), "traceback": traceback.format_exc()})
         results["status"] = "failed_at_user_check"

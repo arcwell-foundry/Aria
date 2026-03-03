@@ -500,11 +500,11 @@ async def _handle_user_message(
                     .eq("goal_id", pg["id"])
                     .order("created_at", desc=True)
                     .limit(1)
-                    .maybe_single()
                     .execute()
                 )
-                if plan_result.data:
-                    tasks_raw = plan_result.data.get("tasks", "[]")
+                plan_record = plan_result.data[0] if plan_result and plan_result.data else None
+                if plan_record:
+                    tasks_raw = plan_record.get("tasks", "[]")
                     plan_tasks = (
                         json.loads(tasks_raw)
                         if isinstance(tasks_raw, str)
@@ -529,7 +529,7 @@ async def _handle_user_message(
                         f"\n\n## Pending Execution Plan (Awaiting User Approval)\n"
                         f"Goal: {pg.get('title', '')}\n"
                         f"Description: {pg.get('description', '')}\n"
-                        f"Execution mode: {plan_result.data.get('execution_mode', 'parallel')}\n"
+                        f"Execution mode: {plan_record.get('execution_mode', 'parallel')}\n"
                         f"Estimated time: {plan_result.data.get('estimated_total_minutes', '?')} minutes\n"
                         f"Reasoning: {plan_result.data.get('reasoning', '')}\n"
                         f"Tasks:\n" + "\n".join(task_lines) + "\n\n"
@@ -945,17 +945,18 @@ async def _maybe_deliver_first_conversation(user_id: str) -> bool:
             db.table("onboarding_state")
             .select("completed_at, metadata")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not onboarding.data or not onboarding.data.get("completed_at"):
+        onboarding_record = onboarding.data[0] if onboarding and onboarding.data else None
+        if not onboarding_record or not onboarding_record.get("completed_at"):
             logger.debug(
                 "First conversation skipped: onboarding not complete (user=%s)",
                 user_id,
             )
             return False
 
-        ob_metadata = onboarding.data.get("metadata") or {}
+        ob_metadata = onboarding_record.get("metadata") or {}
         if ob_metadata.get("first_conversation_ws_delivered"):
             logger.debug(
                 "First conversation already delivered (user=%s)",
@@ -1089,16 +1090,17 @@ async def _generate_fallback_first_conversation(user_id: str, db: Any) -> str | 
             db.table("user_profiles")
             .select("full_name, title, companies(name)")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not profile or not profile.data:
+        profile_record = profile.data[0] if profile and profile.data else None
+        if not profile_record:
             return None
 
-        user_name = (profile.data.get("full_name") or "").split()[0]
-        title = profile.data.get("title", "")
-        company = profile.data.get("companies", {})
+        user_name = (profile_record.get("full_name") or "").split()[0]
+        title = profile_record.get("title", "")
+        company = profile_record.get("companies", {})
         company_name = company.get("name", "") if company else ""
 
         greeting = f"Hi {user_name}," if user_name else "Hi,"
@@ -1146,10 +1148,11 @@ async def _maybe_deliver_morning_briefing(user_id: str) -> bool:
             db.table("onboarding_state")
             .select("completed_at")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not onboarding.data or not onboarding.data.get("completed_at"):
+        onboarding_record = onboarding.data[0] if onboarding and onboarding.data else None
+        if not onboarding_record or not onboarding_record.get("completed_at"):
             return False
 
         # Query today's briefing
@@ -1351,14 +1354,15 @@ async def _handle_proposal_approval(
             .eq("id", proposal_id)
             .eq("user_id", user_id)
             .eq("status", "proposed")
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not proposal_result.data:
+        proposal_record = proposal_result.data[0] if proposal_result and proposal_result.data else None
+        if not proposal_record:
             logger.warning("Proposal not found or already processed: %s", proposal_id)
             return
 
-        proposal = proposal_result.data
+        proposal = proposal_record
         proposal_data = proposal.get("proposal_data") or {}
 
         # Create a goal

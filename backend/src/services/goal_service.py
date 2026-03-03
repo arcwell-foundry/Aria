@@ -750,12 +750,13 @@ class GoalService:
             self._db.table("goal_retrospectives")
             .select("*")
             .eq("goal_id", goal_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        retro_record = retro_result.data[0] if retro_result and retro_result.data else None
         retrospective: dict[str, Any] | None = None
-        if retro_result is not None:
-            retrospective = cast(dict[str, Any] | None, retro_result.data)
+        if retro_record is not None:
+            retrospective = cast(dict[str, Any] | None, retro_record.data)
 
         logger.info(
             "Goal detail retrieved",

@@ -408,32 +408,33 @@ class PersonaBuilder:
                 db.table("user_profiles")
                 .select("full_name, title, department, default_tone, communication_preferences, companies(name)")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
 
-            if profile_result and profile_result.data:
-                name = profile_result.data.get("full_name")
+            if profile_record:
+                name = profile_record.get("full_name")
                 if name:
                     user_info_parts.append(f"Name: {name}")
 
-                title = profile_result.data.get("title")
+                title = profile_record.get("title")
                 if title:
                     user_info_parts.append(f"Title: {title}")
 
-                department = profile_result.data.get("department")
+                department = profile_record.get("department")
                 if department:
                     user_info_parts.append(f"Department: {department}")
 
                 # Company from joined companies table
-                company_data = profile_result.data.get("companies")
+                company_data = profile_record.get("companies")
                 if company_data and isinstance(company_data, dict):
                     company_name = company_data.get("name")
                     if company_name:
                         user_info_parts.append(f"Company: {company_name}")
 
                 # Default tone from user_profiles
-                default_tone = profile_result.data.get("default_tone")
+                default_tone = profile_record.get("default_tone")
                 if default_tone:
                     user_info_parts.append(f"Preferred tone: {default_tone}")
 
@@ -442,19 +443,20 @@ class PersonaBuilder:
                 db.table("digital_twin_profiles")
                 .select("tone, writing_style, formality_level, vocabulary_patterns")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            twin_record = twin_result.data[0] if twin_result and twin_result.data else None
 
-            if twin_result and twin_result.data:
+            if twin_record:
                 # Only add if not already set from user_profiles
-                tone = twin_result.data.get("tone")
+                tone = twin_record.get("tone")
                 if tone and "Preferred tone:" not in " ".join(user_info_parts):
                     user_info_parts.append(f"Preferred tone: {tone}")
-                formality = twin_result.data.get("formality_level")
+                formality = twin_record.get("formality_level")
                 if formality:
                     user_info_parts.append(f"Formality: {formality}")
-                writing_style = twin_result.data.get("writing_style")
+                writing_style = twin_record.get("writing_style")
                 if writing_style:
                     user_info_parts.append(f"Writing style: {writing_style}")
 
@@ -656,11 +658,12 @@ class PersonaBuilder:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                prefs = result.data.get("preferences", {}) or {}
+            record = result.data[0] if result and result.data else None
+            if record:
+                prefs = record.get("preferences", {}) or {}
                 overrides = prefs.get("persona_overrides", {})
                 if overrides:
                     override_parts: list[str] = []
@@ -847,13 +850,14 @@ class PersonaBuilder:
                 db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             prefs: dict[str, Any] = {}
-            if result and result.data:
-                prefs = result.data.get("preferences", {}) or {}
+            record = result.data[0] if result and result.data else None
+            if record:
+                prefs = record.get("preferences", {}) or {}
 
             overrides = prefs.get("persona_overrides", {})
 

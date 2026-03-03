@@ -55,11 +55,12 @@ def _get_overrides(user_id: str) -> dict[str, str]:
             client.table("user_settings")
             .select("preferences")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result and result.data:
-            return result.data.get("preferences", {}).get("trust_overrides", {})
+        record = result.data[0] if result and result.data else None
+        if record:
+            return record.get("preferences", {}).get("trust_overrides", {})
     except Exception:
         logger.exception("Failed to read trust overrides for user %s", user_id)
     return {}
@@ -74,11 +75,12 @@ def _save_overrides(user_id: str, overrides: dict[str, str]) -> None:
         client.table("user_settings")
         .select("preferences")
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if result and result.data:
-        preferences = result.data.get("preferences", {})
+    record = result.data[0] if result and result.data else None
+    if record:
+        preferences = record.get("preferences", {})
         preferences["trust_overrides"] = overrides
         client.table("user_settings").update(
             {"preferences": preferences}

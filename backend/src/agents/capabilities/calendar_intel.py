@@ -227,10 +227,10 @@ class CalendarIntelligenceCapability(BaseCapability):
             .select("id, status")
             .eq("user_id", user_id)
             .eq("calendar_event_id", event.external_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if existing.data:
+        if existing and existing.data:
             logger.debug(
                 "Meeting brief already exists",
                 extra={
@@ -460,10 +460,10 @@ class CalendarIntelligenceCapability(BaseCapability):
             .select("id")
             .eq("user_id", user_id)
             .eq("meeting_id", event.external_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if existing.data:
+        if existing and existing.data:
             logger.debug(
                 "Meeting debrief already exists",
                 extra={"user_id": user_id, "event_id": event.external_id},
@@ -567,11 +567,12 @@ class CalendarIntelligenceCapability(BaseCapability):
                 .eq("user_id", user_id)
                 .eq("integration_type", "google_calendar")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp.data and resp.data.get("composio_connection_id"):
-                return str(resp.data["composio_connection_id"])
+            record = resp.data[0] if resp and resp.data else None
+            if record and record.get("composio_connection_id"):
+                return str(record["composio_connection_id"])
         except Exception:
             logger.warning(
                 "Failed to lookup calendar integration",
@@ -595,11 +596,12 @@ class CalendarIntelligenceCapability(BaseCapability):
                 client.table("user_preferences")
                 .select("meeting_brief_lead_hours")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp.data:
-                return int(resp.data.get("meeting_brief_lead_hours", _DEFAULT_LEAD_HOURS))
+            record = resp.data[0] if resp and resp.data else None
+            if record:
+                return int(record.get("meeting_brief_lead_hours", _DEFAULT_LEAD_HOURS))
         except Exception:
             logger.warning(
                 "Failed to fetch meeting lead hours preference",
@@ -633,11 +635,11 @@ class CalendarIntelligenceCapability(BaseCapability):
                     .select("id")
                     .eq("user_id", user_id)
                     .eq("primary_email", email)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if resp.data:
-                    return str(resp.data["id"])
+                if resp and resp.data:
+                    return str(resp.data[0]["id"])
             except Exception:
                 continue
         return None

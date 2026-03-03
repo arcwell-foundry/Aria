@@ -94,16 +94,17 @@ class TrustCalibrationService:
                 client.table("user_trust_profiles")
                 .select("overall_trust,category_scores")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if response and response.data:
+            record = response.data[0] if response and response.data else None
+            if record:
                 # Check category_scores JSON for specific category
-                category_scores = response.data.get("category_scores") or {}
+                category_scores = record.get("category_scores") or {}
                 if action_category in category_scores:
                     return float(category_scores[action_category])
                 # Fall back to overall_trust
-                return float(response.data.get("overall_trust", DEFAULT_TRUST_SCORE))
+                return float(record.get("overall_trust", DEFAULT_TRUST_SCORE))
         except Exception:
             logger.exception(
                 "Failed to fetch trust score for user %s category %s",
@@ -133,19 +134,20 @@ class TrustCalibrationService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("action_category", action_category)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if response.data:
+            record = response.data[0] if response and response.data else None
+            if record:
                 return TrustProfile(
-                    user_id=response.data["user_id"],
-                    action_category=response.data["action_category"],
-                    trust_score=float(response.data["trust_score"]),
-                    successful_actions=int(response.data["successful_actions"]),
-                    failed_actions=int(response.data["failed_actions"]),
-                    override_count=int(response.data["override_count"]),
-                    last_failure_at=response.data.get("last_failure_at"),
-                    last_override_at=response.data.get("last_override_at"),
+                    user_id=record["user_id"],
+                    action_category=record["action_category"],
+                    trust_score=float(record["trust_score"]),
+                    successful_actions=int(record["successful_actions"]),
+                    failed_actions=int(record["failed_actions"]),
+                    override_count=int(record["override_count"]),
+                    last_failure_at=record.get("last_failure_at"),
+                    last_override_at=record.get("last_override_at"),
                 )
         except Exception:
             logger.exception(
@@ -439,11 +441,11 @@ class TrustCalibrationService:
                 client.table("user_trust_profiles")
                 .select("id,overall_trust,category_scores,total_actions_taken,total_actions_approved,total_actions_rejected")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp and resp.data:
-                row = resp.data
+            row = resp.data[0] if resp and resp.data else None
+            if row:
                 cat_scores = dict(row.get("category_scores") or {})
                 cat_scores[action_category] = new_score
                 update: dict = {

@@ -346,19 +346,18 @@ async def get_skill_performance(
     client = await get_supabase_client()
 
     # Get installed skill info
-    skill_row = (
+    skill_result = (
         await client.table("user_skills")
         .select("*")
         .eq("user_id", str(current_user.id))
         .eq("skill_id", skill_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
-    if not skill_row.data:
+    skill = skill_result.data[0] if skill_result and skill_result.data else None
+    if not skill:
         raise HTTPException(status_code=404, detail="Skill not installed")
-
-    skill = skill_row.data
     total = int(skill.get("execution_count", 0))
     success = int(skill.get("success_count", 0))
     success_rate = (success / total) if total > 0 else 0.0
@@ -592,16 +591,17 @@ async def update_custom_skill(
     client = await get_supabase_client()
 
     # Verify ownership
-    existing = (
+    existing_result = (
         await client.table("custom_skills")
         .select("*")
         .eq("id", skill_id)
         .eq("created_by", str(current_user.id))
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
-    if not existing.data:
+    existing = existing_result.data[0] if existing_result and existing_result.data else None
+    if not existing:
         raise HTTPException(status_code=404, detail="Custom skill not found or not owned by you")
 
     update_data: dict[str, Any] = {}

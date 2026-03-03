@@ -73,16 +73,17 @@ class OnboardingReadinessService:
             self._db.table("onboarding_state")
             .select("readiness_scores")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not response or not response.data:
+        state_record = response.data[0] if response and response.data else None
+        if not state_record:
             # No state yet — return all zeros
             return ReadinessBreakdown()
 
         # Type narrowing for JSON data
-        data_dict = response.data if isinstance(response.data, dict) else {}
+        data_dict = state_record if isinstance(state_record, dict) else {}
         scores_data = data_dict.get("readiness_scores", {})
         if not isinstance(scores_data, dict):
             scores_data = {}
@@ -132,11 +133,12 @@ class OnboardingReadinessService:
             self._db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not state_response or not state_response.data:
+        state_record = state_response.data[0] if state_response and state_response.data else None
+        if not state_record:
             # No state — return zeros
             return ReadinessBreakdown()
 
@@ -256,13 +258,14 @@ class OnboardingReadinessService:
                 self._db.table("user_profiles")
                 .select("company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not profile.data or not profile.data.get("company_id"):
+            profile_record = profile.data[0] if profile and profile.data else None
+            if not profile_record or not profile_record.get("company_id"):
                 return 0.0
 
-            company_id = profile.data["company_id"]
+            company_id = profile_record["company_id"]
 
             # Count semantic facts for this user (enrichment stores here, not corporate_facts)
             facts_result = (
@@ -302,13 +305,14 @@ class OnboardingReadinessService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not result.data:
+            settings_record = result.data[0] if result and result.data else None
+            if not settings_record:
                 return 0.0
 
-            prefs = result.data.get("preferences") or {}
+            prefs = settings_record.get("preferences") or {}
             dt = prefs.get("digital_twin") or {}
 
             score = 0.0

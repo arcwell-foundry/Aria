@@ -214,11 +214,12 @@ class ARIAConfigService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                row = cast(dict[str, Any], result.data)
+            record = result.data[0] if result and result.data else None
+            if record:
+                row = cast(dict[str, Any], record)
                 return cast(dict[str, Any], row.get("preferences", {}) or {})
         except Exception as e:
             logger.warning("Failed to read preferences: %s", e)

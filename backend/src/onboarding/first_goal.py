@@ -259,11 +259,11 @@ class FirstGoalService:
                 self._db.table("user_profiles")
                 .select("full_name, title, role, department, companies(*)")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if profile_result and profile_result.data:
-                profile = profile_result.data
+                profile = profile_result.data[0]
                 context["full_name"] = profile.get("full_name")
                 context["title"] = profile.get("title")
                 context["role"] = profile.get("role")

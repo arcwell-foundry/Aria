@@ -305,27 +305,27 @@ class ResolutionEngine:
                 .select("company_id")
                 .eq("id", user_id)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            if not profile_result.data or not profile_result.data.get("company_id"):
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if not profile_record or not profile_record.get("company_id"):
                 return None
 
-            company_id = profile_result.data["company_id"]
+            company_id = profile_record["company_id"]
             config_result = (
                 self._db.table("tenant_capability_config")
                 .select("*")
                 .eq("tenant_id", company_id)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            if not config_result.data:
+            config_record = config_result.data[0] if config_result and config_result.data else None
+            if not config_record:
                 return None
 
             # Return as a simple namespace object
             from types import SimpleNamespace
-            return SimpleNamespace(**config_result.data)
+            return SimpleNamespace(**config_record)
         except Exception as e:
             # Downgrade to debug: this table may not exist yet (migration pending)
             # and the caller handles None gracefully (skips tenant filtering).
@@ -685,10 +685,10 @@ async def annotate_plan_with_gaps(
                 .select("company_id")
                 .eq("id", user_id)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            company_id = (tenant_config_result.data or {}).get("company_id")
+            tenant_record = tenant_config_result.data[0] if tenant_config_result and tenant_config_result.data else None
+            company_id = (tenant_record or {}).get("company_id")
             tenant_config = None
             if company_id:
                 tc_result = (
@@ -696,12 +696,12 @@ async def annotate_plan_with_gaps(
                     .select("*")
                     .eq("tenant_id", company_id)
                     .limit(1)
-                    .maybe_single()
                     .execute()
                 )
-                if tc_result.data:
+                tc_record = tc_result.data[0] if tc_result and tc_result.data else None
+                if tc_record:
                     from types import SimpleNamespace
-                    tenant_config = SimpleNamespace(**tc_result.data)
+                    tenant_config = SimpleNamespace(**tc_record)
 
             ecosystem = EcosystemSearchService(db_client, tenant_config=tenant_config)
             creation = SkillCreationEngine(db_client)

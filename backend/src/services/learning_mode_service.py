@@ -328,12 +328,12 @@ class LearningModeService:
                 self._db.table("user_settings")
                 .select("integrations")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-
-            if result and result.data:
-                integrations = result.data.get("integrations", {})
+            record = result.data[0] if result and result.data else None
+            if record:
+                integrations = record.get("integrations", {})
                 return integrations.get("email", {}).get("learning_mode_config")
 
             return None
@@ -363,13 +363,13 @@ class LearningModeService:
                 self._db.table("user_settings")
                 .select("integrations")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-
+            record = result.data[0] if result and result.data else None
             current_integrations: dict[str, Any] = {}
-            if result and result.data:
-                current_integrations = result.data.get("integrations", {}) or {}
+            if record:
+                current_integrations = record.get("integrations", {}) or {}
 
             # Update email.learning_mode_config
             email_config = current_integrations.get("email", {})

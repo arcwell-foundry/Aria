@@ -127,10 +127,11 @@ def _resolve_friction(friction_id: str, user_id: str, response: str) -> dict[str
             .select("*")
             .eq("id", friction_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not result or not result.data:
+        record = result.data[0] if result and result.data else None
+        if not record:
             return None
 
         client.table("friction_decisions").update({
@@ -139,7 +140,7 @@ def _resolve_friction(friction_id: str, user_id: str, response: str) -> dict[str
             "resolved_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", friction_id).execute()
 
-        return result.data
+        return record
     except Exception:
         logger.debug(
             "friction_decisions table unavailable — resolving from cache",

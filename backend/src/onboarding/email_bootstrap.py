@@ -365,11 +365,11 @@ class PriorityEmailIngestion:
             self._db.table("user_settings")
             .select("integrations")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if result and result.data:
-            data: dict[str, Any] = result.data  # type: ignore[assignment]
+            data: dict[str, Any] = result.data[0]  # type: ignore[assignment]
             email_config = data.get("integrations", {}).get("email", {})
             return email_config.get("privacy_exclusions", [])
         return []
@@ -1618,11 +1618,11 @@ class PriorityEmailIngestion:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result and result.data:
-                prefs = result.data.get("preferences", {})
+                prefs = result.data[0].get("preferences", {})
                 digital_twin = prefs.get("digital_twin", {})
                 writing_style = digital_twin.get("writing_style")
                 return writing_style is not None
@@ -1714,14 +1714,15 @@ class PriorityEmailIngestion:
                 self._db.table("onboarding_state")
                 .select("metadata")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             # Merge with existing metadata
             existing_metadata: dict[str, Any] = {}
-            if current and current.data:
-                existing_metadata = current.data.get("metadata", {})  # type: ignore[union-attr]
+            current_record = current.data[0] if current and current.data else None
+            if current_record:
+                existing_metadata = current_record.get("metadata", {})  # type: ignore[union-attr]
 
             existing_metadata["email_bootstrap"] = status_data
 

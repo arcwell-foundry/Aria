@@ -819,13 +819,14 @@ If graph context is available, identify implication chains — non-obvious multi
                 client.table("goals")
                 .select("config, status")
                 .eq("id", goal_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not goal_result.data:
+            goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+            if not goal_record:
                 return {**existing_orientation, "connection_changes": connection_changes}
 
-            goal_config = goal_result.data.get("config", {}) or {}
+            goal_config = goal_record.get("config", {}) or {}
             capability_gaps = goal_config.get("capability_gaps", [])
             assessed_at = goal_config.get("capability_assessed_at")
 
@@ -1432,11 +1433,12 @@ Select the best action to make progress toward the goal."""
                     client.table("goals")
                     .select("config")
                     .eq("id", goal_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if goal_result.data:
-                    config = goal_result.data.get("config", {}) or {}
+                goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+                if goal_record:
+                    config = goal_record.get("config", {}) or {}
                     gaps = config.get("capability_gaps", [])
                     updated_gaps = [
                         g for g in gaps

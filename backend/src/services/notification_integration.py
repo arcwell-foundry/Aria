@@ -58,13 +58,13 @@ async def notify_briefing_ready_with_video(user_id: str, briefing_date: str) -> 
             db.table("user_preferences")
             .select("video_briefing_enabled")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-
+        prefs_record = prefs_result.data[0] if prefs_result and prefs_result.data else None
         video_enabled = False
-        if prefs_result and prefs_result.data:
-            video_enabled = prefs_result.data.get("video_briefing_enabled", False)
+        if prefs_record:
+            video_enabled = prefs_record.get("video_briefing_enabled", False)
 
         if video_enabled:
             # Create video briefing session

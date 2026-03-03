@@ -368,7 +368,7 @@ async def approve_draft(
             .select("id, status, user_id, recipient_name, subject, body")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
     except Exception as e:
@@ -378,13 +378,14 @@ async def approve_draft(
             detail="Failed to look up draft",
         ) from e
 
-    if not result.data:
+    record = result.data[0] if result and result.data else None
+    if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Draft {draft_id} not found",
         )
 
-    draft_data = result.data
+    draft_data = record
     if draft_data["status"] != "pending_review":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -505,7 +506,7 @@ async def dismiss_draft(
             .select("id, user_id, recipient_name, subject")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
     except Exception as e:
@@ -515,13 +516,12 @@ async def dismiss_draft(
             detail="Failed to look up draft",
         ) from e
 
-    if not result.data:
+    draft_data = result.data[0] if result and result.data else None
+    if not draft_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Draft {draft_id} not found",
         )
-
-    draft_data = result.data
 
     # Update status to dismissed with feedback tracking
     try:

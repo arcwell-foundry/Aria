@@ -718,23 +718,25 @@ class FirstConversationGenerator:
             self._db.table("user_profiles")
             .select("company_id")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not profile.data or not profile.data.get("company_id"):
+        profile_record = profile.data[0] if profile and profile.data else None
+        if not profile_record or not profile_record.get("company_id"):
             return None
 
         company = (
             self._db.table("companies")
             .select("settings")
-            .eq("id", profile.data["company_id"])
-            .maybe_single()
+            .eq("id", profile_record["company_id"])
+            .limit(1)
             .execute()
         )
-        if not company.data:
+        company_record = company.data[0] if company and company.data else None
+        if not company_record:
             return None
 
-        return company.data.get("settings", {}).get("classification")
+        return company_record.get("settings", {}).get("classification")
 
     async def _get_critical_gaps(self, user_id: str) -> list[dict[str, Any]]:
         """Get critical and high-priority knowledge gaps.
@@ -775,10 +777,9 @@ class FirstConversationGenerator:
             .in_("status", ["active", "in_progress", "pending"])
             .order("created_at", desc=False)
             .limit(1)
-            .maybe_single()
             .execute()
         )
-        return result.data
+        return result.data[0] if result and result.data else None
 
     async def _get_digital_twin_config(
         self, user_id: str
@@ -798,13 +799,14 @@ class FirstConversationGenerator:
             self._db.table("user_settings")
             .select("preferences")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if not result.data:
+        settings_record = result.data[0] if result and result.data else None
+        if not settings_record:
             return None, None
 
-        digital_twin = result.data.get("preferences", {}).get("digital_twin", {})
+        digital_twin = settings_record.get("preferences", {}).get("digital_twin", {})
         return (
             digital_twin.get("writing_style"),
             digital_twin.get("personality_calibration"),
@@ -820,6 +822,6 @@ class FirstConversationGenerator:
             Profile dict or None.
         """
         result = (
-            self._db.table("user_profiles").select("*").eq("id", user_id).maybe_single().execute()
+            self._db.table("user_profiles").select("*").eq("id", user_id).limit(1).execute()
         )
-        return result.data
+        return result.data[0] if result and result.data else None

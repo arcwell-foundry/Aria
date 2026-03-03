@@ -51,11 +51,12 @@ class OnboardingOrchestrator:
             self._db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        state_record = response.data[0] if response and response.data else None
 
-        if response and response.data:
+        if state_record:
             state = self._parse_state(cast(dict[str, Any], response.data))
 
             # Backfill step_data from existing database records if missing
@@ -115,17 +116,18 @@ class OnboardingOrchestrator:
                 self._db.table("user_profiles")
                 .select("company_id, companies(name, domain, website)")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile and profile.data:
-                company = profile.data.get("companies", {})
+            profile_record = profile.data[0] if profile and profile.data else None
+            if profile_record:
+                company = profile_record.get("companies", {})
                 if company:
                     step_data["company_discovery"] = {
                         "company_name": company.get("name", ""),
                         "website": company.get("website", "") or f"https://{company.get('domain', '')}",
                         "email": "",  # Can't retrieve from auth for privacy
-                        "company_id": profile.data.get("company_id"),
+                        "company_id": profile_record.get("company_id"),
                     }
                     updated = True
 
@@ -135,17 +137,18 @@ class OnboardingOrchestrator:
                 self._db.table("user_profiles")
                 .select("full_name, title, department, linkedin_url, phone, role_type")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile and profile.data:
+            profile_record = profile.data[0] if profile and profile.data else None
+            if profile_record:
                 step_data["user_profile"] = {
-                    "full_name": profile.data.get("full_name", ""),
-                    "title": profile.data.get("title", ""),
-                    "department": profile.data.get("department", ""),
-                    "linkedin_url": profile.data.get("linkedin_url", ""),
-                    "phone": profile.data.get("phone", ""),
-                    "role_type": profile.data.get("role_type", ""),
+                    "full_name": profile_record.get("full_name", ""),
+                    "title": profile_record.get("title", ""),
+                    "department": profile_record.get("department", ""),
+                    "linkedin_url": profile_record.get("linkedin_url", ""),
+                    "phone": profile_record.get("phone", ""),
+                    "role_type": profile_record.get("role_type", ""),
                 }
                 updated = True
 
@@ -364,12 +367,12 @@ class OnboardingOrchestrator:
             self._db.table("user_profiles")
             .select("role")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if profile_response and profile_response.data:
-            profile_data = cast(dict[str, Any], profile_response.data)
-            if profile_data.get("role") == "admin":
+        profile_record = profile_response.data[0] if profile_response and profile_response.data else None
+        if profile_record:
+            if profile_record.get("role") == "admin":
                 return "admin"
 
         # Check onboarding state
@@ -377,14 +380,15 @@ class OnboardingOrchestrator:
             self._db.table("onboarding_state")
             .select("completed_at, current_step")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not state_response or not state_response.data:
+        state_record = state_response.data[0] if state_response and state_response.data else None
+        if not state_record:
             return "onboarding"
 
-        state_data = cast(dict[str, Any], state_response.data)
+        state_data = cast(dict[str, Any], state_record)
         if state_data.get("completed_at"):
             return "dashboard"
 
@@ -481,11 +485,12 @@ class OnboardingOrchestrator:
             self._db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if response and response.data:
-            return self._parse_state(cast(dict[str, Any], response.data))
+        state_record = response.data[0] if response and response.data else None
+        if state_record:
+            return self._parse_state(cast(dict[str, Any], state_record))
         return None
 
     async def _trigger_step_processing(
@@ -601,13 +606,14 @@ class OnboardingOrchestrator:
                 self._db.table("user_profiles")
                 .select("company_id, companies(name)")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
             company_name = ""
-            if profile and profile.data:
-                company = profile.data.get("companies")
+            profile_record = profile.data[0] if profile and profile.data else None
+            if profile_record:
+                company = profile_record.get("companies")
                 if company:
                     company_name = company.get("name", "")
 

@@ -107,11 +107,12 @@ async def _get_user_tenant_id(user_id: str) -> str | None:
             db.table("user_profiles")
             .select("company_id")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result.data:
-            return result.data.get("company_id")
+        record = result.data[0] if result and result.data else None
+        if record:
+            return record.get("company_id")
         return None
     except Exception:
         logger.exception("Failed to fetch user tenant_id")

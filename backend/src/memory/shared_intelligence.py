@@ -165,14 +165,13 @@ class SharedIntelligenceService:
                 self._db.table("user_profiles")
                 .select("id, company_id, team_intelligence_opt_in, team_intelligence_opt_in_at")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if not result or not result.data:
+            data = result.data[0] if result and result.data else None
+            if not data:
                 return None
-
-            data = result.data
             return UserOptInStatus(
                 user_id=user_id,
                 company_id=data.get("company_id") or "",
@@ -432,12 +431,13 @@ class SharedIntelligenceService:
                 .eq("predicate", predicate)
                 .eq("object", object)
                 .eq("is_active", True)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                return self._row_to_fact(result.data)
+            record = result.data[0] if result and result.data else None
+            if record:
+                return self._row_to_fact(record)
 
             return None
 

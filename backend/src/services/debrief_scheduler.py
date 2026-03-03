@@ -137,11 +137,11 @@ class DebriefScheduler:
                     .select("id")
                     .eq("user_id", user_id)
                     .eq("meeting_id", event["id"])
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-
-                if debrief_response.data:
+                debrief_record = debrief_response.data[0] if debrief_response and debrief_response.data else None
+                if debrief_record:
                     # Debrief already exists, skip
                     continue
 
@@ -310,11 +310,12 @@ class DebriefScheduler:
                     .select("id")
                     .eq("user_id", user_id)
                     .eq("meeting_id", event["id"])
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
+                debrief_record = debrief_response.data[0] if debrief_response and debrief_response.data else None
 
-                if not debrief_response.data:
+                if not debrief_record:
                     count += 1
 
             return count

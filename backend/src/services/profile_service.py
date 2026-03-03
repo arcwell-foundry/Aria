@@ -230,11 +230,12 @@ class ProfileService:
                                 self.db.table("companies")
                                 .select("name")
                                 .eq("id", company_id)
-                                .maybe_single()
+                                .limit(1)
                                 .execute()
                             )
-                            if comp_resp.data:
-                                company_name = comp_resp.data.get("name", "")
+                            comp_record = comp_resp.data[0] if comp_resp and comp_resp.data else None
+                            if comp_record:
+                                company_name = comp_record.get("name", "")
                         except Exception:
                             pass
 

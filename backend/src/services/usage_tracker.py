@@ -83,11 +83,12 @@ async def check_rate_limit(user_id: str, api_type: str) -> bool:
             .eq("user_id", user_id)
             .eq("date", date.today().isoformat())
             .eq("api_type", api_type)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result and result.data:
-            current_count = result.data.get("call_count", 0)
+        record = result.data[0] if result and result.data else None
+        if record:
+            current_count = record.get("call_count", 0)
             return current_count < limit
         return True  # No usage row yet, within limits
     except Exception:

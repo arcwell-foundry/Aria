@@ -104,18 +104,18 @@ class DeepSyncService:
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
             .eq("status", "active")
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not integration_response.data:
+        integration = integration_response.data[0] if integration_response and integration_response.data else None
+        if not integration:
             logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise CRMSyncError(
                 message=f"No active {integration_type.value} integration found for user",
                 provider=integration_type.value,
             )
 
-        integration = integration_response.data
         connection_id = integration.get("composio_connection_id")
 
         if not connection_id:
@@ -1015,14 +1015,15 @@ class DeepSyncService:
             now = datetime.now(UTC)
 
             # Check if state exists
-            existing = (
+            existing_result = (
                 client.table("integration_sync_state")
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", integration_type.value)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            existing = existing_result.data[0] if existing_result and existing_result.data else None
 
             data = {
                 "user_id": user_id,
@@ -1034,7 +1035,7 @@ class DeepSyncService:
                 "updated_at": now.isoformat(),
             }
 
-            if existing.data:
+            if existing:
                 # Update existing
                 client.table("integration_sync_state").update(data).eq("user_id", user_id).eq(
                     "integration_type", integration_type.value
@@ -1177,18 +1178,18 @@ class DeepSyncService:
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
             .eq("status", "active")
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not integration_response.data:
+        integration = integration_response.data[0] if integration_response and integration_response.data else None
+        if not integration:
             logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise CRMSyncError(
                 message=f"No active {integration_type.value} integration found for user",
                 provider=integration_type.value,
             )
 
-        integration = integration_response.data
         connection_id = integration.get("composio_connection_id")
 
         if not connection_id:
@@ -1794,15 +1795,15 @@ class DeepSyncService:
             .eq("user_id", user_id)
             .eq("integration_type", integration_type.value)
             .eq("status", "active")
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not integration_response.data:
+        integration = integration_response.data[0] if integration_response and integration_response.data else None
+        if not integration:
             logger.warning("No active %s integration for user %s", integration_type.value, user_id)
             raise Exception(f"No active {integration_type.value} integration found for user")
 
-        integration = integration_response.data
         connection_id = integration.get("composio_connection_id")
 
         if not connection_id:

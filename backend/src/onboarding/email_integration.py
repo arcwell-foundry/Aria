@@ -151,13 +151,13 @@ class EmailIntegrationService:
             .select("*")
             .eq("user_id", user_id)
             .eq("integration_type", integration_type)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
         if result and result.data:
             # Type ignore: Supabase returns Any but we know it's a dict at runtime
-            data: dict[str, Any] = result.data  # type: ignore[assignment]
+            data: dict[str, Any] = result.data[0]  # type: ignore[assignment]
             # Check if status is actually "active", not just that a row exists
             is_active = data.get("status") == "active"
             return {
@@ -253,11 +253,12 @@ class EmailIntegrationService:
             self._db.table("user_settings")
             .select("integrations")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        existing_record = existing.data[0] if existing and existing.data else None
         merged_integrations = (
-            existing.data.get("integrations", {}) if existing and existing.data else {}
+            existing_record.get("integrations", {}) if existing_record else {}
         )
         merged_integrations["email"] = {
             "provider": config.provider,

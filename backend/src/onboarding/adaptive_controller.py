@@ -388,11 +388,11 @@ class OnboardingOODAController:
             self._db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if response and response.data:
-            return cast(dict[str, Any], response.data)
+            return cast(dict[str, Any], response.data[0])
         return None
 
     async def _get_classification(self, user_id: str) -> dict[str, Any] | None:
@@ -409,11 +409,11 @@ class OnboardingOODAController:
                 self._db.table("onboarding_state")
                 .select("metadata")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if response and response.data:
-                row = cast(dict[str, Any], response.data)
+                row = cast(dict[str, Any], response.data[0])
                 metadata: dict[str, Any] = row.get("metadata", {})
                 if metadata.get("classification"):
                     return cast(dict[str, Any], metadata["classification"])
@@ -423,21 +423,21 @@ class OnboardingOODAController:
                 self._db.table("user_profiles")
                 .select("company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if profile and profile.data:
-                profile_row = cast(dict[str, Any], profile.data)
+                profile_row = cast(dict[str, Any], profile.data[0])
                 if profile_row.get("company_id"):
                     company = (
                         self._db.table("companies")
                         .select("settings")
                         .eq("id", profile_row["company_id"])
-                        .maybe_single()
+                        .limit(1)
                         .execute()
                     )
                     if company and company.data:
-                        company_row = cast(dict[str, Any], company.data)
+                        company_row = cast(dict[str, Any], company.data[0])
                         settings: dict[str, Any] = company_row.get("settings", {})
                         if settings.get("classification"):
                             return cast(dict[str, Any], settings["classification"])

@@ -1005,11 +1005,12 @@ async def trigger_goal_execution(
             db.table("goals")
             .select("id, user_id, title, status, progress")
             .eq("id", goal_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        goal_record = goal_result.data[0] if goal_result and goal_result.data else None
 
-        if not goal_result.data:
+        if not goal_record:
             from fastapi import HTTPException
 
             raise HTTPException(
@@ -1017,7 +1018,7 @@ async def trigger_goal_execution(
                 detail=f"Goal {goal_id} not found",
             )
 
-        goal = goal_result.data
+        goal = goal_record
         user_id = goal["user_id"]
 
         # Backfill goal_agents if missing

@@ -117,14 +117,15 @@ async def run_weekly_digest_job() -> dict[str, Any]:
 
             # Video briefing if enabled
             try:
-                prefs = (
+                prefs_result = (
                     db.table("user_preferences")
                     .select("video_briefing_enabled")
                     .eq("user_id", user_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if prefs and prefs.data and prefs.data.get("video_briefing_enabled"):
+                prefs = prefs_result.data[0] if prefs_result and prefs_result.data else None
+                if prefs and prefs.get("video_briefing_enabled"):
                     from src.integrations.tavus_persona import SessionType
                     from src.services.video_service import VideoSessionService
 

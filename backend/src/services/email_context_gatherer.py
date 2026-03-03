@@ -799,12 +799,13 @@ class EmailContextGatherer:
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                self._cached_user_email = result.data.get("account_email", "") or ""
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                self._cached_user_email = record.get("account_email", "") or ""
+                return record
 
             result = (
                 self._db.table("user_integrations")
@@ -812,12 +813,13 @@ class EmailContextGatherer:
                 .eq("user_id", user_id)
                 .eq("integration_type", "gmail")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                self._cached_user_email = result.data.get("account_email", "") or ""
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                self._cached_user_email = record.get("account_email", "") or ""
+                return record
 
             logger.warning("No active email integration for user %s", user_id)
             return None
@@ -1084,19 +1086,19 @@ Summary:"""
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("recipient_email", sender_email.lower())
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result.data:
-                data = result.data
+            record = result.data[0] if result and result.data else None
+            if record:
                 style.exists = True
-                style.formality_level = data.get("formality_level", 0.5)
-                style.greeting_style = data.get("greeting_style", "")
-                style.signoff_style = data.get("signoff_style", "")
-                style.tone = data.get("tone", "balanced")
-                style.uses_emoji = data.get("uses_emoji", False)
-                style.email_count = data.get("email_count", 0)
+                style.formality_level = record.get("formality_level", 0.5)
+                style.greeting_style = record.get("greeting_style", "")
+                style.signoff_style = record.get("signoff_style", "")
+                style.tone = record.get("tone", "balanced")
+                style.uses_emoji = record.get("uses_emoji", False)
+                style.email_count = record.get("email_count", 0)
 
                 logger.info(
                     "CONTEXT_GATHERER: Found per-recipient style for %s (%d emails)",
@@ -1117,12 +1119,13 @@ Summary:"""
                 self._db.table("digital_twin_profiles")
                 .select("tone, formality_level, writing_style, metadata")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if twin_result.data:
-                twin = twin_result.data
+            twin_record = twin_result.data[0] if twin_result and twin_result.data else None
+            if twin_record:
+                twin = twin_record
                 style.exists = True
                 style.tone = twin.get("tone", "balanced")
 
@@ -1231,12 +1234,13 @@ Summary:"""
                 .select("email_count, last_email_date, relationship_type, tone")
                 .eq("user_id", user_id)
                 .eq("recipient_email", sender_email.lower())
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if profile_result.data:
-                profile = profile_result.data
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if profile_record:
+                profile = profile_record
                 history.total_emails = profile.get("email_count", 0)
                 if profile.get("last_email_date"):
                     history.last_interaction = profile["last_email_date"]
@@ -1579,11 +1583,12 @@ Summary:"""
                 .eq("user_id", user_id)
                 .eq("integration_type", "googlecalendar")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record
 
             result = (
                 self._db.table("user_integrations")
@@ -1591,11 +1596,12 @@ Summary:"""
                 .eq("user_id", user_id)
                 .eq("integration_type", "outlook365calendar")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record
 
             logger.warning("No active calendar integration for user %s", user_id)
             return None
@@ -1779,11 +1785,12 @@ Summary:"""
                 .eq("user_id", user_id)
                 .eq("integration_type", "salesforce")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record
 
             result = (
                 self._db.table("user_integrations")
@@ -1791,11 +1798,12 @@ Summary:"""
                 .eq("user_id", user_id)
                 .eq("integration_type", "hubspot")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result.data:
-                return result.data
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record
 
             logger.warning("No active CRM integration for user %s", user_id)
             return None
@@ -2373,12 +2381,12 @@ Return ONLY the JSON array, nothing else."""
                 .gte("created_at", cutoff)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
 
-            if result.data:
-                return self._row_to_context(result.data)
+            record = result.data[0] if result and result.data else None
+            if record:
+                return self._row_to_context(record)
 
         except Exception as e:
             logger.warning(

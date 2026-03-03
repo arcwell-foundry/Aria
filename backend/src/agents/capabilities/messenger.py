@@ -766,11 +766,12 @@ class TeamMessengerCapability(BaseCapability):
                 .eq("user_id", user_id)
                 .eq("integration_type", "slack")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp.data and resp.data.get("composio_connection_id"):
-                return str(resp.data["composio_connection_id"])
+            record = resp.data[0] if resp and resp.data else None
+            if record and record.get("composio_connection_id"):
+                return str(record["composio_connection_id"])
         except Exception:
             logger.warning(
                 "Failed to lookup Slack integration",
@@ -793,11 +794,12 @@ class TeamMessengerCapability(BaseCapability):
                 .eq("user_id", user_id)
                 .eq("integration_type", "slack")
                 .eq("status", "active")
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if resp.data:
-                return resp.data.get("metadata") or {}
+            record = resp.data[0] if resp and resp.data else None
+            if record:
+                return record.get("metadata") or {}
         except Exception:
             logger.warning(
                 "Failed to fetch Slack metadata",

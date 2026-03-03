@@ -729,27 +729,27 @@ async def _resolve_entity_to_user(entity_id: str) -> str | None:
         client = SupabaseClient.get_client()
 
         # Search by entity_id in user_connections
-        result = (
+        conn_result = (
             client.table("user_connections")
             .select("user_id")
             .eq("composio_entity_id", entity_id)
             .limit(1)
-            .maybe_single()
             .execute()
         )
-        if result.data:
-            return result.data["user_id"]
+        conn_record = conn_result.data[0] if conn_result and conn_result.data else None
+        if conn_record:
+            return conn_record["user_id"]
 
         # Fallback: search user_profiles by ID prefix
-        result = (
+        profile_result = (
             client.table("user_profiles")
             .select("id")
             .like("id", f"{prefix}%")
             .limit(1)
-            .maybe_single()
             .execute()
         )
-        return result.data["id"] if result.data else None
+        profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+        return profile_record["id"] if profile_record else None
     except Exception:
         logger.warning("Failed to resolve entity %s to user", entity_id, exc_info=True)
         return None

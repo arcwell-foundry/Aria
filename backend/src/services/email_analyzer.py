@@ -1045,9 +1045,8 @@ class EmailAnalyzer:
             }
 
             # Also check the user_profiles table for primary email
-            # NOTE: Avoid maybe_single() here — postgrest-py raises
-            # APIError(code=204) when 0 rows are returned, which is the
-            # normal case for senders that aren't the user.
+            # NOTE: Use limit(1) instead of single() to avoid postgrest-py 204 APIError
+            # on empty results. This is normal for senders that aren't the user.
             profiles = (
                 self._db.table("user_profiles")
                 .select("email")

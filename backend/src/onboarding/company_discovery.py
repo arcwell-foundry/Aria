@@ -152,11 +152,11 @@ Respond in JSON format:
                 self._db.table("companies")
                 .select("*")
                 .eq("domain", domain)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if result.data:  # type: ignore[union-attr]
-                return dict(result.data)  # type: ignore[union-attr, arg-type]
+                return dict(result.data[0])  # type: ignore[union-attr, arg-type]
             return None
         except Exception as e:
             logger.warning(f"Error checking existing company: {e}")

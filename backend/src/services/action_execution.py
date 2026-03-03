@@ -230,14 +230,15 @@ class ActionExecutionService:
             .select("*")
             .eq("action_id", action_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not result or not result.data:
+        undo_record = result.data[0] if result and result.data else None
+        if not undo_record:
             return {"success": False, "reason": "No undo entry found for this action"}
 
-        undo_entry = cast(dict[str, Any], result.data)
+        undo_entry = cast(dict[str, Any], undo_record)
 
         # Check if already undone
         if undo_entry.get("undo_requested"):
@@ -266,11 +267,12 @@ class ActionExecutionService:
             .select("*")
             .eq("id", action_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        action = cast(dict[str, Any], action_result.data) if action_result and action_result.data else {}
+        action_record = action_result.data[0] if action_result and action_result.data else None
+        action = cast(dict[str, Any], action_record) if action_record else {}
         action_title = action.get("title", "")
 
         # Attempt reversal
@@ -348,11 +350,12 @@ class ActionExecutionService:
             .select("undo_requested")
             .eq("action_id", action_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if result and result.data and result.data.get("undo_requested"):
+        undo_record = result.data[0] if result and result.data else None
+        if undo_record and undo_record.get("undo_requested"):
             logger.debug(
                 "Skipping finalization — undo already requested",
                 extra={"action_id": action_id},
@@ -365,14 +368,15 @@ class ActionExecutionService:
             .select("status, action_type")
             .eq("id", action_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not action_result or not action_result.data:
+        action_record = action_result.data[0] if action_result and action_result.data else None
+        if not action_record:
             return
 
-        if action_result.data.get("status") != ActionStatus.UNDO_PENDING.value:
+        if action_record.get("status") != ActionStatus.UNDO_PENDING.value:
             return
 
         now = datetime.now(UTC).isoformat()
@@ -384,7 +388,7 @@ class ActionExecutionService:
         ).eq("id", action_id).eq("user_id", user_id).execute()
 
         # Update trust on success (undo window passed without undo)
-        category = action_type_to_category(action_result.data.get("action_type", ""))
+        category = action_type_to_category(action_record.get("action_type", ""))
         await self._trust.update_on_success(user_id, category)
 
         logger.info(

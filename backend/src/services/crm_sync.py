@@ -299,17 +299,18 @@ class CRMSyncService:
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("integration_type", provider)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if response.data is None:
+            record = response.data[0] if response and response.data else None
+            if record is None:
                 raise CRMConnectionError(
                     provider=provider,
                     message=f"No {provider} integration found for user",
                 )
 
-            return str(response.data["composio_connection_id"])
+            return str(record["composio_connection_id"])
 
         except CRMConnectionError:
             raise

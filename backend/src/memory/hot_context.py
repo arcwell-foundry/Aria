@@ -218,10 +218,10 @@ class HotContextBuilder:
                 self.db.table("user_profiles")
                 .select("full_name, role, company_id, companies(name)")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            data = result.data if result else None
+            data = result.data[0] if result and result.data else None
             if not data:
                 return None
 

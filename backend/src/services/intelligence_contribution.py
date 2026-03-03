@@ -162,12 +162,13 @@ class IntelligenceContributionService:
                 self._db.table("user_profiles")
                 .select("company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                return result.data.get("company_id")
+            record = result.data[0] if result and result.data else None
+            if record:
+                return record.get("company_id")
 
             return None
 
@@ -194,13 +195,14 @@ class IntelligenceContributionService:
                 self._db.table("goals")
                 .select("metadata, context")
                 .eq("id", goal_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
 
-            if result and result.data:
-                metadata = result.data.get("metadata", {}) or {}
-                context = result.data.get("context", {}) or {}
+            record = result.data[0] if result and result.data else None
+            if record:
+                metadata = record.get("metadata", {}) or {}
+                context = record.get("context", {}) or {}
 
                 # Check common locations for account name
                 account_name = (

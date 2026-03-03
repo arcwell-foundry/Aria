@@ -279,11 +279,12 @@ class WorkingMemoryManager:
                 db.table("conversations")
                 .select("working_memory")
                 .eq("id", conversation_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data and result.data.get("working_memory"):
-                return WorkingMemory.from_dict(result.data["working_memory"])
+            record = result.data[0] if result and result.data else None
+            if record and record.get("working_memory"):
+                return WorkingMemory.from_dict(record["working_memory"])
         except Exception:
             pass
         return None

@@ -279,17 +279,15 @@ async def get_scan_status(current_user: CurrentUser) -> dict[str, Any]:
             .eq("user_id", user_id)
             .order("started_at", desc=True)
             .limit(1)
-            .maybe_single()
             .execute()
         )
+        run = result.data[0] if result and result.data else None
 
-        if not result.data:
+        if not run:
             return {
                 "has_previous_scan": False,
                 "message": "No previous inbox scan found",
             }
-
-        run = result.data
         return {
             "has_previous_scan": True,
             "run_id": run.get("id"),

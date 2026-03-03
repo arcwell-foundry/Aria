@@ -753,14 +753,15 @@ class MeetingIntelligenceCapability(BaseCapability):
                 .select("id")
                 .eq("user_id", user_id)
                 .eq("meeting_id", meeting_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            existing_record = existing.data[0] if existing and existing.data else None
 
-            if existing.data:
+            if existing_record:
                 client.table("meeting_debriefs").update(
                     {"insights": insights_payload, "updated_at": now.isoformat()},
-                ).eq("id", existing.data["id"]).execute()
+                ).eq("id", existing_record["id"]).execute()
             else:
                 client.table("meeting_debriefs").insert(
                     {
@@ -804,16 +805,17 @@ class MeetingIntelligenceCapability(BaseCapability):
                 .select("id, insights")
                 .eq("user_id", user_id)
                 .eq("meeting_id", meeting_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
+            existing_record = existing.data[0] if existing and existing.data else None
 
-            if existing.data:
-                current_insights = existing.data.get("insights") or {}
+            if existing_record:
+                current_insights = existing_record.get("insights") or {}
                 current_insights["coaching"] = coaching.model_dump()
                 client.table("meeting_debriefs").update(
                     {"insights": current_insights, "updated_at": now.isoformat()},
-                ).eq("id", existing.data["id"]).execute()
+                ).eq("id", existing_record["id"]).execute()
             else:
                 logger.warning(
                     "No meeting_debriefs row to store coaching; creating one",

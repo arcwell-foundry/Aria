@@ -112,11 +112,12 @@ class CrossUserAccelerationService:
             self._db.table("companies")
             .select("id, name, domain")
             .eq("domain", normalized_domain)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not result or not result.data:
+        company_record = result.data[0] if result and result.data else None
+        if not company_record:
             # Company doesn't exist
             return CompanyCheckResult(
                 exists=False,
@@ -126,7 +127,7 @@ class CrossUserAccelerationService:
                 recommendation="full",
             )
 
-        company = result.data
+        company = company_record
         company_id = company["id"]
         company_name = company["name"]
 

@@ -280,21 +280,21 @@ class SkillCreationEngine:
                 .select("company_id")
                 .eq("id", user_id)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            if not profile_result.data or not profile_result.data.get("company_id"):
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if not profile_record or not profile_record.get("company_id"):
                 return None
 
             config_result = (
                 self._db.table("tenant_capability_config")
                 .select("*")
-                .eq("tenant_id", profile_result.data["company_id"])
+                .eq("tenant_id", profile_record["company_id"])
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
-            return config_result.data if config_result.data else None
+            config_record = config_result.data[0] if config_result and config_result.data else None
+            return config_record if config_record else None
         except Exception as e:
             logger.debug("Failed to load tenant config: %s", e)
             return None

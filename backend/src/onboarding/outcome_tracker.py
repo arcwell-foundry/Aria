@@ -62,14 +62,15 @@ class OnboardingOutcomeTracker:
             self._db.table("onboarding_state")
             .select("*")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not state_response or not state_response.data:
+        state_record = state_response.data[0] if state_response and state_response.data else None
+        if not state_record:
             raise ValueError(f"Onboarding state not found for user {user_id}")
 
-        state = state_response.data
+        state = state_record
         if not isinstance(state, dict):
             raise ValueError(f"Invalid onboarding state data for user {user_id}")
 
@@ -124,11 +125,12 @@ class OnboardingOutcomeTracker:
                     self._db.table("companies")
                     .select("settings")
                     .eq("id", company_discovery["company_id"])
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if company_result and company_result.data:
-                    settings = company_result.data.get("settings", {})
+                company_record = company_result.data[0] if company_result and company_result.data else None
+                if company_record:
+                    settings = company_record.get("settings", {})
                     if isinstance(settings, dict):
                         classification = settings.get("classification", {})
                         if isinstance(classification, dict):

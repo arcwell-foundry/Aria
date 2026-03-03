@@ -454,15 +454,16 @@ class GoalExecutionService:
             .select("*, goal_agents(*)")
             .eq("id", goal_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
 
-        if not goal_result or not goal_result.data:
+        goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+        if not goal_record:
             logger.warning("Goal not found", extra={"goal_id": goal_id})
             return {"goal_id": goal_id, "status": "not_found", "results": []}
 
-        goal = goal_result.data
+        goal = goal_record
 
         # Update goal status to active
         now = datetime.now(UTC).isoformat()
@@ -2439,9 +2440,10 @@ class GoalExecutionService:
         """
         # Get user profile
         profile_result = (
-            self._db.table("user_profiles").select("*").eq("id", user_id).maybe_single().execute()
+            self._db.table("user_profiles").select("*").eq("id", user_id).limit(1).execute()
         )
-        profile = (profile_result.data if profile_result else None) or {}
+        profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+        profile = profile_record if profile_record else {}
 
         # Get company info
         company: dict[str, Any] = {}
@@ -2450,10 +2452,11 @@ class GoalExecutionService:
                 self._db.table("companies")
                 .select("*")
                 .eq("id", profile["company_id"])
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            company = (company_result.data if company_result else None) or {}
+            company_record = company_result.data[0] if company_result and company_result.data else None
+            company = company_record if company_record else {}
 
         # Get top semantic facts
         facts_result = (
@@ -2485,10 +2488,11 @@ class GoalExecutionService:
             self._db.table("onboarding_state")
             .select("readiness_scores")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        readiness = ((state_result.data if state_result else None) or {}).get("readiness_scores", {})
+        state_record = state_result.data[0] if state_result and state_result.data else None
+        readiness = (state_record or {}).get("readiness_scores", {})
 
         # Build enrichment summary from facts
         fact_texts = [f.get("fact", "") for f in facts[:20]]
@@ -2511,22 +2515,24 @@ class GoalExecutionService:
                 self._db.table("user_profiles")
                 .select("role, title, full_name, company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile_result and profile_result.data:
-                context["user_profile"] = profile_result.data
-                company_id = profile_result.data.get("company_id")
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            if profile_record:
+                context["user_profile"] = profile_record
+                company_id = profile_record.get("company_id")
                 if company_id:
                     company_result = (
                         self._db.table("companies")
                         .select("name")
                         .eq("id", company_id)
-                        .maybe_single()
+                        .limit(1)
                         .execute()
                     )
-                    if company_result and company_result.data:
-                        context["company_name"] = company_result.data.get("name", "")
+                    company_record = company_result.data[0] if company_result and company_result.data else None
+                    if company_record:
+                        context["company_name"] = company_record.get("name", "")
         except Exception as e:
             logger.warning("Failed to fetch user profile for context: %s", e)
 
@@ -2536,11 +2542,12 @@ class GoalExecutionService:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if settings_result and settings_result.data:
-                prefs = settings_result.data.get("preferences", {})
+            settings_record = settings_result.data[0] if settings_result and settings_result.data else None
+            if settings_record:
+                prefs = settings_record.get("preferences", {})
                 aria_config = prefs.get("aria_config", {})
                 if aria_config:
                     context["aria_config"] = aria_config
@@ -2814,10 +2821,11 @@ class GoalExecutionService:
                 self._db.table("user_profiles")
                 .select("company_id")
                 .eq("id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            company_id = (profile_result.data or {}).get("company_id")
+            profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+            company_id = (profile_record or {}).get("company_id")
             resources["company_id"] = company_id
             if company_id:
                 # Try corporate_facts first, fall back to memory_semantic
@@ -2871,10 +2879,11 @@ class GoalExecutionService:
             .select("*")
             .eq("id", goal_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        goal = goal_result.data if goal_result else None
+        goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+        goal = goal_record
         if not goal:
             return {"goal_id": goal_id, "error": "Goal not found", "tasks": []}
 
@@ -3592,10 +3601,11 @@ class GoalExecutionService:
             self._db.table("goals")
             .select("status")
             .eq("id", goal_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if goal_check.data and goal_check.data.get("status") != "active":
+        goal_check_record = goal_check.data[0] if goal_check and goal_check.data else None
+        if goal_check_record and goal_check_record.get("status") != "active":
             self._db.table("goals").update(
                 {"status": "active", "started_at": now, "updated_at": now}
             ).eq("id", goal_id).execute()
@@ -3633,10 +3643,11 @@ class GoalExecutionService:
                 .select("status")
                 .eq("id", goal_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if goal_check.data and goal_check.data.get("status") == "plan_ready":
+            goal_check_record = goal_check.data[0] if goal_check and goal_check.data else None
+            if goal_check_record and goal_check_record.get("status") == "plan_ready":
                 logger.info(
                     "Goal is plan_ready — skipping execution (awaiting user approval)",
                     extra={"goal_id": goal_id, "user_id": user_id},
@@ -3672,12 +3683,12 @@ class GoalExecutionService:
                 .eq("goal_id", goal_id)
                 .order("created_at", desc=True)
                 .limit(1)
-                .maybe_single()
                 .execute()
             )
+            plan_record = plan_result.data[0] if plan_result and plan_result.data else None
 
-            if plan_result.data:
-                tasks_raw = plan_result.data.get("tasks", "[]")
+            if plan_record:
+                tasks_raw = plan_record.get("tasks", "[]")
                 tasks = json.loads(tasks_raw) if isinstance(tasks_raw, str) else tasks_raw
                 # Normalize task dicts: plan_goal() stores "agent" and
                 # "dependencies" but execution code expects "agent_type"
@@ -3698,10 +3709,10 @@ class GoalExecutionService:
                 )
 
                 # Extract execution_mode from stored plan or plan JSON
-                execution_mode = plan_result.data.get("execution_mode", "sequential")
+                execution_mode = plan_record.get("execution_mode", "sequential")
                 if not execution_mode or execution_mode == "sequential":
                     # Check inside the plan JSON blob (reused_workflow stores it there)
-                    plan_blob = plan_result.data.get("plan")
+                    plan_blob = plan_record.get("plan")
                     if plan_blob:
                         parsed = json.loads(plan_blob) if isinstance(plan_blob, str) else plan_blob
                         execution_mode = parsed.get("execution_mode", execution_mode)
@@ -3739,10 +3750,11 @@ class GoalExecutionService:
                 .select("*")
                 .eq("id", goal_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            goal = goal_result.data or {"id": goal_id, "title": "Unknown", "config": {}}
+            goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+            goal = goal_record or {"id": goal_id, "title": "Unknown", "config": {}}
             context = await self._gather_execution_context(user_id)
 
             # Fetch team intelligence once for all agents (fail-open)
@@ -3766,7 +3778,7 @@ class GoalExecutionService:
 
             # Extract conversation_id from plan row for persisting progress messages
             plan_conversation_id = (
-                plan_result.data.get("conversation_id") if plan_result.data else None
+                plan_record.get("conversation_id") if plan_record else None
             )
 
             total_tasks = len(tasks)
@@ -4634,10 +4646,10 @@ class GoalExecutionService:
             .select("id, title, status, progress, started_at, updated_at")
             .eq("id", goal_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        goal = goal_result.data
+        goal = goal_result.data[0] if goal_result and goal_result.data else None
         if not goal:
             return {"goal_id": goal_id, "error": "Goal not found"}
 
@@ -4648,10 +4660,9 @@ class GoalExecutionService:
             .eq("goal_id", goal_id)
             .order("created_at", desc=True)
             .limit(1)
-            .maybe_single()
             .execute()
         )
-        plan = plan_result.data
+        plan = plan_result.data[0] if plan_result and plan_result.data else None
 
         # Fetch recent executions via goal_agents for this goal
         ga_result = (
@@ -4790,12 +4801,13 @@ class GoalExecutionService:
                 self._db.table("goals")
                 .select("title, metadata, context")
                 .eq("id", goal_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if goal_data and goal_data.data:
-                goal_title = goal_data.data.get("title", "")
-                goal_results = goal_data.data.get("metadata", {}).get("agent_results", {})
+            goal_record = goal_data.data[0] if goal_data and goal_data.data else None
+            if goal_record:
+                goal_title = goal_record.get("title", "")
+                goal_results = goal_record.get("metadata", {}).get("agent_results", {})
                 await intel_service.process_goal_completion(
                     user_id=user_id,
                     goal_id=goal_id,
@@ -4809,10 +4821,10 @@ class GoalExecutionService:
         # Analyze signals for accounts/leads discovered during goal execution
         try:
             causal_engine = self._get_causal_engine()
-            if causal_engine and goal_data and goal_data.data:
+            if causal_engine and goal_record:
                 # Extract accounts/leads from goal context
-                goal_context = goal_data.data.get("context", {}) or {}
-                goal_metadata = goal_data.data.get("metadata", {}) or {}
+                goal_context = goal_record.get("context", {}) or {}
+                goal_metadata = goal_record.get("metadata", {}) or {}
 
                 # Look for account names or lead IDs in context/metadata
                 accounts = goal_context.get("accounts", []) or goal_metadata.get("accounts", [])
@@ -4855,11 +4867,12 @@ class GoalExecutionService:
                     self._db.table("goals")
                     .select("title")
                     .eq("id", goal_id)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                if goal_result and goal_result.data:
-                    goal_title = goal_result.data.get("title", "")
+                goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+                if goal_record:
+                    goal_title = goal_record.get("title", "")
             except Exception:
                 pass
 
@@ -5057,14 +5070,15 @@ class GoalExecutionService:
                 self._db.table("goals")
                 .select("*")
                 .eq("id", goal_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if not goal_result.data:
+            goal_record = goal_result.data[0] if goal_result and goal_result.data else None
+            if not goal_record:
                 logger.warning("Goal %s not found for task resumption", goal_id)
                 return
 
-            goal = goal_result.data
+            goal = goal_record
 
             # Gather execution context
             context = await self._gather_execution_context(user_id)

@@ -235,17 +235,18 @@ async def get_webset_job(
             .select("*")
             .eq("id", job_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
+        record = result.data[0] if result and result.data else None
 
-        if not result.data:
+        if not record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Webset job not found",
             )
 
-        return result.data  # type: ignore[return-value]
+        return record  # type: ignore[return-value]
 
     except HTTPException:
         raise
