@@ -170,6 +170,19 @@ Do not include any text outside the JSON object."""
         # Clean up any orphaned runs from previous crashes
         await self._cleanup_stale_runs(user_id)
 
+        # Global per-user lock: skip if another run is already active
+        if await self._is_run_active(user_id):
+            logger.info(
+                "[EMAIL_PIPELINE] Stage: skipped_concurrent | user_id=%s | run_id=%s | "
+                "reason=another run already active for this user",
+                user_id,
+                run_id,
+            )
+            result.status = "skipped"
+            result.error_message = "Another processing run is already active"
+            result.completed_at = datetime.now(UTC)
+            return result
+
         # Create processing run record
         await self._create_processing_run(run_id, user_id, started_at)
 
@@ -663,12 +676,22 @@ Do not include any text outside the JSON object."""
             temperature=0.7,
         )
 
-        # Parse JSON response
+        # Parse JSON response - strip markdown code fences if present
+        text = response.strip()
+        if text.startswith("```"):
+            # Remove opening fence (```json, ```JSON, or plain ```)
+            first_newline = text.find("\n")
+            if first_newline != -1:
+                text = text[first_newline + 1:]
+            # Remove closing fence
+            if text.rstrip().endswith("```"):
+                text = text.rstrip()[:-3].strip()
+
         try:
-            data = json.loads(response.strip())
+            data = json.loads(text)
             return ReplyDraftContent(
                 subject=data.get("subject", f"Re: {email.subject}"),
-                body=data.get("body", response),
+                body=data.get("body", text),
             )
         except json.JSONDecodeError:
             # Fallback: use raw response as body
@@ -678,7 +701,7 @@ Do not include any text outside the JSON object."""
             )
             return ReplyDraftContent(
                 subject=f"Re: {email.subject}",
-                body=response,
+                body=text,
             )
 
     def _build_reply_prompt(
@@ -972,6 +995,40 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             logger.warning("DRAFT_ENGINE: Failed to get user name: %s", e)
 
         return "there"
+
+    async def _is_run_active(self, user_id: str) -> bool:
+        """Check if a processing run is already active for this user.
+
+        Prevents concurrent runs from the scheduler and API endpoint
+        generating duplicate drafts. A run started within the last 10
+        minutes with status 'running' blocks new runs.
+        """
+        try:
+            result = (
+                self._db.table("email_processing_runs")
+                .select("id, started_at")
+                .eq("user_id", user_id)
+                .eq("status", "running")
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                logger.info(
+                    "DRAFT_ENGINE: Active run found for user %s: run_id=%s started_at=%s",
+                    user_id,
+                    result.data[0]["id"],
+                    result.data[0]["started_at"],
+                )
+                return True
+            return False
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to check active runs for user %s: %s",
+                user_id,
+                e,
+            )
+            # On error, allow the run to proceed rather than silently blocking
+            return False
 
     async def _cleanup_stale_runs(self, user_id: str) -> None:
         """Mark runs stuck in 'running' for >10min as failed."""

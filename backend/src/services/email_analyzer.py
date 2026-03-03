@@ -834,7 +834,9 @@ class EmailAnalyzer:
 
             oauth_client = get_oauth_client()
 
-            since_date = (datetime.now(UTC) - timedelta(hours=since_hours)).isoformat()
+            since_datetime = datetime.now(UTC) - timedelta(hours=since_hours)
+            since_date = since_datetime.isoformat()
+            since_epoch = int(since_datetime.timestamp())
 
             if provider == "outlook":
                 logger.info(
@@ -846,6 +848,7 @@ class EmailAnalyzer:
                     action="OUTLOOK_GET_MAIL_DELTA",
                     params={
                         "$top": 200,
+                        "$filter": f"receivedDateTime ge {since_date}",
                     },
                     user_id=user_id,
                 )
@@ -886,6 +889,7 @@ class EmailAnalyzer:
                     params={
                         "label": "INBOX",
                         "max_results": 200,
+                        "query": f"after:{since_epoch}",
                     },
                     user_id=user_id,
                 )
