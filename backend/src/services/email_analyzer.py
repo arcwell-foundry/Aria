@@ -928,17 +928,20 @@ class EmailAnalyzer:
         Returns:
             List of exclusion dicts with 'type' and 'value' keys.
         """
-        result = (
-            self._db.table("user_settings")
-            .select("integrations")
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        if result and result.data:
-            data: dict[str, Any] = result.data  # type: ignore[assignment]
-            email_config = data.get("integrations", {}).get("email", {})
-            return email_config.get("privacy_exclusions", [])
+        try:
+            result = (
+                self._db.table("user_settings")
+                .select("integrations")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                data: dict[str, Any] = result.data[0]
+                email_config = data.get("integrations", {}).get("email", {})
+                return email_config.get("privacy_exclusions", [])
+        except Exception:
+            logger.debug("EMAIL_ANALYZER: Could not load exclusions for %s", user_id)
         return []
 
     def _is_excluded(
@@ -1042,15 +1045,18 @@ class EmailAnalyzer:
             }
 
             # Also check the user_profiles table for primary email
-            profile = (
+            # NOTE: Avoid maybe_single() here — postgrest-py raises
+            # APIError(code=204) when 0 rows are returned, which is the
+            # normal case for senders that aren't the user.
+            profiles = (
                 self._db.table("user_profiles")
                 .select("email")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if profile.data and profile.data.get("email"):
-                user_emails.add(profile.data["email"].lower())
+            if profiles.data and profiles.data[0].get("email"):
+                user_emails.add(profiles.data[0]["email"].lower())
 
             # Also check auth email
             auth_email = await self._get_user_email(user_id)
@@ -1065,11 +1071,14 @@ class EmailAnalyzer:
                 )
                 return True
 
-        except Exception as e:
-            logger.warning(
-                "EMAIL_ANALYZER: Self-sent check failed for %s: %s",
+        except Exception:
+            # A failure here just means we couldn't confirm the sender is
+            # the user — default to treating the email as *not* self-sent,
+            # which is the common path.  Only log at debug to avoid noise
+            # (the previous warning fired for every single email).
+            logger.debug(
+                "EMAIL_ANALYZER: Self-sent check could not resolve for %s",
                 sender,
-                e,
             )
 
         return False
@@ -1371,11 +1380,11 @@ class EmailAnalyzer:
                 self._db.table("user_settings")
                 .select("preferences")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
-                prefs = result.data.get("preferences", {})
+            if result.data:
+                prefs = result.data[0].get("preferences", {})
                 if isinstance(prefs, dict):
                     vip_contacts = prefs.get("vip_contacts", [])
                     if sender_email.lower() in [
