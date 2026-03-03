@@ -276,21 +276,51 @@ class WritingAnalysisService:
                 row = cast(dict[str, Any], result.data[0])
                 current_prefs = row.get("preferences", {}) or {}
 
-            # Merge digital_twin data
-            digital_twin = current_prefs.get("digital_twin", {})
+            # Merge digital_twin data (preserve existing values)
+            digital_twin = current_prefs.get("digital_twin", {}) or {}
             digital_twin["writing_style"] = fingerprint.model_dump()
             digital_twin["writing_style_updated_at"] = datetime.now(UTC).isoformat()
             current_prefs["digital_twin"] = digital_twin
 
             # Update
-            (
+            update_result = (
                 db.table("user_settings")
                 .update({"preferences": current_prefs})
                 .eq("user_id", user_id)
                 .execute()
             )
+
+            # Verify the update succeeded
+            if not update_result.data:
+                logger.error(
+                    "Writing style update returned no data for user %s - update may have failed",
+                    user_id,
+                )
+                return
+
+            # Double-check by reading back
+            verify_result = (
+                db.table("user_settings")
+                .select("preferences->digital_twin->writing_style")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if verify_result and verify_result.data:
+                stored = verify_result.data[0].get("writing_style")
+                if stored:
+                    logger.info(
+                        "Writing style fingerprint stored successfully for user %s (confidence: %.2f)",
+                        user_id,
+                        fingerprint.confidence,
+                    )
+                else:
+                    logger.error(
+                        "Writing style verification failed for user %s - data not present after update",
+                        user_id,
+                    )
         except Exception as e:
-            logger.warning("Failed to store fingerprint: %s", e)
+            logger.error("Failed to store fingerprint for user %s: %s", user_id, e, exc_info=True)
 
     async def _update_readiness(
         self,
