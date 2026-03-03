@@ -561,7 +561,7 @@ class PriorityEmailIngestion:
                 mgr = get_session_manager()
                 response = await mgr.execute_action(
                     user_id=user_id,
-                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+                    action="OUTLOOK_LIST_MESSAGES",
                     params=action_params,
                     connection_id=connection_id,
                 )
@@ -573,7 +573,7 @@ class PriorityEmailIngestion:
                     integration_id=integration_id,
                     connection_id=connection_id,
                     integration_type=integration_type,
-                    action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+                    action="OUTLOOK_LIST_MESSAGES",
                     params=action_params,
                     oauth_client=oauth_client,
                 )

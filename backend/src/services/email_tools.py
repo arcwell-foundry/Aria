@@ -289,7 +289,7 @@ async def _read_recent_emails(
             integration_id=integration_id,
             connection_id=connection_id,
             integration_type=provider,
-            action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+            action="OUTLOOK_LIST_MESSAGES",
             params={"folder": "Inbox", "top": count, "orderby": ["receivedDateTime desc"]},
             oauth_client=oauth_client,
         )
@@ -334,7 +334,7 @@ async def _search_emails(
             integration_id=integration_id,
             connection_id=connection_id,
             integration_type=provider,
-            action="OUTLOOK_OUTLOOK_LIST_MESSAGES",
+            action="OUTLOOK_LIST_MESSAGES",
             params={
                 "folder": "Inbox",
                 "top": max_results,
@@ -385,7 +385,7 @@ async def _read_email_detail(
             integration_id=integration_id,
             connection_id=connection_id,
             integration_type=provider,
-            action="OUTLOOK_OUTLOOK_GET_MESSAGE",
+            action="OUTLOOK_GET_MESSAGE",
             params={"message_id": message_id},
             oauth_client=oauth_client,
         )

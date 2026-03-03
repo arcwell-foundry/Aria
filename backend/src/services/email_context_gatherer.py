@@ -607,7 +607,7 @@ class EmailContextGatherer:
 
         try:
             oauth_client = get_oauth_client()
-            action = "OUTLOOK_OUTLOOK_LIST_MESSAGES"
+            action = "OUTLOOK_LIST_MESSAGES"
             params: dict[str, Any] = {
                 "conversationId": thread_id,
                 "orderby": ["receivedDateTime asc"],
