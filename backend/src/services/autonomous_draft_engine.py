@@ -14,6 +14,7 @@ It does NOT extend DraftService - it uses composition, not inheritance.
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -647,6 +648,67 @@ Do not include any text outside the JSON object."""
             )
 
     # ------------------------------------------------------------------
+    # LLM Response Parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_draft_response(raw_llm_output: str, logger: logging.Logger) -> dict:
+        """Parse LLM draft response, handling all known output formats.
+
+        Handles: fenced JSON, raw JSON, mixed text+JSON, corrupted JSON (reject), plain text.
+
+        Args:
+            raw_llm_output: The raw response string from the LLM.
+            logger: Logger instance for error reporting.
+
+        Returns:
+            Dict with keys: 'subject', 'body', 'parsed' (bool), optionally 'error'.
+        """
+        text = raw_llm_output.strip()
+
+        # Step 1: Strip markdown code fences (```json ... ``` or ``` ... ```)
+        if text.startswith("```"):
+            # Remove opening fence (with optional language tag)
+            text = re.sub(r"^```\w*\n?", "", text)
+            # Remove closing fence
+            text = re.sub(r"\n?```$", "", text)
+            text = text.strip()
+
+        # Step 2: Try to parse as JSON
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                body = parsed.get("body", parsed.get("content", parsed.get("message", "")))
+                subject = parsed.get("subject", "")
+                if body:
+                    # Unescape any escaped newlines from JSON
+                    body = body.replace("\\n", "\n")
+                    return {"subject": subject, "body": body, "parsed": True}
+        except json.JSONDecodeError:
+            pass
+
+        # Step 3: Try to extract JSON from mixed text (LLM wrote explanation + JSON)
+        json_match = re.search(r'\{[^{}]*"body"\s*:\s*"[^"]*"[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                body = parsed.get("body", "")
+                subject = parsed.get("subject", "")
+                if body:
+                    body = body.replace("\\n", "\n")
+                    return {"subject": subject, "body": body, "parsed": True}
+            except json.JSONDecodeError:
+                pass
+
+        # Step 4: If text still contains JSON artifacts, it's corrupted — don't save
+        if text.startswith("{") and '"body"' in text:
+            logger.error("JSON_PARSE_FAILURE: Could not extract body from JSON response")
+            return {"subject": "", "body": "", "parsed": False, "error": "unparseable_json"}
+
+        # Step 5: Plain text response — use as-is
+        return {"subject": "", "body": text, "parsed": True}
+
+    # ------------------------------------------------------------------
     # Scheduling Intent Detection
     # ------------------------------------------------------------------
 
@@ -739,36 +801,37 @@ Do not include any text outside the JSON object."""
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=system_prompt,
-            temperature=0.7,
+            temperature=0.3,  # Lower temperature for consistent JSON output
         )
 
-        # Parse JSON response - strip markdown code fences if present
-        text = response.strip()
-        if text.startswith("```"):
-            # Remove opening fence (```json, ```JSON, or plain ```)
-            first_newline = text.find("\n")
-            if first_newline != -1:
-                text = text[first_newline + 1:]
-            # Remove closing fence
-            if text.rstrip().endswith("```"):
-                text = text.rstrip()[:-3].strip()
+        # Parse LLM response with robust multi-step parser
+        parsed = self._parse_draft_response(response, logger)
 
-        try:
-            data = json.loads(text)
-            return ReplyDraftContent(
-                subject=data.get("subject", f"Re: {email.subject}"),
-                body=data.get("body", text),
-            )
-        except json.JSONDecodeError:
-            # Fallback: use raw response as body
-            logger.warning(
-                "DRAFT_ENGINE: LLM returned non-JSON for email %s, using fallback",
+        # Validation gate: reject unparseable responses
+        if not parsed.get("parsed") or parsed.get("error"):
+            logger.error(
+                "DRAFT_REJECTED: Unparseable LLM response for thread %s, email %s",
+                email.thread_id,
                 email.email_id,
             )
-            return ReplyDraftContent(
-                subject=f"Re: {email.subject}",
-                body=text,
+            raise ValueError(f"Unparseable LLM response: {parsed.get('error', 'unknown')}")
+
+        body = parsed["body"]
+        subject = parsed.get("subject") or f"Re: {email.subject}"
+
+        # Validation gate: reject responses that still contain JSON artifacts
+        if "```" in body or body.strip().startswith("{"):
+            logger.error(
+                "DRAFT_REJECTED: Body still contains JSON artifacts for thread %s, email %s",
+                email.thread_id,
+                email.email_id,
             )
+            raise ValueError("Draft body contains JSON artifacts")
+
+        return ReplyDraftContent(
+            subject=subject,
+            body=body,
+        )
 
     def _build_reply_prompt(
         self,
