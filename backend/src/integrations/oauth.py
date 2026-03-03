@@ -340,9 +340,21 @@ class ComposioOAuthClient:
             tool = self._client.client.tools.retrieve(tool_slug=action)
             versions = getattr(tool, "available_versions", None)
             if versions:
+                logger.info(
+                    "Resolved version for %s: %s (available: %s)",
+                    action,
+                    versions[0],
+                    versions,
+                )
                 return versions[0]  # newest first
+            else:
+                logger.warning(
+                    "No available_versions for action %s - tool response: %s",
+                    action,
+                    tool,
+                )
         except Exception as e:
-            logger.debug("Could not resolve version for %s: %s", action, e)
+            logger.error("Could not resolve version for %s: %s", action, e, exc_info=True)
         return None
 
     async def execute_action(

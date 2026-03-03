@@ -753,6 +753,20 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
     end = now + timedelta(days=7)
     oauth_client = get_oauth_client()
 
+    # Debug: Try to resolve tool version first
+    debug_info: dict[str, Any] = {}
+    try:
+        version = oauth_client._resolve_tool_version("GOOGLECALENDAR_FIND_EVENT")
+        debug_info["google_version"] = version
+    except Exception as e:
+        debug_info["google_version_error"] = str(e)
+
+    try:
+        version = oauth_client._resolve_tool_version("OUTLOOK_GET_CALENDAR_VIEW")
+        debug_info["outlook_version"] = version
+    except Exception as e:
+        debug_info["outlook_version_error"] = str(e)
+
     try:
         if "google" in integration_type:
             response = oauth_client.execute_action_sync(
@@ -825,6 +839,7 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
             "integration_type": integration_type,
             "events": [],
             "synced": 0,
+            "debug": debug_info,
         }
 
     # 3. Sync events to local calendar_events table
@@ -868,7 +883,87 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
         "events": events,
         "event_count": len(events),
         "synced": synced,
+        "debug": debug_info,
     }
+
+
+# ---------------------------------------------------------------------------
+# Calendar Action Discovery
+# ---------------------------------------------------------------------------
+
+
+@router.get("/calendar/discover")
+async def discover_calendar_actions(current_user: CurrentUser) -> dict[str, Any]:
+    """Discover available calendar actions from Composio.
+
+    This endpoint queries Composio to find all available actions for
+    Google Calendar and Outlook calendar integrations.
+    """
+    from composio import App
+
+    from src.integrations.oauth import get_oauth_client
+
+    oauth_client = get_oauth_client()
+    results: dict[str, Any] = {
+        "google_calendar_actions": [],
+        "outlook_calendar_actions": [],
+        "google_version_test": {},
+        "outlook_version_test": {},
+        "errors": [],
+    }
+
+    # Try to discover actions via Composio SDK
+    try:
+        client = oauth_client._client
+        # List all tools and filter for calendar-related ones
+        tools_response = client.client.tools.list()
+        all_tools = list(tools_response.items) if hasattr(tools_response, "items") else []
+
+        for tool in all_tools:
+            tool_slug = getattr(tool, "slug", "").upper()
+            toolkit = getattr(tool, "toolkit", None)
+            toolkit_slug = getattr(toolkit, "slug", "").upper() if toolkit else ""
+
+            if "CALENDAR" in tool_slug or "EVENT" in tool_slug:
+                if "GOOGLE" in toolkit_slug or "GOOGLECALENDAR" in tool_slug:
+                    results["google_calendar_actions"].append({
+                        "slug": tool_slug,
+                        "toolkit": toolkit_slug,
+                    })
+                elif "OUTLOOK" in toolkit_slug or "MICROSOFT" in toolkit_slug:
+                    results["outlook_calendar_actions"].append({
+                        "slug": tool_slug,
+                        "toolkit": toolkit_slug,
+                    })
+    except Exception as e:
+        results["errors"].append(f"Failed to list tools: {e}")
+
+    # Test version resolution for known calendar actions
+    test_actions = [
+        "GOOGLECALENDAR_FIND_EVENT",
+        "GOOGLECALENDAR_GET_EVENTS",
+        "GOOGLECALENDAR_LIST_EVENTS",
+        "GOOGLECALENDAR_LIST_CALENDARS",
+        "OUTLOOK_GET_CALENDAR_VIEW",
+        "OUTLOOK_LIST_CALENDAR_EVENTS",
+        "OUTLOOK_CALENDAR_GET_EVENTS",
+        "MICROSOFTOUTLOOK_GET_CALENDAR_VIEW",
+    ]
+
+    for action in test_actions:
+        try:
+            version = oauth_client._resolve_tool_version(action)
+            if "GOOGLE" in action:
+                results["google_version_test"][action] = version or "NULL"
+            else:
+                results["outlook_version_test"][action] = version or "NULL"
+        except Exception as e:
+            if "GOOGLE" in action:
+                results["google_version_test"][action] = f"ERROR: {e}"
+            else:
+                results["outlook_version_test"][action] = f"ERROR: {e}"
+
+    return results
 
 
 # ---------------------------------------------------------------------------
