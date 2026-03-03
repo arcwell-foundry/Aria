@@ -38,6 +38,7 @@ PURPOSE_DESCRIPTIONS: dict[EmailDraftPurpose, str] = {
     EmailDraftPurpose.PROPOSAL: "a proposal email presenting an offer or solution",
     EmailDraftPurpose.THANK_YOU: "a thank you email expressing gratitude",
     EmailDraftPurpose.CHECK_IN: "a check-in email to maintain the relationship",
+    EmailDraftPurpose.REPLY: "a professional reply to the sender's email",
     EmailDraftPurpose.OTHER: "a general business email",
 }
 
@@ -400,19 +401,41 @@ class DraftService:
             # Get personality calibration (full object for traits)
             calibration = await self._personality_calibrator.get_calibration(user_id)
 
-            # Combine original context with additional context
-            original_context = draft.get("context", {}).get("user_context", "")
-            combined_context = (
-                f"{original_context}\n{additional_context}"
-                if additional_context
-                else original_context
-            )
+            # Build context - for REPLY drafts, load full email context from draft_context table
+            purpose = EmailDraftPurpose(draft["purpose"])
+            combined_context = ""
+
+            if purpose == EmailDraftPurpose.REPLY:
+                # Load full draft context which contains the original email thread
+                full_context = await self._load_draft_context(draft.get("draft_context_id"))
+                if full_context:
+                    combined_context = self._build_reply_context_from_draft_context(full_context)
+                    logger.info(
+                        "Regenerating REPLY draft with full email context (draft_context_id=%s)",
+                        draft.get("draft_context_id"),
+                    )
+                else:
+                    # Fallback to stored context if draft_context not available
+                    original_context = draft.get("context", {}).get("user_context", "")
+                    combined_context = original_context
+                    logger.warning(
+                        "No draft_context found for REPLY draft %s, using stored context",
+                        draft_id,
+                    )
+            else:
+                # For non-REPLY purposes, use the stored user context
+                original_context = draft.get("context", {}).get("user_context", "")
+                combined_context = original_context
+
+            # Append any additional context provided by user
+            if additional_context:
+                combined_context = f"{combined_context}\n\n{additional_context}" if combined_context else additional_context
 
             # Build new generation prompt
             generation_prompt = self._build_generation_prompt(
                 recipient_email=draft["recipient_email"],
                 recipient_name=draft.get("recipient_name"),
-                purpose=EmailDraftPurpose(draft["purpose"]),
+                purpose=purpose,
                 tone=use_tone,
                 subject_hint=None,  # Let LLM generate new subject
                 context=combined_context,
@@ -430,14 +453,8 @@ class DraftService:
                 agent_id="draft_service",
             )
 
-            # Parse response
-            try:
-                email_content = json.loads(response)
-                subject = email_content.get("subject", draft["subject"])
-                body = email_content.get("body", "")
-            except json.JSONDecodeError:
-                subject = draft["subject"]
-                body = response
+            # Parse response - extract JSON from potentially markdown-wrapped response
+            subject, body = self._parse_llm_response(response, draft["subject"])
 
             # Score style match
             style_score = await self._digital_twin.score_style_match(user_id, body)
@@ -650,6 +667,146 @@ class DraftService:
         except Exception:
             logger.warning(f"Failed to get lead context for {lead_memory_id}")
             return None
+
+    async def _load_draft_context(self, draft_context_id: str | None) -> dict[str, Any] | None:
+        """Load full draft context from the draft_context table.
+
+        This contains the original email thread and all gathered context
+        for reply drafts created by the autonomous draft engine.
+
+        Args:
+            draft_context_id: The ID of the draft_context record.
+
+        Returns:
+            The draft context data, or None if not found.
+        """
+        if not draft_context_id:
+            return None
+
+        try:
+            client = SupabaseClient.get_client()
+            result = (
+                client.table("draft_context")
+                .select("*")
+                .eq("id", draft_context_id)
+                .single()
+                .execute()
+            )
+            return cast(dict[str, Any], result.data) if result.data else None
+        except Exception:
+            logger.warning(f"Failed to load draft_context for {draft_context_id}")
+            return None
+
+    def _build_reply_context_from_draft_context(self, draft_context: dict[str, Any]) -> str:
+        """Build context string for REPLY drafts from the full draft_context.
+
+        This extracts the original email content and thread context to include
+        in the generation prompt, similar to how autonomous_draft_engine does it.
+
+        Args:
+            draft_context: The full draft context from the database.
+
+        Returns:
+            A formatted context string for the generation prompt.
+        """
+        parts = []
+
+        # Add original email info
+        sender_email = draft_context.get("sender_email", "")
+        subject = draft_context.get("subject", "")
+        parts.append(f"=== ORIGINAL EMAIL YOU ARE REPLYING TO ===")
+        parts.append(f"From: {sender_email}")
+        parts.append(f"Subject: {subject}")
+
+        # Add thread context if available
+        thread_context = draft_context.get("thread_context")
+        if thread_context and isinstance(thread_context, dict):
+            # Thread summary
+            if thread_context.get("summary"):
+                parts.append(f"\nThread Summary: {thread_context['summary']}")
+
+            # Recent messages from thread
+            messages = thread_context.get("messages", [])
+            if messages:
+                parts.append("\n=== RECENT THREAD MESSAGES ===")
+                for msg in messages[-3:]:  # Last 3 messages
+                    sender = msg.get("sender_name") or msg.get("sender_email", "Unknown")
+                    body = msg.get("body", "")
+                    # Truncate long messages
+                    if len(body) > 500:
+                        body = body[:500] + "..."
+                    is_from_user = msg.get("is_from_user", False)
+                    prefix = "You" if is_from_user else sender
+                    parts.append(f"\n{prefix}: {body}")
+
+        # Add recipient research if available
+        recipient_research = draft_context.get("recipient_research")
+        if recipient_research and isinstance(recipient_research, dict):
+            info_parts = []
+            if recipient_research.get("sender_title"):
+                info_parts.append(f"Title: {recipient_research['sender_title']}")
+            if recipient_research.get("sender_company"):
+                info_parts.append(f"Company: {recipient_research['sender_company']}")
+            if recipient_research.get("bio"):
+                bio = recipient_research["bio"]
+                if len(bio) > 300:
+                    bio = bio[:300] + "..."
+                info_parts.append(f"Bio: {bio}")
+            if info_parts:
+                parts.append("\n=== ABOUT THE RECIPIENT ===")
+                parts.extend(info_parts)
+
+        return "\n".join(parts)
+
+    def _parse_llm_response(self, response: str, fallback_subject: str) -> tuple[str, str]:
+        """Parse LLM response to extract subject and body.
+
+        Handles multiple response formats:
+        1. Clean JSON: {"subject": "...", "body": "..."}
+        2. JSON inside markdown code blocks
+        3. Plain text (fallback)
+
+        Args:
+            response: The raw LLM response string.
+            fallback_subject: Subject to use if parsing fails.
+
+        Returns:
+            Tuple of (subject, body).
+        """
+        import re
+
+        # Try direct JSON parse first
+        try:
+            data = json.loads(response.strip())
+            if isinstance(data, dict):
+                return (
+                    data.get("subject", fallback_subject),
+                    data.get("body", response),
+                )
+        except json.JSONDecodeError:
+            pass
+
+        # Try extracting JSON from markdown code blocks
+        # Pattern matches ```json ... ``` or ``` ... ```
+        code_block_pattern = r"```(?:json)?\s*\n?(.*?)```"
+        matches = re.findall(code_block_pattern, response, re.DOTALL | re.IGNORECASE)
+
+        for match in matches:
+            try:
+                data = json.loads(match.strip())
+                if isinstance(data, dict):
+                    return (
+                        data.get("subject", fallback_subject),
+                        data.get("body", match),
+                    )
+            except json.JSONDecodeError:
+                continue
+
+        # Fallback: use raw response as body
+        logger.warning(
+            "Failed to parse LLM response as JSON, using raw response as body"
+        )
+        return (fallback_subject, response)
 
     def _build_generation_prompt(
         self,

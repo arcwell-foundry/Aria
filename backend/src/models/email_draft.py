@@ -31,6 +31,9 @@ class EmailDraftStatus(str, Enum):
     """Status of an email draft."""
 
     DRAFT = "draft"
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    DISMISSED = "dismissed"
     SENT = "sent"
     FAILED = "failed"
 

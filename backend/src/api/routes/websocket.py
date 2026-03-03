@@ -802,9 +802,12 @@ async def _handle_user_message(
         )
 
         render_mode = "markdown"
+        c1_rendered_content: str | None = None
         if all_tools:
             # Tool path: full content available — apply C1 if eligible
             c1_content, render_mode = await _apply_thesys_c1(display_content)
+            if render_mode == "c1":
+                c1_rendered_content = c1_content
             await websocket.send_json(
                 {
                     "type": "aria.token",
@@ -823,6 +826,7 @@ async def _handle_user_message(
                     "ui_commands": ui_commands,
                     "suggestions": suggestions,
                     "render_mode": render_mode,
+                    "c1_response": c1_rendered_content,
                 },
             }
         )

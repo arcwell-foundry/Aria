@@ -42,6 +42,14 @@ class WebSocketManagerImpl {
   }
 
   connect(userId: string, sessionId: string): void {
+    // Skip if already connecting/connected with the same config
+    if (this.config?.userId === userId && this.config?.sessionId === sessionId) {
+      if (this._connectionState === 'connected' || this._connectionState === 'connecting') {
+        console.debug('[WebSocketManager] Already connected/connecting with same config, skipping');
+        return;
+      }
+    }
+
     this.config = { userId, sessionId };
     this.intentionalDisconnect = false;
     this.reconnectAttempts = 0;

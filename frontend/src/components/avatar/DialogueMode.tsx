@@ -53,14 +53,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const briefingProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  // Connect WebSocket on mount
-  useEffect(() => {
-    if (!user?.id || !session?.id) return;
-    wsManager.connect(user.id, session.id);
-    return () => {
-      wsManager.disconnect();
-    };
-  }, [user?.id, session?.id]);
+  // WebSocket connection is handled by AppShell - no duplicate connect here
+  // AppShell maintains a single persistent WebSocket connection across all routes
 
   // Trigger briefing delivery when entering briefing mode
   useEffect(() => {
@@ -146,6 +140,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           rich_content: data.rich_content ?? [],
           ui_commands: data.ui_commands ?? [],
           suggestions: data.suggestions ?? [],
+          render_mode: data.render_mode ?? 'markdown',
+          c1_response: data.c1_response ?? null,
         });
         streamingIdRef.current = null;
       } else {
@@ -211,12 +207,16 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         rich_content: RichContent[];
         ui_commands: UICommand[];
         suggestions: string[];
+        render_mode: 'c1' | 'markdown';
+        c1_response: string | null;
       }>;
       if (streamingIdRef.current) {
         updateMessageMetadata(streamingIdRef.current, {
           rich_content: data.rich_content ?? [],
           ui_commands: data.ui_commands ?? [],
           suggestions: data.suggestions ?? [],
+          render_mode: data.render_mode ?? 'markdown',
+          c1_response: data.c1_response ?? null,
         });
       }
     };
@@ -245,6 +245,22 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       // Positive signal that the LLM stream finished normally.
     };
 
+    const handleC1Render = (payload: unknown) => {
+      // C1 post-processing upgrade: backend sends aria.c1_render after streaming
+      // completes to upgrade the message from markdown to rich C1 UI
+      const data = (payload ?? {}) as Partial<{
+        conversation_id: string;
+        content: string;
+        render_mode: string;
+      }>;
+      if (streamingIdRef.current) {
+        updateMessageMetadata(streamingIdRef.current, {
+          render_mode: 'c1',
+          c1_response: data.content,
+        });
+      }
+    };
+
     wsManager.on(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
     wsManager.on(WS_EVENTS.ARIA_THINKING, handleThinking);
     wsManager.on(WS_EVENTS.ARIA_SPEAKING, handleSpeaking);
@@ -252,6 +268,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     wsManager.on('aria.metadata', handleMetadata);
     wsManager.on(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
     wsManager.on(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+    wsManager.on('aria.c1_render', handleC1Render);
 
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
@@ -261,6 +278,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       wsManager.off('aria.metadata', handleMetadata);
       wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+      wsManager.off('aria.c1_render', handleC1Render);
     };
   }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking, toastTitleForContent]);
 

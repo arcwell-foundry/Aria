@@ -351,12 +351,31 @@ export function ARIAWorkspace() {
       // so this is a no-op unless the aria.message is delayed.
     };
 
+    const handleC1Render = (payload: unknown) => {
+      // C1 post-processing upgrade: backend sends aria.c1_render after streaming
+      // completes to upgrade the message from markdown to rich C1 UI
+      const data = (payload ?? {}) as Partial<{
+        conversation_id: string;
+        content: string;
+        render_mode: string;
+      }>;
+
+      if (data.content && streamingIdRef.current) {
+        // Upgrade the currently streaming message with C1 content
+        updateMessageMetadata(streamingIdRef.current, {
+          render_mode: 'c1',
+          c1_response: data.content,
+        });
+      }
+    };
+
     wsManager.on(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
     wsManager.on(WS_EVENTS.ARIA_THINKING, handleThinking);
     wsManager.on('aria.token', handleToken);
     wsManager.on('aria.metadata', handleMetadata);
     wsManager.on(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
     wsManager.on(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+    wsManager.on('aria.c1_render', handleC1Render);
 
     return () => {
       wsManager.off(WS_EVENTS.ARIA_MESSAGE, handleAriaMessage);
@@ -365,6 +384,7 @@ export function ARIAWorkspace() {
       wsManager.off('aria.metadata', handleMetadata);
       wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
+      wsManager.off('aria.c1_render', handleC1Render);
     };
   }, [
     addMessage,
