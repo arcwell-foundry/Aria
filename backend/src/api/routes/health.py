@@ -129,6 +129,38 @@ async def health_check_detailed(
     }
 
 
+@router.post("/circuit-breakers/{service_name}/reset", status_code=status.HTTP_200_OK)
+async def reset_circuit_breaker(
+    service_name: str,
+    current_user: AdminUser,
+) -> dict[str, Any]:
+    """Reset a specific circuit breaker to CLOSED state (admin only).
+
+    Use this to recover from transient outages without waiting for the
+    recovery timeout to expire.
+    """
+    breakers = get_all_circuit_breakers()
+    cb = breakers.get(service_name)
+    if cb is None:
+        return {
+            "error": f"Unknown circuit breaker: {service_name}",
+            "available": list(breakers.keys()),
+        }
+    previous_state = cb.state.value
+    cb.reset()
+    logger.info(
+        "Circuit breaker %s reset by admin %s (was %s)",
+        service_name,
+        current_user.id,
+        previous_state,
+    )
+    return {
+        "service": service_name,
+        "previous_state": previous_state,
+        "current_state": cb.state.value,
+    }
+
+
 # ---------------------------------------------------------------------------
 # WebSocket Push Test Endpoint
 # ---------------------------------------------------------------------------

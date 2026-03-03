@@ -256,6 +256,16 @@ exa_circuit_breaker = CircuitBreaker(
 composio_circuit_breaker = CircuitBreaker(
     "composio", failure_threshold=5, recovery_timeout=60.0, success_threshold=3,
 )
+# Per-service Composio circuit breakers — prevents calendar failures from blocking email
+composio_calendar_circuit_breaker = CircuitBreaker(
+    "composio_calendar", failure_threshold=5, recovery_timeout=60.0, success_threshold=2,
+)
+composio_email_circuit_breaker = CircuitBreaker(
+    "composio_email", failure_threshold=5, recovery_timeout=60.0, success_threshold=2,
+)
+composio_crm_circuit_breaker = CircuitBreaker(
+    "composio_crm", failure_threshold=5, recovery_timeout=60.0, success_threshold=2,
+)
 claude_api_circuit_breaker = CircuitBreaker(
     "claude_api", failure_threshold=5, recovery_timeout=60.0, success_threshold=3,
 )

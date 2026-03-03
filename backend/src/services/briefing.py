@@ -22,6 +22,7 @@ from src.core.persona import PersonaBuilder, PersonaRequest
 from src.db.supabase import SupabaseClient
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
+from src.core.resilience import composio_calendar_circuit_breaker
 from src.services.activity_service import ActivityService
 
 try:
@@ -67,8 +68,8 @@ _CALENDAR_INTEGRATION_TYPES = ("google_calendar", "outlook_calendar", "outlook")
 
 _CALENDAR_READ_ACTIONS: dict[str, str] = {
     "google_calendar": "GOOGLECALENDAR_FIND_EVENT",
-    "outlook_calendar": "OUTLOOK_CALENDAR_FIND_EVENTS",
-    "outlook": "OUTLOOK_CALENDAR_FIND_EVENTS",
+    "outlook_calendar": "OUTLOOK_GET_CALENDAR_VIEW",
+    "outlook": "OUTLOOK_GET_CALENDAR_VIEW",
 }
 
 
@@ -799,11 +800,18 @@ class BriefingService:
             time_min = f"{briefing_date.isoformat()}T00:00:00Z"
             time_max = f"{briefing_date.isoformat()}T23:59:59Z"
 
+            # Google Calendar uses timeMin/timeMax; Outlook uses start_datetime/end_datetime
+            if provider == "google_calendar":
+                action_params = {"timeMin": time_min, "timeMax": time_max}
+            else:
+                action_params = {"start_datetime": time_min, "end_datetime": time_max}
+
             result = await oauth_client.execute_action(
                 connection_id=connection_id,
                 action=action_slug,
-                params={"timeMin": time_min, "timeMax": time_max},
+                params=action_params,
                 user_id=user_id,
+                circuit_breaker=composio_calendar_circuit_breaker,
             )
 
             if not result.get("successful"):

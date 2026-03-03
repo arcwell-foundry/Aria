@@ -7,7 +7,7 @@ from typing import Any
 from composio import Composio
 
 from src.core.config import settings
-from src.core.resilience import composio_circuit_breaker
+from src.core.resilience import CircuitBreaker, composio_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +351,7 @@ class ComposioOAuthClient:
         action: str,
         params: dict[str, Any],
         user_id: str | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
     ) -> dict[str, Any]:
         """Execute an action via Composio.
 
@@ -359,11 +360,14 @@ class ComposioOAuthClient:
             action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_LIST_MESSAGES').
             params: Parameters for the action.
             user_id: Optional user/entity ID for the action.
+            circuit_breaker: Optional per-service circuit breaker. Falls back to
+                the shared ``composio_circuit_breaker`` when not provided.
 
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
         """
-        composio_circuit_breaker.check()
+        cb = circuit_breaker or composio_circuit_breaker
+        cb.check()
 
         # Resolve the tool version required by the SDK
         version = await asyncio.to_thread(self._resolve_tool_version, action)
@@ -381,9 +385,9 @@ class ComposioOAuthClient:
         try:
             result = await asyncio.to_thread(_execute)
         except Exception:
-            composio_circuit_breaker.record_failure()
+            cb.record_failure()
             raise
-        composio_circuit_breaker.record_success()
+        cb.record_success()
         # The SDK returns a dict with 'successful', 'data', 'error' keys
         if isinstance(result, dict):
             return result

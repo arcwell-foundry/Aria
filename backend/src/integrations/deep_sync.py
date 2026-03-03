@@ -1354,18 +1354,21 @@ class DeepSyncService:
                     "timeMax": time_max_str,
                 }
             else:  # OUTLOOK
-                action = "OUTLOOK_OUTLOOK_LIST_EVENTS"
+                action = "OUTLOOK_GET_CALENDAR_VIEW"
                 params = {
-                    "startDateTime": time_min_str,
-                    "endDateTime": time_max_str,
+                    "start_datetime": time_min_str,
+                    "end_datetime": time_max_str,
                 }
 
-            # Execute Composio action
+            # Execute Composio action — use calendar-specific circuit breaker
+            from src.core.resilience import composio_calendar_circuit_breaker
+
             result = await self.integration_service.execute_action(
                 connection_id=connection_id,
                 action=action,
                 params=params,
                 user_id=user_id,
+                circuit_breaker=composio_calendar_circuit_breaker,
             )
 
             # Extract events from response — Outlook returns {data: {value: [...]}}

@@ -34,8 +34,8 @@ _CRM_INTEGRATION_TYPES = ("salesforce", "hubspot")
 
 _CALENDAR_READ_ACTIONS: dict[str, str] = {
     "google_calendar": "GOOGLECALENDAR_FIND_EVENT",
-    "outlook_calendar": "OUTLOOK_CALENDAR_FIND_EVENTS",
-    "outlook": "OUTLOOK_CALENDAR_FIND_EVENTS",
+    "outlook_calendar": "OUTLOOK_GET_CALENDAR_VIEW",
+    "outlook": "OUTLOOK_GET_CALENDAR_VIEW",
 }
 
 _CALENDAR_WRITE_ACTIONS: dict[str, dict[str, str]] = {
@@ -46,13 +46,13 @@ _CALENDAR_WRITE_ACTIONS: dict[str, dict[str, str]] = {
     },
     "outlook_calendar": {
         "create": "OUTLOOK_CALENDAR_CREATE_EVENT",
-        "update": "OUTLOOK_CALENDAR_UPDATE_EVENT",
-        "delete": "OUTLOOK_CALENDAR_DELETE_EVENT",
+        "update": "OUTLOOK_UPDATE_CALENDAR_EVENT",
+        "delete": "OUTLOOK_DELETE_EVENT",
     },
     "outlook": {
         "create": "OUTLOOK_CALENDAR_CREATE_EVENT",
-        "update": "OUTLOOK_CALENDAR_UPDATE_EVENT",
-        "delete": "OUTLOOK_CALENDAR_DELETE_EVENT",
+        "update": "OUTLOOK_UPDATE_CALENDAR_EVENT",
+        "delete": "OUTLOOK_DELETE_EVENT",
     },
 }
 
