@@ -47,7 +47,7 @@ function AppContent() {
   // Fetch Thesys feature flag after authentication
   useEffect(() => {
     if (!isAuthenticated) return;
-    apiClient.get('/api/v1/config/features')
+    apiClient.get('/config/features')
       .then((res) => useThesysStore.getState().setEnabled(res.data.thesys_enabled))
       .catch(() => {}); // Default: disabled
   }, [isAuthenticated]);

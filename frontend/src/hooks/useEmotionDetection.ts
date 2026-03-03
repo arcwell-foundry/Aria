@@ -40,7 +40,8 @@ export function useEmotionDetection() {
       lastSentRef.current = now;
 
       const token = localStorage.getItem('access_token');
-      fetch('/api/v1/perception/emotion', {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      fetch(`${baseUrl}/api/v1/perception/emotion`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
