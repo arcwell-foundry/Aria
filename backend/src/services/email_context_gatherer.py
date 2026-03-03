@@ -1693,6 +1693,7 @@ Summary:"""
 
         try:
             oauth_client = get_oauth_client()
+            # Skip version check since OUTLOOK_GET_CALENDAR_VIEW has no registered version
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
                 action="OUTLOOK_GET_CALENDAR_VIEW",
@@ -1701,6 +1702,7 @@ Summary:"""
                     "end_datetime": f"{end_date}T23:59:59Z",
                 },
                 user_id=user_id,
+                dangerously_skip_version_check=True,
             )
 
             if response.get("successful"):

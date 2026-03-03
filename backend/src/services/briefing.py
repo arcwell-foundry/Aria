@@ -806,12 +806,14 @@ class BriefingService:
             else:
                 action_params = {"start_datetime": time_min, "end_datetime": time_max}
 
+            # Outlook calendar has no registered version, so skip version check
             result = await oauth_client.execute_action(
                 connection_id=connection_id,
                 action=action_slug,
                 params=action_params,
                 user_id=user_id,
                 circuit_breaker=composio_calendar_circuit_breaker,
+                dangerously_skip_version_check=(provider != "google_calendar"),
             )
 
             if not result.get("successful"):

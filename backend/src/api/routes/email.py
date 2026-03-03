@@ -799,7 +799,7 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
                 for ev in raw_events
             ]
         else:
-            # Outlook
+            # Outlook - skip version check since OUTLOOK_GET_CALENDAR_VIEW has no registered version
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
                 action="OUTLOOK_GET_CALENDAR_VIEW",
@@ -808,6 +808,7 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
                     "end_datetime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
                 user_id=user_id,
+                dangerously_skip_version_check=True,
             )
             # Extract events - handle different response formats
             raw_data = response.get("data", {})

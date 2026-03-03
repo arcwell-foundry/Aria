@@ -1362,6 +1362,7 @@ class DeepSyncService:
                 }
 
             # Execute Composio action — use calendar-specific circuit breaker
+            # Outlook calendar has no registered version, so skip version check
             from src.core.resilience import composio_calendar_circuit_breaker
 
             result = await self.integration_service.execute_action(
@@ -1370,6 +1371,7 @@ class DeepSyncService:
                 params=params,
                 user_id=user_id,
                 circuit_breaker=composio_calendar_circuit_breaker,
+                dangerously_skip_version_check=(integration_type == IntegrationType.OUTLOOK),
             )
 
             # Extract events from response — Outlook returns {data: {value: [...]}}

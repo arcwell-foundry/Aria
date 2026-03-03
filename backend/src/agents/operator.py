@@ -470,10 +470,13 @@ class OperatorAgent(SkillAwareAgent):
             from src.integrations.oauth import get_oauth_client
 
             oauth_client = get_oauth_client()
+            # Outlook calendar actions have no registered version, skip version check
+            skip_version = action.upper().startswith("OUTLOOK") and "CALENDAR" in action.upper()
             return await oauth_client.execute_action(
                 connection_id=connection_id,
                 action=action,
                 params=params,
+                dangerously_skip_version_check=skip_version,
             )
         except Exception as e:
             logger.error(

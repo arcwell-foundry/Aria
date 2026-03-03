@@ -364,6 +364,7 @@ class ComposioOAuthClient:
         params: dict[str, Any],
         user_id: str | None = None,
         circuit_breaker: CircuitBreaker | None = None,
+        dangerously_skip_version_check: bool = False,
     ) -> dict[str, Any]:
         """Execute an action via Composio.
 
@@ -374,6 +375,8 @@ class ComposioOAuthClient:
             user_id: Optional user/entity ID for the action.
             circuit_breaker: Optional per-service circuit breaker. Falls back to
                 the shared ``composio_circuit_breaker`` when not provided.
+            dangerously_skip_version_check: Skip version check for tools without versions.
+                Required for some Outlook calendar actions that have no registered version.
 
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
@@ -381,8 +384,10 @@ class ComposioOAuthClient:
         cb = circuit_breaker or composio_circuit_breaker
         cb.check()
 
-        # Resolve the tool version required by the SDK
-        version = await asyncio.to_thread(self._resolve_tool_version, action)
+        # Resolve the tool version required by the SDK (unless skipping)
+        version = None
+        if not dangerously_skip_version_check:
+            version = await asyncio.to_thread(self._resolve_tool_version, action)
 
         # Execute Composio action via SDK
         def _execute() -> Any:
@@ -392,6 +397,7 @@ class ComposioOAuthClient:
                 user_id=user_id,
                 arguments=params,
                 version=version,
+                dangerously_skip_version_check=dangerously_skip_version_check,
             )
 
         try:
@@ -413,6 +419,7 @@ class ComposioOAuthClient:
         action: str,
         params: dict[str, Any],
         user_id: str | None = None,
+        dangerously_skip_version_check: bool = False,
     ) -> dict[str, Any]:
         """Execute an action via Composio (synchronous version).
 
@@ -421,27 +428,31 @@ class ComposioOAuthClient:
             action: The tool slug (e.g., 'GMAIL_FETCH_EMAILS', 'OUTLOOK_LIST_MESSAGES').
             params: Parameters for the action.
             user_id: Optional user/entity ID for the action.
+            dangerously_skip_version_check: Skip version check for tools without versions.
+                Required for some Outlook calendar actions that have no registered version.
 
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
         """
-        # Pre-load tool schema to avoid KeyError in Composio SDK
-        # The SDK's execute() tries _custom_tools[slug].info which fails
-        # if the tool isn't in the registry. We preload via retrieve().
         version: str | None = None
-        if action not in self._client.tools._tool_schemas:
-            try:
-                tool = self._client.client.tools.retrieve(tool_slug=action)
-                self._client.tools._tool_schemas[action] = tool
-                versions = getattr(tool, "available_versions", None)
-                if versions:
-                    version = versions[0]
-            except Exception as e:
-                logger.debug("Could not preload tool schema for %s: %s", action, e)
 
-        # If we didn't get a version from preload, resolve it now
-        if version is None:
-            version = self._resolve_tool_version(action)
+        if not dangerously_skip_version_check:
+            # Pre-load tool schema to avoid KeyError in Composio SDK
+            # The SDK's execute() tries _custom_tools[slug].info which fails
+            # if the tool isn't in the registry. We preload via retrieve().
+            if action not in self._client.tools._tool_schemas:
+                try:
+                    tool = self._client.client.tools.retrieve(tool_slug=action)
+                    self._client.tools._tool_schemas[action] = tool
+                    versions = getattr(tool, "available_versions", None)
+                    if versions:
+                        version = versions[0]
+                except Exception as e:
+                    logger.debug("Could not preload tool schema for %s: %s", action, e)
+
+            # If we didn't get a version from preload, resolve it now
+            if version is None:
+                version = self._resolve_tool_version(action)
 
         # Execute Composio action via SDK
         result = self._client.tools.execute(
@@ -450,6 +461,7 @@ class ComposioOAuthClient:
             user_id=user_id,
             arguments=params,
             version=version,
+            dangerously_skip_version_check=dangerously_skip_version_check,
         )
         # The SDK returns a dict with 'successful', 'data', and 'error' keys
         if isinstance(result, dict):
