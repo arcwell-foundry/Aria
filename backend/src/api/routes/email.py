@@ -757,15 +757,21 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
         if "google" in integration_type:
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
-                action="GOOGLECALENDAR_GET_EVENTS",
+                action="GOOGLECALENDAR_FIND_EVENT",
                 params={
-                    "timeMin": now.isoformat() + "Z",
-                    "timeMax": end.isoformat() + "Z",
-                    "maxResults": 50,
+                    "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "timeMax": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
                 user_id=user_id,
             )
-            raw_events = response.get("data", {}).get("items", [])
+            # Extract events - handle different response formats
+            raw_data = response.get("data", {})
+            if isinstance(raw_data, dict):
+                raw_events = raw_data.get("items", raw_data.get("events", []))
+            elif isinstance(raw_data, list):
+                raw_events = raw_data
+            else:
+                raw_events = []
             events = [
                 {
                     "external_id": ev.get("id", ""),
@@ -784,13 +790,19 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
                 connection_id=connection_id,
                 action="OUTLOOK_GET_CALENDAR_VIEW",
                 params={
-                    "startDateTime": now.isoformat() + "Z",
-                    "endDateTime": end.isoformat() + "Z",
-                    "$top": 50,
+                    "start_datetime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "end_datetime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
                 user_id=user_id,
             )
-            raw_events = response.get("data", {}).get("value", [])
+            # Extract events - handle different response formats
+            raw_data = response.get("data", {})
+            if isinstance(raw_data, dict):
+                raw_events = raw_data.get("value", raw_data.get("events", []))
+            elif isinstance(raw_data, list):
+                raw_events = raw_data
+            else:
+                raw_events = []
             events = [
                 {
                     "external_id": ev.get("id", ""),
@@ -841,10 +853,18 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
                 "Failed to sync calendar event %s: %s", ev.get("external_id"), e
             )
 
+    # Determine the action name that was used
+    action_name = (
+        "GOOGLECALENDAR_FIND_EVENT"
+        if "google" in integration_type
+        else "OUTLOOK_GET_CALENDAR_VIEW"
+    )
+
     return {
         "success": True,
         "connection_id": connection_id,
         "integration_type": integration_type,
+        "action": action_name,
         "events": events,
         "event_count": len(events),
         "synced": synced,

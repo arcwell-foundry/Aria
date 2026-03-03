@@ -1636,17 +1636,25 @@ Summary:"""
             oauth_client = get_oauth_client()
             response = oauth_client.execute_action_sync(
                 connection_id=connection_id,
-                action="GOOGLECALENDAR_GET_EVENTS",
+                action="GOOGLECALENDAR_FIND_EVENT",
                 params={
                     "timeMin": f"{start_date}T00:00:00Z",
                     "timeMax": f"{end_date}T23:59:59Z",
-                    "maxResults": 50,
                 },
                 user_id=user_id,
             )
 
             if response.get("successful"):
-                for event in response.get("data", {}).get("items", []):
+                # Extract events - handle different response formats
+                raw_data = response.get("data", {})
+                if isinstance(raw_data, dict):
+                    raw_events = raw_data.get("items", raw_data.get("events", []))
+                elif isinstance(raw_data, list):
+                    raw_events = raw_data
+                else:
+                    raw_events = []
+
+                for event in raw_events:
                     attendees = event.get("attendees", [])
                     if any(
                         sender_email.lower() in a.get("email", "").lower()
@@ -1689,15 +1697,23 @@ Summary:"""
                 connection_id=connection_id,
                 action="OUTLOOK_GET_CALENDAR_VIEW",
                 params={
-                    "startDateTime": f"{start_date}T00:00:00Z",
-                    "endDateTime": f"{end_date}T23:59:59Z",
-                    "$top": 50,
+                    "start_datetime": f"{start_date}T00:00:00Z",
+                    "end_datetime": f"{end_date}T23:59:59Z",
                 },
                 user_id=user_id,
             )
 
             if response.get("successful"):
-                for event in response.get("data", {}).get("value", []):
+                # Extract events - handle different response formats
+                raw_data = response.get("data", {})
+                if isinstance(raw_data, dict):
+                    raw_events = raw_data.get("value", raw_data.get("events", []))
+                elif isinstance(raw_data, list):
+                    raw_events = raw_data
+                else:
+                    raw_events = []
+
+                for event in raw_events:
                     attendees = event.get("attendees", [])
                     if any(
                         sender_email.lower() in a.get("emailAddress", {}).get("address", "").lower()
