@@ -138,6 +138,24 @@ class AutonomousDraftEngine:
 
 CRITICAL SCHEDULING RULE: This email asks about scheduling but you do NOT have access to the user's calendar. You MUST NOT suggest any specific dates, times, or time slots. Instead write something like: 'Let me check my calendar and get back to you with some available times.' or 'I'll look at my schedule and send over some options shortly.' NEVER invent availability."""
 
+    # Time patterns for post-LLM validation (code-level guardrail)
+    _TIME_PATTERNS = [
+        r'\d{1,2}:\d{2}\s*(AM|PM|am|pm|EST|PST|CST|MST|ET|PT|CT|MT)',  # "2:00 PM EST"
+        r'\d{1,2}\s*(AM|PM|am|pm)\s*(EST|PST|CST|MST|ET|PT|CT|MT)?',    # "2 PM EST" or "2 PM"
+        r'(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+(morning|afternoon|evening|at\s+\d)',  # "Thursday afternoon"
+        r'(tomorrow|today)\s+(morning|afternoon|evening|at\s+\d)',        # "tomorrow afternoon"
+        r'(before|after|around)\s+\d{1,2}\s*(AM|PM|am|pm)',              # "after 2 PM"
+        r'(March|April|May|June|July|August|September|October|November|December|January|February)\s+\d{1,2}',  # "March 5th"
+    ]
+
+    # Meeting claim patterns for post-LLM validation
+    _MEETING_CLAIM_PATTERNS = [
+        r'(already|just)\s+(had|finished|completed|wrapped up)\s+(the|our|a)\s+(meeting|call|session)',
+        r'(great|good|nice)\s+(meeting|call|chat)\s+(earlier|today|this morning|this afternoon)',
+        r'(enjoyed|appreciated)\s+(our|the)\s+(meeting|call|conversation)\s+(earlier|today)',
+        r'following up (on|from) (our|the) (meeting|call|conversation)',
+    ]
+
     _REPLY_TASK_INSTRUCTIONS = """
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
 {
@@ -544,6 +562,26 @@ Do not include any text outside the JSON object."""
                 user_id, user_name, email, context, style_guidelines, tone_guidance
             )
 
+            # d.5 POST-LLM VALIDATION: Calendar guardrail (code-level enforcement)
+            # This is the PRIMARY defense - validates actual text, not prompt instructions
+            current_utc = datetime.now(UTC)
+            is_valid, cleaned_body = self._validate_calendar_claims(
+                draft_content.body, context, current_utc
+            )
+            if not is_valid:
+                logger.info(
+                    "[EMAIL_PIPELINE] Stage: calendar_guardrail_applied | email_id=%s | "
+                    "original_length=%d | cleaned_length=%d",
+                    email.email_id,
+                    len(draft_content.body),
+                    len(cleaned_body),
+                )
+                # Update the draft content with the cleaned body
+                draft_content = ReplyDraftContent(
+                    subject=draft_content.subject,
+                    body=cleaned_body,
+                )
+
             # e. Score style match
             style_score = await self._digital_twin.score_style_match(user_id, draft_content.body)
 
@@ -782,6 +820,222 @@ Do not include any text outside the JSON object."""
         return False
 
     # ------------------------------------------------------------------
+    # Post-LLM Calendar Guardrail (Code-Level Enforcement)
+    # ------------------------------------------------------------------
+
+    def _validate_calendar_claims(
+        self,
+        draft_body: str,
+        context: DraftContext,
+        current_utc_time: datetime,
+    ) -> tuple[bool, str]:
+        """Validate that the draft doesn't make unsupported calendar claims.
+
+        This is the PRIMARY defense against calendar hallucination - it runs on
+        the actual text produced by the LLM, not on a prompt it might ignore.
+
+        Args:
+            draft_body: The draft body text to validate.
+            context: The context from EmailContextGatherer (for calendar data check).
+            current_utc_time: Current UTC time for temporal validation.
+
+        Returns:
+            Tuple of (is_valid, cleaned_body_or_original).
+            If is_valid is False, the second element is the cleaned body.
+        """
+        has_real_calendar_data = self._has_calendar_context(context)
+
+        # Detect time-specific patterns in the draft
+        has_time_claims = any(
+            re.search(p, draft_body, re.IGNORECASE) for p in self._TIME_PATTERNS
+        )
+
+        # Detect meeting reference patterns
+        has_meeting_claims = any(
+            re.search(p, draft_body, re.IGNORECASE) for p in self._MEETING_CLAIM_PATTERNS
+        )
+
+        # CASE 1: No calendar data but draft suggests specific times → CLEAN
+        if not has_real_calendar_data and has_time_claims:
+            logger.warning(
+                "CALENDAR_GUARDRAIL_REJECT: Draft contains time suggestions without calendar data"
+            )
+            cleaned = self._replace_time_claims_with_safe_language(draft_body)
+            return (False, cleaned)
+
+        # CASE 2: Draft makes claims about meetings but we can't verify → CLEAN
+        if has_meeting_claims and not has_real_calendar_data:
+            logger.warning(
+                "CALENDAR_GUARDRAIL_REJECT: Draft references meetings without calendar verification"
+            )
+            cleaned = self._replace_meeting_claims_with_safe_language(draft_body)
+            return (False, cleaned)
+
+        # CASE 3: Has calendar data but need to validate temporal claims
+        if has_real_calendar_data and has_meeting_claims:
+            # Check if the draft claims a future meeting already happened
+            if context.calendar_context and context.calendar_context.upcoming_meetings:
+                for meeting in context.calendar_context.upcoming_meetings:
+                    meeting_time_str = meeting.get('start_time') or meeting.get('start')
+                    if meeting_time_str:
+                        try:
+                            # Parse the meeting time (handle ISO format)
+                            if isinstance(meeting_time_str, str):
+                                meeting_time = datetime.fromisoformat(
+                                    meeting_time_str.replace('Z', '+00:00')
+                                )
+                            else:
+                                meeting_time = meeting_time_str
+
+                            if meeting_time > current_utc_time:
+                                # Meeting is in the FUTURE — draft should NOT say "already had"
+                                if re.search(
+                                    r'(already|just)\s+(had|finished|completed)',
+                                    draft_body,
+                                    re.IGNORECASE
+                                ):
+                                    logger.warning(
+                                        "CALENDAR_GUARDRAIL_REJECT: Draft says 'already had' "
+                                        "meeting that's in the future"
+                                    )
+                                    cleaned = self._replace_meeting_claims_with_safe_language(
+                                        draft_body
+                                    )
+                                    return (False, cleaned)
+                        except (ValueError, TypeError) as e:
+                            logger.warning(
+                                "CALENDAR_GUARDRAIL: Could not parse meeting time %s: %s",
+                                meeting_time_str,
+                                e,
+                            )
+
+        return (True, draft_body)
+
+    def _replace_time_claims_with_safe_language(self, draft_body: str) -> str:
+        """Replace specific time suggestions with calendar-check language.
+
+        Args:
+            draft_body: The draft body containing time references.
+
+        Returns:
+            Cleaned draft body with safe language.
+        """
+        # Safe language patterns - if sentence already has these, just remove time refs
+        safe_patterns = [
+            r'check (my|the) calendar',
+            r'get back to you',
+            r'send (over |you )?(some )?available times',
+            r'look at (my|the) schedule',
+            r'my availability',
+        ]
+
+        def has_safe_language(text: str) -> bool:
+            return any(re.search(p, text, re.IGNORECASE) for p in safe_patterns)
+
+        def remove_time_refs_from_sentence(sentence: str) -> str:
+            """Remove time references while preserving the rest of the sentence."""
+            # First, try to truncate at common safe-language boundaries
+            # "Let me check my calendar and get back to you with confirmation on 2pm"
+            #   -> "Let me check my calendar and get back to you."
+            # Find the LAST occurrence of any safe phrase and truncate there
+            safe_phrases = [
+                r'get back to you',
+                r'send (over |you )?(some )?available times',
+                r'look at (my|the) schedule',
+                r'check (my|the) calendar',
+            ]
+
+            last_match_end = -1
+            for phrase in safe_phrases:
+                for match in re.finditer(phrase, sentence, re.IGNORECASE):
+                    if match.end() > last_match_end:
+                        last_match_end = match.end()
+
+            if last_match_end > 0:
+                truncated = sentence[:last_match_end].strip()
+                # Ensure proper ending
+                if not truncated.endswith(('.', '!', '?')):
+                    truncated += '.'
+                return truncated
+
+            # If no truncation point, remove time patterns directly
+            time_patterns_to_remove = [
+                r'\s*(at|on|around|before|after)?\s*\d{1,2}:\d{2}\s*(AM|PM|am|pm|EST|PST|CST|MST|ET|PT|CT|MT)',
+                r'\s*(at|on|around|before|after)?\s*\d{1,2}\s*(AM|PM|am|pm)\s*(EST|PST|CST|MST|ET|PT|CT|MT)?',
+                r'\s*(on\s+)?(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+(morning|afternoon|evening)?',
+                r'\s*(tomorrow|today)(\s+(morning|afternoon|evening))?',
+                r'\s*(in\s+)?(the\s+)?(morning|afternoon|evening)',
+                r'\s*(on\s+)?(March|April|May|June|July|August|September|October|November|December|January|February)\s+\d{1,2}(st|nd|rd|th)?',
+            ]
+            cleaned = sentence
+            for pattern in time_patterns_to_remove:
+                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+            # Clean up double spaces and trailing punctuation
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            cleaned = re.sub(r'\s+([.!?])', r'\1', cleaned)
+            return cleaned
+
+        # Process sentence by sentence
+        sentences = re.split(r'(?<=[.!?])\s+', draft_body)
+        cleaned_sentences = []
+
+        for sentence in sentences:
+            has_time = any(re.search(p, sentence, re.IGNORECASE) for p in self._TIME_PATTERNS)
+
+            if has_time:
+                if has_safe_language(sentence):
+                    # Sentence already has safe language - just remove time refs
+                    cleaned = remove_time_refs_from_sentence(sentence)
+                    if cleaned and len(cleaned) > 10:  # Keep if meaningful content remains
+                        cleaned_sentences.append(cleaned)
+                    else:
+                        # If removing time refs left nothing meaningful, use safe language
+                        cleaned_sentences.append(
+                            "I'll check my calendar and send over some available times shortly."
+                        )
+                else:
+                    # No safe language - replace entire sentence
+                    cleaned_sentences.append(
+                        "I'll check my calendar and send over some available times shortly."
+                    )
+            else:
+                cleaned_sentences.append(sentence)
+
+        return ' '.join(cleaned_sentences)
+
+    def _replace_meeting_claims_with_safe_language(self, draft_body: str) -> str:
+        """Replace meeting claims with safe language.
+
+        Args:
+            draft_body: The draft body containing meeting references.
+
+        Returns:
+            Cleaned draft body with safe language.
+        """
+        cleaned = draft_body
+
+        # Replace past-tense meeting references with future-tense or neutral
+        replacements = [
+            (
+                r'(already|just)\s+(had|finished|completed|wrapped up)\s+(the|our|a)\s+(meeting|call)',
+                r'have \3 \4 scheduled'
+            ),
+            (
+                r'(great|good|nice)\s+(meeting|call|chat)\s+(earlier|today|this morning|this afternoon)',
+                r'great \2'
+            ),
+            (
+                r'(enjoyed|appreciated)\s+(our|the)\s+(meeting|call|conversation)\s+(earlier|today)',
+                r'\1 \2 \3'
+            ),
+        ]
+
+        for pattern, replacement in replacements:
+            cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+
+        return cleaned
+
+    # ------------------------------------------------------------------
     # LLM Draft Generation
     # ------------------------------------------------------------------
 
@@ -963,6 +1217,16 @@ Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
                 crm_info.append(f"Deal value: ${context.crm_context.deal_value:,.0f}")
             if crm_info:
                 sections.append("=== CRM STATUS ===\n" + "\n".join(crm_info))
+
+        # Current time context (critical for temporal awareness)
+        current_utc = datetime.now(UTC)
+        sections.append(f"""=== CURRENT TIME ===
+Current date and time (UTC): {current_utc.isoformat()}Z
+
+IMPORTANT: Use this to correctly determine if events are in the past or future.
+- A meeting at 2pm today is in the FUTURE if the current time is 10am.
+- Do NOT say you "already had" a meeting that hasn't happened yet.
+- When referencing today/tonight/tomorrow, this is your reference point.""")
 
         # User info and task
         sections.append(f"""=== YOUR INFO ===
