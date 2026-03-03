@@ -77,6 +77,9 @@ class ProcessingRunResult:
     drafts_failed: int = 0
     status: str = "running"
     error_message: str | None = None
+    # Watermark fields for tracking which emails have been processed
+    watermark_timestamp: str | None = None
+    watermark_email_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +175,14 @@ Do not include any text outside the JSON object."""
         self,
         user_id: str,
         since_hours: int = 24,
+        force_full_scan: bool = False,
     ) -> ProcessingRunResult:
         """Full autonomous email processing pipeline.
 
         Args:
             user_id: The user whose inbox to process.
-            since_hours: How many hours back to scan.
+            since_hours: How many hours back to scan (used only if no watermark or force_full_scan).
+            force_full_scan: If True, ignore watermark and scan all emails within since_hours.
 
         Returns:
             ProcessingRunResult with all draft results and statistics.
@@ -210,26 +215,59 @@ Do not include any text outside the JSON object."""
         # Create processing run record
         await self._create_processing_run(run_id, user_id, started_at)
 
+        # Track the newest email seen for watermark
+        newest_email_timestamp: str | None = None
+        newest_email_id: str | None = None
+
         try:
             logger.info(
-                "[EMAIL_PIPELINE] Stage: inbox_processing_started | user_id=%s | since_hours=%d | run_id=%s",
+                "[EMAIL_PIPELINE] Stage: inbox_processing_started | user_id=%s | since_hours=%d | force_full_scan=%s | run_id=%s",
                 user_id,
                 since_hours,
+                force_full_scan,
                 run_id,
             )
 
-            # 1. Scan inbox via EmailAnalyzer
-            scan_result = await self._email_analyzer.scan_inbox(user_id, since_hours)
+            # Get watermark unless force_full_scan is True
+            since_timestamp: str | None = None
+            if not force_full_scan:
+                watermark = await self._get_watermark(user_id)
+                if watermark:
+                    since_timestamp = watermark.get("watermark_timestamp")
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: watermark_found | user_id=%s | since_timestamp=%s | run_id=%s",
+                        user_id,
+                        since_timestamp,
+                        run_id,
+                    )
+                else:
+                    logger.info(
+                        "[EMAIL_PIPELINE] Stage: no_watermark | user_id=%s | using_since_hours=%d | run_id=%s",
+                        user_id,
+                        since_hours,
+                        run_id,
+                    )
+
+            # 1. Scan inbox via EmailAnalyzer with optional watermark filter
+            scan_result = await self._email_analyzer.scan_inbox(
+                user_id, since_hours, since_timestamp=since_timestamp
+            )
             result.emails_scanned = scan_result.total_emails
             result.emails_needs_reply = len(scan_result.needs_reply)
 
+            # Capture watermark from scan result for saving later
+            if scan_result.newest_email_timestamp:
+                result.watermark_timestamp = scan_result.newest_email_timestamp
+                result.watermark_email_id = scan_result.newest_email_id
+
             logger.info(
-                "[EMAIL_PIPELINE] Stage: scan_complete | emails_scanned=%d | needs_reply=%d | fyi=%d | skipped=%d | run_id=%s",
+                "[EMAIL_PIPELINE] Stage: scan_complete | emails_scanned=%d | needs_reply=%d | fyi=%d | skipped=%d | run_id=%s | new_watermark=%s",
                 result.emails_scanned,
                 result.emails_needs_reply,
                 len(scan_result.fyi),
                 len(scan_result.skipped),
                 run_id,
+                result.watermark_timestamp or "none",
             )
 
             # Log inbox scan to activity feed (non-blocking)
@@ -1235,19 +1273,28 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 "processing_time_ms": processing_time_ms,
             }
 
+            # Only save watermark for successful runs (completed or partial_failure)
+            # Failed runs should NOT update the watermark - next run will reprocess
+            if result.status in ("completed", "partial_failure"):
+                if result.watermark_timestamp:
+                    update_data["watermark_timestamp"] = result.watermark_timestamp
+                if result.watermark_email_id:
+                    update_data["watermark_email_id"] = result.watermark_email_id
+
             self._db.table("email_processing_runs").update(
                 update_data
             ).eq("id", result.run_id).execute()
 
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_finalized | run_id=%s | status=%s | "
-                "emails_scanned=%d | drafts_generated=%d | drafts_failed=%d | time_ms=%s",
+                "emails_scanned=%d | drafts_generated=%d | drafts_failed=%d | time_ms=%s | watermark=%s",
                 result.run_id,
                 result.status,
                 result.emails_scanned,
                 result.drafts_generated,
                 result.drafts_failed,
                 processing_time_ms,
+                result.watermark_timestamp or "none",
             )
         except Exception as e:
             logger.error(
@@ -1256,6 +1303,44 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 e,
                 exc_info=True,
             )
+
+    # ------------------------------------------------------------------
+    # Watermark Methods
+    # ------------------------------------------------------------------
+
+    async def _get_watermark(self, user_id: str) -> dict | None:
+        """Get the watermark from the last completed processing run.
+
+        The watermark represents the newest email that was successfully processed.
+        Future scans should only fetch emails received AFTER this timestamp.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Dict with watermark_timestamp and watermark_email_id, or None if no watermark.
+        """
+        try:
+            result = (
+                self._db.table("email_processing_runs")
+                .select("watermark_timestamp, watermark_email_id")
+                .eq("user_id", user_id)
+                .eq("status", "completed")
+                .not_.is_("watermark_timestamp", "null")
+                .order("watermark_timestamp", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to get watermark for user %s: %s",
+                user_id,
+                e,
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Deduplication Methods

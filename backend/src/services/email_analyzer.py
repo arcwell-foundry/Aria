@@ -58,6 +58,9 @@ class EmailScanResult(BaseModel):
     fyi: list[EmailCategory] = Field(default_factory=list)
     skipped: list[EmailCategory] = Field(default_factory=list)
     urgent: list[EmailCategory] = Field(default_factory=list)  # subset of needs_reply
+    # Watermark tracking: timestamp of the newest email seen in this scan
+    newest_email_timestamp: str | None = None
+    newest_email_id: str | None = None
 
 
 def _strip_html(raw: str) -> str:
@@ -161,22 +164,26 @@ class EmailAnalyzer:
         self,
         user_id: str,
         since_hours: int = 24,
+        since_timestamp: str | None = None,
     ) -> EmailScanResult:
         """Scan inbox for new emails since last check.
 
         Args:
             user_id: The authenticated user's ID.
             since_hours: How far back to look for emails (default 24h).
+            since_timestamp: ISO timestamp for watermark - only fetch emails after this time.
+                            If provided, takes precedence over since_hours for filtering.
 
         Returns:
-            EmailScanResult with categorized lists.
+            EmailScanResult with categorized lists and watermark info.
         """
         result = EmailScanResult()
 
         logger.info(
-            "EMAIL_ANALYZER: Starting inbox scan for user %s (last %d hours)",
+            "EMAIL_ANALYZER: Starting inbox scan for user %s (last %d hours, since_timestamp=%s)",
             user_id,
             since_hours,
+            since_timestamp or "none",
         )
 
         try:
@@ -188,8 +195,10 @@ class EmailAnalyzer:
                 user_id,
             )
 
-            # 2. Fetch inbox emails
-            emails = await self._fetch_inbox_emails(user_id, since_hours=since_hours)
+            # 2. Fetch inbox emails with optional watermark filter
+            emails = await self._fetch_inbox_emails(
+                user_id, since_hours=since_hours, since_timestamp=since_timestamp
+            )
             result.total_emails = len(emails)
             logger.info(
                 "EMAIL_ANALYZER: Fetched %d inbox emails for user %s",
@@ -201,8 +210,18 @@ class EmailAnalyzer:
                 logger.info("EMAIL_ANALYZER: No emails found for user %s", user_id)
                 return result
 
+            # Track newest email for watermark
+            newest_timestamp: str | None = None
+            newest_email_id: str | None = None
+
             # 3. Categorize each email
             for email in emails:
+                # Track newest email for watermark
+                email_date = email.get("date") or email.get("receivedDateTime")
+                if email_date:
+                    if newest_timestamp is None or email_date > newest_timestamp:
+                        newest_timestamp = email_date
+                        newest_email_id = email.get("id") or email.get("message_id")
                 try:
                     categorized = await self.categorize_email(email, user_id, exclusions)
 
@@ -235,6 +254,17 @@ class EmailAnalyzer:
                 len(result.fyi),
                 len(result.skipped),
             )
+
+            # Set watermark info in result
+            result.newest_email_timestamp = newest_timestamp
+            result.newest_email_id = newest_email_id
+            if newest_timestamp:
+                logger.info(
+                    "EMAIL_ANALYZER: Watermark for user %s - timestamp=%s, email_id=%s",
+                    user_id,
+                    newest_timestamp,
+                    newest_email_id,
+                )
 
             return result
 
@@ -765,6 +795,7 @@ class EmailAnalyzer:
         self,
         user_id: str,
         since_hours: int = 24,
+        since_timestamp: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch inbox emails via Composio.
 
@@ -773,7 +804,8 @@ class EmailAnalyzer:
 
         Args:
             user_id: The user whose inbox to fetch.
-            since_hours: How many hours of history to fetch.
+            since_hours: How many hours of history to fetch (fallback if no since_timestamp).
+            since_timestamp: ISO timestamp to fetch emails after (watermark).
 
         Returns:
             List of email dicts.
@@ -834,9 +866,27 @@ class EmailAnalyzer:
 
             oauth_client = get_oauth_client()
 
-            since_datetime = datetime.now(UTC) - timedelta(hours=since_hours)
-            since_date = since_datetime.isoformat()
-            since_epoch = int(since_datetime.timestamp())
+            # Use watermark timestamp if provided, otherwise calculate from since_hours
+            if since_timestamp:
+                since_date = since_timestamp
+                # Parse the ISO timestamp and convert to epoch for Gmail
+                try:
+                    parsed_dt = datetime.fromisoformat(since_timestamp.replace("Z", "+00:00"))
+                    since_epoch = int(parsed_dt.timestamp())
+                except ValueError:
+                    # Fallback to since_hours if timestamp parsing fails
+                    since_datetime = datetime.now(UTC) - timedelta(hours=since_hours)
+                    since_date = since_datetime.isoformat()
+                    since_epoch = int(since_datetime.timestamp())
+                logger.info(
+                    "EMAIL_ANALYZER: Using watermark timestamp %s for user %s",
+                    since_timestamp,
+                    user_id,
+                )
+            else:
+                since_datetime = datetime.now(UTC) - timedelta(hours=since_hours)
+                since_date = since_datetime.isoformat()
+                since_epoch = int(since_datetime.timestamp())
 
             if provider == "outlook":
                 logger.info(
