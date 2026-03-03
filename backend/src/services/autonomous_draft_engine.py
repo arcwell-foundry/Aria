@@ -111,6 +111,29 @@ class AutonomousDraftEngine:
 
     _FALLBACK_REPLY_PROMPT = """You are ARIA, an AI assistant drafting an email reply."""
 
+    _SCHEDULING_KEYWORDS = [
+        "availability",
+        "available",
+        "schedule",
+        "meet",
+        "call",
+        "time",
+        "when can",
+        "free",
+        "calendar",
+        "slot",
+        "meeting",
+        "book",
+        "appointment",
+        "discuss",
+        "chat",
+        "sync",
+    ]
+
+    _CALENDAR_GUARDRAIL_INSTRUCTION = """
+
+CRITICAL SCHEDULING RULE: This email asks about scheduling but you do NOT have access to the user's calendar. You MUST NOT suggest any specific dates, times, or time slots. Instead write something like: 'Let me check my calendar and get back to you with some available times.' or 'I'll look at my schedule and send over some options shortly.' NEVER invent availability."""
+
     _REPLY_TASK_INSTRUCTIONS = """
 IMPORTANT: Your response MUST be valid JSON with exactly these fields:
 {
@@ -624,6 +647,41 @@ Do not include any text outside the JSON object."""
             )
 
     # ------------------------------------------------------------------
+    # Scheduling Intent Detection
+    # ------------------------------------------------------------------
+
+    def _detect_scheduling_intent(self, email: Any) -> bool:
+        """Detect if the email asks about scheduling/availability.
+
+        Checks the email subject and body for scheduling-related keywords.
+
+        Args:
+            email: The original email (EmailCategory).
+
+        Returns:
+            True if scheduling intent detected, False otherwise.
+        """
+        text_to_check = f"{email.subject or ''} {email.snippet or ''}".lower()
+        return any(kw in text_to_check for kw in self._SCHEDULING_KEYWORDS)
+
+    def _has_calendar_context(self, context: DraftContext) -> bool:
+        """Check if calendar data was actually gathered.
+
+        Args:
+            context: The context from EmailContextGatherer.
+
+        Returns:
+            True if calendar context is available with data, False otherwise.
+        """
+        # Check if calendar_context exists and has actual meeting data
+        if context.calendar_context and context.calendar_context.upcoming_meetings:
+            return True
+        # Also check if "calendar" is in sources_used (even if empty, it was attempted)
+        if "calendar" in context.sources_used:
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # LLM Draft Generation
     # ------------------------------------------------------------------
 
@@ -669,6 +727,14 @@ Do not include any text outside the JSON object."""
             system_prompt = ctx.to_system_prompt() + "\n\n" + self._REPLY_TASK_INSTRUCTIONS
         except Exception as e:
             logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
+
+        # Calendar hallucination guardrail: inject if scheduling intent detected but no calendar data
+        if self._detect_scheduling_intent(email) and not self._has_calendar_context(context):
+            logger.info(
+                "CALENDAR_GUARDRAIL: Scheduling intent detected for thread %s but no calendar data — injecting guardrail instruction",
+                email.thread_id,
+            )
+            system_prompt += self._CALENDAR_GUARDRAIL_INSTRUCTION
 
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
