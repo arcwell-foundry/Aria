@@ -32,6 +32,13 @@ IMPORTANT: Your response MUST be valid JSON with exactly two fields:
 Do not include any text outside the JSON object.
 """
 
+EMAIL_REGENERATION_PROMPT = """You are ARIA, an AI assistant helping a sales professional draft emails.
+Rewrite the email draft based on the parameters below.
+
+IMPORTANT: Write ONLY the email body text. Do NOT wrap your response in JSON, code blocks,
+or include a subject line. Output the email body directly as plain text, ready to send.
+"""
+
 PURPOSE_DESCRIPTIONS: dict[EmailDraftPurpose, str] = {
     EmailDraftPurpose.INTRO: "an introduction email to establish initial contact",
     EmailDraftPurpose.FOLLOW_UP: "a follow-up email to continue a previous conversation",
@@ -391,6 +398,7 @@ class DraftService:
 
             # Use provided tone or existing tone
             use_tone = tone if tone else EmailDraftTone(draft["tone"])
+            tone_was_explicit = tone is not None
 
             # Get lead context if originally provided
             lead_context = await self._get_lead_context(user_id, draft.get("lead_memory_id"))
@@ -398,10 +406,16 @@ class DraftService:
             # Get style guidelines
             style_guidelines = await self._digital_twin.get_style_guidelines(user_id)
 
-            # Get personality calibration (full object for traits)
-            calibration = await self._personality_calibrator.get_calibration(user_id)
+            # Only use personality calibration when user did NOT explicitly pick a tone.
+            # An explicit tone selection (Professional/Casual/Urgent) overrides global
+            # personality calibration to keep tone per-draft only.
+            calibration = None
+            if not tone_was_explicit:
+                calibration = await self._personality_calibrator.get_calibration(user_id)
 
-            # Build context - for REPLY drafts, load full email context from draft_context table
+            # Build context - for REPLY drafts, load full email context from draft_context table.
+            # NEVER use the existing draft body as context — always go back to the
+            # original email and thread to prevent hallucination compounding.
             purpose = EmailDraftPurpose(draft["purpose"])
             combined_context = ""
 
@@ -415,13 +429,24 @@ class DraftService:
                         draft.get("draft_context_id"),
                     )
                 else:
-                    # Fallback to stored context if draft_context not available
-                    original_context = draft.get("context", {}).get("user_context", "")
-                    combined_context = original_context
-                    logger.warning(
-                        "No draft_context found for REPLY draft %s, using stored context",
-                        draft_id,
+                    # Fallback: try to fetch original email content via original_email_id
+                    original_email_context = await self._fetch_original_email_context(
+                        draft.get("original_email_id"), draft.get("thread_id")
                     )
+                    if original_email_context:
+                        combined_context = original_email_context
+                        logger.info(
+                            "Regenerating REPLY draft with original email fallback (email_id=%s)",
+                            draft.get("original_email_id"),
+                        )
+                    else:
+                        # Last resort: use stored context (but NOT the draft body itself)
+                        original_context = draft.get("context", {}).get("user_context", "")
+                        combined_context = original_context
+                        logger.warning(
+                            "No draft_context or original email found for REPLY draft %s, using stored context",
+                            draft_id,
+                        )
             else:
                 # For non-REPLY purposes, use the stored user context
                 original_context = draft.get("context", {}).get("user_context", "")
@@ -437,24 +462,25 @@ class DraftService:
                 recipient_name=draft.get("recipient_name"),
                 purpose=purpose,
                 tone=use_tone,
-                subject_hint=None,  # Let LLM generate new subject
+                subject_hint=draft["subject"],  # Keep subject as hint for regeneration
                 context=combined_context,
                 lead_context=lead_context,
                 style_guidelines=style_guidelines,
                 calibration=calibration,
             )
 
-            # Generate with slightly higher temperature for variation
+            # Use regeneration prompt that asks for plain text, not JSON
             response = await self._llm.generate_response(
                 messages=[{"role": "user", "content": generation_prompt}],
-                system_prompt=EMAIL_GENERATION_PROMPT,
+                system_prompt=EMAIL_REGENERATION_PROMPT,
                 temperature=0.8,
                 task=TaskType.SCRIBE_DRAFT_EMAIL,
                 agent_id="draft_service",
             )
 
-            # Parse response - extract JSON from potentially markdown-wrapped response
-            subject, body = self._parse_llm_response(response, draft["subject"])
+            # Post-process: strip any JSON/code-fence wrapping the LLM may produce
+            body = self._clean_llm_body(response, draft["subject"])
+            subject = draft["subject"]  # Keep original subject on tone change
 
             # Score style match
             style_score = await self._digital_twin.score_style_match(user_id, body)
@@ -711,25 +737,49 @@ class DraftService:
         """
         parts = []
 
-        # Add original email info
+        # Add original email info including the body from thread messages
         sender_email = draft_context.get("sender_email", "")
         subject = draft_context.get("subject", "")
-        parts.append(f"=== ORIGINAL EMAIL YOU ARE REPLYING TO ===")
+        parts.append("=== ORIGINAL EMAIL YOU ARE REPLYING TO ===")
         parts.append(f"From: {sender_email}")
         parts.append(f"Subject: {subject}")
 
-        # Add thread context if available
+        # Extract the original email body from the thread messages.
+        # The most recent non-user message is the email we're replying to.
         thread_context = draft_context.get("thread_context")
+        original_body = ""
         if thread_context and isinstance(thread_context, dict):
-            # Thread summary
-            if thread_context.get("summary"):
-                parts.append(f"\nThread Summary: {thread_context['summary']}")
-
-            # Recent messages from thread
             messages = thread_context.get("messages", [])
-            if messages:
-                parts.append("\n=== RECENT THREAD MESSAGES ===")
-                for msg in messages[-3:]:  # Last 3 messages
+            # Find the last message that isn't from the user (the inbound email)
+            for msg in reversed(messages):
+                if not msg.get("is_from_user", False):
+                    original_body = msg.get("body", "")
+                    break
+            # If all messages are from the user, just use the last message
+            if not original_body and messages:
+                original_body = messages[-1].get("body", "")
+
+        # Also check thread_summary for a text summary
+        thread_summary = ""
+        if thread_context and isinstance(thread_context, dict):
+            thread_summary = thread_context.get("summary", "")
+
+        if original_body:
+            # Truncate very long emails but keep enough for context
+            if len(original_body) > 2000:
+                original_body = original_body[:2000] + "..."
+            parts.append(f"Body:\n{original_body}")
+        elif thread_summary:
+            parts.append(f"Summary: {thread_summary}")
+
+        # Add thread context if available (earlier messages for thread awareness)
+        if thread_context and isinstance(thread_context, dict):
+            messages = thread_context.get("messages", [])
+            # Show earlier thread messages for context (skip the last one already shown)
+            earlier_messages = messages[:-1] if len(messages) > 1 else []
+            if earlier_messages:
+                parts.append("\n=== EARLIER THREAD MESSAGES ===")
+                for msg in earlier_messages[-3:]:  # Last 3 earlier messages
                     sender = msg.get("sender_name") or msg.get("sender_email", "Unknown")
                     body = msg.get("body", "")
                     # Truncate long messages
@@ -738,6 +788,20 @@ class DraftService:
                     is_from_user = msg.get("is_from_user", False)
                     prefix = "You" if is_from_user else sender
                     parts.append(f"\n{prefix}: {body}")
+
+        # Add relationship history if available
+        relationship_history = draft_context.get("relationship_history")
+        if relationship_history and isinstance(relationship_history, dict):
+            memory_facts = relationship_history.get("memory_facts", [])
+            if memory_facts:
+                fact_lines = "\n".join(
+                    f"- {f.get('fact', str(f))}" for f in memory_facts[:3]
+                )
+                total = relationship_history.get("total_emails", 0)
+                parts.append(f"\n=== RELATIONSHIP HISTORY ===")
+                if total:
+                    parts.append(f"Total interactions: {total}")
+                parts.append(f"Key facts:\n{fact_lines}")
 
         # Add recipient research if available
         recipient_research = draft_context.get("recipient_research")
@@ -807,6 +871,105 @@ class DraftService:
             "Failed to parse LLM response as JSON, using raw response as body"
         )
         return (fallback_subject, response)
+
+    def _clean_llm_body(self, response: str, fallback_subject: str) -> str:
+        """Clean LLM response for regeneration — extract plain email body.
+
+        When regenerating with EMAIL_REGENERATION_PROMPT, the LLM should return
+        plain text. But if it returns JSON or code-fenced output anyway, extract
+        just the body text.
+
+        Args:
+            response: The raw LLM response.
+            fallback_subject: Subject line (unused, kept for signature parity).
+
+        Returns:
+            Clean email body text.
+        """
+        import re
+
+        text = response.strip()
+
+        # Strip markdown code fences (```json ... ``` or ``` ... ```)
+        code_block_pattern = r"^```(?:json)?\s*\n?(.*?)```\s*$"
+        match = re.match(code_block_pattern, text, re.DOTALL | re.IGNORECASE)
+        if match:
+            text = match.group(1).strip()
+
+        # If it looks like JSON with subject/body keys, extract the body
+        if text.startswith("{") or '"body"' in text or '"subject"' in text:
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict) and "body" in data:
+                    return data["body"].strip()
+            except json.JSONDecodeError:
+                pass
+
+        return text
+
+    async def _fetch_original_email_context(
+        self,
+        original_email_id: str | None,
+        thread_id: str | None,
+    ) -> str | None:
+        """Fetch original email content as fallback when draft_context is missing.
+
+        Tries to load the original inbound email from draft_context table by
+        email_id or thread_id. Returns a formatted context string or None.
+
+        Args:
+            original_email_id: The ID of the original email being replied to.
+            thread_id: The thread ID to search by.
+
+        Returns:
+            Formatted context string, or None if not found.
+        """
+        if not original_email_id and not thread_id:
+            return None
+
+        try:
+            client = SupabaseClient.get_client()
+
+            # Try by email_id first (most specific)
+            if original_email_id:
+                result = (
+                    client.table("draft_context")
+                    .select("*")
+                    .eq("email_id", original_email_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .maybe_single()
+                    .execute()
+                )
+                if result.data:
+                    return self._build_reply_context_from_draft_context(
+                        cast(dict[str, Any], result.data)
+                    )
+
+            # Fall back to thread_id
+            if thread_id:
+                result = (
+                    client.table("draft_context")
+                    .select("*")
+                    .eq("thread_id", thread_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .maybe_single()
+                    .execute()
+                )
+                if result.data:
+                    return self._build_reply_context_from_draft_context(
+                        cast(dict[str, Any], result.data)
+                    )
+
+        except Exception:
+            logger.warning(
+                "Failed to fetch original email context (email_id=%s, thread_id=%s)",
+                original_email_id,
+                thread_id,
+            )
+
+        return None
 
     def _build_generation_prompt(
         self,
