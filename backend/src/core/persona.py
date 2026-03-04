@@ -487,12 +487,15 @@ Your voice guidelines are authoritative. Your conversation history is not a styl
             # user_profiles.id matches auth.users.id
             profile_result = (
                 db.table("user_profiles")
-                .select("full_name, title, department, default_tone, communication_preferences, companies(name)")
+                .select("full_name, title, department, default_tone, communication_preferences, timezone, companies(name)")
                 .eq("id", user_id)
                 .limit(1)
                 .execute()
             )
             profile_record = profile_result.data[0] if profile_result and profile_result.data else None
+
+            # Timezone for all time presentations (defaults to America/New_York)
+            user_timezone = "America/New_York"
 
             if profile_record:
                 name = profile_record.get("full_name")
@@ -519,6 +522,11 @@ Your voice guidelines are authoritative. Your conversation history is not a styl
                 if default_tone:
                     user_info_parts.append(f"Preferred tone: {default_tone}")
 
+                # Get user's timezone (for converting UTC times to local)
+                tz = profile_record.get("timezone")
+                if tz:
+                    user_timezone = tz
+
             # Also get digital_twin_profiles for additional tone/style preferences
             twin_result = (
                 db.table("digital_twin_profiles")
@@ -543,6 +551,42 @@ Your voice guidelines are authoritative. Your conversation history is not a styl
 
             if user_info_parts:
                 parts.append("## User Profile\n\n" + "\n".join(user_info_parts))
+
+            # Add timezone instruction - this is CRITICAL for all time presentations
+            try:
+                from datetime import datetime, timezone as dt_timezone
+                from zoneinfo import ZoneInfo
+
+                # Get current time in user's timezone for reference
+                tz = ZoneInfo(user_timezone)
+                now_local = datetime.now(dt_timezone.utc).astimezone(tz)
+                current_local_time = now_local.strftime("%I:%M %p %Z")
+                current_date = now_local.strftime("%A, %B %d, %Y")
+
+                timezone_instruction = f"""## User's Local Timezone
+
+The user is in the {user_timezone} timezone. It is currently {current_local_time} on {current_date} in their timezone.
+
+CRITICAL INSTRUCTIONS FOR TIME PRESENTATION:
+1. ALWAYS convert and present all times, dates, and deadlines in the user's local timezone ({user_timezone}).
+2. NEVER show UTC or any other timezone to the user.
+3. When you receive calendar events, meeting times, or deadlines in UTC, convert them to {user_timezone} before presenting.
+4. Example: A meeting stored as 16:00 UTC should be presented as {now_local.strftime("%I:%M %p")} {user_timezone.split('/')[-1]} Standard Time.
+5. When mentioning relative times (e.g., "tomorrow at 3pm"), always mean the user's local time."""
+                parts.append(timezone_instruction)
+            except Exception as tz_error:
+                # Fallback without current time calculation
+                timezone_instruction = f"""## User's Local Timezone
+
+The user is in the {user_timezone} timezone.
+
+CRITICAL INSTRUCTIONS FOR TIME PRESENTATION:
+1. ALWAYS convert and present all times, dates, and deadlines in the user's local timezone ({user_timezone}).
+2. NEVER show UTC or any other timezone to the user.
+3. When you receive calendar events, meeting times, or deadlines in UTC, convert them to {user_timezone} before presenting.
+4. Example: A meeting stored as 16:00 UTC should be presented as 11:00 AM EST (for America/New_York)."""
+                parts.append(timezone_instruction)
+                logger.debug("Timezone calculation failed, using fallback: %s", tz_error)
 
         except Exception as e:
             logger.error("PersonaBuilder L4 user profile failed for %s: %s", user_id, e, exc_info=True)

@@ -95,9 +95,63 @@ def _patch_l4_dependencies(
             if db_error:
                 mock_db.side_effect = db_error
             else:
-                mock_result = MagicMock()
-                mock_result.data = {"preferences": preferences or {}}
-                mock_db.return_value.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = mock_result
+                # Create a mock client that returns proper data for various queries
+                mock_client = MagicMock()
+
+                # Mock for user_profiles query (with timezone)
+                profile_result = MagicMock()
+                profile_result.data = [{
+                    "full_name": "Test User",
+                    "title": "Test Title",
+                    "department": "Test Dept",
+                    "default_tone": "professional",
+                    "communication_preferences": {},
+                    "timezone": "America/New_York",
+                    "companies": {"name": "Test Company"}
+                }]
+
+                # Mock for digital_twin_profiles query
+                twin_result = MagicMock()
+                twin_result.data = [{
+                    "tone": "professional",
+                    "writing_style": "concise",
+                    "formality_level": "medium",
+                    "vocabulary_patterns": None
+                }]
+
+                # Mock for semantic memory queries (empty)
+                empty_result = MagicMock()
+                empty_result.data = []
+
+                # Mock for user_settings query (with preferences)
+                settings_result = MagicMock()
+                settings_result.data = [{"preferences": preferences or {}}]
+
+                # Mock for user_integrations query (empty)
+                integrations_result = MagicMock()
+                integrations_result.data = []
+
+                # Set up the mock chain - the query pattern uses .limit(1).execute()
+                # We need to return different results based on the table being queried
+                def mock_table(table_name):
+                    mock_query = MagicMock()
+                    if table_name == "user_profiles":
+                        mock_query.select.return_value.eq.return_value.limit.return_value.execute.return_value = profile_result
+                    elif table_name == "digital_twin_profiles":
+                        mock_query.select.return_value.eq.return_value.limit.return_value.execute.return_value = twin_result
+                    elif table_name == "user_settings":
+                        mock_query.select.return_value.eq.return_value.limit.return_value.execute.return_value = settings_result
+                    elif table_name == "user_integrations":
+                        mock_query.select.return_value.eq.return_value.execute.return_value = integrations_result
+                    else:
+                        # Default empty result for other tables (memory_semantic, conversation_episodes, goals, etc.)
+                        mock_query.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = empty_result
+                        mock_query.select.return_value.eq.return_value.limit.return_value.execute.return_value = empty_result
+                        mock_query.select.return_value.eq.return_value.execute.return_value = empty_result
+                    return mock_query
+
+                mock_client.table.side_effect = mock_table
+                mock_db.return_value = mock_client
             yield
 
     return _ctx()
