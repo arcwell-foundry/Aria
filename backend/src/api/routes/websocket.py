@@ -332,7 +332,12 @@ async def _apply_thesys_c1(content: str) -> tuple[str, str]:
     Returns (display_content, render_mode) where render_mode is
     "c1", "c1_eligible", or "markdown".
     """
+    logger.info(
+        "CHAT_STREAM_DEBUG: C1 routing decision start, thesys_configured=%s content_length=%d",
+        settings.thesys_configured, len(content) if content else 0,
+    )
     if not settings.thesys_configured:
+        logger.info("CHAT_STREAM_DEBUG: C1 routing decision=skip (thesys not configured)")
         return content, "markdown"
 
     from src.services.thesys_classifier import ThesysRoutingClassifier
@@ -340,18 +345,32 @@ async def _apply_thesys_c1(content: str) -> tuple[str, str]:
     from src.services.thesys_system_prompt import build_system_prompt
 
     should, content_type = ThesysRoutingClassifier.classify(content)
+    logger.info(
+        "CHAT_STREAM_DEBUG: C1 routing decision=classify should_visualize=%s content_type=%s",
+        should, content_type,
+    )
     if not should:
         return content, "markdown"
 
     service = get_thesys_service()
     if not service.is_available:
+        logger.info("CHAT_STREAM_DEBUG: C1 service not available (circuit breaker open?)")
         return content, "c1_eligible"
 
-    system_prompt = build_system_prompt(content_type)
-    rendered = await service.visualize(content, system_prompt)
-    if rendered != content:
-        return rendered, "c1"
-    return content, "c1_eligible"
+    logger.info("CHAT_STREAM_DEBUG: Sending to C1 visualize...")
+    try:
+        system_prompt = build_system_prompt(content_type)
+        rendered = await service.visualize(content, system_prompt)
+        logger.info(
+            "CHAT_STREAM_DEBUG: C1 result received, rendered_length=%d changed=%s",
+            len(rendered) if rendered else 0, rendered != content,
+        )
+        if rendered != content:
+            return rendered, "c1"
+        return content, "c1_eligible"
+    except Exception as e:
+        logger.error("CHAT_STREAM_DEBUG: C1 error: %s", e)
+        return content, "c1_eligible"
 
 
 async def _handle_user_message(
@@ -372,6 +391,11 @@ async def _handle_user_message(
     payload = data.get("payload", {})
     message_text = payload.get("message", "")
     conversation_id = payload.get("conversation_id")
+
+    logger.info(
+        "CHAT_STREAM_DEBUG: Starting response stream for user=%s conversation_id=%s message=%.50s",
+        user_id, conversation_id, message_text[:50] if message_text else "",
+    )
 
     if not conversation_id:
         # Try to find the user's most recent conversation before creating a new one
@@ -410,6 +434,7 @@ async def _handle_user_message(
     # Send thinking indicator
     thinking = ThinkingEvent()
     await websocket.send_json(thinking.to_ws_dict())
+    logger.info("CHAT_STREAM_DEBUG: Sent aria.thinking event")
 
     # Track whether stream_complete was sent so the finally block can guarantee it
     _stream_complete_sent = False
@@ -703,6 +728,7 @@ async def _handle_user_message(
 
         # Generate LLM response (tool-capable path or streaming path)
         full_content = ""
+        logger.info("CHAT_STREAM_DEBUG: Starting LLM response generation, all_tools=%s", bool(all_tools))
         try:
             if all_tools:
                 # Tool-capable path (non-streaming, mirrors REST chat.py:2705-2711)
@@ -724,6 +750,10 @@ async def _handle_user_message(
                         "I ran into a delay connecting to an external service. "
                         "Let me try a simpler approach — what specifically can I help you with?"
                     )
+                logger.info(
+                    "CHAT_STREAM_DEBUG: Tool loop completed, full_content length=%d",
+                    len(full_content) if full_content else 0,
+                )
                 # Content sent after post-processing to avoid duplication
             else:
                 # Streaming path (no tools)
@@ -817,6 +847,10 @@ async def _handle_user_message(
 
         # Signal stream complete with metadata (no duplicate content)
         _stream_complete_sent = True
+        logger.info(
+            "CHAT_STREAM_DEBUG: Sending aria.stream_complete event, render_mode=%s rich_content_count=%d suggestions=%d",
+            render_mode, len(rich_content), len(suggestions),
+        )
         await websocket.send_json(
             {
                 "type": "aria.stream_complete",
@@ -835,7 +869,12 @@ async def _handle_user_message(
         if render_mode == "markdown" and not all_tools and settings.thesys_configured:
             from src.services.thesys_classifier import ThesysRoutingClassifier
 
+            logger.info("CHAT_STREAM_DEBUG: Post-stream C1 check for non-tool streaming path")
             should_viz, content_type = ThesysRoutingClassifier.classify(display_content)
+            logger.info(
+                "CHAT_STREAM_DEBUG: Post-stream C1 classify result, should_viz=%s content_type=%s",
+                should_viz, content_type,
+            )
             if should_viz:
                 render_mode = "c1_eligible"
                 from src.services.thesys_service import get_thesys_service
@@ -843,10 +882,16 @@ async def _handle_user_message(
 
                 svc = get_thesys_service()
                 if svc.is_available:
+                    logger.info("CHAT_STREAM_DEBUG: Sending to C1 visualize for post-stream upgrade...")
                     sys_prompt = build_system_prompt(content_type)
                     c1_rendered = await svc.visualize(display_content, sys_prompt)
+                    logger.info(
+                        "CHAT_STREAM_DEBUG: Post-stream C1 result received, changed=%s",
+                        c1_rendered != display_content,
+                    )
                     if c1_rendered != display_content:
                         render_mode = "c1"
+                        logger.info("CHAT_STREAM_DEBUG: Sending aria.c1_render event")
                         await websocket.send_json({
                             "type": "aria.c1_render",
                             "payload": {
@@ -888,7 +933,7 @@ async def _handle_user_message(
         # Intent detection is now handled inline before streaming (see above)
 
     except Exception as chat_err:
-        logger.exception("WebSocket chat error: %s", chat_err)
+        logger.exception("CHAT_STREAM_DEBUG: WebSocket chat error: %s", chat_err)
         try:
             await websocket.send_json(
                 {
@@ -905,7 +950,12 @@ async def _handle_user_message(
     finally:
         # GUARANTEE the frontend receives a stream_complete event so it
         # never hangs waiting for the stream to finish.
+        logger.info(
+            "CHAT_STREAM_DEBUG: Handler exiting finally block, _stream_complete_sent=%s",
+            _stream_complete_sent,
+        )
         if not _stream_complete_sent:
+            logger.info("CHAT_STREAM_DEBUG: Sending fallback aria.stream_complete event")
             try:
                 await websocket.send_json(
                     {

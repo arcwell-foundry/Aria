@@ -248,6 +248,10 @@ export function ARIAWorkspace() {
   useEffect(() => {
     const handleAriaMessage = (payload: unknown) => {
       const data = (payload ?? {}) as Partial<AriaMessagePayload>;
+      console.log(
+        '[CHAT_STREAM_DEBUG] aria.message received, setting isStreaming=false, streamingIdRef=',
+        streamingIdRef.current,
+      );
       setStreaming(false);
 
       if (streamingIdRef.current) {
@@ -283,6 +287,7 @@ export function ARIAWorkspace() {
 
     const handleThinking = (payload: unknown) => {
       const data = (payload ?? {}) as Partial<AriaThinkingPayload>;
+      console.log('[CHAT_STREAM_DEBUG] aria.thinking received, is_thinking=', data.is_thinking);
       if (data.is_thinking) {
         setStreaming(true);
       }
@@ -292,6 +297,12 @@ export function ARIAWorkspace() {
       const data = (payload ?? {}) as Partial<{ content: string; full_content: string }>;
 
       const tokenContent = data.content ?? '';
+      console.log(
+        '[CHAT_STREAM_DEBUG] aria.token received, content_length=',
+        tokenContent.length,
+        'streamingIdRef=',
+        streamingIdRef.current,
+      );
       if (!streamingIdRef.current) {
         const store = useConversationStore.getState();
         store.addMessage({
@@ -305,6 +316,7 @@ export function ARIAWorkspace() {
         const msgs = useConversationStore.getState().messages;
         streamingIdRef.current = msgs[msgs.length - 1]?.id ?? null;
         setStreaming(true, streamingIdRef.current);
+        console.log('[CHAT_STREAM_DEBUG] Created streaming message, id=', streamingIdRef.current);
       } else {
         appendToMessage(streamingIdRef.current, tokenContent);
       }
@@ -333,6 +345,7 @@ export function ARIAWorkspace() {
 
     const handleStreamError = (payload: unknown) => {
       const data = (payload ?? {}) as Partial<StreamErrorPayload>;
+      console.log('[CHAT_STREAM_DEBUG] aria.stream_error received, setting isStreaming=false');
       setStreaming(false);
       streamingIdRef.current = null;
 
@@ -349,6 +362,12 @@ export function ARIAWorkspace() {
       // Positive signal that the LLM stream finished normally.
       // The final aria.message event handles setting streaming to false,
       // so this is a no-op unless the aria.message is delayed.
+      console.log(
+        '[CHAT_STREAM_DEBUG] aria.stream_complete received - THIS IS A NO-OP!',
+        'streamingIdRef=',
+        streamingIdRef.current,
+        'isStreaming will NOT be cleared here.',
+      );
     };
 
     const handleC1Render = (payload: unknown) => {
@@ -360,6 +379,12 @@ export function ARIAWorkspace() {
         render_mode: string;
       }>;
 
+      console.log(
+        '[CHAT_STREAM_DEBUG] aria.c1_render received, content_length=',
+        data.content?.length ?? 0,
+        'streamingIdRef=',
+        streamingIdRef.current,
+      );
       if (data.content && streamingIdRef.current) {
         // Upgrade the currently streaming message with C1 content
         updateMessageMetadata(streamingIdRef.current, {
