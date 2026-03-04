@@ -31,6 +31,62 @@ from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
+# Signal type classification rules for market signals - ordered by specificity
+_SIGNAL_TYPE_RULES = [
+    ("fda_approval", ["fda approval", "fda cleared", "fda approved", "regulatory approval"]),
+    ("clinical_trial", ["clinical trial", "phase i", "phase ii", "phase iii", "phase 1", "phase 2", "phase 3", "clinical study"]),
+    ("funding", ["acquisition", "acquire", "acquired", "invested", "funding", "ipo", "market value", "merger", "buyout"]),
+    ("leadership", ["ceo", "president", "chief", "appointed", "joined as", "promoted to", "officer", "executive", "board member"]),
+    ("partnership", ["partner", "partnership", "agreement", "collaborated", "alliance", "joint venture", "strategic alliance"]),
+    ("patent", ["patent", "intellectual property", "ip protection"]),
+    ("earnings", ["revenue", "earnings", "quarterly", "financial report", "q1 ", "q2 ", "q3 ", "q4 ", "annual report"]),
+    ("regulatory", ["compliance", "regulation", "sustainability", "esg"]),
+    ("hiring", ["hiring", "recruited", "expanding team", "job opening"]),
+    ("product", ["launched", "product", "introduced", "exhibited", "conference", "bio ", "showcase", "announcement"]),
+]
+
+
+def _classify_signal_type(fact: str) -> str:
+    """Classify a fact into a signal type using keyword matching.
+
+    Args:
+        fact: The fact text to classify.
+
+    Returns:
+        Signal type string.
+    """
+    fact_lower = fact.lower()
+    for signal_type, keywords in _SIGNAL_TYPE_RULES:
+        for keyword in keywords:
+            if keyword in fact_lower:
+                return signal_type
+    return "product"
+
+
+def _extract_headline(fact: str, max_length: int = 80) -> str:
+    """Extract a headline from a fact.
+
+    Args:
+        fact: The fact text.
+        max_length: Maximum headline length.
+
+    Returns:
+        Headline string.
+    """
+    # Try to get first sentence
+    import re
+    first_sentence_match = re.match(r"^(.+?[.!?])\s", fact)
+    if first_sentence_match:
+        headline = first_sentence_match.group(1)
+    else:
+        headline = fact
+
+    # Truncate if needed
+    if len(headline) > max_length:
+        headline = headline[:max_length].rsplit(" ", 1)[0] + "..."
+
+    return headline
+
 
 class EnrichmentStage(str, Enum):
     """Stages of the enrichment pipeline."""
