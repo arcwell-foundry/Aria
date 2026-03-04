@@ -591,6 +591,126 @@ CRITICAL INSTRUCTIONS FOR TIME PRESENTATION:
         except Exception as e:
             logger.error("PersonaBuilder L4 user profile failed for %s: %s", user_id, e, exc_info=True)
 
+        # 0.4. Upcoming calendar events (Today & Tomorrow)
+        # This is CRITICAL - without this, ARIA launches execution plans to find meeting info
+        # instead of answering directly from context
+        try:
+            from datetime import datetime, timedelta, timezone as dt_timezone
+            from zoneinfo import ZoneInfo
+
+            db = get_supabase_client()
+
+            # Query events for next 2 days (today and tomorrow)
+            now_utc = datetime.now(dt_timezone.utc)
+            two_days_ahead = now_utc + timedelta(days=2)
+
+            events_result = (
+                db.table("calendar_events")
+                .select("title, start_time, end_time, attendees, external_company")
+                .eq("user_id", user_id)
+                .gte("start_time", now_utc.isoformat())
+                .lt("start_time", two_days_ahead.isoformat())
+                .order("start_time", desc=False)
+                .limit(15)
+                .execute()
+            )
+
+            if events_result.data:
+                # Get user's timezone for conversion (already retrieved above, but default if not)
+                tz_str = user_timezone if user_timezone else "America/New_York"
+                user_tz = ZoneInfo(tz_str)
+
+                # Group events by day
+                today_events: list[str] = []
+                tomorrow_events: list[str] = []
+
+                today_date = (now_utc.astimezone(user_tz)).date()
+                tomorrow_date = today_date + timedelta(days=1)
+
+                for event in events_result.data:
+                    title = event.get("title", "Untitled Meeting")
+
+                    # Skip buffer blocks
+                    if "buffer" in title.lower():
+                        continue
+
+                    # Parse and convert times
+                    start_utc_str = event.get("start_time", "")
+                    end_utc_str = event.get("end_time", "")
+
+                    if not start_utc_str:
+                        continue
+
+                    try:
+                        start_utc = datetime.fromisoformat(start_utc_str.replace("Z", "+00:00"))
+                        if start_utc.tzinfo is None:
+                            start_utc = start_utc.replace(tzinfo=dt_timezone.utc)
+
+                        start_local = start_utc.astimezone(user_tz)
+                        event_date = start_local.date()
+
+                        # Format time range
+                        time_str = start_local.strftime("%I:%M %p")
+                        if end_utc_str:
+                            end_utc = datetime.fromisoformat(end_utc_str.replace("Z", "+00:00"))
+                            if end_utc.tzinfo is None:
+                                end_utc = end_utc.replace(tzinfo=dt_timezone.utc)
+                            end_local = end_utc.astimezone(user_tz)
+                            time_str = f"{start_local.strftime('%I:%M %p')} - {end_local.strftime('%I:%M %p')}"
+
+                        # Format attendees
+                        attendees_raw = event.get("attendees", [])
+                        attendee_str = ""
+                        if attendees_raw and isinstance(attendees_raw, list):
+                            # Extract names and emails
+                            attendee_info = []
+                            for att in attendees_raw[:4]:  # Limit to 4 attendees
+                                if isinstance(att, dict):
+                                    email = att.get("email", att.get("address", ""))
+                                    name = att.get("name", "")
+                                    if name:
+                                        attendee_info.append(name)
+                                    elif email:
+                                        attendee_info.append(email)
+                            if attendee_info:
+                                attendee_str = f" ({len(attendee_info)} attendee{'s' if len(attendee_info) > 1 else ''}: {', '.join(attendee_info)})"
+
+                        # Build event line
+                        company = event.get("external_company", "")
+                        event_line = f"{time_str}: {title}{attendee_str}"
+
+                        # Add to appropriate day group
+                        if event_date == today_date:
+                            today_events.append(event_line)
+                        elif event_date == tomorrow_date:
+                            tomorrow_events.append(event_line)
+                    except (ValueError, TypeError) as parse_err:
+                        logger.debug("Failed to parse event time: %s", parse_err)
+                        continue
+
+                # Build calendar section
+                calendar_lines: list[str] = []
+                if today_events or tomorrow_events:
+                    calendar_lines.append("## YOUR CALENDAR (Today & Tomorrow)")
+
+                    # Format today's date nicely
+                    today_formatted = today_date.strftime("%A, %B %-d")
+                    tomorrow_formatted = tomorrow_date.strftime("%A, %B %-d")
+
+                    if today_events:
+                        calendar_lines.append(f"\nToday, {today_formatted}:\n")
+                        calendar_lines.append("\n".join(f"- {e}" for e in today_events[:8]))
+
+                    if tomorrow_events:
+                        calendar_lines.append(f"\nTomorrow, {tomorrow_formatted}:\n")
+                        calendar_lines.append("\n".join(f"- {e}" for e in tomorrow_events[:8]))
+
+                    if calendar_lines:
+                        parts.append("\n".join(calendar_lines))
+
+        except Exception as e:
+            logger.error("PersonaBuilder L4 calendar context failed for %s: %s", user_id, e, exc_info=True)
+
         # 0.5. Key facts from semantic memory about the user
         try:
             from src.db.supabase import get_supabase_client
