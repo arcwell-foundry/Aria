@@ -137,7 +137,7 @@ class SignalService:
             limit: Maximum number of signals to return.
 
         Returns:
-            List of signal dicts.
+            List of signal dicts with fields mapped for frontend compatibility.
         """
         query = self._db.table("market_signals").select("*").eq("user_id", user_id)
 
@@ -155,7 +155,33 @@ class SignalService:
             extra={"user_id": user_id, "count": len(result.data)},
         )
 
-        return cast(list[dict[str, Any]], result.data)
+        # Transform database fields to match frontend Signal interface:
+        # - headline -> content (main display text)
+        # - source_name -> source (origin of the signal)
+        # - detected_at -> created_at (timestamp, formatted as ISO 8601)
+        transformed = []
+        for row in result.data:
+            transformed_row = dict(row)
+            # Map field names for frontend compatibility
+            if "headline" in transformed_row:
+                transformed_row["content"] = transformed_row.pop("headline")
+            if "source_name" in transformed_row:
+                transformed_row["source"] = transformed_row.pop("source_name")
+            # Map detected_at to created_at and ensure ISO 8601 format
+            if "detected_at" in transformed_row:
+                detected_at = transformed_row.pop("detected_at")
+                # Parse and reformat to proper ISO 8601
+                try:
+                    if isinstance(detected_at, str):
+                        # Handle Postgres timestamp format: "2026-02-14 22:09:00.71081+00"
+                        # Replace space with T for ISO 8601 compatibility
+                        detected_at = detected_at.replace(" ", "T", 1)
+                    transformed_row["created_at"] = detected_at
+                except Exception:
+                    transformed_row["created_at"] = detected_at
+            transformed.append(transformed_row)
+
+        return transformed
 
     async def mark_as_read(self, user_id: str, signal_id: str) -> dict[str, Any] | None:
         """Mark a signal as read.

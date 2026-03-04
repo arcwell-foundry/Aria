@@ -67,13 +67,28 @@ async def test_create_signal_stores_in_database(mock_db: MagicMock) -> None:
 async def test_get_signals_returns_all_signals_by_default(mock_db: MagicMock) -> None:
     """Test get_signals returns all signals without filters."""
     with patch("src.services.signal_service.SupabaseClient") as mock_db_class:
-        expected_signals = [
-            {"id": "signal-1", "company_name": "Acme Corp", "signal_type": "funding"},
-            {"id": "signal-2", "company_name": "Beta Inc", "signal_type": "hiring"},
+        # Mock data as it comes from the database
+        db_signals = [
+            {
+                "id": "signal-1",
+                "company_name": "Acme Corp",
+                "signal_type": "funding",
+                "headline": "Acme raises $50M",
+                "source_name": "TechCrunch",
+                "detected_at": "2026-02-14 22:09:00.71081+00",
+            },
+            {
+                "id": "signal-2",
+                "company_name": "Beta Inc",
+                "signal_type": "hiring",
+                "headline": "Beta hiring engineers",
+                "source_name": "LinkedIn",
+                "detected_at": "2026-02-13 10:30:00+00",
+            },
         ]
         # Setup DB mock
         mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=expected_signals
+            data=db_signals
         )
         mock_db_class.get_client.return_value = mock_db
 
@@ -83,7 +98,12 @@ async def test_get_signals_returns_all_signals_by_default(mock_db: MagicMock) ->
         result = await service.get_signals("user-456")
 
         assert len(result) == 2
-        assert result == expected_signals
+        # Verify field transformation: headline -> content, source_name -> source, detected_at -> created_at
+        assert result[0]["content"] == "Acme raises $50M"
+        assert result[0]["source"] == "TechCrunch"
+        assert "T" in result[0]["created_at"]  # ISO 8601 format has T separator
+        assert result[1]["content"] == "Beta hiring engineers"
+        assert result[1]["source"] == "LinkedIn"
 
         # Verify query was built correctly
         mock_db.table.assert_called_with("market_signals")
