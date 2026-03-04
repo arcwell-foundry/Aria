@@ -349,6 +349,7 @@ class StrategistAgent(SkillAwareAgent):
                 account_name=target_company,
             )
             if system_prompt is None:
+                # TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
                 system_prompt = (
                     "You are ARIA's Strategist agent — a senior life sciences commercial "
                     "strategist with deep expertise in pharma, biotech, and CDMO sales. "
@@ -657,6 +658,7 @@ class StrategistAgent(SkillAwareAgent):
                 output_format="json",
             )
             if system_prompt is None:
+                # TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
                 system_prompt = (
                     "You are ARIA's Strategist agent — a senior life sciences commercial "
                     "strategist with deep expertise in pharma, biotech, and CDMO sales. "

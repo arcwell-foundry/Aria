@@ -78,6 +78,7 @@ Respond with ONLY a JSON object (no markdown fences):
 }
 """
 
+# TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
 _FALLBACK_SYSTEM_PROMPT = """\
 You are ARIA, an autonomous AI colleague for Life Sciences commercial teams. \
 You are evaluating whether to push back on a user request.

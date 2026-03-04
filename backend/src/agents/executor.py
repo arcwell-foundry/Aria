@@ -345,6 +345,7 @@ class ProceduralMemory(Protocol):
 # Fallback system prompt
 # ---------------------------------------------------------------------------
 
+# TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
 _FALLBACK_SYSTEM_PROMPT = """\
 You are ARIA's Executor — a browser automation specialist. Your job is to plan \
 precise browser steps to accomplish a task on a given URL.

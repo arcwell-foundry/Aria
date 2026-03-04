@@ -1126,7 +1126,7 @@ async def _generate_personalized_suggestions(
         raw = await llm.generate(
             prompt_messages,
             task=TaskType.SUGGEST_FOLLOWUP,
-            system_prompt="You are ARIA, an AI sales assistant. Generate short, actionable follow-up suggestions.",
+            system_prompt="You are ARIA, an autonomous AI colleague. Generate short, actionable follow-up suggestions that move work forward.",
             user_id=user_id,
         )
         import json as _json

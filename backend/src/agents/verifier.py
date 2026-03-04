@@ -98,6 +98,7 @@ VERIFICATION_POLICIES: dict[str, VerificationPolicy] = {
 
 
 # Fallback system prompt when PersonaBuilder is unavailable
+# TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
 _FALLBACK_SYSTEM_PROMPT = """\
 You are ARIA's Verifier — a skeptical, rigorous quality reviewer for life sciences \
 commercial outputs. Your job is to find problems, not to be encouraging.
