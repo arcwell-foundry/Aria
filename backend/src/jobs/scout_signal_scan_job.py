@@ -71,7 +71,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 from src.agents.scout import ScoutAgent
                 from src.core.llm import LLMClient
 
-                scout = ScoutAgent(llm_client=LLMClient())
+                scout = ScoutAgent(llm_client=LLMClient(), user_id=user_id)
                 result = await scout.execute(
                     {"entities": entities, "signal_types": ["news", "funding", "regulatory"]}
                 )

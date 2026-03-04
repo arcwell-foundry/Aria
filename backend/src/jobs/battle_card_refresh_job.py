@@ -86,7 +86,7 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
                     stats["competitors_scanned"] += 1
 
                     # Search for recent intel via Scout
-                    intel = await _gather_competitor_intel(competitor)
+                    intel = await _gather_competitor_intel(competitor, user_id=user_id)
 
                     if not intel:
                         continue
@@ -194,7 +194,7 @@ async def run_battle_card_refresh_job() -> dict[str, Any]:
     return stats
 
 
-async def _gather_competitor_intel(competitor: str) -> list[dict[str, Any]]:
+async def _gather_competitor_intel(competitor: str, user_id: str = "") -> list[dict[str, Any]]:
     """Run Scout-style web search for a competitor and return intel items."""
     intel: list[dict[str, Any]] = []
 
@@ -202,7 +202,7 @@ async def _gather_competitor_intel(competitor: str) -> list[dict[str, Any]]:
         from src.agents.scout import ScoutAgent
         from src.core.llm import LLMClient
 
-        scout = ScoutAgent(llm_client=LLMClient())
+        scout = ScoutAgent(llm_client=LLMClient(), user_id=user_id)
         result = await scout.execute(
             {
                 "entities": [competitor],
