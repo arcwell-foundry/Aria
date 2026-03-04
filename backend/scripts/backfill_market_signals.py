@@ -152,7 +152,7 @@ async def backfill_market_signals() -> int:
     db = SupabaseClient.get_client()
 
     # Get the user ID (should be single user - Dhruv)
-    users_result = db.table("users").select("id").limit(1).execute()
+    users_result = db.table("user_profiles").select("id").limit(1).execute()
     if not users_result.data:
         logger.error("No users found in database")
         return 0

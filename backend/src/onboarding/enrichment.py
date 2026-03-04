@@ -1284,6 +1284,49 @@ Respond ONLY with the JSON array, no additional text."""
             except Exception as e:
                 logger.warning(f"Failed to store fact: {e}")
 
+        # Sync facts to market_signals for Intelligence page display
+        try:
+            # Resolve company name for signal records
+            _co_row = (
+                self._db.table("companies")
+                .select("name")
+                .eq("id", company_id)
+                .limit(1)
+                .execute()
+            )
+            _co_name = (
+                _co_row.data[0]["name"]
+                if _co_row and _co_row.data and _co_row.data[0].get("name")
+                else "Unknown"
+            )
+
+            for fact in result.facts:
+                try:
+                    source_key = f"enrichment_{fact.source}"
+                    relevance = 0.9 if fact.source == "news" else (
+                        0.85 if fact.source == "leadership" else 0.7
+                    )
+                    self._db.table("market_signals").insert(
+                        {
+                            "user_id": user_id,
+                            "company_name": _co_name,
+                            "signal_type": _classify_signal_type(fact.fact),
+                            "headline": _extract_headline(fact.fact),
+                            "summary": fact.fact,
+                            "source_name": source_key,
+                            "relevance_score": relevance,
+                            "metadata": {
+                                "category": fact.category,
+                                "entities": fact.entities,
+                                "company_id": company_id,
+                            },
+                        }
+                    ).execute()
+                except Exception as e:
+                    logger.warning(f"Failed to create market signal: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to sync market signals during enrichment: {e}")
+
         # Store hypotheses in semantic memory and Graphiti knowledge graph
         for hyp in result.hypotheses:
             try:
