@@ -36,6 +36,7 @@ export function ARIAWorkspace() {
   useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
+  const streamingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const conversationLoadedRef = useRef(false);
   const briefingInjectedRef = useRef(false);
   const briefingStreamAbortRef = useRef<AbortController | null>(null);
@@ -290,6 +291,13 @@ export function ARIAWorkspace() {
       console.log('[CHAT_STREAM_DEBUG] aria.thinking received, is_thinking=', data.is_thinking);
       if (data.is_thinking) {
         setStreaming(true);
+        // Safety timeout: auto-clear streaming after 120s in case completion event is lost
+        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
+        streamingTimeoutRef.current = setTimeout(() => {
+          console.warn('[CHAT_STREAM_DEBUG] Safety timeout: force-clearing streaming state after 120s');
+          setStreaming(false);
+          streamingIdRef.current = null;
+        }, 120000);
       }
     };
 
@@ -359,15 +367,11 @@ export function ARIAWorkspace() {
     };
 
     const handleStreamComplete = () => {
-      // Positive signal that the LLM stream finished normally.
-      // The final aria.message event handles setting streaming to false,
-      // so this is a no-op unless the aria.message is delayed.
-      console.log(
-        '[CHAT_STREAM_DEBUG] aria.stream_complete received - THIS IS A NO-OP!',
-        'streamingIdRef=',
-        streamingIdRef.current,
-        'isStreaming will NOT be cleared here.',
-      );
+      console.log('[CHAT_STREAM_DEBUG] aria.stream_complete → clearing streaming state');
+      // Clear the safety timeout since we got the completion event
+      if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
+      setStreaming(false);
+      streamingIdRef.current = null;
     };
 
     const handleC1Render = (payload: unknown) => {
