@@ -446,6 +446,9 @@ def execute_with_refresh_sync(
     if oauth_client is None:
         oauth_client = get_oauth_client()
 
+    # All Outlook actions have no registered version, skip version check
+    skip_version = action.upper().startswith("OUTLOOK")
+
     # --- Attempt primary connection ---
     try:
         result = oauth_client.execute_action_sync(
@@ -453,6 +456,7 @@ def execute_with_refresh_sync(
             action=action,
             params=params,
             user_id=user_id,
+            dangerously_skip_version_check=skip_version,
         )
     except Exception as exc:
         if not _is_auth_error(exc=exc):
@@ -484,6 +488,7 @@ def execute_with_refresh_sync(
                 action=action,
                 params=params,
                 user_id=user_id,
+                dangerously_skip_version_check=skip_version,
             )
         except Exception as alt_exc:
             logger.debug(

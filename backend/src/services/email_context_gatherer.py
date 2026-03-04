@@ -633,6 +633,7 @@ class EmailContextGatherer:
                 action=action,
                 params=params,
                 user_id=user_id,
+                dangerously_skip_version_check=True,  # Outlook tools have no registered version
             )
 
             logger.info(

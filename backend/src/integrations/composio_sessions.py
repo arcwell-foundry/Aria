@@ -224,8 +224,8 @@ class ComposioSessionManager:
                 "Session-only execution is not yet supported."
             )
 
-        # Outlook calendar actions have no registered version, skip version check
-        skip_version = action.upper().startswith("OUTLOOK") and "CALENDAR" in action.upper()
+        # All Outlook actions have no registered version, skip version check
+        skip_version = action.upper().startswith("OUTLOOK")
         return await oauth.execute_action(
             connection_id=connection_id,
             action=action,

@@ -281,6 +281,7 @@ class EmailClientWriter:
                 action="OUTLOOK_CREATE_DRAFT",
                 params=params,
                 user_id=user_id,
+                dangerously_skip_version_check=True,  # Outlook tools have no registered version
             )
             logger.info(
                 "EMAIL_CLIENT: Outlook create draft result: successful=%s, data_keys=%s",
