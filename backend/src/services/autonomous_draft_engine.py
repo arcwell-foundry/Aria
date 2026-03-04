@@ -341,6 +341,7 @@ Do not include any text outside the JSON object."""
             emails_skipped_learning_mode = 0
             emails_skipped_existing_draft = 0
             emails_deferred_active_conversation = 0
+            emails_skipped_user_replied = 0
 
             for thread_id, thread_emails in grouped_emails.items():
                 # Collect email_ids for cross-run dedup check
@@ -409,7 +410,17 @@ Do not include any text outside the JSON object."""
                         user_id, user_name, email, is_learning_mode, run_id
                     )
                     result.drafts.append(draft)
-                    if draft.success:
+
+                    # Handle user_already_replied as a special skip case (not generated, not failed)
+                    if draft.error == "user_already_replied":
+                        emails_skipped_user_replied += 1
+                        logger.info(
+                            "[EMAIL_PIPELINE] Stage: skipped_user_replied | email_id=%s | thread_id=%s | run_id=%s",
+                            email.email_id,
+                            email.thread_id,
+                            run_id,
+                        )
+                    elif draft.success:
                         result.drafts_generated += 1
                         logger.info(
                             "[EMAIL_PIPELINE] Stage: draft_generated | draft_id=%s | email_id=%s | confidence=%.2f | run_id=%s",
@@ -450,13 +461,14 @@ Do not include any text outside the JSON object."""
             logger.info(
                 "[EMAIL_PIPELINE] Stage: run_complete | run_id=%s | "
                 "drafts_generated=%d | drafts_failed=%d | "
-                "skipped_existing=%d | deferred_active=%d | skipped_learning=%d | status=%s",
+                "skipped_existing=%d | deferred_active=%d | skipped_learning=%d | skipped_user_replied=%d | status=%s",
                 run_id,
                 result.drafts_generated,
                 result.drafts_failed,
                 emails_skipped_existing_draft,
                 emails_deferred_active_conversation,
                 emails_skipped_learning_mode,
+                emails_skipped_user_replied,
                 result.status,
             )
 
@@ -544,6 +556,38 @@ Do not include any text outside the JSON object."""
                 logger.info(
                     "DRAFT_ENGINE: Using fallback context for email %s",
                     email.email_id,
+                )
+
+            # a.5 REPLY CHECK: Skip drafting if user already replied manually
+            # This prevents ARIA from drafting replies to emails the user already responded to
+            user_already_replied, reply_timestamp = self._check_user_already_replied(
+                email, context
+            )
+            if user_already_replied:
+                logger.info(
+                    "REPLY_CHECK: User already replied to thread %s at %s, skipping draft for email_id=%s",
+                    email.thread_id,
+                    reply_timestamp,
+                    email.email_id,
+                )
+                # Log skip to email_scan_log for visibility
+                await self._log_skip_decision(
+                    user_id, email.thread_id, "user_already_replied", email.email_id
+                )
+                return DraftResult(
+                    draft_id="",
+                    recipient_email=email.sender_email,
+                    recipient_name=email.sender_name,
+                    subject="",
+                    body="",
+                    style_match_score=0.0,
+                    confidence_level=0.0,
+                    aria_notes="Skipped: User already replied to this thread",
+                    original_email_id=email.email_id,
+                    thread_id=email.thread_id,
+                    context_id="",
+                    success=True,  # Not a failure - intentional skip
+                    error="user_already_replied",
                 )
 
             # b. Get style guidelines
@@ -1782,6 +1826,70 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 e,
             )
             return False
+
+    def _check_user_already_replied(
+        self,
+        email: Any,
+        context: DraftContext,
+    ) -> tuple[bool, str | None]:
+        """Check if user has already replied to this thread after the incoming email.
+
+        This prevents ARIA from drafting replies to emails the user already responded
+        to manually (e.g., user replied on mobile before ARIA's scan ran).
+
+        Args:
+            email: The incoming email that triggered NEEDS_REPLY (EmailCategory).
+            context: The context from EmailContextGatherer with thread messages.
+
+        Returns:
+            Tuple of (has_replied, reply_timestamp). If has_replied is True,
+            reply_timestamp contains the timestamp of the user's reply.
+        """
+        # No thread context available - can't verify, proceed with draft
+        if not context.thread_context or not context.thread_context.messages:
+            logger.debug(
+                "REPLY_CHECK: No thread messages available for email_id=%s, proceeding with draft",
+                email.email_id,
+            )
+            return (False, None)
+
+        messages = context.thread_context.messages
+
+        # Find the triggering email's timestamp
+        # The triggering email is from the sender (not the user) and is the one we're replying to
+        # We look for the latest non-user message as the trigger point
+        triggering_timestamp: str | None = None
+        for msg in messages:
+            if not msg.is_from_user:
+                # This is a message from someone else (the sender)
+                # Use the latest one as the trigger point
+                triggering_timestamp = msg.timestamp
+
+        if not triggering_timestamp:
+            logger.debug(
+                "REPLY_CHECK: Could not find triggering message timestamp for email_id=%s",
+                email.email_id,
+            )
+            return (False, None)
+
+        # Check if any user message came AFTER the triggering email
+        for msg in messages:
+            if msg.is_from_user and msg.timestamp:
+                # Compare timestamps - user reply must be AFTER the triggering email
+                if msg.timestamp > triggering_timestamp:
+                    logger.info(
+                        "REPLY_CHECK: User reply detected at %s (after trigger at %s) for thread %s",
+                        msg.timestamp,
+                        triggering_timestamp,
+                        email.thread_id,
+                    )
+                    return (True, msg.timestamp)
+
+        logger.debug(
+            "REPLY_CHECK: No user reply found after triggering email for thread %s",
+            email.thread_id,
+        )
+        return (False, None)
 
     async def _defer_draft(
         self,
