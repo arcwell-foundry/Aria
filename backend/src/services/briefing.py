@@ -12,6 +12,7 @@ import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
@@ -135,6 +136,72 @@ class BriefingService:
             except Exception as e:
                 logger.warning("BriefingService: Failed to initialize SalesCausalReasoningEngine: %s", e)
         return self._causal_engine
+
+    async def _get_user_timezone(self, user_id: str) -> str:
+        """Get the user's timezone from user_profiles table.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Timezone string (e.g., 'America/New_York'), defaults to 'America/New_York'.
+        """
+        try:
+            result = (
+                self._db.table("user_profiles")
+                .select("timezone")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if result and result.data:
+                return result.data[0].get("timezone", "America/New_York")
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch user timezone",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+        return "America/New_York"
+
+    async def _format_time_in_user_timezone(
+        self,
+        iso_time_str: str,
+        user_id: str,
+    ) -> str:
+        """Convert an ISO time string to user's local timezone and format.
+
+        Args:
+            iso_time_str: ISO 8601 time string (e.g., '2026-03-04T16:00:00+00:00').
+            user_id: The user's ID.
+
+        Returns:
+            Formatted time in user's local timezone (e.g., '11:00 AM').
+        """
+        try:
+            # Clean the ISO string (handle Z suffix)
+            cleaned = iso_time_str.replace("Z", "+00:00")
+            utc_time = datetime.fromisoformat(cleaned)
+
+            # Ensure timezone-aware
+            if utc_time.tzinfo is None:
+                utc_time = utc_time.replace(tzinfo=UTC)
+
+            # Get user's timezone and convert
+            user_tz_str = await self._get_user_timezone(user_id)
+            user_tz = ZoneInfo(user_tz_str)
+            local_time = utc_time.astimezone(user_tz)
+
+            # Format as "11:00 AM" or "11:00 PM"
+            return local_time.strftime("%-I:%M %p") if cleaned else ""
+        except Exception as e:
+            logger.warning(
+                "Failed to convert time to user timezone",
+                extra={"iso_time": iso_time_str, "user_id": user_id},
+                exc_info=True,
+            )
+            # Return original string on failure
+            return iso_time_str
 
     async def generate_briefing(
         self,
@@ -846,6 +913,9 @@ class BriefingService:
                 else:
                     time_str = str(start_time)
 
+                # Convert UTC time to user's local timezone for display
+                formatted_time = await self._format_time_in_user_timezone(time_str, user_id)
+
                 # Extract attendees
                 attendees_raw = event.get("attendees", event.get("requiredAttendees", []))
                 attendees = []
@@ -859,7 +929,7 @@ class BriefingService:
                 key_meetings.append({
                     "id": event.get("id", ""),
                     "title": event.get("summary", event.get("subject", "Untitled Meeting")),
-                    "time": time_str,
+                    "time": formatted_time,  # Now in user's local timezone
                     "attendees": attendees,
                     "company": None,  # Would need additional enrichment
                     "has_brief": False,  # Would need meeting prep integration
