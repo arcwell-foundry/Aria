@@ -678,7 +678,177 @@ class PersonaBuilder:
         except Exception as e:
             logger.error("PersonaBuilder L4 persona overrides failed for %s: %s", user_id, e, exc_info=True)
 
+        # 5. Integration Status and Activity (CRITICAL for accurate responses)
+        try:
+            integration_section = await self._build_integration_context(user_id)
+            if integration_section:
+                parts.append(integration_section)
+        except Exception as e:
+            logger.error("PersonaBuilder L4 integration context failed for %s: %s", user_id, e, exc_info=True)
+
         return "\n\n".join(parts)
+
+    async def _build_integration_context(self, user_id: str) -> str:
+        """Build integration status and activity context.
+
+        Queries user_integrations for real status, plus activity metrics
+        from email_processing_runs, calendar_events, and writing_style_fingerprints.
+
+        This ensures ARIA reports ACTUAL integration status, not hallucinated state.
+
+        Args:
+            user_id: The user to build integration context for.
+
+        Returns:
+            Formatted integration status string with activity metrics.
+        """
+        from src.db.supabase import get_supabase_client
+
+        db = get_supabase_client()
+        lines: list[str] = []
+
+        # Query all integrations for this user
+        integrations_result = (
+            db.table("user_integrations")
+            .select("integration_type, status, sync_status, account_email, last_sync_at, error_message")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        integrations = integrations_result.data if integrations_result.data else []
+
+        # Build status lines for each integration
+        for integ in integrations:
+            integ_type = integ.get("integration_type", "unknown")
+            status = integ.get("status", "unknown")
+            sync_status = integ.get("sync_status", "")
+            account_email = integ.get("account_email", "")
+            last_sync = integ.get("last_sync_at", "")
+            error_msg = integ.get("error_message", "")
+
+            # Format status
+            if status == "active" and sync_status != "failed":
+                status_text = "CONNECTED and ACTIVE"
+                if last_sync:
+                    # Parse and format last sync time
+                    try:
+                        from datetime import datetime, timezone
+
+                        sync_time = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+                        delta = datetime.now(timezone.utc) - sync_time
+                        if delta.total_seconds() < 3600:
+                            mins = int(delta.total_seconds() / 60)
+                            status_text += f". Last sync: {mins} minute{'s' if mins != 1 else ''} ago"
+                        elif delta.total_seconds() < 86400:
+                            hours = int(delta.total_seconds() / 3600)
+                            status_text += f". Last sync: {hours} hour{'s' if hours != 1 else ''} ago"
+                        else:
+                            days = int(delta.total_seconds() / 86400)
+                            status_text += f". Last sync: {days} day{'s' if days != 1 else ''} ago"
+                    except (ValueError, TypeError):
+                        pass
+                status_text += f". Status: {sync_status or 'success'}"
+            elif status == "active" and sync_status == "failed":
+                status_text = f"CONNECTED but last sync FAILED"
+                if error_msg:
+                    status_text += f" ({error_msg[:100]})"
+            else:
+                status_text = f"NOT CONNECTED (status: {status})"
+
+            email_str = f" ({account_email})" if account_email else ""
+            lines.append(f"- {integ_type.title()}{email_str}: {status_text}")
+
+        # If no integrations, note that
+        if not lines:
+            lines.append("- No integrations connected")
+
+        # Add activity metrics
+        activity_lines: list[str] = []
+
+        # Email processing runs (recent scans)
+        try:
+            email_runs = (
+                db.table("email_processing_runs")
+                .select("id, status, emails_scanned, created_at")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+            if email_runs.data:
+                total_scanned = sum(r.get("emails_scanned", 0) or 0 for r in email_runs.data)
+                successful = sum(1 for r in email_runs.data if r.get("status") == "completed")
+                if total_scanned > 0:
+                    activity_lines.append(f"- Email scanning: {total_scanned} emails scanned across {successful} successful runs")
+        except Exception:
+            pass
+
+        # Calendar events synced
+        try:
+            calendar_count = (
+                db.table("calendar_events")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            count = calendar_count.count if hasattr(calendar_count, "count") else 0
+            if count and count > 0:
+                activity_lines.append(f"- Calendar sync: {count} events synced")
+        except Exception:
+            pass
+
+        # Writing style analysis
+        try:
+            style_result = (
+                db.table("writing_style_fingerprints")
+                .select("confidence, email_count, sample_count")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if style_result.data:
+                style = style_result.data[0]
+                conf = style.get("confidence", 0)
+                emails = style.get("email_count", 0)
+                samples = style.get("sample_count", 0)
+                if emails or samples:
+                    activity_lines.append(
+                        f"- Writing style: Analyzed {emails} sent emails, {samples} writing samples, confidence {conf:.0%}"
+                    )
+        except Exception:
+            pass
+
+        # Contacts extracted
+        try:
+            contacts_count = (
+                db.table("email_contacts")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            count = contacts_count.count if hasattr(contacts_count, "count") else 0
+            if count and count > 0:
+                activity_lines.append(f"- Contact intelligence: {count} contacts extracted and profiled")
+        except Exception:
+            pass
+
+        # Build the section
+        section = "## Integration Status\n\n"
+        section += "CURRENT INTEGRATION STATUS (query the database for this):\n\n"
+        section += "\n".join(lines) + "\n\n"
+
+        if activity_lines:
+            section += "ACTIVE CAPABILITIES (what ARIA is doing with these integrations):\n\n"
+            section += "\n".join(activity_lines) + "\n\n"
+
+        section += "IMPORTANT: When asked about integrations, report the ACTUAL status above. "
+        section += "Do NOT guess or hallucinate integration status. "
+        section += "If an integration is active and syncing, say it's working. "
+        section += "If an integration shows errors or is disconnected, explain that accurately."
+
+        return section
 
     def _build_agent_context(self, request: PersonaRequest) -> str:
         """Build Layer 5: agent-specific context.
