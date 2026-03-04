@@ -1748,7 +1748,8 @@ Summary:"""
     ) -> int:
         """Sync fetched calendar events to the local calendar_events table.
 
-        Uses upsert on (user_id, external_id) to avoid duplicates.
+        NOTE: calendar_events has no unique constraint on (user_id, external_id),
+        so we check for existing rows before inserting.
 
         Args:
             user_id: The user's ID.
@@ -1762,25 +1763,49 @@ Summary:"""
         for event in events:
             ext_id = event.get("id")
             if not ext_id:
+                logger.warning(
+                    "CONTEXT_GATHERER: Skipping calendar event with no id: %s",
+                    event.get("title"),
+                )
                 continue
             try:
+                # Check if event already exists
+                existing = self._db.table("calendar_events").select("id").eq("user_id", user_id).eq("external_id", ext_id).execute()
+                if existing.data:
+                    logger.debug(
+                        "CONTEXT_GATHERER: Calendar event already cached: %s",
+                        ext_id,
+                    )
+                    synced += 1
+                    continue
+
+                # Insert new event - pass list/dict directly for JSONB columns
                 attendees = event.get("attendees_list", [])
-                self._db.table("calendar_events").upsert(
-                    {
-                        "user_id": user_id,
-                        "title": event.get("title", ""),
-                        "start_time": event.get("start", ""),
-                        "end_time": event.get("end", ""),
-                        "attendees": json.dumps(attendees),
-                        "source": source,
-                        "external_id": ext_id,
-                        "metadata": json.dumps(event),
-                    },
-                    on_conflict="user_id,external_id",
-                ).execute()
-                synced += 1
+                result = self._db.table("calendar_events").insert({
+                    "user_id": user_id,
+                    "title": event.get("title", ""),
+                    "start_time": event.get("start", ""),
+                    "end_time": event.get("end", ""),
+                    "attendees": attendees,  # JSONB: pass list directly
+                    "source": source,
+                    "external_id": ext_id,
+                    "metadata": event,  # JSONB: pass dict directly
+                }).execute()
+
+                if result.data:
+                    logger.info(
+                        "CONTEXT_GATHERER: Cached calendar event '%s' (id=%s)",
+                        event.get("title"),
+                        ext_id,
+                    )
+                    synced += 1
+                else:
+                    logger.error(
+                        "CONTEXT_GATHERER: Insert returned no data for event %s",
+                        ext_id,
+                    )
             except Exception as e:
-                logger.warning(
+                logger.error(
                     "CONTEXT_GATHERER: Failed to cache calendar event %s: %s",
                     ext_id,
                     e,

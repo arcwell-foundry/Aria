@@ -844,30 +844,51 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
         }
 
     # 3. Sync events to local calendar_events table
+    # NOTE: calendar_events has no unique constraint on (user_id, external_id),
+    # so we use INSERT instead of upsert and check for existing rows.
     synced = 0
+    sync_errors = []
     source = "google" if "google" in integration_type else "outlook"
     for ev in events:
-        if not ev.get("external_id"):
+        ext_id = ev.get("external_id")
+        if not ext_id:
+            logger.warning("CALENDAR_SYNC: Skipping event with no external_id: %s", ev.get("title"))
+            continue
+        start_time = ev.get("start_time")
+        if not start_time:
+            logger.warning("CALENDAR_SYNC: Skipping event with no start_time: %s", ev.get("title"))
             continue
         try:
-            db.table("calendar_events").upsert(
-                {
-                    "user_id": user_id,
-                    "title": ev["title"],
-                    "start_time": ev["start_time"],
-                    "end_time": ev.get("end_time"),
-                    "attendees": json.dumps(ev.get("attendees", [])),
-                    "source": source,
-                    "external_id": ev["external_id"],
-                    "metadata": json.dumps(ev),
-                },
-                on_conflict="user_id,external_id",
-            ).execute()
-            synced += 1
+            # Check if event already exists
+            existing = db.table("calendar_events").select("id").eq("user_id", user_id).eq("external_id", ext_id).execute()
+            if existing.data:
+                logger.info("CALENDAR_SYNC: Event already exists, skipping: %s", ext_id)
+                synced += 1
+                continue
+
+            # Insert new event - pass list/dict directly for JSONB columns
+            result = db.table("calendar_events").insert({
+                "user_id": user_id,
+                "title": ev["title"],
+                "start_time": start_time,
+                "end_time": ev.get("end_time"),
+                "attendees": ev.get("attendees", []),  # JSONB: pass list directly
+                "source": source,
+                "external_id": ext_id,
+                "metadata": ev,  # JSONB: pass dict directly
+            }).execute()
+
+            if result.data:
+                logger.info("CALENDAR_SYNC: Inserted event '%s' (id=%s)", ev.get("title"), ext_id)
+                synced += 1
+            else:
+                err_msg = f"Insert returned no data for event {ext_id}"
+                logger.error("CALENDAR_SYNC_FAIL: %s", err_msg)
+                sync_errors.append(err_msg)
         except Exception as e:
-            logger.warning(
-                "Failed to sync calendar event %s: %s", ev.get("external_id"), e
-            )
+            err_msg = f"Event '{ev.get('title')}': {e}"
+            logger.error("CALENDAR_SYNC_FAIL: %s", err_msg)
+            sync_errors.append(err_msg)
 
     # Determine the action name that was used
     action_name = (
@@ -884,6 +905,7 @@ async def test_calendar_integration(current_user: CurrentUser) -> dict[str, Any]
         "events": events,
         "event_count": len(events),
         "synced": synced,
+        "sync_errors": sync_errors,
         "debug": debug_info,
     }
 
