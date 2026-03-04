@@ -179,28 +179,47 @@ class MeetingBriefService:
         user_id: str,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        """Get upcoming meetings with brief status.
+        """Get upcoming meetings from calendar_events table.
+
+        Queries the calendar_events table (synced from Google/Outlook) rather than
+        meeting_briefs table, so users see all upcoming meetings regardless of whether
+        briefs have been generated.
 
         Args:
             user_id: The user's ID.
             limit: Maximum number of meetings to return.
 
         Returns:
-            List of meeting briefs ordered by meeting time.
+            List of upcoming calendar events ordered by start time.
         """
         now = datetime.now(UTC).isoformat()
 
         result = (
-            self._db.table("meeting_briefs")
-            .select("id, calendar_event_id, meeting_title, meeting_time, status, attendees")
+            self._db.table("calendar_events")
+            .select("id, title, start_time, end_time, attendees, source")
             .eq("user_id", user_id)
-            .gte("meeting_time", now)
-            .order("meeting_time", desc=False)
+            .gte("start_time", now)
+            .order("start_time", desc=False)
             .limit(limit)
             .execute()
         )
 
-        return cast(list[dict[str, Any]], result.data or [])
+        # Map calendar_events schema to UpcomingMeetingResponse format
+        meetings: list[dict[str, Any]] = []
+        for row in result.data or []:
+            meetings.append({
+                "calendar_event_id": row["id"],
+                "meeting_title": row.get("title"),
+                "meeting_time": row["start_time"],
+                "end_time": row.get("end_time"),
+                "attendees": row.get("attendees", []),
+                "source": row.get("source"),
+                # No brief info since we're querying calendar_events directly
+                "status": None,
+                "brief_id": None,
+            })
+
+        return meetings
 
     async def upsert_brief(
         self,

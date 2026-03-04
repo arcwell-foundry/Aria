@@ -90,30 +90,31 @@ async def test_create_brief_inserts_pending_brief() -> None:
 
 @pytest.mark.asyncio
 async def test_get_upcoming_meetings_returns_list() -> None:
-    """Test get_upcoming_meetings returns meetings with brief status."""
+    """Test get_upcoming_meetings returns meetings from calendar_events table."""
     with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
-        mock_briefs = [
+        # Mock data now matches calendar_events table schema
+        mock_events = [
             {
-                "id": "brief-1",
-                "calendar_event_id": "evt-1",
-                "meeting_title": "Call 1",
-                "meeting_time": "2026-02-04T14:00:00Z",
-                "status": "completed",
+                "id": "evt-1",
+                "title": "Call 1",
+                "start_time": "2026-02-04T14:00:00Z",
+                "end_time": "2026-02-04T14:30:00Z",
                 "attendees": ["a@example.com"],
+                "source": "outlook",
             },
             {
-                "id": "brief-2",
-                "calendar_event_id": "evt-2",
-                "meeting_title": "Call 2",
-                "meeting_time": "2026-02-05T10:00:00Z",
-                "status": "pending",
+                "id": "evt-2",
+                "title": "Call 2",
+                "start_time": "2026-02-05T10:00:00Z",
+                "end_time": "2026-02-05T10:30:00Z",
                 "attendees": ["b@example.com"],
+                "source": "google",
             },
         ]
 
         mock_db = MagicMock()
         mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=mock_briefs
+            data=mock_events
         )
         mock_db_class.get_client.return_value = mock_db
 
@@ -124,6 +125,8 @@ async def test_get_upcoming_meetings_returns_list() -> None:
 
         assert len(result) == 2
         assert result[0]["calendar_event_id"] == "evt-1"
+        assert result[0]["meeting_title"] == "Call 1"
+        assert result[0]["source"] == "outlook"
 
 
 @pytest.mark.asyncio
@@ -368,8 +371,8 @@ async def test_create_brief_stores_attendees() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_upcoming_meetings_orders_by_meeting_time() -> None:
-    """Test get_upcoming_meetings orders results by meeting_time ascending."""
+async def test_get_upcoming_meetings_orders_by_start_time() -> None:
+    """Test get_upcoming_meetings orders results by start_time ascending."""
     with patch("src.services.meeting_brief.SupabaseClient") as mock_db_class:
         mock_db = MagicMock()
         mock_order = MagicMock()
@@ -384,8 +387,8 @@ async def test_get_upcoming_meetings_orders_by_meeting_time() -> None:
         service = MeetingBriefService()
         await service.get_upcoming_meetings(user_id="user-123", limit=10)
 
-        # Verify order was called with meeting_time ascending
-        mock_order.assert_called_once_with("meeting_time", desc=False)
+        # Verify order was called with start_time ascending (calendar_events schema)
+        mock_order.assert_called_once_with("start_time", desc=False)
 
 
 @pytest.mark.asyncio
