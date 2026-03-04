@@ -427,6 +427,21 @@ class PersonaBuilder:
                 )
                 prompt = high_load + "\n\n" + prompt
 
+        # === CRITICAL: VOICE CONSISTENCY (must be LAST thing Claude reads) ===
+        # This overrides any pattern-matching on old conversation history
+        voice_override = """
+
+=== CRITICAL: VOICE CONSISTENCY ===
+
+Your previous responses in this conversation may use an older communication style that does not match your current voice guidelines. ALWAYS follow the Jarvis Voice Rules above, even if your recent messages in this conversation used a different style. Specifically:
+
+- If your previous responses listed integration catalogs, do NOT repeat that pattern. Report what's connected and working instead.
+- If your previous responses used feature lists or markdown headers, switch to natural conversational paragraphs.
+- If your previous responses said "I can help you with..." or "I can connect to...", stop. Report what you've DONE, not what you CAN do.
+
+Your voice guidelines are authoritative. Your conversation history is not a style guide."""
+        prompt += voice_override
+
         return prompt
 
     async def _build_user_context(self, user_id: str) -> tuple[str, bool]:

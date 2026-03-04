@@ -91,13 +91,32 @@ class WorkingMemory:
                 # All messages are system messages, can't truncate further
                 break
 
+    # Maximum messages to send verbatim to LLM (sliding window)
+    # Older messages are consolidated into episodic/semantic memory, not dumped chronologically
+    MAX_CONTEXT_MESSAGES = 20
+
     def get_context_for_llm(self) -> list[dict[str, str]]:
         """Get messages formatted for LLM consumption.
 
+        Uses a sliding window to limit context to recent messages only.
+        Older messages still exist in the database and episodic memory,
+        but are not sent verbatim to prevent pattern-matching on old styles.
+
         Returns:
-            List of messages with only role and content fields.
+            List of messages with only role and content fields (last N messages).
         """
-        return [{"role": msg["role"], "content": msg["content"]} for msg in self.messages]
+        # Apply sliding window to prevent old conversation patterns from
+        # contaminating current voice/style guidelines
+        messages_to_send = self.messages[-self.MAX_CONTEXT_MESSAGES:] if len(self.messages) > self.MAX_CONTEXT_MESSAGES else self.messages
+
+        if len(self.messages) > self.MAX_CONTEXT_MESSAGES:
+            logger.debug(
+                "WorkingMemory sliding window: sending %d of %d messages to LLM (older messages in episodic memory)",
+                len(messages_to_send),
+                len(self.messages),
+            )
+
+        return [{"role": msg["role"], "content": msg["content"]} for msg in messages_to_send]
 
     def set_entity(self, key: str, value: Any) -> None:
         """Store an active entity in working memory.
