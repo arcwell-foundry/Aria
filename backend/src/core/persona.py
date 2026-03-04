@@ -463,7 +463,7 @@ Your voice guidelines are authoritative. Your conversation history is not a styl
         # We approximate: if build_time is very low, it was cached.
         return result, False  # The decorator tracks hits internally
 
-    @cached(ttl=300, key_func=lambda self, user_id: f"persona_l4:{user_id}")
+    @cached(ttl=300, key_func=lambda self, user_id: f"persona_l4_v2:{user_id}")
     async def _cached_user_context(self, user_id: str) -> str:
         """Cached inner method for L4 context assembly.
 
@@ -691,6 +691,11 @@ CRITICAL INSTRUCTIONS FOR TIME PRESENTATION:
                 # Build calendar section
                 calendar_lines: list[str] = []
                 if today_events or tomorrow_events:
+                    # Add explicit instruction to use calendar data directly
+                    calendar_lines.append("## CALENDAR & SCHEDULE RULES")
+                    calendar_lines.append("")
+                    calendar_lines.append("You have DIRECT ACCESS to the user's full calendar below. For ANY question about meetings, times, attendees, schedule, or availability — answer IMMEDIATELY from this data. NEVER create execution plans, goals, or agent tasks for calendar questions. Just answer. You already have the information.")
+                    calendar_lines.append("")
                     calendar_lines.append("## YOUR CALENDAR (Today & Tomorrow)")
 
                     # Format today's date nicely
@@ -1308,7 +1313,7 @@ CRITICAL INSTRUCTIONS FOR TIME PRESENTATION:
             ).execute()
 
             # Invalidate L4 cache for this user
-            invalidate_cache("_cached_user_context", key=f"persona_l4:{user_id}")
+            invalidate_cache("_cached_user_context", key=f"persona_l4_v2:{user_id}")
 
             logger.info(
                 "Persona override stored",
