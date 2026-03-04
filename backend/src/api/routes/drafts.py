@@ -84,19 +84,24 @@ async def list_drafts(
     current_user: CurrentUser,
     limit: int = Query(50, ge=1, le=100),
     status: str | None = Query(None, description="Filter by status (draft, sent, failed)"),
+    include_dismissed: bool = Query(False, description="Include dismissed drafts in results"),
 ) -> list[dict[str, Any]]:
     """List user's email drafts.
+
+    By default, dismissed drafts are excluded from results since they are not actionable.
+    Set include_dismissed=true to include them.
 
     Args:
         current_user: The authenticated user.
         limit: Maximum number of drafts to return (1-100).
         status: Optional status filter.
+        include_dismissed: If True, include dismissed drafts (default: False).
 
     Returns:
         List of email drafts.
     """
     service = get_draft_service()
-    drafts = await service.list_drafts(current_user.id, limit, status)
+    drafts = await service.list_drafts(current_user.id, limit, status, include_dismissed)
     logger.info("Drafts listed", extra={"user_id": current_user.id, "count": len(drafts)})
     return drafts
 

@@ -236,11 +236,16 @@ class DraftService:
             logger.exception("Failed to get draft")
             return None
 
+    # Status values that should be excluded from the default drafts list
+    # These are "terminal" states that users don't need to see in their active drafts
+    _EXCLUDED_STATUSES = ("dismissed",)
+
     async def list_drafts(
         self,
         user_id: str,
         limit: int = 50,
         status: str | None = None,
+        include_dismissed: bool = False,
     ) -> list[dict[str, Any]]:
         """List user's drafts.
 
@@ -248,6 +253,7 @@ class DraftService:
             user_id: The ID of the user whose drafts to list.
             limit: Maximum number of drafts to return.
             status: Optional status filter.
+            include_dismissed: If True, include dismissed drafts (default: False).
 
         Returns:
             List of draft data dictionaries.
@@ -258,6 +264,10 @@ class DraftService:
 
             if status:
                 query = query.eq("status", status)
+            elif not include_dismissed:
+                # Exclude dismissed drafts by default - they're not actionable
+                for excluded_status in self._EXCLUDED_STATUSES:
+                    query = query.neq("status", excluded_status)
 
             result = query.order("created_at", desc=True).limit(limit).execute()
 

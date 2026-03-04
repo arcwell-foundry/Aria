@@ -47,15 +47,23 @@ const PURPOSE_LABELS: Record<EmailDraftPurpose, string> = {
   proposal: 'Proposal',
   thank_you: 'Thank You',
   check_in: 'Check-in',
+  reply: 'Reply',
   other: 'Other',
 };
 
-// Status badge styles
+// Status badge styles - covers all known statuses plus fallback for unknown
 const STATUS_STYLES: Record<EmailDraftStatus, { label: string; bg: string; text: string }> = {
   draft: { label: 'DRAFTING', bg: 'var(--accent)', text: 'white' },
   sent: { label: 'SENT', bg: 'var(--success)', text: 'white' },
   failed: { label: 'FAILED', bg: 'var(--critical)', text: 'white' },
+  pending_review: { label: 'PENDING', bg: '#6366f1', text: 'white' },
+  approved: { label: 'APPROVED', bg: 'var(--success)', text: 'white' },
+  dismissed: { label: 'DISMISSED', bg: 'var(--text-secondary)', text: 'white' },
+  saved_to_client: { label: 'SAVED', bg: '#0891b2', text: 'white' },
 };
+
+// Fallback style for any unrecognized status
+const DEFAULT_STATUS_STYLE = { label: 'UNKNOWN', bg: 'var(--text-secondary)', text: 'white' };
 
 // Confidence tier badge styles
 const TIER_STYLES: Record<ConfidenceTier, { label: string; bg: string; text: string }> = {
@@ -233,7 +241,8 @@ function DraftsList() {
       ) : (
         <div className="space-y-3">
           {filteredDrafts.map((draft) => {
-            const statusStyle = STATUS_STYLES[draft.status];
+            // Use fallback for unrecognized statuses to prevent crashes
+            const statusStyle = STATUS_STYLES[draft.status] || DEFAULT_STATUS_STYLE;
             return (
               <button
                 key={draft.id}

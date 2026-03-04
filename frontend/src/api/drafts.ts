@@ -7,11 +7,19 @@ export type EmailDraftPurpose =
   | "proposal"
   | "thank_you"
   | "check_in"
+  | "reply"
   | "other";
 
 export type EmailDraftTone = "formal" | "friendly" | "urgent";
 
-export type EmailDraftStatus = "draft" | "sent" | "failed";
+export type EmailDraftStatus =
+  | "draft"
+  | "sent"
+  | "failed"
+  | "pending_review"
+  | "approved"
+  | "dismissed"
+  | "saved_to_client";
 
 // Response types
 export type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW" | "MINIMAL";
