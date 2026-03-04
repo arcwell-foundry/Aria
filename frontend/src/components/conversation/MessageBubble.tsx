@@ -115,6 +115,18 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
       message.render_mode === 'c1' &&
       message.c1_response &&
       message.c1_response.trim() !== '';
+
+    // Diagnostic: Log C1 rendering decision
+    console.log('[MessageBubble] C1 render check:', {
+      messageId: message.id,
+      thesysEnabled,
+      render_mode: message.render_mode,
+      hasC1Response: !!message.c1_response,
+      c1ResponseLength: message.c1_response?.length ?? 0,
+      c1ResponsePreview: message.c1_response?.slice(0, 100),
+      shouldUseC1,
+    });
+
     return (
       <div
         className={`group flex items-start gap-3 justify-start ${

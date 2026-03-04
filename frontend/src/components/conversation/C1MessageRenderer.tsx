@@ -62,6 +62,22 @@ export function C1MessageRenderer({
 }: C1MessageRendererProps) {
   const navigate = useNavigate();
 
+  // Diagnostic: Log what we receive
+  console.log('[C1MessageRenderer] Received c1Response:', {
+    length: c1Response?.length ?? 0,
+    preview: c1Response?.slice(0, 200),
+    isStreaming,
+  });
+
+  // Handle C1 SDK errors - this tells us if parsing failed
+  const handleC1Error = useCallback((error: { code: number; c1Response: string }) => {
+    console.error('[C1MessageRenderer] C1 SDK error:', {
+      code: error.code,
+      responseLength: error.c1Response?.length,
+      responsePreview: error.c1Response?.slice(0, 300),
+    });
+  }, []);
+
   const handleAction = useCallback(
     async (event: C1ActionEvent) => {
       // C1Action has optional type and params - handle missing type
@@ -227,6 +243,7 @@ export function C1MessageRenderer({
         c1Response={c1Response}
         isStreaming={isStreaming}
         onAction={handleAction}
+        onError={handleC1Error}
         customComponents={customComponents}
       />
     </div>

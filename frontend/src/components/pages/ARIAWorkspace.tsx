@@ -36,6 +36,7 @@ export function ARIAWorkspace() {
   useEmotionDetection();
 
   const streamingIdRef = useRef<string | null>(null);
+  const lastCompletedMessageIdRef = useRef<string | null>(null); // For C1 post-processing
   const streamingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const conversationLoadedRef = useRef(false);
   const briefingInjectedRef = useRef(false);
@@ -366,8 +367,44 @@ export function ARIAWorkspace() {
       });
     };
 
-    const handleStreamComplete = () => {
-      console.log('[CHAT_STREAM_DEBUG] aria.stream_complete → clearing streaming state');
+    const handleStreamComplete = (payload: unknown) => {
+      // The backend sends metadata in aria.stream_complete payload:
+      // { render_mode, c1_response, rich_content, ui_commands, suggestions }
+      const data = (payload ?? {}) as Partial<{
+        conversation_id: string;
+        rich_content: RichContent[];
+        ui_commands: UICommand[];
+        suggestions: string[];
+        render_mode: 'c1' | 'markdown';
+        c1_response: string | null;
+      }>;
+
+      console.log(
+        '[CHAT_STREAM_DEBUG] aria.stream_complete received:',
+        JSON.stringify({
+          render_mode: data.render_mode,
+          c1_response_length: data.c1_response?.length ?? 0,
+          rich_content_count: data.rich_content?.length ?? 0,
+          suggestions_count: data.suggestions?.length ?? 0,
+          streamingIdRef: streamingIdRef.current,
+        }, null, 2),
+      );
+
+      // Update message metadata if we have a streaming message
+      if (streamingIdRef.current) {
+        // Save the message ID for potential C1 post-processing (aria.c1_render comes later)
+        lastCompletedMessageIdRef.current = streamingIdRef.current;
+
+        updateMessageMetadata(streamingIdRef.current, {
+          rich_content: data.rich_content ?? [],
+          ui_commands: data.ui_commands ?? [],
+          suggestions: data.suggestions ?? [],
+          render_mode: data.render_mode,
+          c1_response: data.c1_response,
+        });
+        console.log('[CHAT_STREAM_DEBUG] Updated message with stream_complete metadata');
+      }
+
       // Clear the safety timeout since we got the completion event
       if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
       setStreaming(false);
@@ -383,17 +420,44 @@ export function ARIAWorkspace() {
         render_mode: string;
       }>;
 
+      // Use streamingIdRef if available, otherwise fall back to last completed message
+      const targetMessageId = streamingIdRef.current || lastCompletedMessageIdRef.current;
+
       console.log(
-        '[CHAT_STREAM_DEBUG] aria.c1_render received, content_length=',
-        data.content?.length ?? 0,
-        'streamingIdRef=',
-        streamingIdRef.current,
+        '[CHAT_STREAM_DEBUG] aria.c1_render received:',
+        JSON.stringify({
+          content_length: data.content?.length ?? 0,
+          content_preview: data.content?.slice(0, 300),
+          render_mode: data.render_mode,
+          conversation_id: data.conversation_id,
+          streamingIdRef: streamingIdRef.current,
+          lastCompletedMessageId: lastCompletedMessageIdRef.current,
+          targetMessageId,
+        }, null, 2),
       );
-      if (data.content && streamingIdRef.current) {
-        // Upgrade the currently streaming message with C1 content
-        updateMessageMetadata(streamingIdRef.current, {
+
+      if (data.content && targetMessageId) {
+        // Upgrade the message with C1 content
+        console.log('[CHAT_STREAM_DEBUG] Updating message metadata with C1 content');
+        updateMessageMetadata(targetMessageId, {
           render_mode: 'c1',
           c1_response: data.content,
+        });
+        // Verify the update happened
+        setTimeout(() => {
+          const messages = useConversationStore.getState().messages;
+          const updated = messages.find(m => m.id === targetMessageId);
+          console.log('[CHAT_STREAM_DEBUG] Post-update verification:', {
+            messageId: targetMessageId,
+            found: !!updated,
+            render_mode: updated?.render_mode,
+            c1_response_length: updated?.c1_response?.length ?? 0,
+          });
+        }, 100);
+      } else {
+        console.warn('[CHAT_STREAM_DEBUG] C1 render skipped:', {
+          hasContent: !!data.content,
+          hasTargetMessageId: !!targetMessageId,
         });
       }
     };
