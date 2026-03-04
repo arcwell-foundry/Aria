@@ -1794,7 +1794,7 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             # Query email_scan_log for messages in this thread
             result = (
                 self._db.table("email_scan_log")
-                .select("sender_email, scanned_at")
+                .select("sender_email, scanned_at, subject, category")
                 .eq("user_id", user_id)
                 .eq("thread_id", thread_id)
                 .gte("scanned_at", one_hour_ago.isoformat())
@@ -1802,21 +1802,48 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 .execute()
             )
 
+            # DIAGNOSTIC: Log raw data to understand WHY active_conversation fires
+            logger.warning(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, raw_count=%d, entries=%s",
+                thread_id,
+                len(result.data) if result.data else 0,
+                [{"sender": e.get("sender_email"), "subj": e.get("subject", "")[:50], "cat": e.get("category")}
+                 for e in (result.data or [])],
+            )
+
             if not result.data or len(result.data) < 3:
+                logger.warning(
+                    "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (count < 3)",
+                    thread_id,
+                )
                 return False
 
             # Check if there are at least 2 different senders (back-and-forth)
             unique_senders = {msg["sender_email"].lower() for msg in result.data}
 
+            # DIAGNOSTIC: Log the decision criteria
+            logger.warning(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, unique_senders=%s, sender_count=%d, msg_count=%d, threshold=2_senders_AND_3_msgs",
+                thread_id,
+                unique_senders,
+                len(unique_senders),
+                len(result.data),
+            )
+
             if len(unique_senders) >= 2 and len(result.data) >= 3:
-                logger.info(
-                    "DRAFT_ENGINE: Active conversation detected in thread %s (%d messages, %d senders)",
+                logger.warning(
+                    "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=TRUE (TRIGGERED! %d msgs, %d senders including: %s)",
                     thread_id,
                     len(result.data),
                     len(unique_senders),
+                    unique_senders,
                 )
                 return True
 
+            logger.warning(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (not enough senders)",
+                thread_id,
+            )
             return False
 
         except Exception as e:
