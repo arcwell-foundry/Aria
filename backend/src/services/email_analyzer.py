@@ -958,6 +958,88 @@ class EmailAnalyzer:
                 len(emails),
                 user_id,
             )
+
+            # CLIENT-SIDE WATERMARK FILTER
+            # Composio ignores the since_timestamp parameter, so we filter here
+            if since_timestamp and emails:
+                # Log first email's keys and date field for diagnostics
+                if emails:
+                    first_email = emails[0]
+                    logger.info(
+                        "WATERMARK_DEBUG: Email keys: %s",
+                        list(first_email.keys()),
+                    )
+                    date_field = first_email.get(
+                        "receivedDateTime",
+                        first_email.get("date", first_email.get("received_at", "MISSING"))
+                    )
+                    logger.info(
+                        "WATERMARK_DEBUG: Email received field: %s",
+                        date_field,
+                    )
+
+                # Parse watermark timestamp for comparison
+                try:
+                    watermark_dt = datetime.fromisoformat(
+                        since_timestamp.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    logger.warning(
+                        "WATERMARK_FILTER: Could not parse since_timestamp=%s, skipping filter",
+                        since_timestamp,
+                    )
+                    return emails
+
+                original_count = len(emails)
+                filtered_emails = []
+
+                for email in emails:
+                    # Get the email's received timestamp from various possible field names
+                    email_date_str = (
+                        email.get("receivedDateTime") or
+                        email.get("date") or
+                        email.get("received_at")
+                    )
+
+                    if not email_date_str:
+                        # If no date, include it (can't filter)
+                        filtered_emails.append(email)
+                        continue
+
+                    try:
+                        # Parse email date (handle various ISO formats)
+                        email_dt = datetime.fromisoformat(
+                            email_date_str.replace("Z", "+00:00")
+                        )
+
+                        # Only include emails AFTER the watermark timestamp
+                        # Using > (strictly greater than) to exclude emails at or before watermark
+                        if email_dt > watermark_dt:
+                            filtered_emails.append(email)
+                        else:
+                            logger.debug(
+                                "WATERMARK_FILTER: Excluding email %s - date %s <= watermark %s",
+                                email.get("id", "unknown"),
+                                email_date_str,
+                                since_timestamp,
+                            )
+                    except (ValueError, TypeError) as e:
+                        # If parsing fails, include the email (can't filter)
+                        logger.warning(
+                            "WATERMARK_FILTER: Could not parse email date %s: %s",
+                            email_date_str,
+                            e,
+                        )
+                        filtered_emails.append(email)
+
+                logger.info(
+                    "WATERMARK_FILTER: Composio returned %d emails, %d after watermark filter (since %s)",
+                    original_count,
+                    len(filtered_emails),
+                    since_timestamp,
+                )
+                return filtered_emails
+
             return emails
 
         except Exception as e:
