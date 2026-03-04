@@ -433,11 +433,18 @@ class EmailContextGatherer:
             provider = integration.get("integration_type", "").lower()
             connection_id = integration.get("composio_connection_id")
 
+            user_email = getattr(self, "_cached_user_email", "NOT_SET")
             logger.info(
                 "THREAD_FETCH: provider=%s connection_id=%s user_email=%s",
                 provider,
                 connection_id[:20] if connection_id else "NONE",
-                getattr(self, "_cached_user_email", "NOT_SET"),
+                user_email,
+            )
+            # DIAGNOSTIC: Log what email is used for is_from_user detection
+            logger.warning(
+                "REPLY_CHECK_DEBUG: user_email for is_from_user detection=%s (thread=%s)",
+                user_email,
+                thread_id[:40] if thread_id else "NONE",
             )
 
             if not connection_id:

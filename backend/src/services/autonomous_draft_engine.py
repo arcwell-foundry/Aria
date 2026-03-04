@@ -1845,8 +1845,21 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             Tuple of (has_replied, reply_timestamp). If has_replied is True,
             reply_timestamp contains the timestamp of the user's reply.
         """
+        # DIAGNOSTIC: Log what we see for reply detection debugging
+        logger.warning(
+            "REPLY_CHECK_DEBUG: thread_id=%s, has_thread_context=%s, email_id=%s",
+            email.thread_id,
+            context.thread_context is not None,
+            email.email_id,
+        )
+
         # No thread context available - can't verify, proceed with draft
         if not context.thread_context or not context.thread_context.messages:
+            logger.warning(
+                "REPLY_CHECK_DEBUG: No thread messages available - thread_context=%s, messages=%s",
+                context.thread_context,
+                context.thread_context.messages if context.thread_context else None,
+            )
             logger.debug(
                 "REPLY_CHECK: No thread messages available for email_id=%s, proceeding with draft",
                 email.email_id,
@@ -1854,6 +1867,20 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             return (False, None)
 
         messages = context.thread_context.messages
+        logger.warning(
+            "REPLY_CHECK_DEBUG: message_count=%d",
+            len(messages),
+        )
+
+        # DIAGNOSTIC: Log each message's details
+        for i, msg in enumerate(messages):
+            logger.warning(
+                "REPLY_CHECK_DEBUG: msg[%d] sender=%s is_from_user=%s timestamp=%s",
+                i,
+                msg.sender_email,
+                msg.is_from_user,
+                msg.timestamp,
+            )
 
         # Find the triggering email's timestamp
         # The triggering email is from the sender (not the user) and is the one we're replying to
@@ -1865,6 +1892,11 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
                 # Use the latest one as the trigger point
                 triggering_timestamp = msg.timestamp
 
+        logger.warning(
+            "REPLY_CHECK_DEBUG: latest_non_user_timestamp=%s",
+            triggering_timestamp,
+        )
+
         if not triggering_timestamp:
             logger.debug(
                 "REPLY_CHECK: Could not find triggering message timestamp for email_id=%s",
@@ -1873,23 +1905,39 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             return (False, None)
 
         # Check if any user message came AFTER the triggering email
+        found_user_reply = False
+        reply_timestamp = None
         for msg in messages:
             if msg.is_from_user and msg.timestamp:
                 # Compare timestamps - user reply must be AFTER the triggering email
                 if msg.timestamp > triggering_timestamp:
+                    logger.warning(
+                        "REPLY_CHECK_DEBUG: FOUND user reply at %s (after trigger at %s)",
+                        msg.timestamp,
+                        triggering_timestamp,
+                    )
                     logger.info(
                         "REPLY_CHECK: User reply detected at %s (after trigger at %s) for thread %s",
                         msg.timestamp,
                         triggering_timestamp,
                         email.thread_id,
                     )
-                    return (True, msg.timestamp)
+                    found_user_reply = True
+                    reply_timestamp = msg.timestamp
+                    break
 
-        logger.debug(
-            "REPLY_CHECK: No user reply found after triggering email for thread %s",
-            email.thread_id,
+        logger.warning(
+            "REPLY_CHECK_DEBUG: result=has_replied=%s reply_timestamp=%s",
+            found_user_reply,
+            reply_timestamp,
         )
-        return (False, None)
+
+        if not found_user_reply:
+            logger.debug(
+                "REPLY_CHECK: No user reply found after triggering email for thread %s",
+                email.thread_id,
+            )
+        return (found_user_reply, reply_timestamp)
 
     async def _defer_draft(
         self,
