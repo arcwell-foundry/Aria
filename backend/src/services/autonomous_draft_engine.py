@@ -1791,30 +1791,46 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
 
             one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
 
-            # Query email_scan_log for messages in this thread
+            # First get raw count for diagnostics (includes system entries)
+            raw_result = (
+                self._db.table("email_scan_log")
+                .select("sender_email, scanned_at, subject, category")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .gte("scanned_at", one_hour_ago.isoformat())
+                .execute()
+            )
+            raw_count = len(raw_result.data) if raw_result.data else 0
+
+            # Query email_scan_log for messages in this thread, EXCLUDING system entries
+            # System entries (sender_email='system') are skip decisions, not real messages
             result = (
                 self._db.table("email_scan_log")
                 .select("sender_email, scanned_at, subject, category")
                 .eq("user_id", user_id)
                 .eq("thread_id", thread_id)
                 .gte("scanned_at", one_hour_ago.isoformat())
+                .neq("sender_email", "system")  # Exclude system skip entries
                 .order("scanned_at", desc=True)
                 .execute()
             )
+            filtered_count = len(result.data) if result.data else 0
 
-            # DIAGNOSTIC: Log raw data to understand WHY active_conversation fires
-            logger.warning(
-                "ACTIVE_CONVERSATION_DEBUG: thread=%s, raw_count=%d, entries=%s",
+            # DIAGNOSTIC: Log both raw and filtered counts to show the fix working
+            logger.info(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, raw_count=%d, filtered_count=%d (system entries excluded), entries=%s",
                 thread_id,
-                len(result.data) if result.data else 0,
+                raw_count,
+                filtered_count,
                 [{"sender": e.get("sender_email"), "subj": e.get("subject", "")[:50], "cat": e.get("category")}
                  for e in (result.data or [])],
             )
 
-            if not result.data or len(result.data) < 3:
-                logger.warning(
-                    "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (count < 3)",
+            if not result.data or filtered_count < 3:
+                logger.info(
+                    "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (filtered_count=%d < 3)",
                     thread_id,
+                    filtered_count,
                 )
                 return False
 
@@ -1822,27 +1838,28 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             unique_senders = {msg["sender_email"].lower() for msg in result.data}
 
             # DIAGNOSTIC: Log the decision criteria
-            logger.warning(
-                "ACTIVE_CONVERSATION_DEBUG: thread=%s, unique_senders=%s, sender_count=%d, msg_count=%d, threshold=2_senders_AND_3_msgs",
+            logger.info(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, unique_senders=%s, sender_count=%d, filtered_msg_count=%d, threshold=2_senders_AND_3_msgs",
                 thread_id,
                 unique_senders,
                 len(unique_senders),
-                len(result.data),
+                filtered_count,
             )
 
-            if len(unique_senders) >= 2 and len(result.data) >= 3:
-                logger.warning(
+            if len(unique_senders) >= 2 and filtered_count >= 3:
+                logger.info(
                     "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=TRUE (TRIGGERED! %d msgs, %d senders including: %s)",
                     thread_id,
-                    len(result.data),
+                    filtered_count,
                     len(unique_senders),
                     unique_senders,
                 )
                 return True
 
-            logger.warning(
-                "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (not enough senders)",
+            logger.info(
+                "ACTIVE_CONVERSATION_DEBUG: thread=%s, decision=FALSE (sender_count=%d < 2)",
                 thread_id,
+                len(unique_senders),
             )
             return False
 
