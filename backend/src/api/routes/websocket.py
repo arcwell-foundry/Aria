@@ -901,6 +901,42 @@ async def _handle_user_message(
                             },
                         })
 
+        # --- Persist C1 results to database ---
+        # C1 processing happens AFTER persist_turn(), so we need to update the message
+        # metadata separately to ensure page reloads preserve C1 rendering.
+        if render_mode == "c1" and c1_rendered_content:
+            try:
+                db = get_supabase_client()
+                # Find the most recent assistant message in this conversation
+                msg_result = (
+                    db.table("messages")
+                    .select("id, metadata")
+                    .eq("conversation_id", conversation_id)
+                    .eq("role", "assistant")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if msg_result.data:
+                    msg_id = msg_result.data[0]["id"]
+                    existing_metadata = msg_result.data[0].get("metadata") or {}
+                    updated_metadata = {
+                        **existing_metadata,
+                        "render_mode": render_mode,
+                        "c1_response": c1_rendered_content,
+                    }
+                    db.table("messages").update(
+                        {"metadata": updated_metadata}
+                    ).eq("id", msg_id).execute()
+                    logger.info(
+                        "CHAT_STREAM_DEBUG: Persisted C1 results to message %s, render_mode=%s",
+                        msg_id, render_mode,
+                    )
+            except Exception as c1_persist_err:
+                logger.warning(
+                    "Failed to persist C1 results to database: %s", c1_persist_err
+                )
+
         # --- Trigger plan execution if approved via chat ---
         if plan_approved_via_chat and pending_plan_goal_id:
             try:

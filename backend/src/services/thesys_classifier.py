@@ -6,9 +6,10 @@ specialization.
 """
 
 import logging
-import os
 import re
 from typing import Any
+
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,8 @@ class ThesysRoutingClassifier:
             ``content_type`` is one of ``pipeline_data``, ``briefing``,
             ``email_draft``, ``lead_card``, or ``None``.
         """
-        # Feature flag check
-        if not os.environ.get("THESYS_ENABLED", "false").lower() in ("true", "1", "yes"):
+        # Feature flag check — use settings, not os.environ (Pydantic-settings doesn't export)
+        if not settings.THESYS_ENABLED:
             return False, None
 
         # Length gate — short replies are always markdown
