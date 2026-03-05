@@ -37,6 +37,11 @@ const markdownComponents = {
       {children}
     </h3>
   ),
+  h4: ({ children }: { children?: React.ReactNode }) => (
+    <h4 className="font-display italic text-sm text-[var(--text-primary)] mb-1 mt-2 first:mt-0">
+      {children}
+    </h4>
+  ),
   p: ({ children }: { children?: React.ReactNode }) => (
     <p className="text-sm leading-relaxed text-[var(--text-primary)] mb-2 last:mb-0">
       {children}
@@ -52,8 +57,12 @@ const markdownComponents = {
       {children}
     </ol>
   ),
+  // Strong/bold text renders as Instrument Serif italic (aria-insight style)
   strong: ({ children }: { children?: React.ReactNode }) => (
-    <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>
+    <strong className="aria-insight">{children}</strong>
+  ),
+  b: ({ children }: { children?: React.ReactNode }) => (
+    <b className="aria-insight">{children}</b>
   ),
   code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
     const isBlock = className?.includes('language-');
@@ -65,7 +74,7 @@ const markdownComponents = {
       );
     }
     return (
-      <code className="font-mono text-xs bg-[var(--bg-elevated)] rounded px-1.5 py-0.5 text-[var(--accent)]">
+      <code className="aria-data bg-[var(--bg-elevated)] rounded px-1.5 py-0.5">
         {children}
       </code>
     );

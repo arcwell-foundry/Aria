@@ -29,12 +29,12 @@ function formatDividerTime(timestamp: string): string {
 
 export function TimeDivider({ timestamp }: TimeDividerProps) {
   return (
-    <div className="flex items-center gap-3 py-2" data-aria-id="time-divider">
-      <div className="flex-1 h-px bg-[#1A1A2E]" />
-      <span className="font-sans text-xs text-[#555770] whitespace-nowrap select-none">
+    <div className="flex items-center gap-4 my-6">
+      <div className="flex-1 h-px bg-[#2A2F42]" />
+      <span className="font-mono text-[11px] font-medium text-[#8B9DC3] tracking-wide">
         {formatDividerTime(timestamp)}
       </span>
-      <div className="flex-1 h-px bg-[#1A1A2E]" />
+      <div className="flex-1 h-px bg-[#2A2F42]" />
     </div>
   );
 }
