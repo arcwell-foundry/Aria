@@ -445,9 +445,14 @@ async def _handle_user_message(
 
         # Enrich message with signal context if it matches a known signal headline
         # This injects signal data as HIGH-PRIORITY context the LLM cannot ignore
+        logger.info("SIGNAL_ENRICH_WS: About to enrich message: %s", message_text[:80])
         enriched_message = await service._enrich_message_with_signal_context(
             user_id, message_text
         )
+        logger.info("SIGNAL_ENRICH_WS: Enriched=%s, original_len=%d, enriched_len=%d",
+            enriched_message != message_text, len(message_text), len(enriched_message))
+        if enriched_message != message_text:
+            logger.info("SIGNAL_ENRICH_WS: Signal context injected! First 200 chars of enrichment: %s", enriched_message[len(message_text):len(message_text)+200])
 
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(

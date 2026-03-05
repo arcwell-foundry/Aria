@@ -2481,6 +2481,11 @@ class ChatService:
         if memory_types is None:
             memory_types = DEFAULT_MEMORY_TYPES
 
+        # Enrich message with signal context if it matches a known signal headline
+        # This injects signal data as HIGH-PRIORITY context the LLM cannot ignore
+        # We do this BEFORE working memory so the LLM sees the enriched message
+        enriched_message = await self._enrich_message_with_signal_context(user_id, message)
+
         # Get or create working memory for this conversation
         working_memory = await self._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
@@ -2490,8 +2495,9 @@ class ChatService:
         # Ensure conversation record exists for sidebar
         await self._ensure_conversation_record(user_id, conversation_id)
 
-        # Add user message to working memory
-        working_memory.add_message("user", message)
+        # Add ENRICHED user message to working memory (LLM sees enriched context)
+        # Original 'message' is preserved for DB persistence and intent classification
+        working_memory.add_message("user", enriched_message)
 
         # Get conversation history for cognitive load estimation
         conversation_messages = working_memory.get_context_for_llm()
@@ -3406,6 +3412,12 @@ class ChatService:
         Returns:
             List of market signal dicts.
         """
+        # Skip if message was already enriched with signal context
+        # (the signal data is already in the conversation, no need to duplicate)
+        if message and "[ARIA SIGNAL CONTEXT" in message:
+            logger.debug("Skipping signal fetch - message already enriched with signal context")
+            return []
+
         try:
             db = get_supabase_client()
 
@@ -3480,6 +3492,104 @@ class ChatService:
         except Exception as e:
             logger.warning("Failed to fetch market signals for context: %s", e)
             return []
+
+    async def _enrich_message_with_signal_context(
+        self, user_id: str, message: str
+    ) -> str:
+        """Enrich message with signal context if it matches a known signal headline.
+
+        When the user's message references a known signal headline, this appends
+        the full signal data to the message as HIGH-PRIORITY context that the LLM
+        cannot ignore. This ensures the LLM sees the signal data as part of the
+        user's question, not buried in a system prompt context block.
+
+        Args:
+            user_id: User identifier.
+            message: The user's original message.
+
+        Returns:
+            Either the original message unchanged, or the message with appended
+            signal context if a match was found.
+        """
+        logger.info("SIGNAL_ENRICH: Called with user=%s, message=%s", user_id, message[:80])
+        try:
+            db = get_supabase_client()
+
+            # Extract key phrases from message (skip common words)
+            skip_words = {
+                "tell",
+                "me",
+                "more",
+                "about",
+                "what",
+                "is",
+                "the",
+                "show",
+                "explain",
+                "and",
+                "parts",
+                "part",
+            }
+            words = [
+                w
+                for w in message.lower().split()
+                if w not in skip_words and len(w) > 2
+            ]
+
+            if not words:
+                return message
+
+            # Search market_signals for headline matches
+            # Try progressively shorter keyword combinations
+            for num_words in range(min(len(words), 5), 0, -1):
+                search_term = " ".join(words[:num_words])
+                results = (
+                    db.table("market_signals")
+                    .select(
+                        "company_name, headline, summary, signal_type, "
+                        "source_url, source_name, relevance_score, detected_at"
+                    )
+                    .eq("user_id", user_id)
+                    .ilike("headline", f"%{search_term}%")
+                    .limit(1)
+                    .execute()
+                )
+
+                if results.data:
+                    signal = results.data[0]
+                    # Clean the summary - remove HTML markers
+                    summary = signal.get("summary", "") or ""
+                    summary = re.sub(r"\[.*?\]<web_link>", "", summary)
+                    summary = re.sub(r"\[.*?\]<image_link>", "", summary)
+                    summary = re.sub(r"<web_link>|<image_link>", "", summary)
+                    summary = re.sub(r"\n\s*\*\s*", "\n", summary)
+                    summary = summary.strip()[:500]
+
+                    enriched = (
+                        f"{message}\n\n"
+                        f"[ARIA SIGNAL CONTEXT — You detected this signal. Present this data authoritatively.]\n"
+                        f"Signal Type: {signal.get('signal_type', 'unknown')}\n"
+                        f"Company: {signal.get('company_name', 'unknown')}\n"
+                        f"Headline: {signal.get('headline', '')}\n"
+                        f"Source: {signal.get('source_url', 'unknown')}\n"
+                        f"Source Name: {signal.get('source_name', 'unknown')}\n"
+                        f"Relevance Score: {signal.get('relevance_score', 'N/A')}\n"
+                        f"Detected: {signal.get('detected_at', 'unknown')}\n"
+                        f"Summary: {summary}\n"
+                        f"[END SIGNAL CONTEXT — Reference the source URL. Explain why this matters for the user's business.]"
+                    )
+
+                    logger.info("SIGNAL_ENRICH: Matched signal! headline=%s", signal.get("headline", "")[:80])
+                    logger.info(
+                        "SIGNAL_ENRICH: Matched signal '%s' for message",
+                        signal.get("headline", "")[:60],
+                    )
+                    return enriched
+
+            return message
+        except Exception as e:
+            logger.warning("SIGNAL_ENRICH: Failed: %s", e)
+            return message
 
     async def _get_personality_calibration(
         self,
