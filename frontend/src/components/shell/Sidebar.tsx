@@ -34,6 +34,7 @@ import { Avatar } from '@/components/primitives/Avatar';
 import { wsManager } from '@/core/WebSocketManager';
 import { useAutonomyStore } from '@/stores/autonomyStore';
 import { useActionQueueStore } from '@/stores/actionQueueStore';
+import { useConversationStore } from '@/stores/conversationStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -178,6 +179,7 @@ export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
   const { user } = useAuth();
   const currentTier = useAutonomyStore((s) => s.currentTier);
   const fetchAutonomyStatus = useAutonomyStore((s) => s.fetchStatus);
+  const isStreaming = useConversationStore((s) => s.isStreaming);
 
   // Fetch autonomy status on mount
   useEffect(() => {
@@ -298,14 +300,18 @@ export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
       {/* Logo */}
       {/* ----------------------------------------------------------------- */}
       <div className="flex items-center gap-2 px-5 py-6">
-        <span
-          className={`text-xl tracking-tight text-[#E8E6E1] italic ${ariaActive ? 'aria-logo-glow' : ''}`}
-          style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
+        <div
+          className={`aria-presence ${isStreaming ? 'processing' : ''}`}
         >
-          ARIA
-        </span>
+          <span
+            className={`text-xl tracking-tight text-[#E8E6E1] italic ${ariaActive ? 'aria-logo-glow' : ''}`}
+            style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
+          >
+            ARIA
+          </span>
+        </div>
         {ariaActive && (
-          <span className="aria-pulse-dot w-2 h-2 rounded-full bg-[#2E66FF]" />
+          <span className={`aria-pulse-dot w-2 h-2 rounded-full bg-[#2E66FF] ${isStreaming ? 'processing' : ''}`} />
         )}
       </div>
 

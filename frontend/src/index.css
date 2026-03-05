@@ -421,6 +421,53 @@ body {
   }
 }
 
+/* === ARIA Ambient Presence — radial gradient glow on logo container === */
+
+.aria-presence {
+  position: relative;
+}
+
+.aria-presence::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(46, 102, 255, 0.25) 0%, transparent 70%);
+  animation: aria-breathe-glow 4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.aria-presence.processing::after {
+  animation: aria-process-glow 1.5s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(46, 102, 255, 0.4) 0%, rgba(99, 144, 255, 0.15) 50%, transparent 70%);
+}
+
+.aria-presence.presenting::after {
+  animation: aria-present-glow 2s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(46, 102, 255, 0.5) 0%, transparent 60%);
+}
+
+@keyframes aria-breathe-glow {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.08); }
+}
+
+@keyframes aria-process-glow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
+
+@keyframes aria-present-glow {
+  0%, 100% { opacity: 0.5; transform: scale(1.05); }
+  50% { opacity: 0.8; transform: scale(1.12); }
+}
+
+/* ARIA nav item glow when processing */
+.aria-nav-active.processing .nav-label {
+  text-shadow: 0 0 8px rgba(46, 102, 255, 0.4);
+}
+
 /* === ARIA Arrival — light sweep when ARIA starts responding === */
 
 @keyframes aria-arrival-sweep {
@@ -986,5 +1033,16 @@ body {
 
   .count-up-animating {
     animation: none;
+  }
+
+  /* ARIA ambient presence reduced motion */
+  .aria-presence::after {
+    animation: none;
+    opacity: 0.3;
+  }
+
+  .aria-presence.processing::after {
+    animation: none;
+    opacity: 0.5;
   }
 }
