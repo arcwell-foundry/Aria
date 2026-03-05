@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Video } from 'lucide-react';
 import { ConversationThread } from '@/components/conversation/ConversationThread';
@@ -12,6 +12,7 @@ import type { AriaMessagePayload, AriaThinkingPayload, StreamErrorPayload, RichC
 import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { useBriefingStatus } from '@/hooks/useBriefingStatus';
+import { useAuth } from '@/hooks/useAuth';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 import { listConversations, getConversation } from '@/api/chat';
 import { useTodayBriefing } from '@/hooks/useBriefing';
@@ -43,6 +44,16 @@ export function ARIAWorkspace() {
   const briefingStreamAbortRef = useRef<AbortController | null>(null);
   const { data: briefingFallback } = useTodayBriefing();
 
+  // Get user info for greeting personalization
+  const { user } = useAuth();
+
+  // Briefing card state - gate C1 stream behind user action
+  const [briefingStreamRequested, setBriefingStreamRequested] = useState(false);
+  const [briefingSkipped, setBriefingSkipped] = useState(() => {
+    // Check sessionStorage on init for session persistence
+    return sessionStorage.getItem('briefingSkipped') === 'true';
+  });
+
   // Video briefing status
   const {
     ready: briefingReady,
@@ -52,7 +63,6 @@ export function ARIAWorkspace() {
     topics,
     dismissed: briefingDismissed,
     dismiss: dismissBriefing,
-    fetchTextBriefing,
     summaryData,
     clearSummaryData,
   } = useBriefingStatus();
@@ -110,7 +120,10 @@ export function ARIAWorkspace() {
   }, []);
 
   // Inject daily briefing as ARIA's first message via streaming C1 pipeline
+  // IMPORTANT: Only fires when user clicks "Read Summary" button (briefingStreamRequested = true)
   useEffect(() => {
+    // Gate: Only fire if user explicitly requested the stream
+    if (!briefingStreamRequested) return;
     if (briefingInjectedRef.current || briefingInjectedForSession) return;
 
     // Check if a briefing message already exists in the store (dedup guard)
@@ -261,7 +274,7 @@ export function ARIAWorkspace() {
       const s = useConversationStore.getState();
       s.setStreaming(false);
     };
-  }, [briefingFallback, appendToMessage, updateMessageMetadata, setCurrentSuggestions]);
+  }, [briefingStreamRequested, briefingFallback, appendToMessage, updateMessageMetadata, setCurrentSuggestions]);
 
   // Wire up event listeners
   useEffect(() => {
@@ -541,39 +554,23 @@ export function ARIAWorkspace() {
     navigate('/briefing');
   }, [navigate]);
 
-  const handleDismissBriefing = useCallback(() => {
-    dismissBriefing();
-    // Add a message to conversation indicating briefing was dismissed
-    addMessage({
-      role: 'system',
-      content: 'Briefing saved for later. You can access it anytime from the Briefing section.',
-      rich_content: [],
-      ui_commands: [],
-      suggestions: ['Show briefing now', 'Open Briefing'],
-    });
-  }, [dismissBriefing, addMessage]);
+  // Skip - collapse to minimal bar, persist in sessionStorage
+  const handleSkipBriefing = useCallback(() => {
+    setBriefingSkipped(true);
+    sessionStorage.setItem('briefingSkipped', 'true');
+  }, []);
 
-  const handleReadInstead = useCallback(async () => {
-    try {
-      const textBriefing = await fetchTextBriefing();
-      dismissBriefing();
-      addMessage({
-        role: 'aria',
-        content: textBriefing,
-        rich_content: [],
-        ui_commands: [],
-        suggestions: ['Show me today\'s meetings', 'Any urgent signals?', 'Check pipeline health'],
-      });
-    } catch {
-      addMessage({
-        role: 'system',
-        content: 'Unable to load text briefing. Please try again.',
-        rich_content: [],
-        ui_commands: [],
-        suggestions: ['Try again'],
-      });
-    }
-  }, [fetchTextBriefing, dismissBriefing, addMessage]);
+  // Expand - show full card again
+  const handleExpandBriefing = useCallback(() => {
+    setBriefingSkipped(false);
+    sessionStorage.removeItem('briefingSkipped');
+  }, []);
+
+  // Read Summary - trigger C1 stream instead of text briefing
+  const handleReadBriefing = useCallback(() => {
+    setBriefingStreamRequested(true);
+    dismissBriefing(); // Hide the card, stream will render below
+  }, [dismissBriefing]);
 
   // Show summary card after briefing ends
   useEffect(() => {
@@ -598,8 +595,11 @@ export function ARIAWorkspace() {
     }
   }, [summaryData, addMessage, clearSummaryData]);
 
-  // Determine if video briefing card should be shown
-  const showVideoBriefingCard = briefingReady && !briefingViewed && !briefingDismissed && briefingId;
+  // Determine briefing card visibility
+  // Show full card if briefing ready, not viewed, not dismissed, and user hasn't requested stream yet
+  const showBriefingCard = Boolean(briefingReady && !briefingViewed && !briefingDismissed && !briefingStreamRequested && briefingId);
+  // Show collapsed bar if user skipped the briefing
+  const showCollapsedBar = Boolean(briefingReady && briefingSkipped && !briefingStreamRequested && briefingId);
 
   return (
     <div
@@ -620,16 +620,19 @@ export function ARIAWorkspace() {
         </button>
       </div>
 
-      {/* Video Briefing Card - shown when briefing is ready and not yet viewed */}
-      {showVideoBriefingCard && (
+      {/* Briefing Card - shown when briefing is ready and not yet viewed */}
+      {(showBriefingCard || showCollapsedBar) && (
         <div className="px-6 pb-4">
           <VideoBriefingCard
             briefingId={briefingId!}
             duration={duration}
             topics={topics}
+            userName={user?.full_name ?? undefined}
             onPlay={handlePlayBriefing}
-            onDismiss={handleDismissBriefing}
-            onReadInstead={handleReadInstead}
+            onRead={handleReadBriefing}
+            onSkip={handleSkipBriefing}
+            isCollapsed={showCollapsedBar}
+            onExpand={handleExpandBriefing}
           />
         </div>
       )}
