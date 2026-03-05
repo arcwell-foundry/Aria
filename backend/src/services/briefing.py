@@ -1453,9 +1453,9 @@ class BriefingService:
                 for p in email_patterns[:5]:
                     pattern_lines.append(f"- [{p.get('type', 'pattern')}] {p.get('insight', '')}")
                 patterns_note = (
-                    "\n\nEmail intelligence patterns detected:\n"
+                    "\n\nEmail patterns detected (METADATA ONLY - no email body content available):\n"
                     + "\n".join(pattern_lines)
-                    + "\nHighlight the most strategically important pattern in the summary."
+                    + "\nYou may mention a pattern if factually supported. Never infer email content or conversation direction."
                 )
 
             prompt = f"""Generate a brief, professional briefing summary (2-3 sentences) based on:
@@ -1468,6 +1468,8 @@ Emails received: {email_count}
 Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_note}{causal_note}
 
 Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
+
+IMPORTANT: Only describe information you can directly verify from the data provided. Never infer email content, conversation direction, or relationship narratives from metadata alone. It is better to say less than to say something inaccurate.
 """
 
         # Inject tone guidance if available
@@ -1797,14 +1799,21 @@ Be concise and actionable. Do not use emojis. Use clean, professional language. 
                 for e in scan_result.needs_reply
             )
             topics_prompt = (
-                "Analyze these email subjects and identify any thematic "
-                "patterns (e.g., multiple people asking about the same topic, "
-                "converging deal activity, industry trend signals):\n\n"
+                "CRITICAL CONSTRAINTS - FOLLOW EXACTLY:\n"
+                "- You have email METADATA only: sender names and subject lines.\n"
+                "- You do NOT have email body content. The email bodies were not provided.\n"
+                "- NEVER infer, guess, or describe what emails are about beyond what subjects state.\n"
+                "- NEVER describe the nature, intent, direction, or progress of email threads.\n"
+                "- NEVER use phrases like 'moving toward', 'discussing', 'negotiating', 'exploring', 'indicating'.\n"
+                "- NEVER fabricate relationship narratives or deal progress from subject lines.\n"
+                "- DO identify factual patterns: same sender, similar subjects, same company domain.\n"
+                "- If you cannot identify a pattern from subjects alone, return [].\n\n"
+                "Email metadata:\n"
                 f"{email_lines}\n\n"
-                "Return 0-3 patterns as a JSON array. Each element:\n"
-                '{"pattern": "description", "emails_involved": ["sender1", '
-                '"sender2"], "strategic_implication": "what this means"}\n\n'
-                "If no meaningful patterns, return []."
+                "Return 0-2 factual patterns as a JSON array. Each element:\n"
+                '{"pattern": "factual observation only (e.g., 3 emails from Acme Corp)", '
+                '"emails_involved": ["sender1", "sender2"], "note": "optional context"}\n\n'
+                "If no clear factual patterns, return []. REMEMBER: Less is more. Only state what is explicitly shown."
             )
             try:
                 topic_response = await self._llm.generate_response(
