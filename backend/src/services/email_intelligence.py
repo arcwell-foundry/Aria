@@ -21,14 +21,16 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
-from src.services.email_analyzer import EmailCategory
+
+if TYPE_CHECKING:
+    from src.services.email_analyzer import EmailCategory
 
 logger = logging.getLogger(__name__)
 

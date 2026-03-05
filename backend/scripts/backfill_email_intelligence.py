@@ -24,10 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.db.supabase import SupabaseClient
-from src.services.email_intelligence import (
-    EmailIntelligenceService,
-    EmailCategory,
-)
+from src.services.email_analyzer import EmailCategory
+from src.services.email_intelligence import EmailIntelligenceService
 
 logging.basicConfig(
     level=logging.INFO,
