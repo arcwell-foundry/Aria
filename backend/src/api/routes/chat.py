@@ -253,8 +253,28 @@ async def chat_stream(
             session_id=conversation_id,
         )
 
+        # --- Signal Enrichment Bypass (MUST BE FIRST ROUTING DECISION) ---
+        # If the message matches a known signal headline, enrich with signal context
+        # and skip ALL goal routing to preserve signal context in conversational response
+        enriched_message = await service._enrich_message_with_signal_context(
+            current_user.id, request.message
+        )
+        was_signal_enriched = (enriched_message != request.message)
+
+        if was_signal_enriched:
+            logger.info(
+                "SIGNAL_BYPASS: Message was signal-enriched, skipping intent classification "
+                "and routing to conversational response"
+            )
+            # Update working memory with enriched message for LLM context
+            working_memory.messages.pop()  # Remove original message
+            working_memory.add_message("user", enriched_message)  # Add enriched version
+
         # --- Inline Intent Detection (before building system prompt) ---
-        intent_result = await service._classify_intent(current_user.id, request.message)
+        # Skip if signal-enriched - those go directly to conversational response
+        intent_result = None
+        if not was_signal_enriched:
+            intent_result = await service._classify_intent(current_user.id, request.message)
 
         if intent_result and intent_result.get("is_goal"):
             # Short-circuit: emit goal plan instead of streaming a chat response
@@ -324,8 +344,10 @@ async def chat_stream(
             yield "data: [DONE]\n\n"
             return
 
-        # --- Check for pending plan interactions ---
-        plan_action = await service._classify_plan_action(current_user.id, request.message)
+        # --- Check for pending plan interactions (skip if signal-enriched) ---
+        plan_action = None
+        if not was_signal_enriched:
+            plan_action = await service._classify_plan_action(current_user.id, request.message)
         if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
             # Short-circuit: handle plan action
             metadata = {
