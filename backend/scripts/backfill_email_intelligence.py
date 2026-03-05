@@ -12,13 +12,17 @@ For the test user:
     python scripts/backfill_email_intelligence.py --user-id 41475700-c1fb-4f66-8c56-77bd90b73abb
 """
 
+# Load environment variables from .env BEFORE any other imports
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 import argparse
 import asyncio
 import json
 import logging
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
