@@ -752,6 +752,12 @@ These are the goals the user is currently working toward. Reference them proacti
 
 {goals}"""
 
+MARKET_SIGNALS_TEMPLATE = """## Recent Market Intelligence
+
+These are signals ARIA has detected. You gathered this intelligence — reference it confidently and specifically:
+
+{signals}"""
+
 USER_CALIBRATION_TEMPLATE = """## User Communication Preferences
 
 {tone_guidance}
@@ -2535,6 +2541,7 @@ class ChatService:
             proactive_insights,
             causal_result,
             user_mental_model,
+            market_signals_ctx,
         ) = await asyncio.gather(
             _safe(self._query_relevant_memories(
                 user_id=user_id, query=message, memory_types=memory_types,
@@ -2551,6 +2558,7 @@ class ChatService:
                 user_id, limit=3, hours_back=24,
             ), None, "causal"),
             _safe(self._user_model_service.get_model(user_id), None, "user_model"),
+            _safe(self._get_recent_signals(user_id, message), [], "market_signals"),
         )
         context_ms = (time.perf_counter() - context_start) * 1000
 
@@ -2759,6 +2767,7 @@ class ChatService:
                 capability_context=capability_context,
                 causal_actions=causal_actions,
                 user_mental_model=user_mental_model,
+                market_signals=market_signals_ctx,
             )
         else:
             system_prompt = self._build_system_prompt(
@@ -2773,6 +2782,7 @@ class ChatService:
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+                market_signals=market_signals_ctx,
             )
 
         # Inject friction flag note into system prompt if flagged
@@ -3380,6 +3390,95 @@ class ChatService:
             logger.warning("Failed to get proactive insights: %s", e)
             return []
 
+    async def _get_recent_signals(
+        self, user_id: str, message: str = ""
+    ) -> list[dict[str, Any]]:
+        """Fetch recent market signals for LLM context.
+
+        If the message mentions a specific signal, prioritize that.
+
+        Args:
+            user_id: User identifier.
+            message: Current user message for keyword matching.
+
+        Returns:
+            List of market signal dicts.
+        """
+        try:
+            db = get_supabase_client()
+
+            # Check if user message matches a known signal headline
+            if message:
+                words = [
+                    w
+                    for w in message.split()
+                    if len(w) > 3
+                    and w.lower()
+                    not in (
+                        "tell",
+                        "more",
+                        "about",
+                        "what",
+                        "show",
+                        "know",
+                    )
+                ]
+                if words:
+                    # Try headline match on first significant word
+                    matched = (
+                        db.table("market_signals")
+                        .select(
+                            "id, company_name, headline, summary, signal_type, "
+                            "source_url, source_name, relevance_score, detected_at"
+                        )
+                        .eq("user_id", user_id)
+                        .ilike("headline", f"%{words[0]}%")
+                        .order("detected_at", desc=True)
+                        .limit(3)
+                        .execute()
+                    )
+
+                    if matched.data:
+                        # Also get a few recent signals for broader context
+                        recent = (
+                            db.table("market_signals")
+                            .select(
+                                "id, company_name, headline, summary, signal_type, "
+                                "source_url, relevance_score, detected_at"
+                            )
+                            .eq("user_id", user_id)
+                            .order("detected_at", desc=True)
+                            .limit(3)
+                            .execute()
+                        )
+
+                        # Merge matched (priority) + recent, dedup by id
+                        seen: set[str] = set()
+                        result: list[dict[str, Any]] = []
+                        for s in (matched.data or []) + (recent.data or []):
+                            if s["id"] not in seen:
+                                seen.add(s["id"])
+                                result.append(s)
+                        return result[:7]
+
+            # Default: return 5 most recent signals
+            result = (
+                db.table("market_signals")
+                .select(
+                    "id, company_name, headline, summary, signal_type, "
+                    "source_url, relevance_score, detected_at"
+                )
+                .eq("user_id", user_id)
+                .order("detected_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+
+            return result.data or []
+        except Exception as e:
+            logger.warning("Failed to fetch market signals for context: %s", e)
+            return []
+
     async def _get_personality_calibration(
         self,
         user_id: str,
@@ -3566,6 +3665,7 @@ class ChatService:
         active_goals: list[dict[str, Any]] | None = None,
         digital_twin_calibration: dict[str, Any] | None = None,
         capability_context: str | None = None,
+        market_signals: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -3647,6 +3747,32 @@ class ChatService:
                 goal_lines.append(line)
             base_prompt += "\n\n" + ACTIVE_GOALS_TEMPLATE.format(
                 goals="\n".join(goal_lines)
+            )
+
+        # Add market intelligence signals
+        if market_signals:
+            signal_lines = []
+            for sig in market_signals[:7]:
+                company = sig.get("company_name", "Unknown")
+                headline = sig.get("headline", "")
+                sig_type = sig.get("signal_type", "")
+                source_url = sig.get("source_url", "")
+                summary = sig.get("summary", "")
+                if summary:
+                    summary = re.sub(r"\[.*?\]<web_link>", "", summary)
+                    summary = re.sub(r"\[.*?\]<image_link>", "", summary)
+                    summary = re.sub(r"<web_link>|<image_link>", "", summary)
+                    summary = re.sub(r"\n\s*\*\s*\[", "", summary)
+                    summary = summary.strip()[:300]
+
+                line = f"- [{sig_type.upper()}] {company}: {headline}"
+                if source_url:
+                    line += f" (source: {source_url})"
+                if summary and len(summary) > 20:
+                    line += f"\n  Summary: {summary}"
+                signal_lines.append(line)
+            base_prompt += "\n\n" + MARKET_SIGNALS_TEMPLATE.format(
+                signals="\n".join(signal_lines)
             )
 
         # Add dedicated procedural memory section
@@ -3744,6 +3870,7 @@ class ChatService:
         capability_context: str | None = None,
         causal_actions: list[Any] | None = None,
         user_mental_model: Any = None,
+        market_signals: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
@@ -3878,6 +4005,32 @@ class ChatService:
                     goal_lines.append(line)
                 prompt += "\n\n" + ACTIVE_GOALS_TEMPLATE.format(
                     goals="\n".join(goal_lines)
+                )
+
+            # Append market intelligence signals
+            if market_signals:
+                signal_lines = []
+                for sig in market_signals[:7]:
+                    company = sig.get("company_name", "Unknown")
+                    headline = sig.get("headline", "")
+                    sig_type = sig.get("signal_type", "")
+                    source_url = sig.get("source_url", "")
+                    summary = sig.get("summary", "")
+                    if summary:
+                        summary = re.sub(r"\[.*?\]<web_link>", "", summary)
+                        summary = re.sub(r"\[.*?\]<image_link>", "", summary)
+                        summary = re.sub(r"<web_link>|<image_link>", "", summary)
+                        summary = re.sub(r"\n\s*\*\s*\[", "", summary)
+                        summary = summary.strip()[:300]
+
+                    line = f"- [{sig_type.upper()}] {company}: {headline}"
+                    if source_url:
+                        line += f" (source: {source_url})"
+                    if summary and len(summary) > 20:
+                        line += f"\n  Summary: {summary}"
+                    signal_lines.append(line)
+                prompt += "\n\n" + MARKET_SIGNALS_TEMPLATE.format(
+                    signals="\n".join(signal_lines)
                 )
 
             # Add capability context for ARIA self-awareness
