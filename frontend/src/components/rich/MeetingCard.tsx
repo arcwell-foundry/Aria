@@ -7,6 +7,8 @@ export interface MeetingCardData {
   id: string;
   title: string;
   time: string;
+  start_time?: string;
+  date?: string;
   attendees: string[];
   company: string;
   has_brief: boolean;
@@ -39,9 +41,17 @@ export function MeetingCard({ data }: MeetingCardProps) {
 
   if (!data) return null;
 
-  const formattedTime = data.time
-    ? new Date(data.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : '';
+  // Backend sends time pre-formatted (e.g. "11:00 AM"), so display directly.
+  // Fall back to parsing start_time ISO string if available.
+  let formattedTime = '';
+  if (data.time) {
+    formattedTime = data.time;
+  } else if (data.start_time) {
+    const parsed = new Date(data.start_time);
+    formattedTime = isNaN(parsed.getTime())
+      ? ''
+      : parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   return (
     <div

@@ -635,6 +635,8 @@ class BriefingService:
                         "id": meeting.get("id"),
                         "title": meeting.get("title"),
                         "time": meeting.get("time"),
+                        "start_time": meeting.get("start_time", ""),
+                        "date": meeting.get("date", ""),
                         "attendees": meeting.get("attendees", []),
                         "company": meeting.get("company"),
                         "has_brief": meeting.get("has_brief", False),
@@ -840,6 +842,11 @@ class BriefingService:
             for row in today_result.data or []:
                 if not isinstance(row, dict):
                     continue
+                # Skip buffer events (e.g. "[15-minute buffer before ...]")
+                title = row.get("title", "")
+                title_lower = (title or "").lower()
+                if "[buffer" in title_lower or "buffer]" in title_lower:
+                    continue
                 formatted_time = await self._format_time_in_user_timezone(
                     row.get("start_time", ""), user_id
                 )
@@ -855,10 +862,30 @@ class BriefingService:
                         elif isinstance(att, str):
                             attendees.append({"email": att, "name": ""})
 
+                # Build ISO start_time and formatted date for frontend
+                raw_start = row.get("start_time", "")
+                formatted_date = ""
+                iso_start = ""
+                if raw_start:
+                    try:
+                        cleaned_ts = raw_start.replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(cleaned_ts)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=UTC)
+                        user_tz_str = await self._get_user_timezone(user_id)
+                        local_dt = dt.astimezone(ZoneInfo(user_tz_str))
+                        formatted_date = local_dt.strftime("%B %-d, %Y")
+                        iso_start = dt.isoformat()
+                    except Exception:
+                        iso_start = raw_start
+                        formatted_date = ""
+
                 key_meetings.append({
                     "id": row.get("id", ""),
                     "title": row.get("title", "Untitled Meeting"),
                     "time": formatted_time,
+                    "start_time": iso_start,
+                    "date": formatted_date,
                     "attendees": attendees,
                     "company": None,
                     "has_brief": False,
@@ -875,7 +902,14 @@ class BriefingService:
                 .limit(5)
                 .execute()
             )
-            tomorrow_meetings = tomorrow_result.data or []
+            tomorrow_meetings = [
+                m for m in (tomorrow_result.data or [])
+                if isinstance(m, dict)
+                and not (
+                    "[buffer" in (m.get("title", "") or "").lower()
+                    or "buffer]" in (m.get("title", "") or "").lower()
+                )
+            ]
             first_tomorrow = tomorrow_meetings[0] if tomorrow_meetings else None
             tomorrow_first_time = None
             tomorrow_first_title = None
@@ -973,6 +1007,11 @@ class BriefingService:
             key_meetings = []
             for event in events[:10]:
                 if not isinstance(event, dict):
+                    continue
+                # Skip buffer events in Composio results
+                event_title = event.get("summary", event.get("subject", ""))
+                event_title_lower = (event_title or "").lower()
+                if "[buffer" in event_title_lower or "buffer]" in event_title_lower:
                     continue
                 start_time = event.get("start", {})
                 if isinstance(start_time, dict):

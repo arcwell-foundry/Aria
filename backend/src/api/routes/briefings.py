@@ -135,7 +135,11 @@ async def _generate_briefing_narrative(
     if meeting_count > 0:
         meetings_text = f"## Calendar\n{meeting_count} meetings today.\n"
         for m in calendar.get("key_meetings", [])[:8]:
-            attendees = ", ".join(m.get("attendees", [])[:3])
+            raw_att = m.get("attendees", [])[:3]
+            attendees = ", ".join(
+                a.get("name") or a.get("email", "") if isinstance(a, dict) else str(a)
+                for a in raw_att
+            )
             meetings_text += f"- {m.get('time', '')} — {m.get('title', 'Meeting')}"
             if attendees:
                 meetings_text += f" (with {attendees})"
