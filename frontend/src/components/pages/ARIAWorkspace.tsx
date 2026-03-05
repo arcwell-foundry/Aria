@@ -18,6 +18,7 @@ import { listConversations, getConversation } from '@/api/chat';
 import { useTodayBriefing } from '@/hooks/useBriefing';
 import { streamBriefingC1 } from '@/api/briefings';
 import { VideoBriefingCard } from '@/components/briefing';
+import { ChatIntelligencePanel } from '@/components/panels/ChatIntelligencePanel';
 
 // Module-level flag to prevent re-injecting briefing across remounts within the same session.
 // Reset when the page fully reloads (new session), which is the intended behavior.
@@ -606,43 +607,49 @@ export function ARIAWorkspace() {
 
   return (
     <div
-      className="flex-1 flex flex-col h-full"
+      className="flex-1 flex flex-row h-full min-w-0"
       style={{ backgroundColor: '#0A0A0B' }}
       data-aria-id="aria-workspace"
     >
-      {/* Header with avatar toggle */}
-      <div className="flex items-center justify-end gap-3 px-6 py-2">
-        <EmotionIndicator />
-        <button
-          onClick={() => modalityController.switchTo('avatar')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-[#2E66FF] hover:bg-[#2E66FF]/10 transition-colors"
-          aria-label="Switch to Dialogue Mode"
-        >
-          <Video size={14} />
-          <span className="text-xs">Avatar</span>
-        </button>
+      {/* Chat column */}
+      <div className="flex-1 flex flex-col h-full min-w-0">
+        {/* Header with avatar toggle */}
+        <div className="flex items-center justify-end gap-3 px-6 py-2">
+          <EmotionIndicator />
+          <button
+            onClick={() => modalityController.switchTo('avatar')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#8B8FA3] hover:text-[#2E66FF] hover:bg-[#2E66FF]/10 transition-colors"
+            aria-label="Switch to Dialogue Mode"
+          >
+            <Video size={14} />
+            <span className="text-xs">Avatar</span>
+          </button>
+        </div>
+
+        {/* Briefing Card - shown when briefing is ready and not yet viewed */}
+        {(showBriefingCard || showCollapsedBar) && (
+          <div className="px-6 pb-4">
+            <VideoBriefingCard
+              briefingId={briefingId!}
+              duration={duration}
+              topics={topics}
+              userName={user?.full_name ?? undefined}
+              onPlay={handlePlayBriefing}
+              onRead={handleReadBriefing}
+              onSkip={handleSkipBriefing}
+              isCollapsed={showCollapsedBar}
+              onExpand={handleExpandBriefing}
+            />
+          </div>
+        )}
+
+        <ConversationThread onStartTyping={handleStartTyping} />
+        <SuggestionChips onSelect={handleSend} />
+        <InputBar onSend={handleSend} />
       </div>
 
-      {/* Briefing Card - shown when briefing is ready and not yet viewed */}
-      {(showBriefingCard || showCollapsedBar) && (
-        <div className="px-6 pb-4">
-          <VideoBriefingCard
-            briefingId={briefingId!}
-            duration={duration}
-            topics={topics}
-            userName={user?.full_name ?? undefined}
-            onPlay={handlePlayBriefing}
-            onRead={handleReadBriefing}
-            onSkip={handleSkipBriefing}
-            isCollapsed={showCollapsedBar}
-            onExpand={handleExpandBriefing}
-          />
-        </div>
-      )}
-
-      <ConversationThread onStartTyping={handleStartTyping} />
-      <SuggestionChips onSelect={handleSend} />
-      <InputBar onSend={handleSend} />
+      {/* Right intelligence panel */}
+      <ChatIntelligencePanel onSendMessage={handleSend} />
     </div>
   );
 }

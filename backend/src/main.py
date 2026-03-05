@@ -46,6 +46,7 @@ from src.api.routes import (
     goals,
     health,
     insights,
+    intelligence_panel,  # Right panel intelligence data for chat page
     integrations,
     intelligence,  # Phase 7: Causal intelligence routes
     leads,
@@ -375,6 +376,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(insights.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(intelligence.router, prefix="/api/v1")  # Phase 7: Causal intelligence
+app.include_router(intelligence_panel.router, prefix="/api/v1")  # Chat page right panel
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
