@@ -866,8 +866,6 @@ class ChatService:
          "outreach", "Draft professional outreach communications"),
         (re.compile(r"\b(?:analyze|assess|evaluate|review|audit)\b.{0,40}\b(?:pipeline|deal|opportunit|portfolio|territory|funnel)", re.I),
          "analysis", "Analyze sales pipeline and opportunities"),
-        (re.compile(r"\b(?:prepare|build|create|put together)\b.{0,40}\b(?:meeting|call|presentation|deck|brief|agenda)", re.I),
-         "meeting_prep", "Prepare meeting materials and briefing"),
         (re.compile(r"\b(?:build|create|generate|prepare)\b.{0,40}\b(?:battle ?card|competitive|comparison|analysis|report|brief|strategy)", re.I),
          "competitive_intel", "Build competitive intelligence materials"),
         (re.compile(r"\b(?:map|analyze|plan|build)\b.{0,40}\b(?:territory|region|geo|market\s+entry)", re.I),
@@ -875,6 +873,56 @@ class ChatService:
         (re.compile(r"\b(?:monitor|track|watch|alert|notify)\b.{0,40}\b(?:compan|competitor|market|news|trigger|signal|change)", re.I),
          "research", "Monitor and track market signals"),
     ]
+
+    # Deterministic quick-action patterns — bypass LLM, skip goal creation
+    # NOTE: trailing \b is omitted on the final group to allow plurals
+    # (e.g. "signals", "drafts", "meetings") to match.
+    _QUICK_ACTION_PATTERNS: ClassVar[list[tuple[re.Pattern[str], str, str]]] = [
+        # Meeting prep — pull from calendar_events, market_signals, battle_cards
+        (re.compile(r"\b(?:prep|prepare|brief|get ready|ready)\b.{0,40}\b(?:meeting|call|sync|chat|session|presentation|demo)", re.I),
+         "meeting_prep", "Prepare meeting brief from existing data"),
+
+        # Calendar queries — pull from calendar_events
+        (re.compile(r"\b(?:what|show|list|any)\b.{0,30}\b(?:meeting|calendar|schedule|appointment|event).{0,20}\b(?:today|tomorrow|this week|next|upcoming)", re.I),
+         "calendar_query", "Answer calendar question from existing data"),
+        (re.compile(r"\b(?:when|what time)\b.{0,30}\b(?:meeting|call|next|first)", re.I),
+         "calendar_query", "Answer calendar question from existing data"),
+
+        # Signal/intelligence review — pull from market_signals
+        (re.compile(r"\b(?:show|review|what|any|latest|recent|new)\b.{0,30}\b(?:signal|intelligence|news|alert|competitor|market)", re.I),
+         "signal_review", "Review market signals from existing data"),
+
+        # Draft/email status — pull from email_drafts
+        (re.compile(r"\b(?:show|review|any|how many|pending|waiting)\b.{0,30}\b(?:draft|email|message|reply|response)", re.I),
+         "draft_review", "Review email drafts from existing data"),
+
+        # Task/goal status — pull from goals
+        (re.compile(r"\b(?:what|show|any|how many|status|check)\b.{0,30}\b(?:task|goal|action|overdue|open|pending|to.?do)", re.I),
+         "task_review", "Review task status from existing data"),
+
+        # Pipeline overview — pull from leads + goals
+        (re.compile(r"\b(?:show|what|how)\b.{0,20}\b(?:pipeline|funnel|deals?|leads?)", re.I),
+         "pipeline_review", "Review pipeline from existing data"),
+
+        # Battle card / competitive lookup — pull from battle_cards
+        (re.compile(r"\b(?:what|tell|show|compare)\b.{0,30}\b(?:battle ?card|vs|versus|compared to|competitive|against)", re.I),
+         "competitive_lookup", "Look up competitive intelligence from existing data"),
+    ]
+
+    @staticmethod
+    def _match_quick_action(message: str) -> dict[str, Any] | None:
+        """Check message against quick action patterns.
+        Returns a pre-filled intent dict if a pattern matches, else None.
+        """
+        for pattern, action_type, description in ChatService._QUICK_ACTION_PATTERNS:
+            if pattern.search(message):
+                return {
+                    "is_goal": False,
+                    "is_quick_action": True,
+                    "action_type": action_type,
+                    "description": description,
+                }
+        return None
 
     @staticmethod
     def _match_goal_trigger(message: str) -> dict[str, Any] | None:
@@ -884,6 +932,11 @@ class ChatService:
         This provides a fast, reliable fallback that doesn't depend on
         LLM judgment for obvious action-oriented requests.
         """
+        # Check quick action patterns first — they take priority
+        quick_match = ChatService._match_quick_action(message)
+        if quick_match:
+            return None  # Don't match as a goal if it's a quick action
+
         for pattern, goal_type, desc_template in ChatService._GOAL_TRIGGER_PATTERNS:
             m = pattern.search(message)
             if m:
@@ -898,14 +951,18 @@ class ChatService:
         return None
 
     async def _classify_intent(self, user_id: str, message: str) -> dict[str, Any] | None:
-        """Classify whether a user message implies a goal ARIA should plan.
+        """Classify user message into one of three intent categories.
 
         Uses a two-tier approach:
-        1. Deterministic pattern matching for obvious goal triggers (fast, reliable)
+        1. Deterministic pattern matching for obvious goal/quick_action triggers (fast, reliable)
         2. LLM classification for ambiguous messages (max_tokens=256, temperature=0.1)
 
-        Returns the parsed intent dict on success, or ``None`` when the
-        message is conversational and doesn't warrant goal creation.
+        Three categories:
+        - is_goal=true: Complex tasks requiring external research or multi-step agent workflows
+        - is_quick_action=true: Requests answerable from data ARIA already has
+        - is_conversational (both false): Casual conversation, feedback, explanations
+
+        Returns the parsed intent dict on success, or ``None`` on classification failure.
         """
         logger.warning(
             "INTENT_DEBUG: _classify_intent CALLED — message=%s, user=%s",
@@ -928,37 +985,57 @@ class ChatService:
 
         try:
             intent_prompt = (
-                "You are the intent classifier for ARIA, an AI sales agent that "
-                "EXECUTES tasks using specialized agents (Hunter for lead gen, "
-                "Analyst for research, Strategist for planning, Scribe for drafting, "
-                "Scout for monitoring). ARIA doesn't just talk — she acts.\n\n"
+                "You are the intent classifier for ARIA, an AI colleague for life sciences "
+                "commercial teams. ARIA has three response modes.\n\n"
                 f'User message: "{message}"\n\n'
-                "Classify as is_goal=true if the user wants ARIA to DO something:\n"
-                "- Find, source, or identify companies, leads, or prospects\n"
-                "- Research, investigate, or analyze a market, company, or competitor\n"
-                "- Draft, write, compose, or prepare any communication\n"
-                "- Build a strategy, battle card, report, or recommendation\n"
-                "- Monitor, track, or watch for changes or signals\n"
-                "- Prepare for a meeting, call, or presentation\n"
-                "- Plan or map a territory, pipeline, or go-to-market motion\n"
-                "- Compare, evaluate, or score options\n\n"
-                "Classify as is_goal=false ONLY if the message is:\n"
+
+                "CLASSIFY AS is_goal=true ONLY for complex tasks requiring multi-step "
+                "external research or creation that ARIA cannot answer from existing data:\n"
+                "- Find, source, or identify NEW companies, leads, or prospects (requires external search)\n"
+                "- Deep research or investigation of a market, sector, or company (requires web/API calls)\n"
+                "- Build a comprehensive strategy, report, or territory plan from scratch\n"
+                "- Create a new battle card or competitive analysis requiring fresh research\n"
+                "- Monitor or set up tracking for new entities\n\n"
+
+                "CLASSIFY AS is_quick_action=true for requests answerable from data ARIA "
+                "already has (calendar, emails, signals, tasks, contacts, battle cards):\n"
+                "- Prepare for or brief me on an upcoming meeting\n"
+                "- Show, review, or summarize calendar/meetings/schedule\n"
+                "- Show, review, or summarize market signals or competitor news\n"
+                "- Show, review, or summarize email drafts or pending replies\n"
+                "- Show, review, or summarize tasks, goals, or action items\n"
+                "- Show pipeline, deals, or lead status\n"
+                "- Look up a specific competitor's battle card\n"
+                "- Draft a quick email reply (not a cold outreach campaign)\n"
+                "- Any question that can be answered by querying existing database tables\n\n"
+
+                "CLASSIFY AS is_conversational=true for:\n"
                 "- Casual conversation, greetings, or small talk\n"
                 "- Asking ARIA to explain, clarify, or teach a concept\n"
-                "- Feedback on a previous response (e.g. 'thanks', 'good job')\n"
-                "- A question about ARIA's own capabilities or status\n\n"
-                "IMPORTANT: When in doubt, classify as is_goal=true. ARIA's value "
-                "is in DOING things, not just answering questions. If the user wants "
-                "information that requires research or data gathering, that IS a goal.\n\n"
+                "- Feedback on a previous response\n"
+                "- Questions about ARIA's capabilities or status\n"
+                "- Opinions, advice, or discussion\n"
+                "- Approving or rejecting a presented plan\n"
+                "- Following up on something ARIA already said\n\n"
+
+                "IMPORTANT: Default to is_quick_action when the request involves data ARIA "
+                "likely already has. Only use is_goal for tasks requiring NEW external research "
+                "or multi-step agent workflows. When in doubt between goal and quick_action, "
+                "choose quick_action — it is better to answer fast and offer to go deeper than "
+                "to make the user wait for a plan they did not need.\n\n"
+
                 "Respond with ONLY valid JSON (no markdown, no backticks):\n"
                 "{\n"
                 '  "is_goal": true or false,\n'
-                '  "goal_title": "concise title if is_goal is true, else null",\n'
-                '  "goal_type": "research|analysis|lead_gen|competitive_intel'
-                '|outreach|meeting_prep|territory|custom",\n'
-                '  "goal_description": "1-2 sentence description if is_goal '
-                'is true, else null"\n'
-                "}"
+                '  "is_quick_action": true or false,\n'
+                '  "goal_title": "concise title if is_goal, else null",\n'
+                '  "goal_type": "lead_gen|research|outreach|analysis|competitive_intel|territory|monitoring — if is_goal, else null",\n'
+                '  "action_type": "meeting_prep|calendar_query|signal_review|draft_review|task_review|pipeline_review|competitive_lookup|quick_draft — if is_quick_action, else null",\n'
+                '  "goal_description": "1-2 sentence description if is_goal, else null"\n'
+                "}\n\n"
+                "RULES:\n"
+                "- Exactly one of is_goal or is_quick_action should be true, or both false (conversational)\n"
+                "- Never set both is_goal and is_quick_action to true\n"
             )
 
             llm = LLMClient()
@@ -979,7 +1056,17 @@ class ChatService:
             cleaned = cleaned.strip()
 
             intent = json.loads(cleaned)
-            logger.warning("INTENT_DEBUG: LLM classification result=%s", intent)
+
+            # Ensure new fields have defaults for backwards compatibility
+            if "is_quick_action" not in intent:
+                intent["is_quick_action"] = False
+            if "action_type" not in intent:
+                intent["action_type"] = None
+
+            logger.warning(
+                "INTENT_DEBUG: LLM classification result=%s",
+                {k: v for k, v in intent.items() if v is not None},
+            )
             return intent
 
         except json.JSONDecodeError as je:
@@ -2661,10 +2748,21 @@ class ChatService:
                 "proactive_insights": [],
             }
 
-        # --- Inline Intent Detection: route goals before conversational LLM ---
-        intent_start = time.perf_counter()
-        intent_result = await self._classify_intent(user_id, message)
-        intent_ms = (time.perf_counter() - intent_start) * 1000
+        # --- Signal Enrichment Bypass ---
+        # If the message was signal-enriched, skip intent classification entirely.
+        # Signal-enriched messages contain [ARIA SIGNAL CONTEXT] which already has
+        # all the context ARIA needs - routing to goal creation loses that context.
+        was_signal_enriched = (enriched_message != message)
+        if was_signal_enriched:
+            logger.info(
+                "SIGNAL_BYPASS: Message was signal-enriched, skipping intent classification and routing to conversational response"
+            )
+            intent_result = None  # Skip goal routing
+        else:
+            # --- Inline Intent Detection: route goals before conversational LLM ---
+            intent_start = time.perf_counter()
+            intent_result = await self._classify_intent(user_id, message)
+            intent_ms = (time.perf_counter() - intent_start) * 1000
 
         if intent_result and intent_result.get("is_goal"):
             logger.info(
