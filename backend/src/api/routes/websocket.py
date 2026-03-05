@@ -464,6 +464,17 @@ async def _handle_user_message(
                 "SIGNAL_BYPASS: Message was signal-enriched, skipping intent classification and pending plan routing"
             )
 
+        # --- Quick Action Detection (BEFORE intent classification) ---
+        quick_action_match = None
+        if not was_signal_enriched:
+            from src.services.chat import ChatService
+            quick_action_match = ChatService._match_quick_action(message_text)
+            if quick_action_match:
+                logger.info(
+                    "QUICK_ACTION_WS: Pattern matched: %s",
+                    quick_action_match.get("action_type"),
+                )
+
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
@@ -600,15 +611,62 @@ async def _handle_user_message(
                 pending_plan_goal_id, user_id,
             )
 
-        # --- Intent Classification (skip for signal-enriched messages) ---
+        # --- Intent Classification (skip for signal-enriched messages or quick actions) ---
         # Signal-enriched messages already have all the context they need - the signal
         # data was injected into the message at the top of this handler.
+        # Quick actions bypass LLM intent classification entirely.
         intent_result = None
-        if not was_signal_enriched:
+        if not was_signal_enriched and not quick_action_match:
             # --- Inline Intent Detection (ALWAYS runs — even with pending plans) ---
             # A new action request like "find companies" must create a new goal,
             # not be blocked by a stale plan_ready goal from an earlier request.
             intent_result = await service._classify_intent(user_id, message_text)
+
+        # --- Quick Action Routing ---
+        if quick_action_match or (intent_result and intent_result.get("is_quick_action")):
+            action_intent = quick_action_match or intent_result
+            logger.info("QUICK_ACTION_WS: Routing to handler, action_type=%s", action_intent.get("action_type"))
+
+            try:
+                result = await service._handle_quick_action(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message_text,
+                    intent=action_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+            except Exception:
+                logger.exception(
+                    "WS quick action handling failed",
+                    extra={"user_id": user_id},
+                )
+                await websocket.send_json(
+                    {
+                        "type": "aria.message",
+                        "message": "I understood your request but ran into a problem. Please try again.",
+                        "rich_content": [],
+                        "ui_commands": [],
+                        "suggestions": ["Try again"],
+                        "conversation_id": conversation_id,
+                        "intent_detected": "quick_action",
+                    }
+                )
+                return
+
+            # Send response via WebSocket
+            await websocket.send_json(
+                {
+                    "type": "aria.message",
+                    "message": result.get("response", ""),
+                    "rich_content": result.get("rich_content", []),
+                    "ui_commands": result.get("ui_commands", []),
+                    "suggestions": result.get("suggestions", []),
+                    "conversation_id": conversation_id,
+                    "intent_detected": "quick_action",
+                }
+            )
+            return
 
         if intent_result and intent_result.get("is_goal"):
             logger.info(
