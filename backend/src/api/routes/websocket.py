@@ -629,10 +629,16 @@ async def _handle_user_message(
             return
 
         # Query active goals and digital twin calibration for prompt injection
-        active_goals, digital_twin_calibration, capability_context = await _aio.gather(
+        (
+            active_goals,
+            digital_twin_calibration,
+            capability_context,
+            market_signals,
+        ) = await _aio.gather(
             _safe(service._get_active_goals(user_id), [], "goals"),
             _safe(service._get_digital_twin_calibration(user_id), None, "digital_twin"),
             _safe(service._get_capability_context(user_id), None, "capability"),
+            _safe(service._get_recent_signals(user_id, message_text), [], "market_signals"),
         )
 
         # Build system prompt — use PersonaBuilder (v2) for full ARIA identity
@@ -647,6 +653,7 @@ async def _handle_user_message(
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+                market_signals=market_signals,
             )
         else:
             system_prompt = service._build_system_prompt(
@@ -659,6 +666,7 @@ async def _handle_user_message(
                 active_goals=active_goals,
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
+                market_signals=market_signals,
             )
 
         # Debug: log system prompt to verify ARIA identity
