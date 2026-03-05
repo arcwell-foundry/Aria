@@ -56,6 +56,9 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   // WebSocket connection is handled by AppShell - no duplicate connect here
   // AppShell maintains a single persistent WebSocket connection across all routes
 
+  // State for text-only briefing mode
+  const [textOnlyMode, setTextOnlyMode] = useState(false);
+
   // Trigger briefing delivery when entering briefing mode
   useEffect(() => {
     if (sessionType !== 'briefing') return;
@@ -63,19 +66,53 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     const deliverBriefing = async () => {
       try {
         // If replay, use the replay endpoint; otherwise, deliver new briefing
-        if (isReplay) {
-          await apiClient.post('/briefings/replay');
-        } else {
-          await apiClient.post('/briefings/deliver');
+        const endpoint = isReplay ? '/briefings/replay' : '/briefings/deliver';
+        const response = await apiClient.post<{
+          mode?: 'text_only' | 'video';
+          content?: {
+            summary?: string;
+            rich_content?: Array<{ type: string; data: Record<string, unknown> }>;
+            suggestions?: string[];
+          };
+          message?: string;
+          status: string;
+          error?: string;
+        }>(endpoint);
+
+        // Handle text-only mode - render directly to conversation store
+        if (response.data.mode === 'text_only' && response.data.content) {
+          setTextOnlyMode(true);
+          const { content } = response.data;
+
+          // Add briefing as ARIA message
+          addMessage({
+            role: 'aria',
+            content: content.summary || 'Your daily briefing is ready.',
+            rich_content: content.rich_content || [],
+            ui_commands: [],
+            suggestions: content.suggestions || ['Show me details', 'Dismiss'],
+          });
+
+          if (content.suggestions?.length) {
+            setCurrentSuggestions(content.suggestions);
+          }
         }
+        // Video mode: briefing arrives via WebSocket, no action needed here
       } catch (err) {
-        // Briefing delivery failure handled by WebSocket fallback
+        // Briefing delivery failure - show error message
         console.warn('Briefing delivery request failed:', err);
+        addMessage({
+          role: 'system',
+          content: 'Unable to load briefing. Please try refreshing the page.',
+          rich_content: [],
+          ui_commands: [],
+          suggestions: ['Try again'],
+        });
       }
     };
 
     deliverBriefing();
-  }, [sessionType, isReplay]);
+  }, [sessionType, isReplay, addMessage, setCurrentSuggestions]);
 
   // Track briefing progress based on aria.speaking events
   useEffect(() => {
@@ -408,6 +445,12 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           {/* Left: Avatar */}
           <div className="flex-1 flex flex-col items-center justify-center relative">
             <AvatarContainer />
+            {/* Text-only mode indicator */}
+            {textOnlyMode && isBriefing && (
+              <div className="absolute top-8 px-3 py-1.5 rounded-full bg-[#1A1A2E] border border-[#2E66FF]/30">
+                <span className="text-xs text-[#8B8FA3]">Text briefing mode</span>
+              </div>
+            )}
             <VideoToastStack
               toasts={toasts}
               onDismiss={handleToastDismiss}

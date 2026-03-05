@@ -850,16 +850,36 @@ async def regenerate_briefing(
 async def deliver_briefing(
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Generate today's briefing and deliver via WebSocket.
+    """Generate today's briefing and deliver via WebSocket or text-only mode.
 
     Generates a fresh briefing and pushes it to the user's active
     WebSocket connection as an AriaMessageEvent with rich content
     cards, UI commands, and suggestions.
+
+    Falls back to text-only mode when Tavus video avatar is not configured.
+    In text-only mode, returns the briefing content directly for frontend rendering.
     """
+    # Check if Tavus video service is configured
+    tavus_configured = bool(settings.TAVUS_API_KEY)
+
     try:
         service = BriefingService()
         content = await service.generate_briefing(current_user.id)
 
+        # If Tavus not configured, return text-only mode immediately
+        if not tavus_configured:
+            logger.info(
+                "Briefing delivered in text-only mode (Tavus not configured)",
+                extra={"user_id": current_user.id},
+            )
+            return {
+                "mode": "text_only",
+                "content": content,
+                "message": "Video avatar not configured. Text briefing available.",
+                "status": "delivered",
+            }
+
+        # Tavus configured - try WebSocket delivery
         try:
             from src.core.ws import ws_manager
             from src.models.ws_events import AriaMessageEvent
@@ -872,17 +892,89 @@ async def deliver_briefing(
             )
             await ws_manager.send_to_user(current_user.id, event)
             logger.info("Briefing delivered via WebSocket", extra={"user_id": current_user.id})
-            return {"briefing": content, "status": "delivered"}
+            return {"mode": "video", "briefing": content, "status": "delivered"}
         except Exception as e:
             logger.warning(f"WebSocket briefing delivery failed: {e}")
-            return {"briefing": content, "status": "generated_not_delivered"}
+            # Fall back to text-only if WebSocket fails
+            return {
+                "mode": "text_only",
+                "content": content,
+                "message": "Video delivery unavailable. Text briefing available.",
+                "status": "delivered",
+            }
     except Exception:
         logger.exception(
             "Briefing delivery failed",
             extra={"user_id": current_user.id},
         )
         return {
+            "mode": "text_only",
             "briefing": None,
             "status": "failed",
             "error": "Briefing generation failed. Please try again.",
+        }
+
+
+@router.post("/replay")
+async def replay_briefing(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Replay today's briefing without regenerating.
+
+    Fetches the existing daily briefing for today and returns it
+    in text-only mode. Used when navigating to /briefing?replay=true.
+
+    Returns the briefing content directly for frontend rendering.
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        today_str = date.today().isoformat()
+
+        # Fetch today's existing briefing
+        result = (
+            db.table("daily_briefings")
+            .select("id, content")
+            .eq("user_id", current_user.id)
+            .eq("briefing_date", today_str)
+            .limit(1)
+            .execute()
+        )
+
+        if not result.data:
+            # No briefing exists - generate one
+            service = BriefingService()
+            content = await service.generate_briefing(current_user.id)
+            logger.info(
+                "Briefing generated for replay (none existed)",
+                extra={"user_id": current_user.id},
+            )
+        else:
+            # Use existing briefing
+            raw_content = result.data[0].get("content")
+            content = (
+                json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+            )
+            logger.info(
+                "Briefing replayed from cache",
+                extra={"user_id": current_user.id},
+            )
+
+        return {
+            "mode": "text_only",
+            "content": content,
+            "message": "Briefing ready for replay.",
+            "status": "delivered",
+        }
+    except Exception:
+        logger.exception(
+            "Briefing replay failed",
+            extra={"user_id": current_user.id},
+        )
+        return {
+            "mode": "text_only",
+            "content": None,
+            "status": "failed",
+            "error": "Could not load briefing. Please try refreshing.",
         }
