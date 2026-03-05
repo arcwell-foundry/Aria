@@ -2570,6 +2570,8 @@ class ChatService:
         )
         if isinstance(user_mental_model, Exception):
             user_mental_model = None
+        if isinstance(market_signals_ctx, Exception):
+            market_signals_ctx = []
 
         # Timing placeholders (parallelized — individual times ≈ total)
         memory_ms = context_ms
