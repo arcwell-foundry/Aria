@@ -1,12 +1,13 @@
 """Production health monitoring with dependency checks.
 
 Provides comprehensive health checks for all ARIA dependencies:
-- Supabase DB (critical — unhealthy if down)
-- Tavus API (non-critical — degraded if down)
-- Claude/Anthropic API (non-critical — degraded if down)
-- Exa API (non-critical — degraded if down)
+- Supabase DB (core service — unhealthy if down)
+- Claude API (core service — unhealthy if down)
+- Tavus API (optional — status shown but doesn't affect overall health)
+- Exa API (optional — status shown but doesn't affect overall health)
 
-Used by Render's healthCheckPath to auto-restart unhealthy instances.
+Core services: ["supabase", "claude"] — required for app to function
+Optional services: ["tavus", "exa"] — nice to have, don't affect overall health
 """
 
 import logging
@@ -109,7 +110,10 @@ async def check_tavus() -> ServiceCheck:
 
 
 async def check_claude() -> ServiceCheck:
-    """Check Anthropic Claude API reachability."""
+    """Check Anthropic Claude API reachability.
+
+    Claude is a core service - required for ARIA to function.
+    """
     start = time.perf_counter()
     try:
         from src.core.config import settings
@@ -119,6 +123,7 @@ async def check_claude() -> ServiceCheck:
                 name="claude",
                 status=ServiceStatus.UNCONFIGURED,
                 message="ANTHROPIC_API_KEY not set",
+                critical=True,
             )
 
         import anthropic
@@ -133,6 +138,7 @@ async def check_claude() -> ServiceCheck:
             name="claude",
             status=ServiceStatus.UP,
             latency_ms=round(latency, 2),
+            critical=True,
         )
     except Exception as e:
         latency = (time.perf_counter() - start) * 1000
@@ -142,11 +148,15 @@ async def check_claude() -> ServiceCheck:
             status=ServiceStatus.DOWN,
             latency_ms=round(latency, 2),
             message=str(e)[:200],
+            critical=True,
         )
 
 
 async def check_exa() -> ServiceCheck:
-    """Check Exa API reachability."""
+    """Check Exa API reachability.
+
+    Uses the find_similar endpoint which accepts GET requests for health checks.
+    """
     start = time.perf_counter()
     try:
         from src.core.config import settings
@@ -161,14 +171,19 @@ async def check_exa() -> ServiceCheck:
         import httpx
 
         async with httpx.AsyncClient(timeout=5.0) as client:
+            # Use find_similar endpoint which accepts GET requests
+            # See: https://docs.exa.ai/api-reference/search/find-similar
             response = await client.get(
-                "https://api.exa.ai/search",
-                headers={"x-api-key": settings.EXA_API_KEY},
+                "https://api.exa.ai/find_similar",
+                headers={
+                    "x-api-key": settings.EXA_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                params={"url": "https://example.com"},
             )
             latency = (time.perf_counter() - start) * 1000
-            # 405 Method Not Allowed means the API is reachable
-            # (GET not allowed on search, but server responded)
-            if response.status_code in (200, 405, 422):
+            # 200, 400 (missing required param), or 401 (invalid key) all indicate API is reachable
+            if response.status_code in (200, 400, 401, 403):
                 return ServiceCheck(
                     name="exa",
                     status=ServiceStatus.UP,
@@ -191,6 +206,10 @@ async def check_exa() -> ServiceCheck:
         )
 
 
+CORE_SERVICES = {"supabase", "claude"}
+OPTIONAL_SERVICES = {"tavus", "exa", "composio"}
+
+
 async def run_health_checks() -> dict[str, Any]:
     """Run all dependency health checks and compute overall status.
 
@@ -199,6 +218,10 @@ async def run_health_checks() -> dict[str, Any]:
         Render uses the HTTP status code from the calling endpoint:
         - 200 for healthy/degraded (instance keeps running)
         - 503 for unhealthy (Render auto-restarts)
+
+    Status logic:
+        - UNHEALTHY: Any core service (supabase, claude) is DOWN
+        - HEALTHY: All core services are up (optional services don't affect this)
     """
     import asyncio
 
@@ -211,7 +234,7 @@ async def run_health_checks() -> dict[str, Any]:
     )
 
     services: dict[str, dict[str, Any]] = {}
-    db_down = False
+    core_down = False
 
     for result in checks:
         if isinstance(result, Exception):
@@ -225,17 +248,13 @@ async def run_health_checks() -> dict[str, Any]:
         }
         if check.message:
             services[check.name]["message"] = check.message
+        # Only core services affect overall health
         if check.critical and check.status == ServiceStatus.DOWN:
-            db_down = True
+            core_down = True
 
-    # Determine overall status
-    if db_down:
+    # Determine overall status based ONLY on core services
+    if core_down:
         overall = OverallStatus.UNHEALTHY
-    elif any(
-        s["status"] == ServiceStatus.DOWN.value
-        for s in services.values()
-    ):
-        overall = OverallStatus.DEGRADED
     else:
         overall = OverallStatus.HEALTHY
 

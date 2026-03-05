@@ -11,8 +11,10 @@ interface HealthResponse {
 }
 
 export interface ServiceHealthState {
-  /** True when overall status is "healthy" or when we haven't checked yet. */
+  /** True when overall status is "healthy". We only show banner for "unhealthy" (core services down). */
   isHealthy: boolean;
+  /** True when core services are down and banner should be shown. */
+  isCritical: boolean;
   /** Services that are degraded or down, as a name→status map. */
   degradedServices: Record<string, "degraded" | "down">;
   /** ISO timestamp of the last successful health check. */
@@ -30,6 +32,7 @@ export interface ServiceHealthState {
 export function useServiceHealth(enabled = true): ServiceHealthState {
   const [state, setState] = useState<ServiceHealthState>({
     isHealthy: true,
+    isCritical: false,
     degradedServices: {},
     lastCheck: null,
     isLoading: true,
@@ -46,6 +49,7 @@ export function useServiceHealth(enabled = true): ServiceHealthState {
         setState((prev) => ({
           ...prev,
           isHealthy: false,
+          isCritical: true,
           degradedServices: { api: "down" },
           lastCheck: new Date().toISOString(),
           isLoading: false,
@@ -62,8 +66,13 @@ export function useServiceHealth(enabled = true): ServiceHealthState {
         }
       }
 
+      // Only "unhealthy" (core services down) triggers banner
+      const isCritical = data.status === "unhealthy";
+      const isHealthy = data.status === "healthy";
+
       setState({
-        isHealthy: data.status === "healthy",
+        isHealthy,
+        isCritical,
         degradedServices: degraded,
         lastCheck: new Date().toISOString(),
         isLoading: false,
@@ -74,6 +83,7 @@ export function useServiceHealth(enabled = true): ServiceHealthState {
       setState((prev) => ({
         ...prev,
         isHealthy: false,
+        isCritical: true,
         degradedServices: { api: "down" },
         lastCheck: prev.lastCheck, // keep last successful timestamp
         isLoading: false,
@@ -84,7 +94,7 @@ export function useServiceHealth(enabled = true): ServiceHealthState {
   useEffect(() => {
     if (!enabled) {
       // Reset when disabled (e.g. user logs out)
-      setState({ isHealthy: true, degradedServices: {}, lastCheck: null, isLoading: true });
+      setState({ isHealthy: true, isCritical: false, degradedServices: {}, lastCheck: null, isLoading: true });
       return;
     }
 

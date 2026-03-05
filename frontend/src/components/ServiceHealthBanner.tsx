@@ -8,7 +8,10 @@ interface ServiceHealthBannerProps {
 }
 
 /**
- * Subtle top-banner shown when backend services are degraded.
+ * Subtle top-banner shown when core backend services are down.
+ *
+ * Only shows for "unhealthy" status (core services down), not for optional
+ * services being unavailable.
  *
  * Follows ARIA Design System v1.0:
  * - Amber color scheme for warnings
@@ -19,8 +22,8 @@ interface ServiceHealthBannerProps {
 export function ServiceHealthBanner({ health }: ServiceHealthBannerProps) {
   const [isDismissed, setIsDismissed] = useState(false);
 
-  // Don't render while loading, when healthy, or when dismissed
-  if (health.isLoading || health.isHealthy || isDismissed) {
+  // Don't render while loading, when not critical, or when dismissed
+  if (health.isLoading || !health.isCritical || isDismissed) {
     return null;
   }
 
