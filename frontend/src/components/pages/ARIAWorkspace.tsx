@@ -61,6 +61,7 @@ export function ARIAWorkspace() {
     briefingId,
     duration,
     topics,
+    isLoading: briefingLoading,
     dismissed: briefingDismissed,
     dismiss: dismissBriefing,
     summaryData,
@@ -596,10 +597,12 @@ export function ARIAWorkspace() {
   }, [summaryData, addMessage, clearSummaryData]);
 
   // Determine briefing card visibility
-  // Show full card if briefing ready, not viewed, not dismissed, and user hasn't requested stream yet
-  const showBriefingCard = Boolean(briefingReady && !briefingViewed && !briefingDismissed && !briefingStreamRequested && briefingId);
+  // Card shows by default on page load - it's the gatekeeper for briefing consumption
+  // Only hide if: user skipped, user already requested stream, or briefing was dismissed
+  // We do NOT require briefingReady/briefingId - show fallback greeting if API hasn't loaded
+  const showBriefingCard = !briefingSkipped && !briefingStreamRequested && !briefingDismissed;
   // Show collapsed bar if user skipped the briefing
-  const showCollapsedBar = Boolean(briefingReady && briefingSkipped && !briefingStreamRequested && briefingId);
+  const showCollapsedBar = briefingSkipped && !briefingStreamRequested;
 
   return (
     <div
