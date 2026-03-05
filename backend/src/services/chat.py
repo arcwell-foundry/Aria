@@ -3076,11 +3076,38 @@ class ChatService:
                 "SIGNAL_BYPASS: Message was signal-enriched, skipping intent classification and routing to conversational response"
             )
             intent_result = None  # Skip goal routing
-        else:
-            # --- Inline Intent Detection: route goals before conversational LLM ---
+
+        # --- Quick Action Detection (BEFORE intent classification) ---
+        quick_action_match = None
+        if not was_signal_enriched:
+            quick_action_match = ChatService._match_quick_action(message)
+            if quick_action_match:
+                logger.info(
+                    "QUICK_ACTION: Pattern matched in process_message: %s",
+                    quick_action_match.get("action_type"),
+                )
+
+        # --- Inline Intent Detection: route goals before conversational LLM ---
+        # Skip if signal-enriched OR quick action matched - those bypass LLM classification
+        if not was_signal_enriched and not quick_action_match:
             intent_start = time.perf_counter()
             intent_result = await self._classify_intent(user_id, message)
             intent_ms = (time.perf_counter() - intent_start) * 1000
+        else:
+            intent_result = None
+
+        # --- Quick Action Routing ---
+        if quick_action_match or (intent_result and intent_result.get("is_quick_action")):
+            action_intent = quick_action_match or intent_result
+            logger.info("QUICK_ACTION: Routing to handler in process_message")
+            return await self._handle_quick_action(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message=message,
+                intent=action_intent,
+                working_memory=working_memory,
+                conversation_messages=conversation_messages,
+            )
 
         if intent_result and intent_result.get("is_goal"):
             logger.info(
@@ -3101,8 +3128,10 @@ class ChatService:
                 load_state=load_state,
             )
 
-        # --- Check for pending plan interactions ---
-        plan_action = await self._classify_plan_action(user_id, message)
+        # --- Check for pending plan interactions (skip if quick action) ---
+        plan_action = None
+        if not quick_action_match and not (intent_result and intent_result.get("is_quick_action")):
+            plan_action = await self._classify_plan_action(user_id, message)
         if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
             if plan_action["action"] == "retry_plan":
                 # Re-attempt planning for a stuck draft goal
