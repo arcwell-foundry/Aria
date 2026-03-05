@@ -270,11 +270,81 @@ async def chat_stream(
             working_memory.messages.pop()  # Remove original message
             working_memory.add_message("user", enriched_message)  # Add enriched version
 
-        # --- Inline Intent Detection (before building system prompt) ---
-        # Skip if signal-enriched - those go directly to conversational response
-        intent_result = None
+        # --- Quick Action Detection (BEFORE intent classification) ---
+        quick_action_match = None
         if not was_signal_enriched:
+            quick_action_match = ChatService._match_quick_action(request.message)
+            if quick_action_match:
+                logger.info(
+                    "QUICK_ACTION: Pattern matched, routing to quick action handler: %s",
+                    quick_action_match.get("action_type"),
+                )
+
+        # --- Inline Intent Detection (before building system prompt) ---
+        # Skip if signal-enriched OR quick action matched - those bypass LLM classification
+        intent_result = None
+        if not was_signal_enriched and not quick_action_match:
             intent_result = await service._classify_intent(current_user.id, request.message)
+
+        # --- Quick Action Routing ---
+        if quick_action_match or (intent_result and intent_result.get("is_quick_action")):
+            action_intent = quick_action_match or intent_result
+            logger.info("QUICK_ACTION: Routing to handler, action_type=%s", action_intent.get("action_type"))
+
+            # Send metadata event
+            metadata = {
+                "type": "metadata",
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+            }
+            yield f"data: {json.dumps(metadata)}\n\n"
+
+            try:
+                result = await service._handle_quick_action(
+                    user_id=current_user.id,
+                    conversation_id=conversation_id,
+                    message=request.message,
+                    intent=action_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+            except Exception:
+                logger.exception(
+                    "Quick action handling failed",
+                    extra={"user_id": current_user.id},
+                )
+                error_event = {
+                    "type": "token",
+                    "content": "I understood your request but ran into a problem. Please try again.",
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                complete_event = {
+                    "type": "complete",
+                    "rich_content": [],
+                    "ui_commands": [],
+                    "suggestions": ["Try again"],
+                    "intent_detected": "quick_action",
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            # Stream response as a single token chunk (simulated streaming for consistent UX)
+            response_text = result.get("response", "")
+            token_event = {"type": "token", "content": response_text}
+            yield f"data: {json.dumps(token_event)}\n\n"
+
+            # Send completion event
+            complete_event = {
+                "type": "complete",
+                "rich_content": result.get("rich_content", []),
+                "ui_commands": result.get("ui_commands", []),
+                "suggestions": result.get("suggestions", []),
+                "intent_detected": "quick_action",
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         if intent_result and intent_result.get("is_goal"):
             # Short-circuit: emit goal plan instead of streaming a chat response
@@ -344,9 +414,9 @@ async def chat_stream(
             yield "data: [DONE]\n\n"
             return
 
-        # --- Check for pending plan interactions (skip if signal-enriched) ---
+        # --- Check for pending plan interactions (skip if signal-enriched OR quick action) ---
         plan_action = None
-        if not was_signal_enriched:
+        if not was_signal_enriched and not quick_action_match and not (intent_result and intent_result.get("is_quick_action")):
             plan_action = await service._classify_plan_action(current_user.id, request.message)
         if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
             # Short-circuit: handle plan action
