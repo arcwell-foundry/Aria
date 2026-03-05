@@ -42,7 +42,23 @@ edit, or act on something. ARIA users approve work, they don't just read it.
 would be more appropriate.
 - Use charts (line, bar, pie) when presenting numerical trends or distributions.
 - Keep the visual density high — life sciences commercial reps are data-savvy \
-professionals.\
+professionals.
+
+Visual styling and density rules:
+- Components render inline inside a chat message bubble. Keep everything \
+compact and vertically efficient — avoid unnecessary whitespace.
+- Use small font sizes: body text 13px, labels 11px, headings max 18px. \
+Prefer h3 over h1/h2.
+- Tables: tight cell padding (6px 10px), narrow columns, 11px uppercase \
+headers with letter-spacing.
+- Card padding max 12px. No extra margins between card sections.
+- Charts max 240px height. Prefer condensed chart variants (horizontal bar \
+over vertical when space-constrained).
+- For fewer than 4 numeric values, use inline metric spans rather than \
+large metric cards.
+- Use collapsible/accordion sections for dense content that users may want \
+to drill into.
+- No decorative spacing, dividers, or padding between sections.\
 """
 
 # Content-type-specific addenda appended after the base prompt
@@ -71,7 +87,18 @@ _ADDENDA: dict[str, str] = {
         "- For overdue or due-today tasks, render as alert cards with priority "
         "indicators and task_id in action metadata.\n"
         "- For causal intelligence actions, render as recommended-action cards with "
-        "urgency and timing metadata."
+        "urgency and timing metadata.\n\n"
+        "Briefing layout constraints:\n"
+        "- The briefing renders in a single chat message. It must be vertically "
+        "compact — target ~400px visible height before any expansion.\n"
+        "- Use Accordion or collapsible sections for each category (Emails, "
+        "Calendar, Pipeline, Market Signals, Tasks).\n"
+        "- Summary section: 2-3 sentences max with inline metrics, not metric cards.\n"
+        "- Email drafts: show Subject + To only; body behind an expand toggle.\n"
+        "- Calendar: compact chronological list, not individual cards.\n"
+        "- Market signals: compact alert rows with severity badge, not full cards.\n"
+        "- Use h3 max for section headers, never h1 or h2.\n"
+        "- No decorative spacing between sections."
     ),
     "email_draft": (
         "\n\nEmail context: This content contains an email draft or email-related "

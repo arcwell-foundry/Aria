@@ -443,6 +443,12 @@ async def _handle_user_message(
         service = ChatService()
         memory_types = DEFAULT_MEMORY_TYPES
 
+        # Enrich message with signal context if it matches a known signal headline
+        # This injects signal data as HIGH-PRIORITY context the LLM cannot ignore
+        enriched_message = await service._enrich_message_with_signal_context(
+            user_id, message_text
+        )
+
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
@@ -452,13 +458,14 @@ async def _handle_user_message(
         # Ensure conversation record
         await service._ensure_conversation_record(user_id, conversation_id)
 
-        # Add user message to working memory
-        working_memory.add_message("user", message_text)
+        # Add ENRICHED user message to working memory (LLM sees enriched context)
+        # Original message_text is preserved for DB persistence below
+        working_memory.add_message("user", enriched_message)
 
         # Query relevant memories
         memories = await service._query_relevant_memories(
             user_id=user_id,
-            query=message_text,
+            query=enriched_message,  # Use enriched for better semantic matching
             memory_types=memory_types,
         )
 
@@ -846,12 +853,21 @@ async def _handle_user_message(
             c1_content, render_mode = await _apply_thesys_c1(display_content)
             if render_mode == "c1":
                 c1_rendered_content = c1_content
-            await websocket.send_json(
-                {
-                    "type": "aria.token",
-                    "payload": {"content": c1_content, "conversation_id": conversation_id},
-                }
-            )
+                # Send readable markdown as token, NOT C1 DSL.
+                # The C1 DSL is delivered via c1_response in aria.stream_complete.
+                await websocket.send_json(
+                    {
+                        "type": "aria.token",
+                        "payload": {"content": display_content, "conversation_id": conversation_id},
+                    }
+                )
+            else:
+                await websocket.send_json(
+                    {
+                        "type": "aria.token",
+                        "payload": {"content": c1_content, "conversation_id": conversation_id},
+                    }
+                )
 
         # Signal stream complete with metadata (no duplicate content)
         _stream_complete_sent = True

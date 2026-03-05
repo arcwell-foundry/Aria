@@ -329,10 +329,13 @@ async def stream_briefing(
         c1_system_prompt = build_system_prompt("briefing")
 
         try:
+            # Send readable narrative as token while C1 renders server-side
+            yield _sse_event({"type": "token", "content": narrative})
+
+            # Buffer C1 chunks internally — do NOT stream as tokens
             c1_chunks: list[str] = []
             async for chunk in thesys.visualize_stream(narrative, c1_system_prompt):
                 c1_chunks.append(chunk)
-                yield _sse_event({"type": "token", "content": chunk})
 
             c1_response = "".join(c1_chunks)
 

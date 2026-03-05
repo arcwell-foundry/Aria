@@ -27,3 +27,87 @@
 .c1-action-button:hover {
   background-color: var(--accent-glow, rgba(46, 102, 255, 0.8));
 }
+
+/* ── Compact density overrides ── */
+
+/* Cards */
+.c1-component-wrapper [class*="card"],
+.c1-component-wrapper [class*="Card"] {
+  padding: 12px;
+}
+
+/* Tables */
+.c1-component-wrapper table th,
+.c1-component-wrapper table td,
+.c1-component-wrapper [class*="tableCell"],
+.c1-component-wrapper [class*="TableCell"] {
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.c1-component-wrapper table th,
+.c1-component-wrapper [class*="tableHeader"],
+.c1-component-wrapper [class*="TableHeader"] {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Headings */
+.c1-component-wrapper h1 {
+  font-size: 18px;
+  margin: 8px 0 4px;
+}
+
+.c1-component-wrapper h2 {
+  font-size: 15px;
+  margin: 6px 0 3px;
+}
+
+.c1-component-wrapper h3 {
+  font-size: 13px;
+  margin: 4px 0 2px;
+}
+
+/* Body text */
+.c1-component-wrapper p {
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+/* Buttons */
+.c1-component-wrapper button,
+.c1-component-wrapper [class*="button"],
+.c1-component-wrapper [class*="Button"] {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+/* Charts */
+.c1-component-wrapper [class*="chart"],
+.c1-component-wrapper [class*="Chart"],
+.c1-component-wrapper svg[class*="recharts"] {
+  max-height: 240px;
+}
+
+/* Alerts / callouts */
+.c1-component-wrapper [class*="alert"],
+.c1-component-wrapper [class*="Alert"],
+.c1-component-wrapper [class*="callout"],
+.c1-component-wrapper [class*="Callout"] {
+  padding: 8px 12px;
+}
+
+/* Badges */
+.c1-component-wrapper [class*="badge"],
+.c1-component-wrapper [class*="Badge"] {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+/* Section gaps */
+.c1-component-wrapper > * + * {
+  margin-top: 8px;
+}
