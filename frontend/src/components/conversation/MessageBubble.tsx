@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/types/chat';
 import { MessageAvatar } from './MessageAvatar';
@@ -10,6 +10,7 @@ import { C1MessageRenderer } from './C1MessageRenderer';
 import { useConversationStore } from '@/stores/conversationStore';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
+import { MessageToolbar } from './MessageToolbar';
 
 interface MessageBubbleProps {
   message: Message;
@@ -81,10 +82,25 @@ const markdownComponents = {
   },
 };
 
+// Custom hook for mobile detection
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  return isMobile;
+}
+
 export const MessageBubble = memo(function MessageBubble({ message, isFirstInGroup = true }: MessageBubbleProps) {
   const isAria = message.role === 'aria';
   const { enabled: thesysEnabled } = useThesys();
   const addMessage = useConversationStore((s) => s.addMessage);
+  const isMobile = useIsMobile();
 
   const {
     speakMessage,
@@ -149,6 +165,14 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
         <MessageAvatar role="aria" visible={isFirstInGroup} />
 
         <div className="relative max-w-[85%] border-l-2 border-accent pl-4 py-2">
+          {/* Desktop: Hover toolbar - only on non-streaming,             messages and not mobile */}
+          {!message.isStreaming && !isMobile && (
+            <MessageToolbar
+              messageContent={message.content}
+              messageId={message.id}
+            />
+          )}
+
           {shouldUseC1 ? (
             // C1 rendering mode
             <C1MessageRenderer
@@ -184,6 +208,15 @@ export const MessageBubble = memo(function MessageBubble({ message, isFirstInGro
               isSupported={isTTSSupported && !message.isStreaming}
             />
           </div>
+
+          {/* Mobile: Inline toolbar below message (always visible) */}
+          {!message.isStreaming && isMobile && (
+            <MessageToolbar
+              messageContent={message.content}
+              messageId={message.id}
+              inline
+            />
+          )}
 
           {/* Hover timestamp tooltip */}
           <span className="absolute -bottom-5 left-4 hidden group-hover:block font-mono text-[11px] text-[#555770] bg-[#111318] px-2 py-1 rounded whitespace-nowrap z-10">
