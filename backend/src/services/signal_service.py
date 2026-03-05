@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from src.core.text_cleaning import clean_signal_summary
 from src.db.supabase import SupabaseClient
 from src.models.signal import (
     MonitoredEntityCreate,
@@ -49,6 +50,13 @@ class SignalService:
             },
         )
 
+        # Clean the summary to remove web scraping markup
+        cleaned_summary = clean_signal_summary(
+            raw_text=data.summary or "",
+            headline=data.headline,
+            max_length=500,
+        )
+
         result = (
             self._db.table("market_signals")
             .insert(
@@ -57,7 +65,7 @@ class SignalService:
                     "company_name": data.company_name,
                     "signal_type": data.signal_type.value,
                     "headline": data.headline,
-                    "summary": data.summary,
+                    "summary": cleaned_summary,
                     "source_url": data.source_url,
                     "source_name": data.source_name,
                     "relevance_score": data.relevance_score,

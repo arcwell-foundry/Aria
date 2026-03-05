@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from src.core.business_hours import get_active_user_ids, get_user_timezone, is_business_hours
+from src.core.text_cleaning import clean_signal_summary
 from src.db.supabase import SupabaseClient
 from src.services.proactive_router import InsightCategory, InsightPriority, ProactiveRouter
 
@@ -103,13 +104,19 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 relevance = float(signal.get("relevance_score", 0.5))
                 signal_id: str | None = None
                 try:
+                    # Clean the summary to remove web scraping markup
+                    cleaned_summary = clean_signal_summary(
+                        raw_text=signal.get("summary", ""),
+                        headline=headline,
+                        max_length=500,
+                    )
                     insert_result = db.table("market_signals").insert(
                         {
                             "user_id": user_id,
                             "company_name": signal.get("company_name", "Unknown"),
                             "signal_type": signal.get("signal_type", "news"),
                             "headline": headline,
-                            "summary": signal.get("summary", ""),
+                            "summary": cleaned_summary,
                             "source_name": signal.get("source", "scout_agent"),
                             "source_url": signal.get("source_url"),
                             "relevance_score": relevance,
