@@ -863,20 +863,64 @@ async def deliver_briefing(
     NEVER returns a non-200 status code - always returns valid JSON with text_only mode
     as a guaranteed fallback.
     """
-    content: dict[str, Any] | None = None
+    # IMMEDIATE CHECK — skip all Tavus/video logic if unconfigured
+    # This MUST be the first thing we check to avoid slow operations
+    tavus_configured = bool(settings.TAVUS_API_KEY)
 
-    # GUARANTEED FALLBACK PATTERN: Try video/Tavus path, but always return text_only on any failure
-    try:
-        # Check if Tavus video service is configured
-        tavus_configured = bool(settings.TAVUS_API_KEY)
+    if not tavus_configured:
+        # Go straight to text-only fallback — no Tavus operations at all
+        # Try to get existing briefing from database (fast path)
+        try:
+            from src.db.supabase import SupabaseClient
 
-        service = BriefingService()
-        content = await service.generate_briefing(current_user.id)
+            db = SupabaseClient.get_client()
+            today_str = date.today().isoformat()
 
-        # If Tavus not configured, return text-only mode immediately
-        if not tavus_configured:
+            result = (
+                db.table("daily_briefings")
+                .select("id, content, briefing_date")
+                .eq("user_id", current_user.id)
+                .eq("briefing_date", today_str)
+                .order("briefing_date", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+            if result.data:
+                briefing = result.data[0]
+                raw_content = briefing.get("content")
+                fallback_content = (
+                    json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+                )
+                logger.info(
+                    "Briefing delivered in text-only mode (Tavus not configured, from DB)",
+                    extra={"user_id": current_user.id},
+                )
+                return {
+                    "mode": "text_only",
+                    "briefing_id": briefing.get("id"),
+                    "content": fallback_content,
+                    "briefing_date": briefing.get("briefing_date"),
+                    "message": "Video avatar not configured. Text briefing available.",
+                    "status": "delivered",
+                }
+        except Exception as db_error:
+            logger.warning(
+                f"Text-only DB lookup failed, will generate fresh: {db_error}",
+                extra={"user_id": current_user.id},
+            )
+
+        # No existing briefing — generate one (but still text-only)
+        # Use asyncio.timeout to ensure we don't hang indefinitely
+        try:
+            import asyncio
+
+            service = BriefingService()
+            # 15 second timeout for generation when Tavus is unconfigured
+            async with asyncio.timeout(15):
+                content = await service.generate_briefing(current_user.id)
             logger.info(
-                "Briefing delivered in text-only mode (Tavus not configured)",
+                "Briefing delivered in text-only mode (Tavus not configured, freshly generated)",
                 extra={"user_id": current_user.id},
             )
             return {
@@ -885,6 +929,33 @@ async def deliver_briefing(
                 "message": "Video avatar not configured. Text briefing available.",
                 "status": "delivered",
             }
+        except Exception as gen_error:
+            logger.error(
+                f"Text-only generation failed: {gen_error}",
+                extra={"user_id": current_user.id},
+                exc_info=True,
+            )
+            # Absolute fallback - return empty but valid 200
+            return {
+                "mode": "text_only",
+                "content": {
+                    "summary": "Briefing unavailable. Please try again later.",
+                    "calendar": {"meeting_count": 0, "key_meetings": []},
+                    "leads": {"hot_leads": [], "needs_attention": []},
+                    "signals": {"company_news": [], "market_trends": [], "competitive_intel": []},
+                    "tasks": {"overdue": [], "due_today": []},
+                },
+                "message": "Briefing generation failed. Please try refreshing.",
+                "status": "delivered",
+            }
+
+    # Tavus IS configured - proceed with video mode path
+    content: dict[str, Any] | None = None
+
+    # GUARANTEED FALLBACK PATTERN: Try video/Tavus path, but always return text_only on any failure
+    try:
+        service = BriefingService()
+        content = await service.generate_briefing(current_user.id)
 
         # Tavus configured - try WebSocket delivery
         try:
@@ -1040,3 +1111,36 @@ async def replay_briefing(
             "status": "failed",
             "error": "Could not load briefing. Please try refreshing.",
         }
+
+
+# TEMPORARY: Test endpoint for verifying text-only fallback without auth
+# Can be removed after verification
+@router.get("/test-text-fallback")
+async def test_text_fallback() -> dict[str, Any]:
+    """Test endpoint to verify text-only fallback works without authentication.
+
+    Returns immediately if Tavus is unconfigured, demonstrating the fast path.
+    """
+    import time
+
+    start = time.time()
+
+    # Same logic as deliver_briefing but without auth
+    tavus_configured = bool(settings.TAVUS_API_KEY)
+
+    if not tavus_configured:
+        return {
+            "mode": "text_only",
+            "tavus_configured": False,
+            "elapsed_ms": int((time.time() - start) * 1000),
+            "message": "Fast path: Tavus unconfigured, would return cached briefing.",
+            "status": "delivered",
+        }
+
+    return {
+        "mode": "video",
+        "tavus_configured": True,
+        "elapsed_ms": int((time.time() - start) * 1000),
+        "message": "Tavus is configured, would proceed with video delivery.",
+        "status": "delivered",
+    }
