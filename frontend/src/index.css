@@ -77,6 +77,41 @@
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 }
 
+/* === ARIA Typography — visual hierarchy in ARIA's messages === */
+
+/**
+ * Instrument Serif for ARIA's key insights
+ * Used for: bold/emphasized text, headings within ARIA messages
+ */
+.aria-insight {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+/* JetBrains Mono for data elements
+ * Used for: timestamps, numbers, percentages, currency, counts
+ */
+.aria-data {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  font-size: 12px;
+  color: #8B9DC3;
+  letter-spacing: 0.02em;
+}
+
+/* Apply aria-insight to strong/b tags within ARIA messages only */
+.prose-aria strong,
+.prose-aria b {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-style: italic;
+  font-size: 16px;
+  font-weight: normal;
+  color: var(--text-primary);
+}
+
 @theme {
   /* Surface colors — use with bg-* utilities */
   --color-primary: var(--bg-primary);
