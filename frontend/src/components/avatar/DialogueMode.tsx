@@ -177,7 +177,15 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
     const handleThinking = (payload: unknown) => {
       const data = (payload ?? {}) as Partial<AriaThinkingPayload>;
-      if (data.is_thinking) setStreaming(true);
+      if (data.is_thinking) {
+        setStreaming(true);
+        // Safety timeout: auto-clear streaming after 120s in case completion event is lost
+        setTimeout(() => {
+          console.warn('[DialogueMode] Safety timeout: force-clearing streaming state after 120s');
+          setStreaming(false);
+          streamingIdRef.current = null;
+        }, 120000);
+      }
     };
 
     const handleToken = (payload: unknown) => {
@@ -279,6 +287,9 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       wsManager.off(WS_EVENTS.ARIA_STREAM_ERROR, handleStreamError);
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
       wsManager.off('aria.c1_render', handleC1Render);
+      // CRITICAL: Reset streaming state on cleanup (unmount or dependency change)
+      setStreaming(false);
+      streamingIdRef.current = null;
     };
   }, [addMessage, appendToMessage, updateMessageMetadata, setStreaming, setCurrentSuggestions, activeConversationId, setActiveConversation, setIsSpeaking, toastTitleForContent]);
 

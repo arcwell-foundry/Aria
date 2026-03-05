@@ -133,6 +133,14 @@ export function ARIAWorkspace() {
     briefingStreamAbortRef.current = abortController;
 
     let streamingMsgId: string | null = null;
+    // Safety timeout: auto-clear streaming after 60s for briefing stream
+    const briefingSafetyTimeout = setTimeout(() => {
+      if (streamingMsgId) {
+        console.warn('[ARIAWorkspace] Briefing stream safety timeout: force-clearing streaming state');
+        const s = useConversationStore.getState();
+        s.setStreaming(false);
+      }
+    }, 60000);
 
     (async () => {
       try {
@@ -164,7 +172,8 @@ export function ARIAWorkspace() {
             if (!jsonStr) continue;
 
             if (jsonStr === '[DONE]') {
-              // Stream complete — finalize streaming state
+              // Stream complete — finalize streaming state and clear safety timeout
+              clearTimeout(briefingSafetyTimeout);
               if (streamingMsgId) {
                 const s = useConversationStore.getState();
                 s.setStreaming(false);
@@ -217,13 +226,17 @@ export function ARIAWorkspace() {
         }
       } catch {
         // Stream failed — fall back to static briefing injection
+        clearTimeout(briefingSafetyTimeout);
         if (abortController.signal.aborted) return;
+
+        // CRITICAL: Reset streaming state on stream failure
+        const s = useConversationStore.getState();
+        s.setStreaming(false);
 
         if (briefingFallback) {
           const hour = new Date().getHours();
           const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-          const s = useConversationStore.getState();
           s.addMessage({
             role: 'aria',
             content: `${greeting}. Here's your intelligence briefing for today.`,
@@ -242,7 +255,11 @@ export function ARIAWorkspace() {
     })();
 
     return () => {
+      clearTimeout(briefingSafetyTimeout);
       abortController.abort();
+      // CRITICAL: Reset streaming state on cleanup (unmount or dependency change)
+      const s = useConversationStore.getState();
+      s.setStreaming(false);
     };
   }, [briefingFallback, appendToMessage, updateMessageMetadata, setCurrentSuggestions]);
 
