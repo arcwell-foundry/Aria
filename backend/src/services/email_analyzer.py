@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
+from src.services.email_intelligence import EmailIntelligenceService
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,34 @@ class EmailAnalyzer:
                     newest_timestamp,
                     newest_email_id,
                 )
+
+            # 5. Extract intelligence from classified emails
+            # Only process NEEDS_REPLY and FYI emails (skip SKIP)
+            emails_for_intelligence = result.needs_reply + result.fyi
+            if emails_for_intelligence:
+                try:
+                    intelligence_service = EmailIntelligenceService()
+                    intel_result = await intelligence_service.extract_and_store(
+                        user_id=user_id,
+                        emails=emails_for_intelligence,
+                    )
+                    logger.info(
+                        "EMAIL_ANALYZER: Intelligence extraction for user %s - "
+                        "%d emails processed, %d facts extracted, %d insights, %d actions",
+                        user_id,
+                        intel_result.emails_processed,
+                        intel_result.facts_extracted,
+                        intel_result.insights_generated,
+                        intel_result.actions_created,
+                    )
+                except Exception as intel_e:
+                    # Log but don't fail the scan if intelligence extraction fails
+                    logger.warning(
+                        "EMAIL_ANALYZER: Intelligence extraction failed for user %s: %s",
+                        user_id,
+                        intel_e,
+                        exc_info=True,
+                    )
 
             return result
 
