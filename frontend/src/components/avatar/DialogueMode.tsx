@@ -58,12 +58,21 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   // State for text-only briefing mode
   const [textOnlyMode, setTextOnlyMode] = useState(false);
+  const [briefingFailed, setBriefingFailed] = useState(false);
 
   // Trigger briefing delivery when entering briefing mode
   useEffect(() => {
     if (sessionType !== 'briefing') return;
+    // Prevent re-triggering if already failed or in text-only mode
+    if (briefingFailed || textOnlyMode) return;
 
-    const deliverBriefing = async () => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [1000, 3000, 10000]; // 1s, 3s, 10s exponential backoff
+    let cancelled = false;
+
+    const deliverBriefing = async (attempt: number = 0): Promise<void> => {
+      if (cancelled) return;
+
       try {
         // If replay, use the replay endpoint; otherwise, deliver new briefing
         const endpoint = isReplay ? '/briefings/replay' : '/briefings/deliver';
@@ -78,6 +87,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           status: string;
           error?: string;
         }>(endpoint);
+
+        if (cancelled) return;
 
         // Handle text-only mode - render directly to conversation store
         if (response.data.mode === 'text_only' && response.data.content) {
@@ -99,8 +110,20 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         }
         // Video mode: briefing arrives via WebSocket, no action needed here
       } catch (err) {
-        // Briefing delivery failure - show error message
-        console.warn('Briefing delivery request failed:', err);
+        if (cancelled) return;
+        console.warn(`Briefing delivery attempt ${attempt + 1} failed:`, err);
+
+        // Check if we should retry
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = RETRY_DELAYS[attempt];
+          console.log(`Retrying briefing delivery in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return deliverBriefing(attempt + 1);
+        }
+
+        // Max retries exceeded - show error and stop
+        console.error('Briefing delivery failed after max retries');
+        setBriefingFailed(true);
         addMessage({
           role: 'system',
           content: 'Unable to load briefing. Please try refreshing the page.',
@@ -112,7 +135,12 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     };
 
     deliverBriefing();
-  }, [sessionType, isReplay, addMessage, setCurrentSuggestions]);
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionType, isReplay]); // Intentionally exclude addMessage/setCurrentSuggestions to prevent re-renders
 
   // Track briefing progress based on aria.speaking events
   useEffect(() => {
