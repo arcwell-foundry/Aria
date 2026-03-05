@@ -1794,26 +1794,50 @@ IMPORTANT: Only describe information you can directly verify from the data provi
         # 2. Topic clustering — converging themes across different senders
         # ------------------------------------------------------------------
         if len(scan_result.needs_reply) >= 3:
-            email_lines = "\n".join(
-                f"- From {e.sender_name}: {e.subject}"
-                for e in scan_result.needs_reply
-            )
+            # Build email context with snippets when available (truncated to 200 chars)
+            email_lines_list = []
+            for e in scan_result.needs_reply:
+                line = f"- From {e.sender_name}: {e.subject}"
+                if e.snippet:
+                    # Truncate snippet to 200 chars for LLM context efficiency
+                    snippet_preview = e.snippet[:200].replace('\n', ' ').strip()
+                    if snippet_preview:
+                        line += f"\n  Preview: {snippet_preview}"
+                email_lines_list.append(line)
+            email_lines = "\n".join(email_lines_list)
+
+            # Build constraint text based on whether we have snippets
+            has_snippets = any(e.snippet for e in scan_result.needs_reply)
+            if has_snippets:
+                constraint_text = (
+                    "CONSTRAINTS - FOLLOW EXACTLY:\n"
+                    "- You have email previews (first 200 chars of body) in addition to subject lines.\n"
+                    "- Base your analysis on the ACTUAL content shown in previews, not assumptions.\n"
+                    "- DO identify patterns based on what the previews actually say.\n"
+                    "- If a preview is missing or empty, only use the subject line for that email.\n"
+                    "- DO NOT fabricate details not present in the previews or subjects.\n"
+                )
+            else:
+                constraint_text = (
+                    "CRITICAL CONSTRAINTS - FOLLOW EXACTLY:\n"
+                    "- You have email METADATA only: sender names and subject lines.\n"
+                    "- You do NOT have email body content. The email bodies were not provided.\n"
+                    "- NEVER infer, guess, or describe what emails are about beyond what subjects state.\n"
+                    "- NEVER describe the nature, intent, direction, or progress of email threads.\n"
+                    "- NEVER use phrases like 'moving toward', 'discussing', 'negotiating', 'exploring', 'indicating'.\n"
+                    "- NEVER fabricate relationship narratives or deal progress from subject lines.\n"
+                    "- DO identify factual patterns: same sender, similar subjects, same company domain.\n"
+                    "- If you cannot identify a pattern from subjects alone, return [].\n"
+                )
+
             topics_prompt = (
-                "CRITICAL CONSTRAINTS - FOLLOW EXACTLY:\n"
-                "- You have email METADATA only: sender names and subject lines.\n"
-                "- You do NOT have email body content. The email bodies were not provided.\n"
-                "- NEVER infer, guess, or describe what emails are about beyond what subjects state.\n"
-                "- NEVER describe the nature, intent, direction, or progress of email threads.\n"
-                "- NEVER use phrases like 'moving toward', 'discussing', 'negotiating', 'exploring', 'indicating'.\n"
-                "- NEVER fabricate relationship narratives or deal progress from subject lines.\n"
-                "- DO identify factual patterns: same sender, similar subjects, same company domain.\n"
-                "- If you cannot identify a pattern from subjects alone, return [].\n\n"
-                "Email metadata:\n"
+                f"{constraint_text}\n"
+                "Email data:\n"
                 f"{email_lines}\n\n"
                 "Return 0-2 factual patterns as a JSON array. Each element:\n"
-                '{"pattern": "factual observation only (e.g., 3 emails from Acme Corp)", '
+                '{"pattern": "factual observation based on actual content", '
                 '"emails_involved": ["sender1", "sender2"], "note": "optional context"}\n\n'
-                "If no clear factual patterns, return []. REMEMBER: Less is more. Only state what is explicitly shown."
+                "If no clear patterns, return []. REMEMBER: Less is more. Only state what is explicitly shown."
             )
             try:
                 topic_response = await self._llm.generate_response(

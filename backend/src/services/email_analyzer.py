@@ -1680,6 +1680,9 @@ class EmailAnalyzer:
             categorized: The categorized email.
         """
         try:
+            # Truncate snippet to 500 chars for storage (matching subject truncation)
+            snippet_text = categorized.snippet[:500] if categorized.snippet else None
+
             self._db.table("email_scan_log").insert(
                 {
                     "id": str(uuid.uuid4()),
@@ -1689,6 +1692,7 @@ class EmailAnalyzer:
                     "sender_email": categorized.sender_email,
                     "sender_name": categorized.sender_name,
                     "subject": categorized.subject[:500],
+                    "snippet": snippet_text,
                     "category": categorized.category,
                     "urgency": categorized.urgency,
                     "needs_draft": categorized.needs_draft,
