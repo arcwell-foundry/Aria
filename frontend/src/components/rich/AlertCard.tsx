@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -21,9 +21,64 @@ const SEVERITY_STYLES: Record<string, { bg: string; text: string; label: string 
   low: { bg: 'bg-blue-500/15', text: 'text-blue-400', label: 'LOW' },
 };
 
+/**
+ * Parse a backend-generated summary string like "Priority: medium. Due: 2026-03-02T02:39:42.764559+00:00"
+ * Returns the extracted priority and a formatted due date string.
+ */
+function parseOverdueSummary(summary: string): { priority: string; dueDateDisplay: string } {
+  // Default values
+  let priority = 'high';
+  let dueDateDisplay = '';
+
+  // Try to parse "Priority: X. Due: Y" format
+  const priorityMatch = summary.match(/Priority:\s*(\w+)/i);
+  const dueMatch = summary.match(/Due:\s*(\S+)/i);
+
+  if (priorityMatch) {
+    priority = priorityMatch[1].toLowerCase();
+  }
+
+  if (dueMatch) {
+    const dueDateStr = dueMatch[1];
+    try {
+      const dueDate = new Date(dueDateStr);
+      const now = new Date();
+
+      // Calculate days overdue (if in the past)
+      const diffMs = now.getTime() - dueDate.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+      if (diffDays > 0) {
+        dueDateDisplay = `Overdue by ${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
+      } else if (diffDays === 0) {
+        dueDateDisplay = 'Due today';
+      } else {
+        // Future date - show as "Due: Feb 23"
+        dueDateDisplay = `Due: ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      }
+    } catch {
+      // If date parsing fails, don't show the raw ISO
+      dueDateDisplay = '';
+    }
+  }
+
+  return { priority, dueDateDisplay };
+}
+
 export function AlertCard({ data }: AlertCardProps) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
+
+  // Check if this is an overdue task card (has "Priority:" and "Due:" in summary)
+  const isOverdueTask = data.summary?.includes('Priority:') && data.summary?.includes('Due:');
+
+  // Parse the summary to extract actual priority and format the due date
+  const { priority, dueDateDisplay } = useMemo(() => {
+    if (isOverdueTask && data.summary) {
+      return parseOverdueSummary(data.summary);
+    }
+    return { priority: data.severity, dueDateDisplay: '' };
+  }, [isOverdueTask, data.summary, data.severity]);
 
   const handleViewDetails = useCallback(() => {
     if (!data) return;
@@ -45,7 +100,13 @@ export function AlertCard({ data }: AlertCardProps) {
 
   if (!data) return null;
 
-  const severity = SEVERITY_STYLES[data.severity] || SEVERITY_STYLES.medium;
+  // Use actual priority for severity styling (not hardcoded backend value)
+  const severity = SEVERITY_STYLES[priority] || SEVERITY_STYLES.medium;
+
+  // For overdue tasks, remove "Overdue: " prefix from headline since badge conveys urgency
+  const displayHeadline = isOverdueTask && data.headline.startsWith('Overdue: ')
+    ? data.headline.slice(9) // Remove "Overdue: " prefix
+    : data.headline;
 
   return (
     <div
@@ -64,9 +125,16 @@ export function AlertCard({ data }: AlertCardProps) {
         )}
       </div>
       <p className="text-sm text-[var(--text-primary)] leading-relaxed">
-        {data.headline}
+        {displayHeadline}
       </p>
-      {data.summary && (
+      {/* For overdue tasks, show formatted due date instead of raw summary */}
+      {isOverdueTask && dueDateDisplay && (
+        <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
+          {dueDateDisplay}
+        </p>
+      )}
+      {/* For non-overdue alerts, show the summary as-is */}
+      {!isOverdueTask && data.summary && (
         <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
           {data.summary}
         </p>
