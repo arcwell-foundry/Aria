@@ -454,6 +454,16 @@ async def _handle_user_message(
         if enriched_message != message_text:
             logger.info("SIGNAL_ENRICH_WS: Signal context injected! First 200 chars of enrichment: %s", enriched_message[len(message_text):len(message_text)+200])
 
+        # --- Signal Enrichment Bypass (MUST BE FIRST ROUTING DECISION) ---
+        # If the message was signal-enriched, skip intent classification AND pending plan
+        # routing entirely. Signal-enriched messages contain [ARIA SIGNAL CONTEXT] which
+        # already has all the context ARIA needs - routing to goal creation loses that context.
+        was_signal_enriched = (enriched_message != message_text)
+        if was_signal_enriched:
+            logger.info(
+                "SIGNAL_BYPASS: Message was signal-enriched, skipping intent classification and pending plan routing"
+            )
+
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
@@ -514,83 +524,92 @@ async def _handle_user_message(
         # --- Pending plan context injection ---
         # If the user has a goal in plan_ready status, inject the plan
         # so ARIA can discuss, modify, or detect approval intent.
+        # SKIP THIS ENTIRELY for signal-enriched messages - they should route
+        # directly to conversational response without any goal/plan interference.
         pending_plan_context = ""
         pending_plan_goal_id: str | None = None
-        try:
-            db = get_supabase_client()
-            plan_ready_goals = (
-                db.table("goals")
-                .select("id, title, description, status")
-                .eq("user_id", user_id)
-                .eq("status", "plan_ready")
-                .order("updated_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if plan_ready_goals.data:
-                pg = plan_ready_goals.data[0]
-                pending_plan_goal_id = pg["id"]
-                # Fetch the execution plan
-                plan_result = (
-                    db.table("goal_execution_plans")
-                    .select("tasks, execution_mode, estimated_total_minutes, reasoning")
-                    .eq("goal_id", pg["id"])
-                    .order("created_at", desc=True)
+        if not was_signal_enriched:
+            try:
+                db = get_supabase_client()
+                plan_ready_goals = (
+                    db.table("goals")
+                    .select("id, title, description, status")
+                    .eq("user_id", user_id)
+                    .eq("status", "plan_ready")
+                    .order("updated_at", desc=True)
                     .limit(1)
                     .execute()
                 )
-                plan_record = plan_result.data[0] if plan_result and plan_result.data else None
-                if plan_record:
-                    tasks_raw = plan_record.get("tasks", "[]")
-                    plan_tasks = (
-                        json.loads(tasks_raw)
-                        if isinstance(tasks_raw, str)
-                        else tasks_raw
+                if plan_ready_goals.data:
+                    pg = plan_ready_goals.data[0]
+                    pending_plan_goal_id = pg["id"]
+                    # Fetch the execution plan
+                    plan_result = (
+                        db.table("goal_execution_plans")
+                        .select("tasks, execution_mode, estimated_total_minutes, reasoning")
+                        .eq("goal_id", pg["id"])
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
                     )
-                    # Build a human-readable plan summary for the LLM
-                    task_lines = []
-                    for i, t in enumerate(plan_tasks):
-                        deps = (
-                            f" (after #{', #'.join(str(d + 1) for d in t.get('dependencies', []))})"
-                            if t.get("dependencies")
-                            else ""
+                    plan_record = plan_result.data[0] if plan_result and plan_result.data else None
+                    if plan_record:
+                        tasks_raw = plan_record.get("tasks", "[]")
+                        plan_tasks = (
+                            json.loads(tasks_raw)
+                            if isinstance(tasks_raw, str)
+                            else tasks_raw
                         )
-                        task_lines.append(
-                            f"  {i + 1}. {t.get('title', 'Task')} — "
-                            f"Agent: {t.get('agent', '?')}, "
-                            f"Risk: {t.get('risk_level', '?')}, "
-                            f"Tools: {', '.join(t.get('tools_needed', []))}"
-                            f"{deps}"
+                        # Build a human-readable plan summary for the LLM
+                        task_lines = []
+                        for i, t in enumerate(plan_tasks):
+                            deps = (
+                                f" (after #{', #'.join(str(d + 1) for d in t.get('dependencies', []))})"
+                                if t.get("dependencies")
+                                else ""
+                            )
+                            task_lines.append(
+                                f"  {i + 1}. {t.get('title', 'Task')} — "
+                                f"Agent: {t.get('agent', '?')}, "
+                                f"Risk: {t.get('risk_level', '?')}, "
+                                f"Tools: {', '.join(t.get('tools_needed', []))}"
+                                f"{deps}"
+                            )
+                        pending_plan_context = (
+                            f"\n\n## Pending Execution Plan (Awaiting User Approval)\n"
+                            f"Goal: {pg.get('title', '')}\n"
+                            f"Description: {pg.get('description', '')}\n"
+                            f"Execution mode: {plan_record.get('execution_mode', 'parallel')}\n"
+                            f"Estimated time: {plan_result.data.get('estimated_total_minutes', '?')} minutes\n"
+                            f"Reasoning: {plan_result.data.get('reasoning', '')}\n"
+                            f"Tasks:\n" + "\n".join(task_lines) + "\n\n"
+                            f"The user is reviewing this plan. Answer questions about it, "
+                            f"explain your reasoning for agent/tool choices, and suggest "
+                            f"modifications if asked. If the user approves (says 'approve', "
+                            f"'go ahead', 'looks good', 'start it', 'execute', 'do it', "
+                            f"'let's go', etc.), respond with your confirmation and include "
+                            f"the marker [PLAN_APPROVED] at the very end of your response "
+                            f"(the system will detect this to trigger execution). "
+                            f"If the user wants changes, describe the updated plan."
                         )
-                    pending_plan_context = (
-                        f"\n\n## Pending Execution Plan (Awaiting User Approval)\n"
-                        f"Goal: {pg.get('title', '')}\n"
-                        f"Description: {pg.get('description', '')}\n"
-                        f"Execution mode: {plan_record.get('execution_mode', 'parallel')}\n"
-                        f"Estimated time: {plan_result.data.get('estimated_total_minutes', '?')} minutes\n"
-                        f"Reasoning: {plan_result.data.get('reasoning', '')}\n"
-                        f"Tasks:\n" + "\n".join(task_lines) + "\n\n"
-                        f"The user is reviewing this plan. Answer questions about it, "
-                        f"explain your reasoning for agent/tool choices, and suggest "
-                        f"modifications if asked. If the user approves (says 'approve', "
-                        f"'go ahead', 'looks good', 'start it', 'execute', 'do it', "
-                        f"'let's go', etc.), respond with your confirmation and include "
-                        f"the marker [PLAN_APPROVED] at the very end of your response "
-                        f"(the system will detect this to trigger execution). "
-                        f"If the user wants changes, describe the updated plan."
-                    )
-        except Exception as e:
-            logger.debug("Pending plan context lookup failed: %s", e)
+            except Exception as e:
+                logger.debug("Pending plan context lookup failed: %s", e)
 
-        logger.warning(
-            "INTENT_GUARD: pending_plan_goal_id=%s for user=%s",
-            pending_plan_goal_id, user_id,
-        )
+            logger.warning(
+                "INTENT_GUARD: pending_plan_goal_id=%s for user=%s",
+                pending_plan_goal_id, user_id,
+            )
 
-        # --- Inline Intent Detection (ALWAYS runs — even with pending plans) ---
-        # A new action request like "find companies" must create a new goal,
-        # not be blocked by a stale plan_ready goal from an earlier request.
-        intent_result = await service._classify_intent(user_id, message_text)
+        # --- Intent Classification (skip for signal-enriched messages) ---
+        # Signal-enriched messages already have all the context they need - the signal
+        # data was injected into the message at the top of this handler.
+        intent_result = None
+        if not was_signal_enriched:
+            # --- Inline Intent Detection (ALWAYS runs — even with pending plans) ---
+            # A new action request like "find companies" must create a new goal,
+            # not be blocked by a stale plan_ready goal from an earlier request.
+            intent_result = await service._classify_intent(user_id, message_text)
+
         if intent_result and intent_result.get("is_goal"):
             logger.info(
                 "WS intent classified as GOAL, routing to plan",
