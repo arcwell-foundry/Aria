@@ -64,6 +64,7 @@ from src.api.routes import (
     skill_replay,
     skills,
     social,
+    suggestions,  # Context-aware suggestion chips
     team_intelligence,  # Team-level shared intelligence sharing
     thesys,  # Thesys C1 Generative UI
     tool_request,  # Phase 4D: User tool request workflow
@@ -390,6 +391,7 @@ app.include_router(signals.router, prefix="/api/v1")
 app.include_router(skill_replay.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(social.router, prefix="/api/v1")
+app.include_router(suggestions.router, prefix="/api/v1")  # Context-aware suggestion chips
 app.include_router(team_intelligence.router, prefix="/api/v1")  # Team-level shared intelligence
 app.include_router(features.router, prefix="/api/v1")  # Feature flags for frontend
 app.include_router(thesys.router, prefix="/api/v1")  # Thesys C1 Generative UI
