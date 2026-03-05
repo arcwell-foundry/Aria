@@ -12,10 +12,15 @@ For the test user:
     python scripts/backfill_email_intelligence.py --user-id 41475700-c1fb-4f66-8c56-77bd90b73abb
 """
 
-# Load environment variables from .env BEFORE any other imports
+# Load environment variables BEFORE any other imports
+# Only load from .env if key env vars aren't already set (backend may have valid keys in shell env)
+import os
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent.parent / ".env")
+
+# Only load .env if ANTHROPIC_API_KEY isn't already set in environment
+if not os.environ.get('ANTHROPIC_API_KEY'):
+    load_dotenv(Path(__file__).parent.parent / ".env")
 
 import argparse
 import asyncio
