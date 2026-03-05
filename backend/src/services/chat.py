@@ -20,6 +20,7 @@ from typing import Any, ClassVar
 
 from src.services.memory_query_service import MemoryQueryService
 from src.core.llm import LLMClient
+from src.core.task_types import TaskType
 from src.db.supabase import get_supabase_client
 from src.intelligence.cognitive_load import CognitiveLoadMonitor
 from src.intelligence.proactive_memory import ProactiveMemoryService
@@ -1076,6 +1077,323 @@ class ChatService:
         except Exception as e:
             logger.warning("Intent classification failed (fall-through to conversation): %s", e)
             return None
+
+    # ------------------------------------------------------------------
+    # Quick Action Handlers
+    # ------------------------------------------------------------------
+
+    async def _gather_quick_action_data(self, user_id: str, action_type: str, message: str) -> dict[str, Any]:
+        """Query Supabase for data relevant to the quick action.
+
+        Args:
+            user_id: The user's ID for filtering user-specific data
+            action_type: The type of quick action (meeting_prep, calendar_query, etc.)
+            message: The user's original message (for potential parsing)
+
+        Returns:
+            Dictionary containing data relevant to the action type.
+            Empty dict on error (logged, not raised).
+        """
+        try:
+            db = get_supabase_client()
+            data: dict[str, Any] = {}
+
+            if action_type == "meeting_prep":
+                # Upcoming meetings
+                meetings = db.table("calendar_events").select(
+                    "title, start_time, end_time, attendees"
+                ).eq("user_id", user_id).gt(
+                    "start_time", "now()"
+                ).order("start_time").limit(5).execute()
+                data["meetings"] = meetings.data or []
+
+                # Relevant signals for meeting companies
+                signals = db.table("market_signals").select(
+                    "company_name, headline, signal_type, detected_at"
+                ).eq("user_id", user_id).order("detected_at", desc=True).limit(5).execute()
+                data["signals"] = signals.data or []
+
+                # Battle cards
+                battle_cards = db.table("battle_cards").select(
+                    "competitor_name, overview, strengths, weaknesses, differentiation"
+                ).limit(10).execute()
+                data["battle_cards"] = battle_cards.data or []
+
+                # Pending drafts for meeting contacts
+                drafts = db.table("email_drafts").select(
+                    "recipient_name, subject, status"
+                ).eq("user_id", user_id).eq("status", "draft").limit(5).execute()
+                data["drafts"] = drafts.data or []
+
+            elif action_type == "calendar_query":
+                meetings = db.table("calendar_events").select(
+                    "title, start_time, end_time, attendees"
+                ).eq("user_id", user_id).gt(
+                    "start_time", "now()"
+                ).order("start_time").limit(10).execute()
+                data["meetings"] = meetings.data or []
+
+            elif action_type == "signal_review":
+                signals = db.table("market_signals").select(
+                    "company_name, headline, summary, signal_type, relevance_score, source_url, detected_at"
+                ).eq("user_id", user_id).order("detected_at", desc=True).limit(10).execute()
+                data["signals"] = signals.data or []
+
+            elif action_type == "draft_review":
+                drafts = db.table("email_drafts").select(
+                    "recipient_name, subject, status, created_at"
+                ).eq("user_id", user_id).eq("status", "draft").order(
+                    "created_at", desc=True
+                ).limit(10).execute()
+                data["drafts"] = drafts.data or []
+
+            elif action_type == "task_review":
+                tasks = db.table("goals").select(
+                    "title, status, description, created_at"
+                ).eq("user_id", user_id).in_(
+                    "status", ["draft", "active", "plan_ready", "in_progress"]
+                ).order("created_at", desc=True).limit(10).execute()
+                data["tasks"] = tasks.data or []
+
+            elif action_type == "pipeline_review":
+                leads = db.table("leads").select("*").eq(
+                    "user_id", user_id
+                ).order("created_at", desc=True).limit(10).execute()
+                data["leads"] = leads.data or []
+                goals = db.table("goals").select(
+                    "title, status, description"
+                ).eq("user_id", user_id).in_(
+                    "status", ["draft", "active", "plan_ready", "in_progress"]
+                ).limit(10).execute()
+                data["goals"] = goals.data or []
+
+            elif action_type == "competitive_lookup":
+                battle_cards = db.table("battle_cards").select("*").limit(10).execute()
+                data["battle_cards"] = battle_cards.data or []
+                signals = db.table("market_signals").select(
+                    "company_name, headline, signal_type, detected_at"
+                ).eq("user_id", user_id).order("detected_at", desc=True).limit(5).execute()
+                data["signals"] = signals.data or []
+
+            return data
+        except Exception as e:
+            logger.error("Quick action data gather failed: %s", e, exc_info=True)
+            return {}
+
+    def _build_quick_action_prompt(self, action_type: str, data: dict[str, Any], user_message: str) -> str:
+        """Build a synthesis prompt with gathered data for the LLM.
+
+        Args:
+            action_type: The type of quick action
+            data: Dictionary containing the gathered data
+            user_message: The user's original message
+
+        Returns:
+            Formatted prompt string for the LLM to synthesize a response.
+        """
+        import json as _json
+
+        data_json = _json.dumps(data, indent=2, default=str)
+
+        prompts = {
+            "meeting_prep": (
+                "The user asked you to prepare for a meeting. You have their calendar, "
+                "market signals, battle cards, and email drafts below. "
+                "Synthesize a concise, actionable meeting brief. Include: who they are meeting, "
+                "key context about attendees/companies, any relevant signals or news, "
+                "suggested talking points, and any pending drafts for those contacts. "
+                "Be specific and opinionated. Do NOT propose a research plan or execution plan.\n\n"
+            ),
+            "calendar_query": (
+                "The user asked about their calendar/schedule. You have their upcoming "
+                "meetings below. Answer directly with times in Eastern Time. Be concise. "
+                "Filter out buffer events (titles containing 'buffer'). Do NOT propose a plan.\n\n"
+            ),
+            "signal_review": (
+                "The user wants to review market signals/intelligence. You have their "
+                "latest signals below. Summarize the most important ones, "
+                "grouped by company or type. Highlight anything that needs attention. "
+                "Be concise and opinionated. Do NOT propose a research plan.\n\n"
+            ),
+            "draft_review": (
+                "The user wants to review their email drafts. You have their pending "
+                "drafts below. Summarize what is waiting: who it is for, the subject, and "
+                "recommend which to send first. Do NOT propose a plan.\n\n"
+            ),
+            "task_review": (
+                "The user wants to review their tasks/goals. You have their active "
+                "tasks below. Summarize what is open, what is overdue, and recommend priorities. "
+                "Be direct and opinionated. Do NOT propose a plan.\n\n"
+            ),
+            "pipeline_review": (
+                "The user wants to see their pipeline. You have their leads and goals below. "
+                "Summarize the current state, highlight risks or opportunities, and "
+                "recommend next actions. Do NOT propose a plan.\n\n"
+            ),
+            "competitive_lookup": (
+                "The user wants competitive intelligence. You have battle cards and "
+                "competitor signals below. Give a direct competitive comparison with strengths, "
+                "weaknesses, and recent moves. Be opinionated. Do NOT propose a plan.\n\n"
+            ),
+        }
+
+        base = prompts.get(
+            action_type,
+            "Answer the user's question using the available data. Be direct and concise.\n\n"
+        )
+
+        return (
+            f"{base}"
+            f'User request: "{user_message}"\n\n'
+            f"Available data from database:\n{data_json}\n\n"
+            "CRITICAL RULES:\n"
+            "- Respond directly with the information. NO execution plans. NO 'Here is my plan'. NO 'Let me break this down'.\n"
+            "- Use the Jarvis voice: specific, opinionated, concise.\n"
+            "- Format times in Eastern Time (user timezone is America/New_York).\n"
+            "- If the data is insufficient, say what you know and offer to research deeper.\n"
+        )
+
+    async def _synthesize_quick_action_response(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        action_type: str,
+        synthesis_prompt: str,
+        conversation_messages: list,
+        working_memory: Any,
+    ) -> dict[str, Any]:
+        """Use conversational LLM to synthesize a quick action response.
+
+        Args:
+            user_id: The user's ID
+            conversation_id: The conversation ID
+            message: The user's original message
+            action_type: The type of quick action (for logging)
+            synthesis_prompt: The pre-built synthesis prompt with data
+            conversation_messages: Recent conversation history
+            working_memory: Working memory object (may be None)
+
+        Returns:
+            Dictionary with response, conversation_id, intent, and action_type.
+        """
+        # Build system prompt
+        try:
+            if self._use_persona_builder:
+                system_prompt = await self._build_system_prompt_v2(user_id, [], None)
+            else:
+                system_prompt = ARIA_SYSTEM_PROMPT
+        except Exception:
+            system_prompt = ARIA_SYSTEM_PROMPT
+
+        enhanced_prompt = (
+            f"{system_prompt}\n\n"
+            "## QUICK ACTION CONTEXT\n"
+            "The user is asking a question you can answer from existing data. "
+            "Respond immediately with the information below. Do NOT create a goal "
+            "or execution plan. Do NOT say 'let me break this down' or propose phases.\n\n"
+            f"{synthesis_prompt}"
+        )
+
+        # Build messages for LLM
+        messages: list[dict[str, str]] = [{"role": "system", "content": enhanced_prompt}]
+        for msg in conversation_messages[-6:]:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
+
+        # Use existing LLMClient
+        llm = LLMClient()
+        response = await llm.generate_response(
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.7,
+            user_id=user_id,
+            task=TaskType.CHAT_RESPONSE,
+        )
+
+        assistant_content = response.strip()
+
+        # Save to DB
+        db = get_supabase_client()
+        db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "role": "user",
+            "content": message,
+        }).execute()
+        db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "role": "assistant",
+            "content": assistant_content,
+        }).execute()
+
+        # Update working memory if available
+        if working_memory:
+            working_memory.add_message("user", message)
+            working_memory.add_message("assistant", assistant_content)
+
+        logger.info(
+            "Quick action response generated: action_type=%s, response_len=%d",
+            action_type,
+            len(assistant_content),
+        )
+
+        return {
+            "response": assistant_content,
+            "conversation_id": conversation_id,
+            "intent": "quick_action",
+            "action_type": action_type,
+        }
+
+    async def _handle_quick_action(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        intent: dict[str, Any],
+        working_memory: Any,
+        conversation_messages: list,
+    ) -> dict[str, Any]:
+        """Handle quick action requests by querying existing data and synthesizing a response.
+
+        This is the main entry point for quick action handling. It orchestrates:
+        1. Gathering relevant data from Supabase
+        2. Building a synthesis prompt with the data
+        3. Calling the LLM to synthesize a natural response
+
+        Args:
+            user_id: The user's ID
+            conversation_id: The conversation ID
+            message: The user's original message
+            intent: The intent dict containing action_type
+            working_memory: Working memory object (may be None)
+            conversation_messages: Recent conversation history
+
+        Returns:
+            Dictionary with response, conversation_id, intent, and action_type.
+        """
+        action_type = intent.get("action_type", "")
+
+        # Gather relevant data from Supabase
+        context_data = await self._gather_quick_action_data(user_id, action_type, message)
+
+        # Build synthesis prompt
+        synthesis_prompt = self._build_quick_action_prompt(action_type, context_data, message)
+
+        # Synthesize response using conversational LLM
+        response = await self._synthesize_quick_action_response(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message=message,
+            action_type=action_type,
+            synthesis_prompt=synthesis_prompt,
+            conversation_messages=conversation_messages,
+            working_memory=working_memory,
+        )
+
+        return response
 
     # ------------------------------------------------------------------
     # Plan-Aware Conversation Handling
