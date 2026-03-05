@@ -32,11 +32,6 @@ export function VideoBriefingCard({
     return 'Good evening';
   };
 
-  // Format topics preview — convert any snake_case to Title Case as safety net
-  const formatTopic = (topic: string) =>
-    topic?.includes('_') ? topic.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : (topic ?? '');
-  const topicsPreview = (topics ?? []).slice(0, 3).map(formatTopic).join(', ') || 'Your daily briefing';
-
   return (
     <div
       className="rounded-xl p-6"
@@ -97,12 +92,14 @@ export function VideoBriefingCard({
               {duration > 0 ? `${duration} min briefing ready` : 'Briefing ready'}
             </span>
           </div>
-          <p
+          <div
             className="text-xs"
             style={{ color: 'var(--text-secondary)' }}
           >
-            Today: {topicsPreview}
-          </p>
+            {topics.slice(0, 2).map((topic, index) => (
+              <div key={index}>{topic}</div>
+            ))}
+          </div>
         </div>
 
         <ChevronRight

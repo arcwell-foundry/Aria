@@ -412,6 +412,44 @@ async def get_today_briefing(
     return {"briefing": None, "status": "not_generated"}
 
 
+def _is_buffer_event(title: str | None) -> bool:
+    """Check if an event is a buffer event (should not count as real meeting)."""
+    if not title:
+        return False
+    title_lower = title.lower()
+    return "[buffer" in title_lower or "buffer]" in title_lower
+
+
+def _format_time_12hr(time_str: str | None) -> str | None:
+    """Format time string to 12-hour format like '11:00 AM'.
+
+    Args:
+        time_str: Time string in format like '11:00' or '14:30'
+
+    Returns:
+        Formatted time like '11:00 AM' or '2:30 PM', or None if invalid
+    """
+    if not time_str:
+        return None
+    try:
+        # Handle various time formats
+        if ':' in time_str:
+            parts = time_str.split(':')
+            hour = int(parts[0])
+            minute = int(parts[1]) if len(parts) > 1 else 0
+        else:
+            return time_str
+
+        # Convert to 12-hour format
+        period = 'AM' if hour < 12 else 'PM'
+        hour_12 = hour if hour <= 12 else hour - 12
+        if hour_12 == 0:
+            hour_12 = 12
+        return f"{hour_12}:{minute:02d} {period}"
+    except (ValueError, IndexError):
+        return time_str
+
+
 @router.get("/status")
 async def get_briefing_status(
     current_user: CurrentUser,
@@ -429,30 +467,111 @@ async def get_briefing_status(
             briefing_content = existing["content"]
             topics: list[str] = []
 
-            # Calendar: Show today's meetings or tomorrow's if none today
-            calendar_data = briefing_content.get("calendar", {})
-            if isinstance(calendar_data, dict):
-                meeting_count = calendar_data.get("meeting_count", 0)
-                tomorrow_count = calendar_data.get("tomorrow_count", 0)
-                tomorrow_first_time = calendar_data.get("tomorrow_first_time")
-                tomorrow_first_title = calendar_data.get("tomorrow_first_title")
+            # Get user's timezone for accurate meeting filtering
+            user_tz_str = await service._get_user_timezone(current_user.id)
+            user_tz = ZoneInfo(user_tz_str)
+            now_local = datetime.now(user_tz)
+            now_utc = now_local.astimezone(UTC)
 
-                if meeting_count > 0:
-                    # Show today's meetings
-                    topics.append(f"{meeting_count} meeting{'s' if meeting_count != 1 else ''} today")
-                elif tomorrow_count > 0 and tomorrow_first_time and tomorrow_first_title:
-                    # Show tomorrow's first meeting if no meetings today
-                    truncated_title = tomorrow_first_title[:30] + "..." if len(tomorrow_first_title) > 30 else tomorrow_first_title
-                    topics.append(f"Tomorrow: {tomorrow_count} meeting{'s' if tomorrow_count != 1 else ''} — First at {tomorrow_first_time}: {truncated_title}")
+            # Calculate today's and tomorrow's date ranges in user's timezone
+            today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            today_end_local = today_start_local + timedelta(days=1)
+            tomorrow_end_local = today_start_local + timedelta(days=2)
 
-            # Tasks: Show open tasks count (not "overdue")
-            tasks_data = briefing_content.get("tasks", {})
-            if isinstance(tasks_data, dict):
-                open_count = tasks_data.get("open_tasks_count", 0)
-                if open_count > 0:
-                    topics.append(f"{open_count} open task{'s' if open_count != 1 else ''}")
+            # Convert to UTC for database queries
+            today_start_utc = today_start_local.astimezone(UTC)
+            today_end_utc = today_end_local.astimezone(UTC)
+            tomorrow_end_utc = tomorrow_end_local.astimezone(UTC)
 
-            # Leads
+            # Query calendar_events table for fresh, accurate meeting counts
+            from src.db.supabase import SupabaseClient
+            db = SupabaseClient().client
+
+            # Get today's FUTURE meetings (excluding buffers)
+            today_result = (
+                db.table("calendar_events")
+                .select("id, title, start_time")
+                .eq("user_id", current_user.id)
+                .gte("start_time", now_utc.isoformat())  # Only future meetings
+                .lt("start_time", today_end_utc.isoformat())  # Still today
+                .order("start_time", desc=False)
+                .limit(20)
+                .execute()
+            )
+
+            # Filter out buffer events
+            today_meetings = [
+                m for m in (today_result.data or [])
+                if not _is_buffer_event(m.get("title") if isinstance(m, dict) else None)
+            ]
+
+            # Get tomorrow's meetings (excluding buffers)
+            tomorrow_result = (
+                db.table("calendar_events")
+                .select("id, title, start_time")
+                .eq("user_id", current_user.id)
+                .gte("start_time", today_end_utc.isoformat())
+                .lt("start_time", tomorrow_end_utc.isoformat())
+                .order("start_time", desc=False)
+                .limit(10)
+                .execute()
+            )
+
+            tomorrow_meetings = [
+                m for m in (tomorrow_result.data or [])
+                if not _is_buffer_event(m.get("title") if isinstance(m, dict) else None)
+            ]
+
+            # Build calendar preview text
+            if today_meetings:
+                # Show today's future meetings with first meeting preview
+                first_meeting = today_meetings[0] if isinstance(today_meetings[0], dict) else {}
+                first_title = first_meeting.get("title", "Meeting")
+                truncated_title = first_title[:30] + "..." if len(first_title) > 30 else first_title
+
+                # Format the first meeting time in user's timezone
+                first_time_formatted = await service._format_time_in_user_timezone(
+                    first_meeting.get("start_time", ""), current_user.id
+                )
+                first_time_12hr = _format_time_12hr(first_time_formatted)
+
+                meeting_count = len(today_meetings)
+                if first_time_12hr:
+                    topics.append(f"Today: {meeting_count} meeting{'s' if meeting_count != 1 else ''} · First at {first_time_12hr} — {truncated_title}")
+                else:
+                    topics.append(f"Today: {meeting_count} meeting{'s' if meeting_count != 1 else ''}")
+            elif tomorrow_meetings:
+                # Show tomorrow's meetings with first meeting preview
+                first_meeting = tomorrow_meetings[0] if isinstance(tomorrow_meetings[0], dict) else {}
+                first_title = first_meeting.get("title", "Meeting")
+                truncated_title = first_title[:30] + "..." if len(first_title) > 30 else first_title
+
+                # Format the first meeting time in user's timezone
+                first_time_formatted = await service._format_time_in_user_timezone(
+                    first_meeting.get("start_time", ""), current_user.id
+                )
+                first_time_12hr = _format_time_12hr(first_time_formatted)
+
+                meeting_count = len(tomorrow_meetings)
+                if first_time_12hr:
+                    topics.append(f"Tomorrow: {meeting_count} meeting{'s' if meeting_count != 1 else ''} · First at {first_time_12hr} — {truncated_title}")
+                else:
+                    topics.append(f"Tomorrow: {meeting_count} meeting{'s' if meeting_count != 1 else ''}")
+            # If no meetings today or tomorrow, don't add calendar topic
+
+            # Query goals table for accurate open tasks count
+            goals_result = (
+                db.table("goals")
+                .select("id, status")
+                .eq("user_id", current_user.id)
+                .not_.in_("status", ["complete", "failed", "cancelled"])
+                .execute()
+            )
+            open_tasks_count = len(goals_result.data or [])
+            if open_tasks_count > 0:
+                topics.append(f"{open_tasks_count} open task{'s' if open_tasks_count != 1 else ''}")
+
+            # Leads (from cached briefing content - this is less time-sensitive)
             leads_data = briefing_content.get("leads", {})
             if isinstance(leads_data, dict):
                 hot_count = len(leads_data.get("hot_leads", []))
@@ -462,7 +581,7 @@ async def get_briefing_status(
                 if attention_count > 0:
                     topics.append(f"{attention_count} need{'s' if attention_count == 1 else ''} attention")
 
-            # Signals
+            # Signals (from cached briefing content - this is less time-sensitive)
             signals_data = briefing_content.get("signals", {})
             if isinstance(signals_data, dict):
                 signal_total = sum(
