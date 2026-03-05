@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
 import { useConversationStore } from '@/stores/conversationStore';
+import { sanitizeSignalText } from '@/utils/sanitizeSignalText';
 
 export interface SignalCardData {
   id: string;
@@ -61,7 +62,7 @@ export function SignalCard({ data }: SignalCardProps) {
         )}
       </div>
       <p className="text-sm text-[var(--text-primary)] leading-relaxed">
-        {data.headline}
+        {sanitizeSignalText(data.headline)}
       </p>
       <div className="mt-2">
         <button

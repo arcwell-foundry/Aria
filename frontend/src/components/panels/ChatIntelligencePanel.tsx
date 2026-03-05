@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useIntelligencePanel } from '@/hooks/useIntelligencePanel';
 import type { UpcomingMeeting, RecentSignal } from '@/api/intelligencePanel';
+import { sanitizeSignalText } from '@/utils/sanitizeSignalText';
 
 const STORAGE_KEY = 'aria-intel-panel-open';
 
@@ -148,7 +149,7 @@ function SignalCard({
         className="text-sm mt-1.5 leading-snug line-clamp-2"
         style={{ color: '#E0E0E0' }}
       >
-        {signal.headline}
+        {sanitizeSignalText(signal.headline)}
       </p>
     </button>
   );

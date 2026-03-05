@@ -26,6 +26,7 @@ import {
   Filter,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
+import { sanitizeSignalText } from "@/utils/sanitizeSignalText";
 import {
   useSignals,
   useUnreadSignalCount,
@@ -169,7 +170,7 @@ function SignalCard({
           className="text-sm leading-relaxed line-clamp-2"
           style={{ color: "var(--text-secondary)" }}
         >
-          {signal.content}
+          {sanitizeSignalText(signal.content)}
         </p>
 
         <div className="flex items-center gap-3 mt-2">

@@ -9,6 +9,7 @@
 import { useOnAction } from '@thesysai/genui-sdk';
 import { AlertTriangle, AlertCircle, Info, Search, Building2, Clock } from 'lucide-react';
 import type { SignalAlertCardProps } from './schemas';
+import { sanitizeSignalText } from '@/utils/sanitizeSignalText';
 
 const severityConfig = {
   high: {
@@ -83,7 +84,7 @@ export function SignalAlertCard({
 
         {/* Summary */}
         <p className="text-secondary text-sm leading-relaxed">
-          {summary}
+          {sanitizeSignalText(summary)}
         </p>
 
         {/* Source */}
