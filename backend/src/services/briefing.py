@@ -795,19 +795,122 @@ class BriefingService:
         user_id: str,
         briefing_date: date,
     ) -> dict[str, Any]:
-        """Get calendar events for the day.
+        """Get calendar events for the day from calendar_events table.
 
-        Checks for active calendar integration and fetches events via Composio.
-        Returns empty structure if no integration is connected or on error.
+        Queries the calendar_events table (synced from Google/Outlook) with
+        timezone-aware filtering. Falls back to Composio API if table is empty.
 
         Args:
             user_id: The user's ID.
             briefing_date: The date to get calendar for.
 
         Returns:
-            Dict with meeting_count and key_meetings.
+            Dict with meeting_count, key_meetings, and tomorrow_meetings info.
         """
-        # Check if user has calendar integration (any of the supported types)
+        # Get user's timezone for proper date filtering
+        user_tz_str = await self._get_user_timezone(user_id)
+        user_tz = ZoneInfo(user_tz_str)
+
+        # Calculate today's date range in user's timezone
+        now_local = datetime.now(user_tz)
+        today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end_local = today_start_local + timedelta(days=1)
+        tomorrow_end_local = today_start_local + timedelta(days=2)
+
+        # Convert to UTC for database queries
+        today_start_utc = today_start_local.astimezone(UTC)
+        today_end_utc = today_end_local.astimezone(UTC)
+        tomorrow_end_utc = tomorrow_end_local.astimezone(UTC)
+
+        # First, try to get events from calendar_events table
+        try:
+            today_result = (
+                self._db.table("calendar_events")
+                .select("id, title, start_time, end_time, attendees, source")
+                .eq("user_id", user_id)
+                .gte("start_time", today_start_utc.isoformat())
+                .lt("start_time", today_end_utc.isoformat())
+                .order("start_time", desc=False)
+                .limit(20)
+                .execute()
+            )
+
+            # Format today's meetings from calendar_events
+            key_meetings = []
+            for row in today_result.data or []:
+                if not isinstance(row, dict):
+                    continue
+                formatted_time = await self._format_time_in_user_timezone(
+                    row.get("start_time", ""), user_id
+                )
+                attendees_raw = row.get("attendees", [])
+                attendees = []
+                if isinstance(attendees_raw, list):
+                    for att in attendees_raw[:5]:
+                        if isinstance(att, dict):
+                            attendees.append({
+                                "email": att.get("email", ""),
+                                "name": att.get("name", ""),
+                            })
+                        elif isinstance(att, str):
+                            attendees.append({"email": att, "name": ""})
+
+                key_meetings.append({
+                    "id": row.get("id", ""),
+                    "title": row.get("title", "Untitled Meeting"),
+                    "time": formatted_time,
+                    "attendees": attendees,
+                    "company": None,
+                    "has_brief": False,
+                })
+
+            # Get tomorrow's meetings count for preview
+            tomorrow_result = (
+                self._db.table("calendar_events")
+                .select("id, title, start_time")
+                .eq("user_id", user_id)
+                .gte("start_time", today_end_utc.isoformat())
+                .lt("start_time", tomorrow_end_utc.isoformat())
+                .order("start_time", desc=False)
+                .limit(5)
+                .execute()
+            )
+            tomorrow_meetings = tomorrow_result.data or []
+            first_tomorrow = tomorrow_meetings[0] if tomorrow_meetings else None
+            tomorrow_first_time = None
+            tomorrow_first_title = None
+            if first_tomorrow and isinstance(first_tomorrow, dict):
+                tomorrow_first_time = await self._format_time_in_user_timezone(
+                    first_tomorrow.get("start_time", ""), user_id
+                )
+                tomorrow_first_title = first_tomorrow.get("title", "Meeting")
+
+            logger.info(
+                "Calendar events fetched from calendar_events table",
+                extra={
+                    "user_id": user_id,
+                    "briefing_date": briefing_date.isoformat(),
+                    "today_count": len(key_meetings),
+                    "tomorrow_count": len(tomorrow_meetings),
+                },
+            )
+
+            return {
+                "meeting_count": len(key_meetings),
+                "key_meetings": key_meetings,
+                "tomorrow_count": len(tomorrow_meetings),
+                "tomorrow_first_time": tomorrow_first_time,
+                "tomorrow_first_title": tomorrow_first_title,
+            }
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch from calendar_events table, falling back to Composio",
+                extra={"user_id": user_id, "error": str(e)},
+                exc_info=True,
+            )
+
+        # Fall back to Composio API if calendar_events table query failed
         try:
             integration_result = (
                 self._db.table("user_integrations")
@@ -818,62 +921,38 @@ class BriefingService:
                 .limit(1)
                 .execute()
             )
-        except Exception as e:
-            logger.warning(
-                "Failed to query user_integrations for calendar",
-                extra={"user_id": user_id},
-                exc_info=True,
-            )
-            return {"meeting_count": 0, "key_meetings": []}
 
-        if not integration_result or not integration_result.data:
-            logger.debug(
-                "No calendar integration for user",
-                extra={"user_id": user_id},
-            )
-            return {"meeting_count": 0, "key_meetings": []}
-
-        integration = integration_result.data[0]
-        provider = integration.get("integration_type")
-        connection_id = integration.get("composio_connection_id")
-
-        if not connection_id:
-            logger.warning(
-                "Calendar integration found but missing connection_id",
-                extra={"user_id": user_id, "provider": provider},
-            )
-            return {"meeting_count": 0, "key_meetings": []}
-
-        # Get the Composio action slug for this provider
-        action_slug = _CALENDAR_READ_ACTIONS.get(provider)
-        if not action_slug:
-            logger.warning(
-                "No calendar read action mapped for provider",
-                extra={"user_id": user_id, "provider": provider},
-            )
-            return {"meeting_count": 0, "key_meetings": []}
-
-        # Fetch events via Composio
-        try:
-            oauth_client = self._get_oauth_client()
-            if oauth_client is None:
-                logger.warning(
-                    "OAuth client not available for calendar fetch",
+            if not integration_result or not integration_result.data:
+                logger.debug(
+                    "No calendar integration for user",
                     extra={"user_id": user_id},
                 )
-                return {"meeting_count": 0, "key_meetings": []}
+                return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
 
-            # Build time range for the briefing date
+            integration = integration_result.data[0]
+            provider = integration.get("integration_type")
+            connection_id = integration.get("composio_connection_id")
+
+            if not connection_id:
+                return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
+
+            action_slug = _CALENDAR_READ_ACTIONS.get(provider)
+            if not action_slug:
+                return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
+
+            oauth_client = self._get_oauth_client()
+            if oauth_client is None:
+                return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
+
+            # Build time range for today
             time_min = f"{briefing_date.isoformat()}T00:00:00Z"
             time_max = f"{briefing_date.isoformat()}T23:59:59Z"
 
-            # Google Calendar uses timeMin/timeMax; Outlook uses start_datetime/end_datetime
             if provider == "google_calendar":
                 action_params = {"timeMin": time_min, "timeMax": time_max}
             else:
                 action_params = {"start_datetime": time_min, "end_datetime": time_max}
 
-            # Outlook calendar has no registered version, so skip version check
             result = await oauth_client.execute_action(
                 connection_id=connection_id,
                 action=action_slug,
@@ -884,43 +963,29 @@ class BriefingService:
             )
 
             if not result.get("successful"):
-                logger.warning(
-                    "Calendar fetch via Composio failed",
-                    extra={
-                        "user_id": user_id,
-                        "provider": provider,
-                        "error": result.get("error"),
-                    },
-                )
-                return {"meeting_count": 0, "key_meetings": []}
+                return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
 
-            # Normalize events from various Composio response formats
             data = result.get("data", {})
             events = data.get("events", data.get("items", data.get("value", [])))
             if not isinstance(events, list):
                 events = [events] if events else []
 
-            # Format events into key_meetings structure
             key_meetings = []
-            for event in events[:10]:  # Limit to 10 meetings for briefing
+            for event in events[:10]:
                 if not isinstance(event, dict):
                     continue
-
-                # Extract time - handle various field names
                 start_time = event.get("start", {})
                 if isinstance(start_time, dict):
                     time_str = start_time.get("dateTime", start_time.get("date", ""))
                 else:
                     time_str = str(start_time)
 
-                # Convert UTC time to user's local timezone for display
                 formatted_time = await self._format_time_in_user_timezone(time_str, user_id)
 
-                # Extract attendees
                 attendees_raw = event.get("attendees", event.get("requiredAttendees", []))
                 attendees = []
                 if isinstance(attendees_raw, list):
-                    for att in attendees_raw[:5]:  # Limit to 5 attendees
+                    for att in attendees_raw[:5]:
                         if isinstance(att, dict):
                             email = att.get("emailAddress", {}).get("address", "") if isinstance(att.get("emailAddress"), dict) else att.get("email", att.get("address", ""))
                             name = att.get("emailAddress", {}).get("name", "") if isinstance(att.get("emailAddress"), dict) else att.get("name", "")
@@ -929,37 +994,25 @@ class BriefingService:
                 key_meetings.append({
                     "id": event.get("id", ""),
                     "title": event.get("summary", event.get("subject", "Untitled Meeting")),
-                    "time": formatted_time,  # Now in user's local timezone
+                    "time": formatted_time,
                     "attendees": attendees,
-                    "company": None,  # Would need additional enrichment
-                    "has_brief": False,  # Would need meeting prep integration
+                    "company": None,
+                    "has_brief": False,
                 })
-
-            logger.info(
-                "Calendar events fetched successfully",
-                extra={
-                    "user_id": user_id,
-                    "briefing_date": briefing_date.isoformat(),
-                    "meeting_count": len(key_meetings),
-                    "provider": provider,
-                },
-            )
 
             return {
                 "meeting_count": len(key_meetings),
                 "key_meetings": key_meetings,
+                "tomorrow_count": 0,  # Composio fallback doesn't check tomorrow
             }
 
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "Failed to fetch calendar events",
-                extra={
-                    "user_id": user_id,
-                    "briefing_date": briefing_date.isoformat(),
-                },
+                "Failed to fetch calendar events via Composio fallback",
+                extra={"user_id": user_id},
                 exc_info=True,
             )
-            return {"meeting_count": 0, "key_meetings": []}
+            return {"meeting_count": 0, "key_meetings": [], "tomorrow_count": 0}
 
     async def _get_lead_data(self, user_id: str) -> dict[str, Any]:
         """Get lead status summary from lead_memories.
@@ -1203,37 +1256,48 @@ class BriefingService:
         }
 
     async def _get_task_data(self, user_id: str) -> dict[str, Any]:
-        """Get task status from prospective memories.
+        """Get task status from goals table.
+
+        Queries the goals table for open (non-complete) tasks.
+        Also checks prospective_memories for overdue tasks.
 
         Args:
             user_id: The user's ID.
 
         Returns:
-            Dict with overdue and due_today tasks.
+            Dict with overdue, due_today, and open_tasks_count.
         """
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        # Get open tasks from goals table (non-complete, non-failed)
+        open_goals_result = (
+            self._db.table("goals")
+            .select("id, title, status, target_date")
+            .eq("user_id", user_id)
+            .in_("status", ["draft", "plan_ready", "active", "paused"])
+            .order("target_date", desc=False)
+            .limit(20)
+            .execute()
+        )
 
-        # Get overdue tasks (due_at < today AND status = pending)
+        open_tasks = []
+        for g in open_goals_result.data or []:
+            if not isinstance(g, dict):
+                continue
+            open_tasks.append({
+                "id": g["id"],
+                "title": g.get("title", "Untitled goal"),
+                "status": g.get("status"),
+                "due_date": g.get("target_date"),
+            })
+
+        # Get overdue tasks from prospective_memories (legacy support)
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
         overdue_result = (
             self._db.table("prospective_memories")
             .select("id, task, priority, trigger_config")
             .eq("user_id", user_id)
             .eq("status", "pending")
             .lt("trigger_config->>due_at", today_start.isoformat())
-            .order("trigger_config->>due_at", desc=False)
-            .limit(10)
-            .execute()
-        )
-
-        # Get tasks due today (today_start <= due_at < today_end AND status = pending)
-        today_result = (
-            self._db.table("prospective_memories")
-            .select("id, task, priority, trigger_config")
-            .eq("user_id", user_id)
-            .eq("status", "pending")
-            .gte("trigger_config->>due_at", today_start.isoformat())
-            .lt("trigger_config->>due_at", today_end.isoformat())
             .order("trigger_config->>due_at", desc=False)
             .limit(10)
             .execute()
@@ -1250,18 +1314,12 @@ class BriefingService:
             if isinstance(t, dict)
         ]
 
-        due_today = [
-            {
-                "id": t["id"],
-                "task": t["task"],
-                "priority": t["priority"],
-                "due_at": t.get("trigger_config", {}).get("due_at"),
-            }
-            for t in (today_result.data or [])
-            if isinstance(t, dict)
-        ]
-
-        return {"overdue": overdue, "due_today": due_today}
+        return {
+            "overdue": overdue,
+            "due_today": [],  # Goals don't have due_today concept
+            "open_tasks": open_tasks,
+            "open_tasks_count": len(open_tasks),
+        }
 
     async def _generate_summary(
         self,

@@ -3,8 +3,9 @@
 import json
 import logging
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -427,7 +428,31 @@ async def get_briefing_status(
         if existing and isinstance(existing.get("content"), dict):
             briefing_content = existing["content"]
             topics: list[str] = []
-            # Extract meaningful topic names from briefing sections
+
+            # Calendar: Show today's meetings or tomorrow's if none today
+            calendar_data = briefing_content.get("calendar", {})
+            if isinstance(calendar_data, dict):
+                meeting_count = calendar_data.get("meeting_count", 0)
+                tomorrow_count = calendar_data.get("tomorrow_count", 0)
+                tomorrow_first_time = calendar_data.get("tomorrow_first_time")
+                tomorrow_first_title = calendar_data.get("tomorrow_first_title")
+
+                if meeting_count > 0:
+                    # Show today's meetings
+                    topics.append(f"{meeting_count} meeting{'s' if meeting_count != 1 else ''} today")
+                elif tomorrow_count > 0 and tomorrow_first_time and tomorrow_first_title:
+                    # Show tomorrow's first meeting if no meetings today
+                    truncated_title = tomorrow_first_title[:30] + "..." if len(tomorrow_first_title) > 30 else tomorrow_first_title
+                    topics.append(f"Tomorrow: {tomorrow_count} meeting{'s' if tomorrow_count != 1 else ''} — First at {tomorrow_first_time}: {truncated_title}")
+
+            # Tasks: Show open tasks count (not "overdue")
+            tasks_data = briefing_content.get("tasks", {})
+            if isinstance(tasks_data, dict):
+                open_count = tasks_data.get("open_tasks_count", 0)
+                if open_count > 0:
+                    topics.append(f"{open_count} open task{'s' if open_count != 1 else ''}")
+
+            # Leads
             leads_data = briefing_content.get("leads", {})
             if isinstance(leads_data, dict):
                 hot_count = len(leads_data.get("hot_leads", []))
@@ -437,6 +462,7 @@ async def get_briefing_status(
                 if attention_count > 0:
                     topics.append(f"{attention_count} need{'s' if attention_count == 1 else ''} attention")
 
+            # Signals
             signals_data = briefing_content.get("signals", {})
             if isinstance(signals_data, dict):
                 signal_total = sum(
@@ -445,18 +471,6 @@ async def get_briefing_status(
                 )
                 if signal_total > 0:
                     topics.append(f"{signal_total} market signal{'s' if signal_total != 1 else ''}")
-
-            tasks_data = briefing_content.get("tasks", {})
-            if isinstance(tasks_data, dict):
-                overdue_count = len(tasks_data.get("overdue", []))
-                if overdue_count > 0:
-                    topics.append(f"{overdue_count} overdue task{'s' if overdue_count != 1 else ''}")
-
-            calendar_data = briefing_content.get("calendar", {})
-            if isinstance(calendar_data, dict):
-                meeting_count = calendar_data.get("meeting_count", 0)
-                if meeting_count > 0:
-                    topics.append(f"{meeting_count} meeting{'s' if meeting_count != 1 else ''}")
 
             if not topics:
                 topics.append("Your daily briefing")
