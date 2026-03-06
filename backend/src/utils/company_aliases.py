@@ -1,174 +1,239 @@
-"""Company alias mapping utility for reliable cross-table joins.
+"""
+Dynamic company name normalization.
 
-This module provides canonical company name normalization to ensure
-market_signals.company_name matches battle_cards.company_name.
-
-Data Quality Issues This Solves:
-1. People stored as company_name (e.g., "Olivier Loeillot" should be "Repligen")
-2. Company name inconsistencies (e.g., "Repligen Corporation" vs "Repligen")
-3. Subsidiary/parent confusion (e.g., "Pall Danaher" vs "Pall Corporation")
+Builds alias mappings from the user's battle_cards table rather than
+hardcoded dictionaries. Falls back to basic suffix-stripping when
+no DB context is available.
 
 Usage:
     from src.utils.company_aliases import normalize_company_name
 
-    canonical_name = normalize_company_name("Thermo Fisher Scientific")
-    # Returns: "Thermo Fisher"
+    # Basic mode (no DB):
+    canonical = normalize_company_name("Sartorius AG")  # -> "Sartorius"
+
+    # Dynamic mode (with DB):
+    canonical = normalize_company_name(
+        "Thermo Fisher Scientific",
+        company_id="...",
+        supabase_client=db,
+    )
 """
 
-from typing import Literal
+import logging
+from typing import Any
 
-# Maps variant names to the canonical name used in battle_cards
-COMPANY_CANONICAL_NAMES: dict[str, str] = {
-    # Repligen variants
-    "Repligen Corporation": "Repligen",
-    "Repligen Corp": "Repligen",
-    # Pall variants
-    "Pall Danaher": "Pall Corporation",
-    "Pall Corp": "Pall Corporation",
-    # Thermo Fisher variants
-    "Thermo Fisher Scientific": "Thermo Fisher",
-    "Thermo Fisher Scientific Inc": "Thermo Fisher",
-    "ThermoFisher": "Thermo Fisher",
-    # MilliporeSigma variants
-    "MilliporeSigma (Merck KGaA)": "MilliporeSigma",
-    "Merck KGaA": "MilliporeSigma",
-    # Sartorius variants
-    "Sartorius AG": "Sartorius",
-    "Sartorius Stedim": "Sartorius",
-    "Sartorius Stedim Biotech": "Sartorius",
-    # Cytiva variants (formerly GE Healthcare Life Sciences)
-    "Cytiva (Danaher)": "Cytiva",
-    "GE Healthcare Life Sciences": "Cytiva",
-    # Danaher variants
-    "Danaher Corporation": "Danaher",
-    # Add more as discovered
-}
+logger = logging.getLogger(__name__)
 
-# People who should be mapped to their company
-# This catches cases where signal extraction incorrectly puts a person's name
-# in the company_name field
-PERSON_TO_COMPANY: dict[str, str] = {
-    # Repligen executives
-    "Olivier Loeillot": "Repligen",
-    "Tony J. Hunt": "Repligen",
-    # Add more as discovered
-}
+# In-process cache (per company_id). Cleared on restart or explicit clear_cache().
+_alias_cache: dict[str, dict[str, str]] = {}
+_person_cache: dict[str, dict[str, str]] = {}
+
+# Common corporate suffixes to strip in basic mode
+_CORPORATE_SUFFIXES = (
+    " Inc", " Inc.", " Corp", " Corp.", " Corporation",
+    " Ltd", " Ltd.", " AG", " SE", " GmbH", " S.A.",
+    " PLC", " plc", " N.V.", " S.p.A.",
+)
 
 
-def normalize_company_name(name: str | None) -> str:
-    """Returns the canonical company name, handling aliases and known people.
+def normalize_company_name(
+    name: str | None,
+    company_id: str | None = None,
+    supabase_client: Any | None = None,
+) -> str:
+    """Return the canonical company name, handling aliases and known people.
 
-    This function should be called before inserting any company_name into
-    market_signals or other tables to ensure consistency with battle_cards.
+    If company_id and supabase_client are provided, dynamically builds an
+    alias mapping from the battle_cards table. Otherwise falls back to
+    basic normalization (strip corporate suffixes).
 
     Args:
         name: The company name to normalize (may be None or empty).
+        company_id: UUID of the user's company (enables dynamic aliases).
+        supabase_client: Supabase client instance for DB queries.
 
     Returns:
-        The canonical company name, or the original name if no mapping exists.
-
-    Examples:
-        >>> normalize_company_name("Thermo Fisher Scientific")
-        "Thermo Fisher"
-        >>> normalize_company_name("Olivier Loeillot")
-        "Repligen"
-        >>> normalize_company_name("Unknown Company")
-        "Unknown Company"
+        The canonical company name, or the cleaned original if no mapping exists.
     """
     if not name:
         return name or ""
 
-    # Check person mapping first (higher priority)
-    if name in PERSON_TO_COMPANY:
-        return PERSON_TO_COMPANY[name]
+    # Dynamic mode: look up aliases from battle_cards
+    if company_id and supabase_client:
+        person_map = _get_or_build_person_map(company_id, supabase_client)
+        aliases = _get_or_build_aliases(company_id, supabase_client)
 
-    # Check alias mapping (exact match)
-    if name in COMPANY_CANONICAL_NAMES:
-        return COMPANY_CANONICAL_NAMES[name]
+        # Check person mapping first (higher priority)
+        if name in person_map:
+            return person_map[name]
 
-    # Check case-insensitive match
-    name_lower = name.lower().strip()
-    for variant, canonical in COMPANY_CANONICAL_NAMES.items():
-        if variant.lower() == name_lower:
-            return canonical
+        # Check alias mapping (exact match)
+        if name in aliases:
+            return aliases[name]
 
-    # Check case-insensitive person match
-    for person, company in PERSON_TO_COMPANY.items():
-        if person.lower() == name_lower:
-            return company
+        # Case-insensitive fallback
+        name_lower = name.lower().strip()
+        for person, company in person_map.items():
+            if person.lower() == name_lower:
+                return company
+        for variant, canonical in aliases.items():
+            if variant.lower() == name_lower:
+                return canonical
 
-    # No mapping found, return original
-    return name
+    # Basic mode: strip common corporate suffixes
+    cleaned = name.strip()
+    for suffix in _CORPORATE_SUFFIXES:
+        if cleaned.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)].strip()
+            break
+
+    return cleaned
 
 
-def get_signal_company_names_for_battle_card(battle_card_name: str) -> list[str]:
-    """Returns all company_name variants that map to this battle card name.
+def get_signal_company_names_for_battle_card(
+    battle_card_name: str,
+    company_id: str | None = None,
+    db: Any | None = None,
+) -> list[str]:
+    """Return all company_name variants that map to this battle card.
 
     Useful when querying market_signals for signals related to a specific
     battle card, since historical signals may use variant names.
 
     Args:
-        battle_card_name: The canonical company name from battle_cards.
+        battle_card_name: The canonical competitor name from battle_cards.
+        company_id: UUID of the user's company (enables dynamic aliases).
+        db: Supabase client instance.
 
     Returns:
-        List of all variant names (including the canonical name) that map
-        to this battle card.
-
-    Examples:
-        >>> get_signal_company_names_for_battle_card("Thermo Fisher")
-        ["Thermo Fisher", "Thermo Fisher Scientific", "Thermo Fisher Scientific Inc", "ThermoFisher"]
+        List of all variant names (including the canonical name).
     """
     names = [battle_card_name]
 
-    # Add all aliases that map to this canonical name
-    for variant, canonical in COMPANY_CANONICAL_NAMES.items():
-        if canonical == battle_card_name:
-            names.append(variant)
+    if company_id and db:
+        aliases = _get_or_build_aliases(company_id, db)
+        for variant, canonical in aliases.items():
+            if canonical == battle_card_name and variant != battle_card_name:
+                names.append(variant)
 
-    # Add all people that map to this company
-    for person, company in PERSON_TO_COMPANY.items():
-        if company == battle_card_name:
-            names.append(person)
+        person_map = _get_or_build_person_map(company_id, db)
+        for person, company in person_map.items():
+            if company == battle_card_name:
+                names.append(person)
 
     return names
 
 
-def is_known_person(name: str) -> bool:
-    """Check if a name is a known person who should be mapped to a company.
-
-    Args:
-        name: The name to check.
-
-    Returns:
-        True if the name is in the PERSON_TO_COMPANY mapping.
-    """
+def is_known_person(
+    name: str,
+    company_id: str | None = None,
+    supabase_client: Any | None = None,
+) -> bool:
+    """Check if a name is a known person mapped to a company."""
     if not name:
         return False
-    return name in PERSON_TO_COMPANY or name.lower() in {
-        p.lower() for p in PERSON_TO_COMPANY
-    }
+    if company_id and supabase_client:
+        person_map = _get_or_build_person_map(company_id, supabase_client)
+        return name in person_map or name.lower() in {p.lower() for p in person_map}
+    return False
 
 
-def get_company_for_person(person_name: str) -> str | None:
-    """Get the company that a person should be mapped to.
-
-    Args:
-        person_name: The person's name.
-
-    Returns:
-        The canonical company name, or None if the person is not in the mapping.
-    """
+def get_company_for_person(
+    person_name: str,
+    company_id: str | None = None,
+    supabase_client: Any | None = None,
+) -> str | None:
+    """Get the company a person should map to."""
     if not person_name:
         return None
-
-    # Try exact match first
-    if person_name in PERSON_TO_COMPANY:
-        return PERSON_TO_COMPANY[person_name]
-
-    # Try case-insensitive match
-    person_lower = person_name.lower()
-    for person, company in PERSON_TO_COMPANY.items():
-        if person.lower() == person_lower:
-            return company
-
+    if company_id and supabase_client:
+        person_map = _get_or_build_person_map(company_id, supabase_client)
+        if person_name in person_map:
+            return person_map[person_name]
+        person_lower = person_name.lower()
+        for person, company in person_map.items():
+            if person.lower() == person_lower:
+                return company
     return None
+
+
+def clear_cache() -> None:
+    """Clear alias caches. Call when battle_cards are updated."""
+    global _alias_cache, _person_cache
+    _alias_cache = {}
+    _person_cache = {}
+
+
+# ---------------------------------------------------------------------------
+# Internal cache builders
+# ---------------------------------------------------------------------------
+
+def _get_or_build_aliases(company_id: str, db: Any) -> dict[str, str]:
+    """Build or retrieve cached alias mapping from battle_cards."""
+    if company_id in _alias_cache:
+        return _alias_cache[company_id]
+
+    try:
+        result = (
+            db.table("battle_cards")
+            .select("competitor_name, competitor_domain")
+            .eq("company_id", company_id)
+            .execute()
+        )
+
+        aliases: dict[str, str] = {}
+        if result.data:
+            for card in result.data:
+                canonical = card["competitor_name"]
+                domain = card.get("competitor_domain", "")
+
+                # Canonical name maps to itself
+                aliases[canonical] = canonical
+
+                # Auto-generate common variants from multi-word names
+                if " " in canonical:
+                    parts = canonical.split()
+                    last_word = parts[-1]
+                    if last_word in (
+                        "Corporation", "Corp", "Inc", "AG", "Ltd",
+                        "GmbH", "SE", "PLC", "plc",
+                    ):
+                        # "Pall Corporation" -> also match "Pall"
+                        short_name = " ".join(parts[:-1])
+                        aliases[short_name] = canonical
+                        # Generate suffix variants: "Pall Corp", "Pall Corp.", etc.
+                        for suffix in ("Corp", "Corp.", "Corporation", "Inc", "Inc.", "AG", "Ltd"):
+                            aliases[f"{short_name} {suffix}"] = canonical
+
+                # Domain-based variant (e.g., "cytiva" from "cytiva.com")
+                if domain:
+                    domain_name = (
+                        domain.replace("https://", "")
+                        .replace("http://", "")
+                        .replace("www.", "")
+                        .replace(".com", "")
+                        .replace(".org", "")
+                        .replace(".io", "")
+                        .strip("/")
+                        .strip()
+                    )
+                    if domain_name and domain_name != canonical.lower():
+                        aliases[domain_name] = canonical
+                        aliases[domain_name.capitalize()] = canonical
+
+        _alias_cache[company_id] = aliases
+        return aliases
+    except Exception as e:
+        logger.warning("Failed to build aliases for company %s: %s", company_id, e)
+        return {}
+
+
+def _get_or_build_person_map(company_id: str, db: Any) -> dict[str, str]:
+    """Build person-to-company mapping. Currently returns empty; future:
+    mine semantic memory for 'X is CEO of Y' patterns."""
+    if company_id in _person_cache:
+        return _person_cache[company_id]
+
+    # Placeholder: will be populated by enrichment pipeline later
+    _person_cache[company_id] = {}
+    return {}
