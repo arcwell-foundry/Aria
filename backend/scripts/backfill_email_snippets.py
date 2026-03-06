@@ -110,6 +110,7 @@ async def fetch_email_body(
                 action="OUTLOOK_GET_MESSAGE",
                 params={"message_id": email_id},
                 user_id=user_id,
+                dangerously_skip_version_check=True,
             )
 
         if not response.get("successful") or not response.get("data"):
@@ -173,7 +174,7 @@ async def backfill(user_id: str, dry_run: bool = False, delay: float = 0.5):
         return
 
     provider = integration["integration_type"]
-    connection_id = integration["connection_id"]
+    connection_id = integration["composio_connection_id"]
     logger.info("Using %s integration (connection: %s)", provider, connection_id[:8])
 
     # Get emails needing backfill
