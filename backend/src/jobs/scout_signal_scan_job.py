@@ -17,6 +17,7 @@ from src.core.business_hours import get_active_user_ids, get_user_timezone, is_b
 from src.core.text_cleaning import clean_signal_summary
 from src.db.supabase import SupabaseClient
 from src.services.proactive_router import InsightCategory, InsightPriority, ProactiveRouter
+from src.utils.company_aliases import normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,12 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 if not headline:
                     continue
 
-                if await _signal_exists(db, user_id, headline):
+                # Normalize company name before deduplication check
+                raw_company_name = signal.get("company_name", "Unknown")
+                canonical_company_name = normalize_company_name(raw_company_name)
+
+                if await _signal_exists(db, user_id, headline, canonical_company_name):
+                    logger.debug("Duplicate signal skipped: %s", headline[:60])
                     continue
 
                 # Store in market_signals (the canonical table read by briefing,
@@ -113,7 +119,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                     insert_result = db.table("market_signals").insert(
                         {
                             "user_id": user_id,
-                            "company_name": signal.get("company_name", "Unknown"),
+                            "company_name": canonical_company_name,
                             "signal_type": signal.get("signal_type", "news"),
                             "headline": headline,
                             "summary": cleaned_summary,
@@ -294,17 +300,24 @@ async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
     return list(entities)
 
 
-async def _signal_exists(db: Any, user_id: str, headline: str) -> bool:
-    """Check if a signal with a similar headline already exists."""
+async def _signal_exists(
+    db: Any, user_id: str, headline: str, company_name: str | None = None
+) -> bool:
+    """Check if a signal with the same headline (and optionally company) already exists.
+
+    Deduplication is based on headline + company_name combination to prevent
+    duplicate signals for the same event from the same company.
+    """
     try:
-        result = (
+        query = (
             db.table("market_signals")
             .select("id")
             .eq("user_id", user_id)
             .eq("headline", headline)
-            .limit(1)
-            .execute()
         )
+        if company_name:
+            query = query.eq("company_name", company_name)
+        result = query.limit(1).execute()
         return bool(result.data)
     except Exception:
         return False

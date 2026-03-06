@@ -19,6 +19,7 @@ from src.models.signal import (
 )
 from src.services import notification_integration
 from src.services.activity_service import ActivityService
+from src.utils.company_aliases import normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +58,15 @@ class SignalService:
             max_length=500,
         )
 
+        # Normalize company name to canonical form for consistent joins
+        canonical_company_name = normalize_company_name(data.company_name)
+
         result = (
             self._db.table("market_signals")
             .insert(
                 {
                     "user_id": user_id,
-                    "company_name": data.company_name,
+                    "company_name": canonical_company_name,
                     "signal_type": data.signal_type.value,
                     "headline": data.headline,
                     "summary": cleaned_summary,

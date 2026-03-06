@@ -28,6 +28,7 @@ from src.core.config import settings
 from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
+from src.utils.company_aliases import normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -1299,6 +1300,9 @@ Respond ONLY with the JSON array, no additional text."""
                 if _co_row and _co_row.data and _co_row.data[0].get("name")
                 else "Unknown"
             )
+
+            # Normalize company name to canonical form
+            _co_name = normalize_company_name(_co_name)
 
             for fact in result.facts:
                 try:
