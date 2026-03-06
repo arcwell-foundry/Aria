@@ -50,7 +50,7 @@ class ImplicationEngine:
         DEFAULT_MIN_SCORE: Minimum combined score threshold (0.3)
     """
 
-    DEFAULT_MAX_HOPS: int = 4
+    DEFAULT_MAX_HOPS: int = 2
     DEFAULT_MIN_SCORE: float = 0.3
 
     def __init__(
@@ -80,6 +80,7 @@ class ImplicationEngine:
         max_hops: int = DEFAULT_MAX_HOPS,
         include_neutral: bool = False,
         min_score: float = DEFAULT_MIN_SCORE,
+        skip_time_horizon: bool = False,
     ) -> list[Implication]:
         """Analyze an event for implications affecting user's goals.
 
@@ -131,16 +132,13 @@ class ImplicationEngine:
 
         logger.info(f"Found {len(goals)} active goals")
 
-        # Step 3: Analyze each chain for implications
-        implications: list[Implication] = []
-
-        for chain in chains:
-            chain_implications = await self._analyze_chain(
-                chain=chain,
-                goals=goals,
-                include_neutral=include_neutral,
-            )
-            implications.extend(chain_implications)
+        # Step 3: Batch-analyze all chains for implications in a single LLM call
+        implications = await self._batch_analyze_chains(
+            chains=chains,
+            goals=goals,
+            event=event,
+            include_neutral=include_neutral,
+        )
 
         # Step 4: Filter by minimum score and sort
         filtered_implications = [impl for impl in implications if impl.combined_score >= min_score]
@@ -151,8 +149,8 @@ class ImplicationEngine:
             key=lambda i: -i.combined_score,
         )
 
-        # Step 5: Enrich with time horizon categorization
-        if sorted_implications and self._time_horizon_analyzer:
+        # Step 5: Enrich with time horizon categorization (skip if caller handles it)
+        if sorted_implications and self._time_horizon_analyzer and not skip_time_horizon:
             sorted_implications = await self._enrich_with_time_horizons(sorted_implications)
 
         elapsed_ms = (time.monotonic() - start_time) * 1000
@@ -192,21 +190,13 @@ class ImplicationEngine:
             min_score=request.min_score,
         )
 
-        # Count chains and goals for metadata
-        chains = await self._causal_engine.traverse(
-            user_id=user_id,
-            trigger_event=request.event,
-            max_hops=request.max_hops,
-        )
-        goals = await self._get_active_goals(user_id)
-
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
         return ImplicationResponse(
             implications=implications,
             processing_time_ms=elapsed_ms,
-            chains_analyzed=len(chains),
-            goals_considered=len(goals),
+            chains_analyzed=len(implications),
+            goals_considered=0,
         )
 
     async def save_insight(
@@ -224,22 +214,24 @@ class ImplicationEngine:
             JarvisInsight object if saved, or None if save failed
         """
         try:
+            # Build title from trigger event (first 100 chars)
+            title = implication.trigger_event[:100] if implication.trigger_event else "Implication insight"
+
             data = {
                 "user_id": user_id,
                 "insight_type": "implication",
-                "trigger_event": implication.trigger_event,
+                "engine_source": "implication",
+                "title": title,
                 "content": implication.content,
                 "classification": implication.type.value,
                 "impact_score": implication.impact_score,
                 "confidence": implication.confidence,
                 "urgency": implication.urgency,
-                "combined_score": implication.combined_score,
                 "causal_chain": implication.causal_chain,
                 "affected_goals": implication.affected_goals,
                 "recommended_actions": implication.recommended_actions,
                 "time_horizon": implication.time_horizon,
-                "time_to_impact": implication.time_to_impact,
-                "status": "new",
+                "status": "active",
             }
 
             result = self._db.table("jarvis_insights").insert(data).execute()
@@ -276,11 +268,10 @@ class ImplicationEngine:
         """
         try:
             result = (
-                self._db.table("goals")
-                .select("id, title, description, priority, status, category")
+                self._db.table("active_goals")
+                .select("id, title, description, status")
                 .eq("user_id", user_id)
-                .eq("status", "active")
-                .order("priority", desc=True)
+                .order("created_at", desc=True)
                 .limit(20)
                 .execute()
             )
@@ -290,6 +281,191 @@ class ImplicationEngine:
         except Exception as e:
             logger.warning(f"Failed to fetch goals: {e}")
             return []
+
+    async def _batch_analyze_chains(
+        self,
+        chains: list[CausalChain],
+        goals: list[dict[str, Any]],
+        event: str,
+        include_neutral: bool,
+    ) -> list[Implication]:
+        """Analyze all causal chains in a single batched LLM call.
+
+        Instead of making separate LLM calls per chain for classification,
+        explanation, and recommendations, this batches everything into one call.
+
+        Args:
+            chains: Causal chains to analyze
+            goals: User's active goals
+            event: Original trigger event
+            include_neutral: Whether to include neutral implications
+
+        Returns:
+            List of implications from all chains
+        """
+        if not chains or not goals:
+            return []
+
+        # Limit chains to analyze (top 5 by confidence)
+        chains = sorted(chains, key=lambda c: -c.final_confidence)[:5]
+
+        # Build chain summaries
+        chain_descriptions: list[str] = []
+        for i, chain in enumerate(chains):
+            chain_summary = " → ".join(
+                f"{h.source_entity} [{h.relationship}] {h.target_entity}"
+                for h in chain.hops
+            )
+            chain_descriptions.append(f"Chain {i + 1}: {chain_summary} (confidence: {chain.final_confidence:.2f})")
+
+        # Build goal summaries
+        goal_summaries = [
+            f"- {g.get('title', 'Unknown')} (priority: {g.get('priority', 1)}): {g.get('description', '')[:100]}"
+            for g in goals[:5]
+        ]
+
+        system_prompt = """You are a business analyst evaluating how causal chains from a market event affect a user's business goals.
+
+For each causal chain, determine:
+1. Classification: "opportunity", "threat", or "neutral"
+2. Which goals are affected (by index, 0-based)
+3. A 2-3 sentence explanation of why this matters
+4. 1-2 specific actionable recommendations
+
+Return ONLY a valid JSON array, no other text:
+[
+  {
+    "chain_index": 0,
+    "classification": "opportunity|threat|neutral",
+    "affected_goal_indices": [0, 2],
+    "explanation": "...",
+    "recommendations": ["...", "..."]
+  }
+]
+
+Only include chains that are opportunities or threats (skip neutral ones unless explicitly requested)."""
+
+        if include_neutral:
+            system_prompt = system_prompt.replace(
+                "Only include chains that are opportunities or threats (skip neutral ones unless explicitly requested).",
+                "Include all chains including neutral ones.",
+            )
+
+        user_content = f"""Event: {event}
+
+Causal Chains:
+{chr(10).join(chain_descriptions)}
+
+User's Goals:
+{chr(10).join(goal_summaries)}
+
+Analyze each chain's impact on the user's goals:"""
+
+        try:
+            response = await self._llm.generate(
+                messages=[{"role": "user", "content": user_content}],
+                system_prompt=system_prompt,
+                task=TaskType.CAUSAL_INFER,
+                agent_id="implication_engine",
+            )
+
+            # Parse JSON response
+            response = response.strip()
+            if response.startswith("```"):
+                lines = response.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                response = "\n".join(lines).strip()
+
+            analyses = json.loads(response)
+            if not isinstance(analyses, list):
+                analyses = [analyses]
+
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning("Batch chain analysis failed: %s, falling back to individual", e)
+            # Fallback: analyze chains individually
+            implications: list[Implication] = []
+            for chain in chains[:3]:
+                chain_impls = await self._analyze_chain(chain, goals, include_neutral)
+                implications.extend(chain_impls)
+            return implications
+
+        # Convert analyses to Implication objects
+        implications = []
+        for analysis in analyses:
+            chain_idx = analysis.get("chain_index", 0)
+            if chain_idx >= len(chains):
+                continue
+
+            chain = chains[chain_idx]
+            classification = analysis.get("classification", "neutral")
+
+            if classification == "neutral" and not include_neutral:
+                continue
+
+            # Map classification to ImplicationType
+            if classification == "opportunity":
+                impl_type = ImplicationType.OPPORTUNITY
+            elif classification == "threat":
+                impl_type = ImplicationType.THREAT
+            else:
+                impl_type = ImplicationType.NEUTRAL
+
+            # Find affected goals
+            affected_goal_indices = analysis.get("affected_goal_indices", [])
+            affected_goals = [
+                goals[i] for i in affected_goal_indices
+                if i < len(goals)
+            ]
+
+            # Calculate scores
+            impact_score = self._calculate_impact(chain, affected_goals)
+            urgency = self._calculate_urgency(chain)
+            confidence = chain.final_confidence
+            combined_score = (
+                impact_score * IMPACT_WEIGHT + confidence * CONFIDENCE_WEIGHT + urgency * URGENCY_WEIGHT
+            )
+
+            # Serialize causal chain
+            causal_chain_data = [
+                {
+                    "source_entity": hop.source_entity,
+                    "target_entity": hop.target_entity,
+                    "relationship": hop.relationship,
+                    "confidence": hop.confidence,
+                    "explanation": hop.explanation,
+                }
+                for hop in chain.hops
+            ]
+
+            explanation = analysis.get("explanation", f"Event may affect your goals via {chain.hops[-1].target_entity if chain.hops else 'unknown'}.")
+            recommendations = analysis.get("recommendations", [])
+            if isinstance(recommendations, list):
+                recommendations = [str(r) for r in recommendations[:3]]
+            else:
+                recommendations = []
+
+            implication = Implication(
+                id=None,
+                trigger_event=chain.trigger_event,
+                content=explanation,
+                type=impl_type,
+                impact_score=impact_score,
+                confidence=confidence,
+                urgency=urgency,
+                combined_score=combined_score,
+                causal_chain=causal_chain_data,
+                affected_goals=[str(g["id"]) for g in affected_goals],
+                recommended_actions=recommendations,
+                time_horizon=None,
+                time_to_impact=chain.time_to_impact,
+                created_at=None,
+            )
+            implications.append(implication)
+
+        return implications
 
     async def _analyze_chain(
         self,
@@ -452,7 +628,7 @@ Consider the goal relevant if:
 - The event creates an opportunity or risk for achieving the goal
 - There's a logical connection between the event and the goal's domain"""
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -464,9 +640,7 @@ Is this goal affected by or relevant to this event impact?""",
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.1,
-                max_tokens=10,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_CLASSIFY,
                 agent_id="implication_engine",
             )
 
@@ -522,7 +696,7 @@ Neutral: No clear positive or negative impact"""
                 f"{h.source_entity} [{h.relationship}] {h.target_entity}" for h in chain.hops
             )
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -536,9 +710,7 @@ How does this chain affect the user's goals?""",
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.1,
-                max_tokens=20,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_CLASSIFY,
                 agent_id="implication_engine",
             )
 
@@ -697,7 +869,7 @@ Be specific about the causal connection."""
 
             goal_titles = [g.get("title", "goal") for g in affected_goals[:2]]
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -711,9 +883,7 @@ Explain this implication in 2-3 sentences:""",
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.5,
-                max_tokens=200,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_INFER,
                 agent_id="implication_engine",
             )
 
@@ -759,7 +929,7 @@ Return ONLY a valid JSON array of strings, no other text:
                 f"{h.source_entity} {h.relationship} {h.target_entity}" for h in chain.hops
             )
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -773,9 +943,7 @@ Generate 1-3 specific recommendations:""",
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.5,
-                max_tokens=300,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_INFER,
                 agent_id="implication_engine",
             )
 

@@ -13,6 +13,7 @@ Key features:
 - Parallel chain support from single event
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -42,12 +43,16 @@ class CausalChainEngine:
     Attributes:
         HOP_DECAY: Confidence multiplier per hop (0.85 = 15% loss per hop)
         MIN_CONFIDENCE: Minimum confidence to include a chain (0.3)
-        MAX_HOPS: Maximum traversal depth (6)
+        MAX_HOPS: Maximum traversal depth (2)
+        MAX_ENTITIES: Maximum entities to traverse per event (3)
+        TRAVERSAL_TIMEOUT_S: Total timeout for all chain traversals (15s)
     """
 
     HOP_DECAY: float = 0.85
     MIN_CONFIDENCE: float = 0.3
-    MAX_HOPS: int = 6
+    MAX_HOPS: int = 2
+    MAX_ENTITIES: int = 3
+    TRAVERSAL_TIMEOUT_S: float = 15.0
 
     def __init__(
         self,
@@ -70,7 +75,7 @@ class CausalChainEngine:
         self,
         user_id: str,
         trigger_event: str,
-        max_hops: int = 4,
+        max_hops: int = 2,
         min_confidence: float = 0.3,
     ) -> list[CausalChain]:
         """Traverse causal chains from a trigger event.
@@ -81,7 +86,7 @@ class CausalChainEngine:
         Args:
             user_id: User ID for context scoping
             trigger_event: Description of the event to analyze
-            max_hops: Maximum number of hops (1-6, default 4)
+            max_hops: Maximum number of hops (1-2, default 2)
             min_confidence: Minimum confidence threshold (0.1-1.0, default 0.3)
 
         Returns:
@@ -110,13 +115,14 @@ class CausalChainEngine:
             logger.warning("No entities extracted from trigger event")
             return []
 
-        logger.info(f"Extracted {len(entities)} entities from trigger event")
+        # Limit to top entities by relevance
+        entities = sorted(entities, key=lambda e: -e.relevance)[: self.MAX_ENTITIES]
 
-        # Step 2: Traverse from each entity
-        all_chains: list[CausalChain] = []
+        logger.info(f"Traversing {len(entities)} entities (from extracted set)")
 
-        for entity in entities:
-            chains = await self._traverse_from_entity(
+        # Step 2: Traverse from each entity in parallel with total timeout
+        async def _traverse_one(entity: EntityExtraction) -> list[CausalChain]:
+            return await self._traverse_from_entity(
                 user_id=user_id,
                 entity=entity,
                 trigger_event=trigger_event,
@@ -126,7 +132,24 @@ class CausalChainEngine:
                 current_hops=[],
                 min_confidence=min_confidence,
             )
-            all_chains.extend(chains)
+
+        all_chains: list[CausalChain] = []
+        try:
+            tasks = [_traverse_one(entity) for entity in entities]
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self.TRAVERSAL_TIMEOUT_S,
+            )
+            for result in results:
+                if isinstance(result, list):
+                    all_chains.extend(result)
+                elif isinstance(result, Exception):
+                    logger.warning("Entity traversal failed: %s", result)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Causal chain traversal timed out after %.1fs, returning partial results",
+                self.TRAVERSAL_TIMEOUT_S,
+            )
 
         # Step 3: Filter by minimum confidence and deduplicate
         filtered_chains = [
@@ -180,15 +203,12 @@ class CausalChainEngine:
             min_confidence=request.min_confidence,
         )
 
-        # Extract entities again for count
-        entities = await self._extract_entities(request.trigger_event)
-
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
         return CausalTraversalResponse(
             chains=chains,
             processing_time_ms=elapsed_ms,
-            entities_found=len(entities),
+            entities_found=len(chains),
             trigger_event=request.trigger_event,
         )
 
@@ -227,12 +247,10 @@ Return ONLY a valid JSON array, no other text:
 ]"""
 
         try:
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[{"role": "user", "content": trigger_event}],
                 system_prompt=system_prompt,
-                temperature=0.3,
-                max_tokens=1000,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_ENTITY_EXTRACT,
                 agent_id="causal_engine",
             )
 
@@ -391,8 +409,11 @@ Return ONLY a valid JSON array, no other text:
         Returns:
             List of inferred relationships with confidence and explanations
         """
-        # Gather context from user's data
-        context = await self._gather_inference_context(user_id, entity.name)
+        # Only gather DB context for primary entities (not inferred hop-2 targets)
+        if entity.entity_type != "unknown":
+            context = await self._gather_inference_context(user_id, entity.name)
+        else:
+            context = "No specific user context available for this entity."
 
         system_prompt = f"""You are an expert analyst in the life sciences industry.
 Given an entity and its context, infer the most likely downstream causal effects.
@@ -417,7 +438,7 @@ Relationship types to use:
 - threatens: Creates risk or negative impact
 - accelerates: Speeds up a process or outcome
 
-Return ONLY a valid JSON array (max 5 items), no other text:
+Return ONLY a valid JSON array (max 3 items), no other text:
 [
   {{
     "target_entity": "entity name",
@@ -428,7 +449,7 @@ Return ONLY a valid JSON array (max 5 items), no other text:
 ]"""
 
         try:
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -436,9 +457,7 @@ Return ONLY a valid JSON array (max 5 items), no other text:
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.5,
-                max_tokens=1000,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_INFER,
                 agent_id="causal_engine",
             )
 
@@ -465,7 +484,7 @@ Return ONLY a valid JSON array (max 5 items), no other text:
                 if r.get("target_entity")
             ]
 
-            return relationships[:5]  # Limit to 5 inferred relationships
+            return relationships[:3]  # Limit to 3 inferred relationships
 
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse inference response: {e}")
@@ -611,6 +630,14 @@ Return ONLY a valid JSON array (max 5 items), no other text:
 
         chains: list[CausalChain] = []
 
+        # Limit to top 3 relationships by confidence to control fan-out
+        graphiti_rels = sorted(
+            graphiti_rels, key=lambda r: r.get("confidence", 0.5), reverse=True
+        )[:3]
+
+        # Build hop-1 chains and collect recursive tasks
+        recursive_tasks: list[asyncio.Task[list[CausalChain]]] = []
+
         for rel in graphiti_rels:
             target_name = rel["target_entity"]
 
@@ -637,21 +664,20 @@ Return ONLY a valid JSON array (max 5 items), no other text:
 
             new_hops = current_hops + [hop]
 
-            # If we have meaningful hops, create a chain
-            if new_hops:
-                chain = CausalChain(
-                    id=None,
-                    trigger_event=trigger_event,
-                    hops=new_hops,
-                    final_confidence=new_confidence,
-                    time_to_impact=None,
-                    source_context=None,
-                    source_id=None,
-                    created_at=None,
-                )
-                chains.append(chain)
+            # Record this chain
+            chain = CausalChain(
+                id=None,
+                trigger_event=trigger_event,
+                hops=new_hops,
+                final_confidence=new_confidence,
+                time_to_impact=None,
+                source_context=None,
+                source_id=None,
+                created_at=None,
+            )
+            chains.append(chain)
 
-            # Recurse if we have more hops allowed
+            # Queue recursive traversal if more hops allowed
             if max_hops > 1:
                 target_entity = EntityExtraction(
                     name=target_name,
@@ -660,16 +686,28 @@ Return ONLY a valid JSON array (max 5 items), no other text:
                     context=None,
                 )
 
-                sub_chains = await self._traverse_from_entity(
-                    user_id=user_id,
-                    entity=target_entity,
-                    trigger_event=trigger_event,
-                    max_hops=max_hops - 1,
-                    visited=visited,
-                    current_confidence=new_confidence,
-                    current_hops=new_hops,
-                    min_confidence=min_confidence,
+                recursive_tasks.append(
+                    asyncio.ensure_future(
+                        self._traverse_from_entity(
+                            user_id=user_id,
+                            entity=target_entity,
+                            trigger_event=trigger_event,
+                            max_hops=max_hops - 1,
+                            visited=visited,
+                            current_confidence=new_confidence,
+                            current_hops=new_hops,
+                            min_confidence=min_confidence,
+                        )
+                    )
                 )
-                chains.extend(sub_chains)
+
+        # Run all recursive traversals in parallel
+        if recursive_tasks:
+            results = await asyncio.gather(*recursive_tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, list):
+                    chains.extend(result)
+                elif isinstance(result, Exception):
+                    logger.warning("Recursive traversal failed: %s", result)
 
         return chains

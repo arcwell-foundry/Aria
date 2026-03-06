@@ -322,22 +322,38 @@ class JarvisInsight(BaseModel):
     id: UUID
     user_id: UUID
     insight_type: str = Field(default="implication")
-    trigger_event: str
+    engine_source: str | None = None
+    title: str | None = None
+    trigger_event: str | None = None
     content: str
-    classification: str  # opportunity, threat, neutral
-    impact_score: float
-    confidence: float
-    urgency: float
-    combined_score: float
-    causal_chain: list[dict[str, Any]]
-    affected_goals: list[str]
-    recommended_actions: list[str]
+    explanation: str | None = None
+    classification: str | None = None  # opportunity, threat, neutral
+    impact_score: float = 0.0
+    confidence: float = 0.0
+    urgency: float = 0.0
+    combined_score: float = 0.0
+    causal_chain: list[dict[str, Any]] = Field(default_factory=list)
+    causal_chain_id: UUID | None = None
+    affected_goals: list[str] = Field(default_factory=list)
+    affected_goal_ids: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    related_entities: list[Any] = Field(default_factory=list)
     time_horizon: str | None = None  # immediate, short_term, medium_term, long_term
     time_to_impact: str | None = None
-    status: str = Field(default="new")  # new, engaged, dismissed, feedback
+    impact_type: str | None = None
+    priority: float | None = None
+    status: str = Field(default="active")
+    feedback: Any | None = None
     feedback_text: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    engaged: bool = False
+    engaged_at: datetime | None = None
+    dismissed: bool = False
+    dismissed_at: datetime | None = None
+    delivered_at: datetime | None = None
+    delivery_method: str | None = None
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class InsightUpdateRequest(BaseModel):

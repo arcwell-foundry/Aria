@@ -509,7 +509,7 @@ Time horizon definitions:
 - medium_term: 1-6 months
 - long_term: 6+ months"""
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[
                     {
                         "role": "user",
@@ -517,9 +517,7 @@ Time horizon definitions:
                     }
                 ],
                 system_prompt=system_prompt,
-                temperature=0.1,
-                max_tokens=200,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_CLASSIFY,
                 agent_id="time_horizon",
             )
 

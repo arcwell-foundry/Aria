@@ -516,11 +516,9 @@ class GoalImpactMapper:
                 goal_description=goal.get("description", ""),
             )
 
-            response = await self._llm.generate_response(
+            response = await self._llm.generate(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=200,
-                task=TaskType.ANALYST_RESEARCH,
+                task=TaskType.CAUSAL_CLASSIFY,
                 agent_id="goal_impact",
             )
 

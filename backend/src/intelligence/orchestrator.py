@@ -28,8 +28,19 @@ _BRIEFING_ENGINES: list[str] = [
     "temporal",
 ]
 
-# Per-engine timeout in seconds — generous enough for 1-3 LLM calls per engine
+# Per-engine timeout in seconds — tuned to each engine's workload
 _ENGINE_TIMEOUT_S = 20
+
+# Engine-specific timeouts for process_event pipeline
+_PROCESS_EVENT_TIMEOUTS: dict[str, int] = {
+    "implication": 15,  # Heavy LLM engine (includes causal traversal)
+    "butterfly": 15,   # Wraps implication engine internally
+    "goal_impact": 5,   # DB query only, no LLM
+    "time_horizon": 5,
+    "connection": 10,
+    "temporal": 5,
+    "predictive": 10,
+}
 
 # Deduplication similarity threshold
 _DEDUP_THRESHOLD = 0.7
@@ -199,7 +210,10 @@ class JarvisOrchestrator:
 
         # Run all engines in parallel with per-engine timeout
         tasks = [
-            self._run_engine_with_timeout(engine_name, user_id, ctx)
+            self._run_engine_with_timeout(
+                engine_name, user_id, ctx,
+                timeout_s=_PROCESS_EVENT_TIMEOUTS.get(engine_name, _ENGINE_TIMEOUT_S),
+            )
             for engine_name in _BRIEFING_ENGINES
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -231,21 +245,24 @@ class JarvisOrchestrator:
         event: str,
         source_context: str = "api_request",
         source_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> list[JarvisInsight]:
         """Process an event through the intelligence pipeline.
 
-        Runs: causal traversal -> implications -> butterfly check ->
-        goal impact -> time horizon categorization.
+        Runs implication, butterfly, and goal impact engines in parallel
+        with per-engine timeouts. Then enriches with time horizons.
 
         Args:
             user_id: User UUID.
             event: Event description text.
             source_context: Where the event originated.
             source_id: Optional source entity ID.
+            context: Optional context dict with additional event info.
 
         Returns:
             List of generated insights (top 5 persisted to DB).
         """
+        start = time.perf_counter()
         all_insights: list[JarvisInsight] = []
 
         logger.info(
@@ -254,14 +271,18 @@ class JarvisOrchestrator:
             source_id,
         )
 
-        # Step 1: Implications (includes causal traversal internally)
-        try:
+        # Run all engines in parallel with per-engine timeouts
+        # Phase 1: Run implication + goal_impact in parallel
+        async def _run_implications() -> tuple[list[JarvisInsight], list[Any]]:
+            """Returns (insights, raw_implications) so butterfly can reuse."""
+            insights: list[JarvisInsight] = []
             implications = await self._implication_engine.analyze_event(
                 user_id=user_id,
                 event=event,
-                max_hops=4,
+                max_hops=1,
                 include_neutral=False,
                 min_score=0.4,
+                skip_time_horizon=True,
             )
             for imp in implications[:5]:
                 insight = await self._implication_engine.save_insight(
@@ -269,41 +290,99 @@ class JarvisOrchestrator:
                     implication=imp,
                 )
                 if insight:
-                    all_insights.append(insight)
-        except Exception:
-            logger.warning("Implication analysis failed for event", exc_info=True)
+                    insights.append(insight)
+            return insights, implications
 
-        # Step 2: Butterfly effect detection
-        try:
-            butterfly = await self._butterfly_detector.detect(
-                user_id=user_id,
-                event=event,
-                max_hops=4,
-            )
-            if butterfly:
-                butterfly_insight = await self._butterfly_detector.save_butterfly_insight(
-                    user_id=user_id,
-                    butterfly=butterfly,
-                )
-                if butterfly_insight:
-                    all_insights.append(butterfly_insight)
-        except Exception:
-            logger.warning("Butterfly detection failed for event", exc_info=True)
-
-        # Step 3: Goal impact mapping
-        try:
+        async def _run_goal_impact() -> list[JarvisInsight]:
+            insights: list[JarvisInsight] = []
             goal_impacts = await self._goal_impact_mapper.assess_event_impact(
                 user_id=user_id,
                 event=event,
             )
             for impact in goal_impacts[:3]:
-                all_insights.append(self._goal_impact_to_insight(impact, event, user_id))
-        except Exception:
-            logger.warning("Goal impact mapping failed for event", exc_info=True)
+                insights.append(self._goal_impact_to_insight(impact, event, user_id))
+            return insights
 
-        # Step 4: Time horizon categorization on resulting insights
+        # Run implication and goal_impact in parallel
+        impl_task = asyncio.ensure_future(
+            asyncio.wait_for(
+                _run_implications(),
+                timeout=_PROCESS_EVENT_TIMEOUTS.get("implication", 15),
+            )
+        )
+        goal_task = asyncio.ensure_future(
+            asyncio.wait_for(
+                _run_goal_impact(),
+                timeout=_PROCESS_EVENT_TIMEOUTS.get("goal_impact", 5),
+            )
+        )
+
+        impl_result: tuple[list[JarvisInsight], list[Any]] = ([], [])
+        goal_result: list[JarvisInsight] = []
+
+        results = await asyncio.gather(impl_task, goal_task, return_exceptions=True)
+
+        if isinstance(results[0], Exception):
+            logger.warning("Engine implication failed in process_event: %s", results[0])
+        else:
+            impl_result = results[0]
+            all_insights.extend(impl_result[0])
+
+        if isinstance(results[1], Exception):
+            logger.warning("Engine goal_impact failed in process_event: %s", results[1])
+        else:
+            goal_result = results[1]
+            all_insights.extend(goal_result)
+
+        # Phase 2: Lightweight butterfly check using already-computed implications
+        # (avoids re-running the full causal traversal)
+        raw_implications = impl_result[1]
+        if raw_implications:
+            total_impact = sum(imp.impact_score for imp in raw_implications)
+            if total_impact >= self._butterfly_detector.AMPLIFICATION_THRESHOLD:
+                logger.info(
+                    "Butterfly effect detected (amplification=%.1f)",
+                    total_impact,
+                )
+                # Build a simple butterfly insight from the implication data
+                combined_impact = sum(imp.combined_score for imp in raw_implications)
+                cascade_depth = max(
+                    (len(imp.causal_chain) for imp in raw_implications), default=0
+                )
+                all_insights.append(
+                    JarvisInsight(
+                        id=UUID("00000000-0000-0000-0000-000000000000"),
+                        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+                        insight_type="butterfly",
+                        trigger_event=event[:200],
+                        content=(
+                            f"Butterfly effect detected: this event cascades through "
+                            f"{len(raw_implications)} implications with "
+                            f"{total_impact:.1f}x amplification. "
+                            f"{raw_implications[0].content[:200]}"
+                        ),
+                        classification="threat"
+                        if any(i.type.value == "threat" for i in raw_implications)
+                        else "opportunity",
+                        impact_score=min(total_impact / 10.0, 1.0),
+                        confidence=sum(i.confidence for i in raw_implications)
+                        / len(raw_implications),
+                        urgency=0.8,
+                        combined_score=min(combined_impact / 5.0, 1.0),
+                        causal_chain=[],
+                        affected_goals=list(
+                            {g for imp in raw_implications for g in imp.affected_goals}
+                        ),
+                        recommended_actions=[],
+                        status="new",
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+
+        # Enrich with time horizon categorization (lightweight, 5s timeout)
         try:
-            for insight in all_insights:
+            async def _enrich_one(insight: JarvisInsight) -> None:
                 if not insight.time_horizon:
                     horizon = await self._time_horizon_analyzer.analyze(
                         content=insight.content,
@@ -312,8 +391,22 @@ class JarvisOrchestrator:
                     if horizon:
                         insight.time_horizon = horizon.horizon
                         insight.time_to_impact = horizon.time_to_impact
+
+            await asyncio.wait_for(
+                asyncio.gather(*[_enrich_one(i) for i in all_insights], return_exceptions=True),
+                timeout=_PROCESS_EVENT_TIMEOUTS.get("time_horizon", 5),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Time horizon enrichment timed out")
         except Exception:
             logger.warning("Time horizon categorization failed", exc_info=True)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "process_event complete: %d insights in %.0fms",
+            len(all_insights),
+            elapsed_ms,
+        )
 
         deduplicated = self._deduplicate(all_insights)
         deduplicated.sort(key=lambda i: i.combined_score, reverse=True)
@@ -499,7 +592,7 @@ class JarvisOrchestrator:
                 implications = await self._implication_engine.analyze_event(
                     user_id=user_id,
                     event=event_text,
-                    max_hops=3,
+                    max_hops=2,
                     include_neutral=False,
                     min_score=0.5,
                 )
@@ -516,7 +609,7 @@ class JarvisOrchestrator:
             insights = []
             for event_text in events[:2]:
                 butterfly = await self._butterfly_detector.detect(
-                    user_id=user_id, event=event_text, max_hops=3
+                    user_id=user_id, event=event_text, max_hops=2
                 )
                 if butterfly:
                     saved = await self._butterfly_detector.save_butterfly_insight(
@@ -574,7 +667,7 @@ class JarvisOrchestrator:
         trigger_deduped: list[JarvisInsight] = []
 
         for insight in insights:
-            trigger = insight.trigger_event.strip().lower()
+            trigger = (insight.trigger_event or insight.title or insight.content[:50] or "").strip().lower()
             if trigger in seen_triggers:
                 existing = seen_triggers[trigger]
                 if insight.combined_score > existing.combined_score:
