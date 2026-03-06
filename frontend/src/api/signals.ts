@@ -7,7 +7,10 @@ export interface Signal {
   signal_type: string;
   company_name: string | null;
   content: string;
+  summary?: string;
   source: string | null;
+  source_url?: string;
+  relevance_score?: number;
   read_at: string | null;
   dismissed_at: string | null;
   created_at: string;

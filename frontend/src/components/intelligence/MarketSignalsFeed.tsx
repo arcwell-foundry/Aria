@@ -114,19 +114,22 @@ function SignalCard({
   onMarkRead: (id: string) => void;
   onDismiss: (id: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const config = getSignalConfig(signal.signal_type);
   const Icon = config.icon;
   const isUnread = !signal.read_at;
+  const relevance = signal.relevance_score ?? 0;
 
   return (
     <div
+      onClick={() => setExpanded(!expanded)}
       className={cn(
-        "flex items-start gap-3 p-4 rounded-lg border transition-colors",
+        "flex items-start gap-3 p-4 rounded-lg border transition-all cursor-pointer",
         "hover:bg-[var(--bg-subtle)]"
       )}
       style={{
         backgroundColor: "var(--bg-elevated)",
-        borderColor: "var(--border)",
+        borderColor: expanded ? "var(--accent)" : "var(--border)",
         borderLeftWidth: isUnread ? "3px" : "1px",
         borderLeftColor: isUnread ? config.color : "var(--border)",
       }}
@@ -159,6 +162,25 @@ function SignalCard({
           >
             {config.label}
           </span>
+          {/* Relevance indicator */}
+          {relevance >= 0.9 && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-medium"
+              style={{ color: "#3b82f6" }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: "#3b82f6" }}
+              />
+              High
+            </span>
+          )}
+          {relevance >= 0.7 && relevance < 0.9 && (
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: "#22c55e" }}
+            />
+          )}
           {isUnread && (
             <span
               className="w-2 h-2 rounded-full flex-shrink-0"
@@ -167,33 +189,96 @@ function SignalCard({
           )}
         </div>
 
+        {/* Collapsed: 2-line clamp. Expanded: full content */}
         <p
-          className="text-sm leading-relaxed line-clamp-2"
+          className={cn("text-sm leading-relaxed", !expanded && "line-clamp-2")}
           style={{ color: "var(--text-secondary)" }}
         >
-          {sanitizeSignalText(signal.content)}
+          {sanitizeSignalText(signal.content, expanded ? 2000 : 300)}
         </p>
 
-        <div className="flex items-center gap-3 mt-2">
-          {signal.source && (
+        {/* Expanded details */}
+        {expanded && (
+          <div className="mt-3 space-y-2">
+            {signal.summary && (
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {sanitizeSignalText(signal.summary, 1000)}
+              </p>
+            )}
+            <div className="flex items-center gap-3 flex-wrap">
+              {signal.source_url && (
+                <a
+                  href={signal.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-xs font-medium underline"
+                  style={{ color: "var(--accent)" }}
+                >
+                  View Source
+                </a>
+              )}
+              {signal.created_at && (
+                <span
+                  className="text-xs"
+                  style={{
+                    color: "var(--text-tertiary, var(--text-secondary))",
+                  }}
+                >
+                  {new Date(signal.created_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
+              )}
+              {relevance > 0 && (
+                <span
+                  className="text-xs"
+                  style={{
+                    color: "var(--text-tertiary, var(--text-secondary))",
+                  }}
+                >
+                  Relevance: {Math.round(relevance * 100)}%
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Footer (always visible when collapsed) */}
+        {!expanded && (
+          <div className="flex items-center gap-3 mt-2">
+            {signal.source && (
+              <span
+                className="text-xs font-mono truncate max-w-[160px]"
+                style={{
+                  color: "var(--text-tertiary, var(--text-secondary))",
+                }}
+              >
+                {formatSourceName(signal.source)}
+              </span>
+            )}
             <span
-              className="text-xs font-mono truncate max-w-[160px]"
-              style={{ color: "var(--text-tertiary, var(--text-secondary))" }}
+              className="text-xs font-mono"
+              style={{
+                color: "var(--text-tertiary, var(--text-secondary))",
+              }}
             >
-              {formatSourceName(signal.source)}
+              {formatRelativeTime(signal.created_at)}
             </span>
-          )}
-          <span
-            className="text-xs font-mono"
-            style={{ color: "var(--text-tertiary, var(--text-secondary))" }}
-          >
-            {formatRelativeTime(signal.created_at)}
-          </span>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
-      <div className="flex-shrink-0 flex items-center gap-1">
+      <div
+        className="flex-shrink-0 flex items-center gap-1"
+        onClick={(e) => e.stopPropagation()}
+      >
         {isUnread && (
           <button
             onClick={() => onMarkRead(signal.id)}
