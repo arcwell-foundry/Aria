@@ -59,6 +59,8 @@ function formatRelativeDate(dateStr: string): string {
 function Tooltip({ text, children }: { text: string; children: React.ReactNode }) {
   const [show, setShow] = useState(false);
 
+  if (!text) return <>{children}</>;
+
   return (
     <span
       className="relative inline-flex"
@@ -73,6 +75,8 @@ function Tooltip({ text, children }: { text: string; children: React.ReactNode }
             backgroundColor: '#1E293B',
             color: '#F1F5F9',
             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            animationName: 'animate-in',
+            animationDuration: '0.15s',
           }}
         >
           {text}
