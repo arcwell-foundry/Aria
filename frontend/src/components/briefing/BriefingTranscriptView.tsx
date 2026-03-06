@@ -74,8 +74,8 @@ function groupContent(richContent: RichContent[]): GroupedContent {
               data: {
                 id: t.id,
                 company_name: '',
-                headline: `Overdue: ${t.title}`,
-                summary: `Priority: high. Due: ${t.due_date ?? ''}`,
+                headline: `Overdue: ${t.task ?? 'Unknown task'}`,
+                summary: `Priority: ${t.priority ?? 'high'}. Due: ${t.due_at ?? ''}`,
                 severity: 'high',
               },
             });
@@ -86,7 +86,7 @@ function groupContent(richContent: RichContent[]): GroupedContent {
               data: {
                 id: t.id,
                 company_name: '',
-                headline: t.title,
+                headline: t.task ?? 'Unknown task',
                 summary: `Due today`,
                 severity: 'medium',
               },

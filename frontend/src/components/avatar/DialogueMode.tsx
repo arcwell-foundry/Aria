@@ -102,11 +102,14 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           setTextOnlyMode(true);
           const { content } = response.data;
 
-          // Add briefing as ARIA message
+          // Add briefing as ARIA message with a single 'briefing' wrapper
+          // so BriefingTranscriptView activates (collapsible sections).
+          // Passing individual cards (meeting_card, alert_card, etc.) alongside
+          // the structured data would cause groupContent() to extract duplicates.
           addMessage({
             role: 'aria',
             content: content.summary || 'Your daily briefing is ready.',
-            rich_content: content.rich_content || [],
+            rich_content: [{ type: 'briefing', data: content as Record<string, unknown> }],
             ui_commands: [],
             suggestions: content.suggestions || ['Show me details', 'Dismiss'],
           });
