@@ -5,11 +5,16 @@
  * ARIA messages: "ARIA" in electric blue, content in lighter weight.
  * User messages: "YOU" in muted gray, content in regular weight.
  * Active (latest) message at full opacity, older messages dimmed.
+ *
+ * Briefing messages (containing a 'briefing' rich_content item) are rendered
+ * through BriefingTranscriptView with collapsible sections instead of
+ * a flat card list.
  */
 
 import ReactMarkdown from 'react-markdown';
 import { MessageAvatar } from '@/components/conversation/MessageAvatar';
 import { RichContentRenderer } from '@/components/rich/RichContentRenderer';
+import { BriefingTranscriptView } from '@/components/briefing/BriefingTranscriptView';
 import type { Message } from '@/types/chat';
 
 interface TranscriptEntryProps {
@@ -23,8 +28,17 @@ function formatTranscriptTime(timestamp: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** Detect whether a message is a text-only briefing delivery */
+function isBriefingMessage(message: Message): boolean {
+  return (
+    message.role === 'aria' &&
+    message.rich_content.some((rc) => rc.type === 'briefing')
+  );
+}
+
 export function TranscriptEntry({ message, isActive, isFirstInGroup }: TranscriptEntryProps) {
   const isAria = message.role === 'aria';
+  const isBriefing = isBriefingMessage(message);
 
   return (
     <div
@@ -47,17 +61,29 @@ export function TranscriptEntry({ message, isActive, isFirstInGroup }: Transcrip
           </div>
         )}
 
-        {isAria ? (
-          <div className="prose-aria text-sm leading-relaxed text-[#E2E4E9] font-light">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+        {isBriefing ? (
+          /* Organized sectioned briefing view */
+          <div className="mt-1">
+            <BriefingTranscriptView
+              summary={message.content}
+              richContent={message.rich_content}
+            />
           </div>
         ) : (
-          <p className="text-sm text-[#F8FAFC]">{message.content}</p>
-        )}
+          <>
+            {isAria ? (
+              <div className="prose-aria text-sm leading-relaxed text-[#E2E4E9] font-light">
+                <ReactMarkdown>{message.content}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-sm text-[#F8FAFC]">{message.content}</p>
+            )}
 
-        {/* Rich content cards */}
-        {message.rich_content.length > 0 && (
-          <RichContentRenderer items={message.rich_content} />
+            {/* Rich content cards */}
+            {message.rich_content.length > 0 && (
+              <RichContentRenderer items={message.rich_content} />
+            )}
+          </>
         )}
       </div>
     </div>
