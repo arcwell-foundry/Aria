@@ -16,12 +16,12 @@
  */
 
 import { useParams } from 'react-router-dom';
-import { useMemo } from 'react';
-import { Newspaper, TrendingUp } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Newspaper, TrendingUp, FlaskConical, ChevronDown, ChevronUp } from 'lucide-react';
 import { useBattleCards } from '@/hooks/useBattleCards';
 import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
-import { useUnreadSignalCount } from '@/hooks/useIntelPanelData';
+import { useUnreadSignalCount, useTherapeuticTrends } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
 
 // Skeleton grid for loading state
@@ -53,6 +53,92 @@ function IntelligenceSkeleton() {
   );
 }
 
+
+// Therapeutic & Manufacturing Trends
+function TherapeuticTrendsSection() {
+  const { data: trends } = useTherapeuticTrends();
+  const [expandedTrend, setExpandedTrend] = useState<string | null>(null);
+
+  if (!trends || trends.length === 0) return null;
+
+  return (
+    <section>
+      <h2
+        className="text-base font-medium mb-4 flex items-center gap-2"
+        style={{ color: 'var(--text-primary)' }}
+      >
+        <FlaskConical className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+        Therapeutic & Manufacturing Trends
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {trends.map((trend) => {
+          const isExpanded = expandedTrend === trend.name;
+          const maxSignals = Math.max(...trends.map(t => t.signal_count));
+          const barWidth = maxSignals > 0 ? (trend.signal_count / maxSignals) * 100 : 0;
+
+          return (
+            <div
+              key={trend.name}
+              onClick={() => setExpandedTrend(isExpanded ? null : trend.name)}
+              className="rounded-xl border p-4 cursor-pointer transition-all hover:-translate-y-0.5"
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderColor: isExpanded ? 'var(--accent)' : '#E2E8F0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <h3 className="text-sm font-semibold" style={{ color: '#1E293B' }}>
+                  {trend.name}
+                </h3>
+                {isExpanded ? (
+                  <ChevronUp className="w-4 h-4" style={{ color: '#94A3B8' }} />
+                ) : (
+                  <ChevronDown className="w-4 h-4" style={{ color: '#94A3B8' }} />
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-xs mb-2" style={{ color: '#5B6E8A' }}>
+                <span>{trend.signal_count} signals</span>
+                <span>{trend.company_count} companies</span>
+              </div>
+              {/* Strength bar */}
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#F1F5F9' }}>
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${barWidth}%`,
+                    backgroundColor: trend.trend_type === 'therapeutic_area' ? '#a855f7' : '#06b6d4',
+                  }}
+                />
+              </div>
+              {/* Expanded: description */}
+              {isExpanded && (
+                <div className="mt-3 pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <p className="text-xs leading-relaxed" style={{ color: '#5B6E8A' }}>
+                    {trend.description}
+                  </p>
+                  {trend.companies_involved.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {trend.companies_involved.map((co) => (
+                        <span
+                          key={co}
+                          className="text-[10px] px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: '#F1F5F9', color: '#475569' }}
+                        >
+                          {co}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 // Intelligence Overview Component
 function IntelligenceOverview() {
@@ -141,6 +227,9 @@ function IntelligenceOverview() {
               </div>
             )}
           </section>
+
+          {/* Therapeutic Trends Section */}
+          <TherapeuticTrendsSection />
 
           {/* Market Signals Section */}
           <section>

@@ -36,6 +36,7 @@ export function useRouteContext() {
   };
 }
 import { listSignals, markSignalRead, markAllRead, dismissSignal, getUnreadCount, type SignalFilters } from "@/api/signals";
+import { getTherapeuticTrends, type TherapeuticTrend } from "@/api/therapeuticTrends";
 import {
   listInsights,
   updateInsightFeedback,
@@ -228,5 +229,16 @@ export function useIntelSyncStatus() {
     queryKey: intelKeys.syncStatus(),
     queryFn: () => getSyncStatus(),
     staleTime: 1000 * 60 * 5,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Therapeutic trends hooks (IntelligencePage)
+// ---------------------------------------------------------------------------
+export function useTherapeuticTrends(days = 30) {
+  return useQuery<TherapeuticTrend[]>({
+    queryKey: ["intel", "therapeutic-trends", days],
+    queryFn: () => getTherapeuticTrends(days),
+    staleTime: 5 * 60_000, // 5 minutes
   });
 }
