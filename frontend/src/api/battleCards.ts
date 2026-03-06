@@ -5,6 +5,7 @@ export interface BattleCardPricing {
   model?: string;
   range?: string;
   strategy?: string;
+  notes?: string;
 }
 
 export interface BattleCardDifferentiation {
@@ -47,6 +48,26 @@ export interface BattleCardMomentumDetail {
   signals_previous_30d: number;
 }
 
+export interface BattleCardNewsItem {
+  title: string;
+  date: string;
+  source: string;
+  relevance: string;
+  signal_type?: string;
+  url?: string;
+}
+
+export interface BattleCardSignal {
+  id: string;
+  headline: string;
+  signal_type: string;
+  source_name: string | null;
+  source_url: string | null;
+  relevance_score: number;
+  detected_at: string;
+  summary: string | null;
+}
+
 export interface BattleCardAnalysis {
   metrics?: BattleCardMetrics;
   strategies?: BattleCardStrategy[];
@@ -63,6 +84,7 @@ export interface BattleCardAnalysis {
   avg_relevance?: number;
   computed_at?: string;
   computation_method?: string;
+  recent_news?: BattleCardNewsItem[];
 }
 
 export interface BattleCard {
@@ -79,6 +101,8 @@ export interface BattleCard {
   analysis: BattleCardAnalysis;
   last_updated: string;
   update_source: "manual" | "auto" | "demo_seed";
+  recent_signals?: BattleCardSignal[];
+  signal_count?: number;
 }
 
 export interface BattleCardChange {

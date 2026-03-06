@@ -103,6 +103,13 @@ async def get_battle_card(
     if not card:
         raise HTTPException(status_code=404, detail="Battle card not found")
 
+    # Enrich with live market signals for this competitor
+    recent_signals, signal_count = await svc.get_recent_signals(
+        current_user.id, competitor_name
+    )
+    card["recent_signals"] = recent_signals
+    card["signal_count"] = signal_count
+
     return card
 
 

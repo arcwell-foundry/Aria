@@ -11,6 +11,7 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from src.db.supabase import SupabaseClient
+from src.utils.company_aliases import get_signal_company_names_for_battle_card
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,52 @@ class BattleCardService:
         )
 
         return cast(list[dict[str, Any]], result.data)
+
+    async def get_recent_signals(
+        self,
+        user_id: str,
+        company_name: str,
+        limit: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get recent market signals for a competitor, plus total count.
+
+        Uses company alias mapping to match signals across variant names.
+
+        Args:
+            user_id: The authenticated user's ID.
+            company_name: The canonical competitor name from battle_cards.
+            limit: Maximum number of recent signals to return.
+
+        Returns:
+            Tuple of (recent_signals_list, total_signal_count).
+        """
+        variant_names = get_signal_company_names_for_battle_card(company_name)
+
+        query = (
+            self._db.table("market_signals")
+            .select(
+                "id, headline, signal_type, source_name, source_url, "
+                "relevance_score, detected_at, summary"
+            )
+            .eq("user_id", user_id)
+            .in_("company_name", variant_names)
+            .order("detected_at", desc=True)
+            .limit(limit)
+        )
+        result = query.execute()
+        signals = cast(list[dict[str, Any]], result.data)
+
+        # Get total count
+        count_result = (
+            self._db.table("market_signals")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .in_("company_name", variant_names)
+            .execute()
+        )
+        total_count = count_result.count or 0
+
+        return signals, total_count
 
     async def add_objection_handler(
         self,
