@@ -951,9 +951,13 @@ class JarvisOrchestrator:
             # Higher score if actions reference specific products, companies, or tactics
             specificity_keywords = [
                 "ATF", "TFF", "XCell", "chromatography", "filtration", "resin",
-                "Repligen", "battle card", "pricing", "account", "territory",
+                "battle card", "pricing", "account", "territory",
                 "outreach", "pilot", "POC", "proposal", "demo",
             ]
+            # Dynamically include the user's company name if available
+            user_company = context.get("user_company") or {}
+            if isinstance(user_company, dict) and user_company.get("name"):
+                specificity_keywords.append(user_company["name"])
             matches = sum(1 for kw in specificity_keywords if kw.lower() in action_text.lower())
             action_score = min(0.3 + (matches * 0.1), 1.0)
 

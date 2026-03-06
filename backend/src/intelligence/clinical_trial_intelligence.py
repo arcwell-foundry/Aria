@@ -133,6 +133,6 @@ def format_clinical_trial_context(trial_info: dict, company_name: str = '') -> s
     ]
 
     if company_name:
-        parts.append(f"\nANALYZE: {company_name} will need this equipment within {trial_info['procurement_lead_months']} months. Identify which Repligen products map to these needs. Recommend specific outreach timing and positioning.")
+        parts.append(f"\nANALYZE: {company_name} will need this equipment within {trial_info['procurement_lead_months']} months. Identify which of our products map to these needs. Recommend specific outreach timing and positioning.")
 
     return '\n'.join(parts)

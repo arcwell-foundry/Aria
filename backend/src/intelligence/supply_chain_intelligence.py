@@ -92,6 +92,6 @@ def format_supply_chain_context(vuln_info: dict, battle_card: dict = None, compa
         if isinstance(pricing, dict) and pricing.get('notes'):
             parts.append(f"Pricing intel: {pricing['notes']}")
 
-    parts.append("\nANALYZE: Which of their customers are most affected? What Repligen products are direct replacements? What's the urgency window for outreach? Generate a specific displacement action plan.")
+    parts.append("\nANALYZE: Which of their customers are most affected? What products from our portfolio are direct replacements? What's the urgency window for outreach? Generate a specific displacement action plan.")
 
     return '\n'.join(parts)
