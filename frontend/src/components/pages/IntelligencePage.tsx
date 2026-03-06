@@ -21,7 +21,7 @@ import { Newspaper, TrendingUp, FlaskConical, ChevronDown, ChevronUp } from 'luc
 import { useBattleCards } from '@/hooks/useBattleCards';
 import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
-import { useUnreadSignalCount, useTherapeuticTrends } from '@/hooks/useIntelPanelData';
+import { useUnreadSignalCount, useTherapeuticTrends, useReturnBriefing } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
 
 // Skeleton grid for loading state
@@ -53,6 +53,92 @@ function IntelligenceSkeleton() {
   );
 }
 
+
+// Return Briefing Banner
+function ReturnBriefingBanner() {
+  const { data: briefing } = useReturnBriefing();
+  const [dismissed, setDismissed] = useState(() => {
+    return sessionStorage.getItem("aria_briefing_dismissed") === "true";
+  });
+
+  if (!briefing || dismissed) return null;
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    sessionStorage.setItem("aria_briefing_dismissed", "true");
+  };
+
+  const hoursAway = Math.round(briefing.hours_away);
+  const daysAway = hoursAway >= 24 ? Math.round(hoursAway / 24) : null;
+  const awayText = daysAway
+    ? `${daysAway} day${daysAway > 1 ? "s" : ""}`
+    : `${hoursAway} hours`;
+
+  const signalCount = briefing.changes?.new_signals?.count ?? 0;
+  const companyCount = briefing.changes?.new_signals?.by_company
+    ? Object.keys(briefing.changes.new_signals.by_company).length
+    : 0;
+  const insightCount = briefing.changes?.new_insights?.count ?? 0;
+
+  return (
+    <div
+      className="rounded-lg p-5 mb-6"
+      style={{
+        backgroundColor: "#EFF6FF",
+        borderLeft: "4px solid #3B82F6",
+      }}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <h3 className="text-sm font-semibold" style={{ color: "#1E40AF" }}>
+          Welcome back! Here&apos;s what changed while you were away:
+        </h3>
+        <button
+          onClick={handleDismiss}
+          className="text-xs font-medium px-2 py-1 rounded hover:bg-blue-100 transition-colors"
+          style={{ color: "#3B82F6" }}
+        >
+          Dismiss
+        </button>
+      </div>
+
+      <p className="text-sm mb-3" style={{ color: "#1E40AF" }}>
+        You were away for {awayText}.
+        {signalCount > 0 &&
+          ` ${signalCount} new market signal${signalCount !== 1 ? "s" : ""}`}
+        {companyCount > 0 &&
+          ` across ${companyCount} compan${companyCount !== 1 ? "ies" : "y"}`}
+        {signalCount > 0 && "."}
+        {insightCount > 0 &&
+          ` ${insightCount} new intelligence insight${insightCount !== 1 ? "s" : ""}.`}
+      </p>
+
+      {briefing.priority_items && briefing.priority_items.length > 0 && (
+        <div className="space-y-1.5">
+          <span
+            className="text-xs font-semibold uppercase tracking-wider"
+            style={{ color: "#1E40AF" }}
+          >
+            Priority items:
+          </span>
+          {briefing.priority_items.map((item, i) => (
+            <p key={i} className="text-sm" style={{ color: "#334155" }}>
+              <span
+                className="font-mono text-[10px] px-1 py-0.5 rounded mr-1.5"
+                style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+              >
+                {item.type?.toUpperCase()}
+              </span>
+              {item.company && (
+                <span className="font-medium">{item.company}: </span>
+              )}
+              {item.text}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Therapeutic & Manufacturing Trends
 function TherapeuticTrendsSection() {
@@ -181,6 +267,9 @@ function IntelligenceOverview() {
           Battle cards and market signals to win competitive deals.
         </p>
       </div>
+
+      {/* Return Briefing */}
+      <ReturnBriefingBanner />
 
       {/* Loading State */}
       {isLoading && <IntelligenceSkeleton />}
