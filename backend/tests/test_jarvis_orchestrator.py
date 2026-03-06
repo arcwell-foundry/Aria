@@ -324,6 +324,149 @@ async def test_get_engine_metrics_aggregates_correctly(
 
 
 # ============================================================
+# Test: Quality Scoring - Multi-dimensional insight quality assessment
+# ============================================================
+
+
+def test_score_insight_quality_high_actionability(orchestrator: JarvisOrchestrator) -> None:
+    """Insights with specific actionable recommendations score higher on actionability."""
+    insight = _make_insight(
+        content="Competitor pricing change detected",
+        combined_score=0.5,
+    )
+    # Add specific action keywords
+    insight.recommended_actions = [
+        "Update battle card for Cytiva ATF system pricing",
+        "Schedule outreach to affected accounts in territory",
+        "Prepare POC proposal for at-risk customers",
+    ]
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score high on actionability due to specific keywords
+    assert score > 0.5, f"Expected actionability boost, got {score}"
+
+
+def test_score_insight_quality_high_novelty(orchestrator: JarvisOrchestrator) -> None:
+    """Insights connecting dots or identifying patterns score higher on novelty."""
+    insight = _make_insight(
+        content="Combined with the recent leadership change, this creates a window of opportunity for displacement. Pattern suggests acceleration of market shift.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = []
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score high on novelty due to pattern/connecting phrases
+    assert score > 0.5, f"Expected novelty boost, got {score}"
+
+
+def test_score_insight_quality_low_novelty(orchestrator: JarvisOrchestrator) -> None:
+    """Insights that just restate the signal score lower on novelty."""
+    insight = _make_insight(
+        content="As announced in the press release, as reported by Reuters, the signal indicates a change.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = []
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score lower on novelty due to restating phrases
+    assert score < 0.5, f"Expected low novelty score, got {score}"
+
+
+def test_score_insight_quality_evidence_strength(orchestrator: JarvisOrchestrator) -> None:
+    """Insights supported by multiple data sources score higher on evidence."""
+    insight = _make_insight(
+        content="The battle card analysis suggests pricing pressure",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = ["Review battle card"]
+
+    context = {
+        "relevant_memories": ["memory1"],
+        "company_recent_signals": ["signal1", "signal2", "signal3"],
+        "active_goals": ["goal1"],
+    }
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score high on evidence due to multiple supporting sources
+    assert score > 0.5, f"Expected evidence boost, got {score}"
+
+
+def test_score_insight_quality_time_sensitivity_urgent(orchestrator: JarvisOrchestrator) -> None:
+    """Time-sensitive insights with urgency keywords score higher."""
+    insight = _make_insight(
+        content="Immediate action required - this is a time-sensitive window that will close before Q2.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = []
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score higher on time sensitivity due to urgency keywords
+    # Baseline is ~0.37, time boost adds ~0.08 (0.8*0.2 - 0.4*0.2 = 0.08)
+    assert score > 0.40, f"Expected time sensitivity boost, got {score}"
+
+
+def test_score_insight_quality_time_sensitivity_long_term(orchestrator: JarvisOrchestrator) -> None:
+    """Long-term insights score lower on time sensitivity."""
+    insight = _make_insight(
+        content="This is a long-term trend that will eventually develop over time with gradual changes.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = []
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should score lower on time sensitivity
+    assert score < 0.55, f"Expected lower time sensitivity score, got {score}"
+
+
+def test_score_insight_quality_combines_dimensions(orchestrator: JarvisOrchestrator) -> None:
+    """Quality score combines all 4 dimensions with correct weights."""
+    insight = _make_insight(
+        content="Window of opportunity for displacement combined with battle card intel suggests immediate action.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = [
+        "Use battle card for Cytiva chromatography positioning",
+        "Schedule demo for affected accounts",
+    ]
+
+    context = {
+        "relevant_memories": ["memory1"],
+        "company_recent_signals": ["signal1", "signal2", "signal3"],
+    }
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should be a well-scored insight
+    assert 0.0 <= score <= 1.0, f"Score {score} out of range"
+    assert score > 0.6, f"Expected high combined score, got {score}"
+
+
+def test_score_insight_quality_baseline(orchestrator: JarvisOrchestrator) -> None:
+    """Baseline insight with no special features gets a moderate score."""
+    insight = _make_insight(
+        content="Generic insight about market conditions.",
+        combined_score=0.5,
+    )
+    insight.recommended_actions = []
+
+    context = {}
+    score = orchestrator._score_insight_quality(insight, context)
+
+    # Should be around baseline (0.3 action + 0.5 novelty + 0.3 evidence + 0.4 time) weighted
+    # = 0.3*0.3 + 0.5*0.25 + 0.3*0.25 + 0.4*0.2 = 0.09 + 0.125 + 0.075 + 0.08 = 0.37
+    assert 0.3 <= score <= 0.5, f"Expected baseline score ~0.37, got {score}"
+
+
+# ============================================================
 # Test: Integration - Event to insights
 # ============================================================
 

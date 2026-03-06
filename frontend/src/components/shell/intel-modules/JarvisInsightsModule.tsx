@@ -7,8 +7,14 @@ interface JarvisInsightData {
   content: string;
   classification: 'opportunity' | 'threat' | 'neutral';
   confidence: number;
+  combined_score: number;
   time_horizon: string | null;
 }
+
+/** Minimum quality score threshold for displaying insights */
+const QUALITY_THRESHOLD = 0.5;
+/** Minimum insights to show even if below threshold (never show empty when data exists) */
+const MIN_INSIGHTS_TO_SHOW = 2;
 
 const CLASSIFICATION_STYLES: Record<string, { color: string; icon: typeof Zap }> = {
   opportunity: { color: 'var(--success)', icon: TrendingUp },
@@ -47,13 +53,20 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
 
   if (isLoading && !propInsights) return <JarvisInsightsSkeleton />;
 
-  const insights: JarvisInsightData[] = propInsights ?? (apiInsights ?? []).map((i) => ({
+  const rawInsights: JarvisInsightData[] = propInsights ?? (apiInsights ?? []).map((i) => ({
     id: i.id,
     content: i.content,
     classification: i.classification,
     confidence: i.confidence,
+    combined_score: i.combined_score ?? i.confidence, // Fallback to confidence if no combined_score
     time_horizon: i.time_horizon,
   }));
+
+  // Filter by quality threshold, but always show at least MIN_INSIGHTS_TO_SHOW
+  const qualityInsights = rawInsights.filter((i) => i.combined_score >= QUALITY_THRESHOLD);
+  const insights = qualityInsights.length >= MIN_INSIGHTS_TO_SHOW
+    ? qualityInsights
+    : rawInsights.slice(0, MIN_INSIGHTS_TO_SHOW);
 
   const handleFeedback = (insightId: string, feedback: string) => {
     setFeedbackGiven((prev) => ({ ...prev, [insightId]: feedback }));
@@ -128,7 +141,7 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
                     {insight.content}
                   </p>
 
-                  {/* Confidence bar */}
+                  {/* Quality score bar */}
                   <div
                     className="mt-1.5 h-[3px] rounded-full"
                     style={{ backgroundColor: 'var(--border)', width: '100%' }}
@@ -136,7 +149,7 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: `${insight.confidence * 100}%`,
+                        width: `${insight.combined_score * 100}%`,
                         backgroundColor: style.color,
                         opacity: 0.7,
                       }}
@@ -160,7 +173,7 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
                         className="font-mono text-[10px]"
                         style={{ color: 'var(--text-secondary)' }}
                       >
-                        {(insight.confidence * 100).toFixed(0)}% conf
+                        {(insight.combined_score * 100).toFixed(0)}% quality
                       </span>
                     </div>
 

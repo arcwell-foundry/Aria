@@ -248,7 +248,14 @@ class JarvisOrchestrator:
         )
 
         deduplicated = self._deduplicate(all_insights)
-        # _deduplicate already sorts by confidence, just cap at 10 for briefings
+        # Apply quality scoring to each insight
+        # Note: combined_score may be a generated column in the DB, so we only
+        # update in-memory. The API sorts by combined_score, so this affects display order.
+        for insight in deduplicated:
+            quality_score = self._score_insight_quality(insight, enriched_ctx)
+            insight.combined_score = quality_score
+        # Sort by quality score after scoring
+        deduplicated.sort(key=lambda x: x.combined_score, reverse=True)
         return deduplicated[:10]
 
     async def process_event(
@@ -512,7 +519,19 @@ class JarvisOrchestrator:
         )
 
         deduplicated = self._deduplicate(all_insights)
-        # _deduplicate already sorts by confidence and caps at 5
+        # Apply quality scoring to each insight and update in database
+        for insight in deduplicated:
+            quality_score = self._score_insight_quality(insight, enriched_context)
+            insight.combined_score = quality_score
+            # Update in database
+            try:
+                self._db.table("jarvis_insights").update(
+                    {"combined_score": quality_score, "updated_at": datetime.now(UTC).isoformat()}
+                ).eq("id", str(insight.id)).execute()
+            except Exception:
+                logger.debug("Failed to update combined_score for insight %s", insight.id)
+        # Sort by quality score after scoring
+        deduplicated.sort(key=lambda x: x.combined_score, reverse=True)
         return deduplicated
 
     async def get_active_insights(
@@ -821,6 +840,74 @@ class JarvisOrchestrator:
         intersection = words1 & words2
         union = words1 | words2
         return len(intersection) / len(union)
+
+    def _score_insight_quality(self, insight: JarvisInsight, context: dict[str, Any]) -> float:
+        """Score insight on 4 dimensions, return combined score 0-1.
+
+        This replaces the generic confidence as the display priority.
+
+        Dimensions:
+        1. ACTIONABILITY (0-1): Does it have specific, executable actions?
+        2. NOVELTY (0-1): Is this telling the user something they wouldn't already know?
+        3. EVIDENCE STRENGTH (0-1): How many data sources support this?
+        4. TIME SENSITIVITY (0-1): Does the user need to act now?
+
+        Weights: actionability 30%, novelty 25%, evidence 25%, time 20%
+        """
+        content = insight.content or ""
+        actions = insight.recommended_actions or []
+
+        # 1. ACTIONABILITY (0-1): Does it have specific, executable actions?
+        action_score = 0.3  # baseline
+        if actions and isinstance(actions, list) and len(actions) > 0:
+            action_text = " ".join(str(a) for a in actions)
+            # Higher score if actions reference specific products, companies, or tactics
+            specificity_keywords = [
+                "ATF", "TFF", "XCell", "chromatography", "filtration", "resin",
+                "Repligen", "battle card", "pricing", "account", "territory",
+                "outreach", "pilot", "POC", "proposal", "demo",
+            ]
+            matches = sum(1 for kw in specificity_keywords if kw.lower() in action_text.lower())
+            action_score = min(0.3 + (matches * 0.1), 1.0)
+
+        # 2. NOVELTY (0-1): Is this telling the user something they wouldn't already know?
+        novelty_score = 0.5  # baseline
+        content_lower = content.lower()
+        # Low novelty: just restating the signal
+        if any(phrase in content_lower for phrase in ["as announced", "as reported", "the signal indicates"]):
+            novelty_score = 0.2
+        # High novelty: connecting dots, identifying patterns, projecting forward
+        if any(phrase in content_lower for phrase in ["window of opportunity", "displacement", "combined with", "pattern", "accelerat", "creates a"]):
+            novelty_score = 0.8
+
+        # 3. EVIDENCE STRENGTH (0-1): How many data sources support this?
+        evidence_score = 0.3  # baseline (signal only)
+        if "battle card" in content_lower or "battle card" in str(actions).lower():
+            evidence_score += 0.2
+        if context.get("relevant_memories"):
+            evidence_score += 0.15
+        if context.get("company_recent_signals") and len(context["company_recent_signals"]) > 2:
+            evidence_score += 0.15
+        if context.get("active_goals"):
+            evidence_score += 0.1
+        evidence_score = min(evidence_score, 1.0)
+
+        # 4. TIME SENSITIVITY (0-1): Does the user need to act now?
+        time_score = 0.4  # baseline
+        if any(phrase in content_lower for phrase in ["immediate", "urgent", "time-sensitive", "window", "before", "accelerat"]):
+            time_score = 0.8
+        if any(phrase in content_lower for phrase in ["long-term", "eventually", "over time", "gradual"]):
+            time_score = 0.2
+
+        # Weighted combination
+        combined = (
+            action_score * 0.30 +
+            novelty_score * 0.25 +
+            evidence_score * 0.25 +
+            time_score * 0.20
+        )
+
+        return round(combined, 3)
 
     def _predictions_to_insights(self, predictions: Any, user_id: str) -> list[JarvisInsight]:
         """Convert PredictiveEngine output to JarvisInsight objects."""
