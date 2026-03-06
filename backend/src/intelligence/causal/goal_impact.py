@@ -447,9 +447,9 @@ class GoalImpactMapper:
 
             if include_draft:
                 # Use .in_() for multiple statuses
-                query = query.in_("status", ["active", "draft"])
+                query = query.in_("status", ["active", "draft", "plan_ready"])
             else:
-                query = query.eq("status", "active")
+                query = query.in_("status", ["active", "plan_ready"])
 
             result = query.order("created_at", desc=True).limit(50).execute()
 

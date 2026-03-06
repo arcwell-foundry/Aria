@@ -31,14 +31,14 @@ class ButterflyDetector:
 
     A butterfly effect is detected when an event's downstream implications
     amplify significantly beyond the initial trigger. If the sum of
-    implication impact scores exceeds 3x the base impact (1.0), it's
+    implication impact scores exceeds 2x the base impact (1.0), it's
     flagged as a butterfly effect.
 
     Attributes:
-        AMPLIFICATION_THRESHOLD: Minimum amplification (3.0) to flag as butterfly
+        AMPLIFICATION_THRESHOLD: Minimum amplification (2.0) to flag as butterfly
     """
 
-    AMPLIFICATION_THRESHOLD: float = 3.0
+    AMPLIFICATION_THRESHOLD: float = 2.0
 
     def __init__(
         self,
@@ -258,13 +258,14 @@ class ButterflyDetector:
             data = {
                 "user_id": user_id,
                 "insight_type": "butterfly_effect",
-                "trigger_event": butterfly.trigger_event,
+                "engine_source": "butterfly",
+                "title": butterfly.trigger_event[:100] if butterfly.trigger_event else "Butterfly effect",
                 "content": (
                     f"Butterfly effect detected: {butterfly.amplification_factor:.1f}x "
                     f"amplification across {butterfly.cascade_depth} cascade levels. "
                     f"Warning level: {butterfly.warning_level.value}"
                 ),
-                "classification": "butterfly_effect",
+                "classification": "threat",
                 "impact_score": min(butterfly.amplification_factor / 10.0, 1.0),  # Normalize to 0-1
                 "confidence": 0.8,  # Default confidence for butterfly detection
                 "urgency": (
@@ -272,18 +273,13 @@ class ButterflyDetector:
                     if butterfly.warning_level in [WarningLevel.HIGH, WarningLevel.CRITICAL]
                     else 0.6
                 ),
-                "combined_score": (
-                    butterfly.combined_impact_score / len(butterfly.final_implications)
-                    if butterfly.final_implications
-                    else 0.5
-                ),
                 "causal_chain": [],  # Butterfly effects don't have a single chain
                 "affected_goals": [],
                 "recommended_actions": [
                     f"Monitor cascade effects over {butterfly.time_to_full_impact}",
                     "Review affected goals for action items",
                 ],
-                "status": "new",
+                "status": "active",
             }
 
             result = self._db.table("jarvis_insights").insert(data).execute()

@@ -376,36 +376,112 @@ class JarvisOrchestrator:
                 cascade_depth = max(
                     (len(imp.causal_chain) for imp in raw_implications), default=0
                 )
-                all_insights.append(
-                    JarvisInsight(
-                        id=UUID("00000000-0000-0000-0000-000000000000"),
-                        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
-                        insight_type="butterfly",
-                        trigger_event=event[:200],
-                        content=(
-                            f"Butterfly effect detected: this event cascades through "
-                            f"{len(raw_implications)} implications with "
-                            f"{total_impact:.1f}x amplification. "
-                            f"{raw_implications[0].content[:200]}"
-                        ),
-                        classification="threat"
-                        if any(i.type.value == "threat" for i in raw_implications)
-                        else "opportunity",
-                        impact_score=min(total_impact / 10.0, 1.0),
-                        confidence=sum(i.confidence for i in raw_implications)
-                        / len(raw_implications),
-                        urgency=0.8,
-                        combined_score=min(combined_impact / 5.0, 1.0),
-                        causal_chain=[],
-                        affected_goals=list(
-                            {g for imp in raw_implications for g in imp.affected_goals}
-                        ),
-                        recommended_actions=[],
-                        status="new",
-                        created_at=datetime.now(UTC),
-                        updated_at=datetime.now(UTC),
-                    )
+                butterfly_classification = (
+                    "threat"
+                    if any(i.type.value == "threat" for i in raw_implications)
+                    else "opportunity"
                 )
+                butterfly_confidence = (
+                    sum(i.confidence for i in raw_implications) / len(raw_implications)
+                )
+                butterfly_content = (
+                    f"Butterfly effect detected: this event cascades through "
+                    f"{len(raw_implications)} implications with "
+                    f"{total_impact:.1f}x amplification. "
+                    f"{raw_implications[0].content[:200]}"
+                )
+                butterfly_data = {
+                    "user_id": user_id,
+                    "insight_type": "butterfly",
+                    "engine_source": "butterfly",
+                    "title": event[:100],
+                    "content": butterfly_content,
+                    "classification": butterfly_classification,
+                    "impact_score": min(total_impact / 10.0, 1.0),
+                    "confidence": butterfly_confidence,
+                    "urgency": 0.8,
+                    "causal_chain": [],
+                    "affected_goals": list(
+                        {g for imp in raw_implications for g in imp.affected_goals}
+                    ),
+                    "recommended_actions": [],
+                    "status": "active",
+                }
+                try:
+                    db_result = self._db.table("jarvis_insights").insert(butterfly_data).execute()
+                    if db_result.data:
+                        all_insights.append(JarvisInsight(**db_result.data[0]))
+                        logger.info("Persisted butterfly insight to jarvis_insights")
+                except Exception:
+                    logger.warning("Failed to persist butterfly insight", exc_info=True)
+
+        # Phase 3: Persist goal_impact insights to DB
+        for gi in goal_result:
+            try:
+                gi_data = {
+                    "user_id": user_id,
+                    "insight_type": gi.insight_type or "goal_impact",
+                    "engine_source": "goal_impact",
+                    "title": (gi.trigger_event or event)[:100],
+                    "content": gi.content,
+                    "classification": gi.classification or "neutral",
+                    "impact_score": gi.impact_score,
+                    "confidence": gi.confidence,
+                    "urgency": gi.urgency,
+                    "causal_chain": gi.causal_chain or [],
+                    "affected_goals": gi.affected_goals or [],
+                    "recommended_actions": gi.recommended_actions or [],
+                    "status": "active",
+                }
+                db_result = self._db.table("jarvis_insights").insert(gi_data).execute()
+                if db_result.data:
+                    logger.info("Persisted goal_impact insight to jarvis_insights")
+            except Exception:
+                logger.warning("Failed to persist goal_impact insight", exc_info=True)
+
+        # Phase 4: Connection engine — find cross-domain connections
+        try:
+            connections = await asyncio.wait_for(
+                self._connection_engine.find_connections(
+                    user_id=user_id,
+                    events=[enriched_event],
+                    days_back=14,
+                ),
+                timeout=_PROCESS_EVENT_TIMEOUTS.get("connection", 15),
+            )
+            for conn in connections[:3]:
+                saved_id = await self._connection_engine.save_connection_insight(
+                    user_id=user_id,
+                    connection=conn,
+                )
+                if saved_id:
+                    all_insights.append(
+                        JarvisInsight(
+                            id=UUID(saved_id) if isinstance(saved_id, str) else saved_id,
+                            user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+                            insight_type="cross_domain_connection",
+                            engine_source="connection",
+                            trigger_event=(conn.source_events[0] if conn.source_events else event[:200]),
+                            content=conn.explanation,
+                            classification=conn.connection_type.value,
+                            impact_score=conn.novelty_score,
+                            confidence=conn.actionability_score,
+                            urgency=conn.relevance_score,
+                            combined_score=(conn.novelty_score + conn.actionability_score + conn.relevance_score) / 3,
+                            causal_chain=[],
+                            affected_goals=[],
+                            recommended_actions=[conn.recommended_action] if conn.recommended_action else [],
+                            status="new",
+                            created_at=datetime.now(UTC),
+                            updated_at=datetime.now(UTC),
+                        )
+                    )
+            if connections:
+                logger.info("Connection engine found %d connections", len(connections))
+        except asyncio.TimeoutError:
+            logger.warning("Connection engine timed out in process_event")
+        except Exception:
+            logger.warning("Connection engine failed in process_event", exc_info=True)
 
         # Enrich with time horizon categorization (lightweight, 5s timeout)
         try:

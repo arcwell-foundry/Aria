@@ -189,24 +189,19 @@ class CrossDomainConnectionEngine:
             data = {
                 "user_id": user_id,
                 "insight_type": "cross_domain_connection",
-                "trigger_event": (connection.source_events[0] if connection.source_events else ""),
+                "engine_source": "connection",
+                "title": (connection.source_events[0] if connection.source_events else "")[:100],
                 "content": connection.explanation,
                 "classification": connection.connection_type.value,
                 "impact_score": connection.novelty_score,
                 "confidence": connection.actionability_score,
                 "urgency": connection.relevance_score,
-                "combined_score": (
-                    connection.novelty_score
-                    + connection.actionability_score
-                    + connection.relevance_score
-                )
-                / 3,
                 "causal_chain": [{"event": e} for e in connection.source_events],
                 "affected_goals": [],
                 "recommended_actions": (
                     [connection.recommended_action] if connection.recommended_action else []
                 ),
-                "status": "new",
+                "status": "active",
             }
 
             result = self._db.table("jarvis_insights").insert(data).execute()
