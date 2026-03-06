@@ -16,6 +16,7 @@ Key features:
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -31,6 +32,72 @@ from src.intelligence.causal.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json_array_from_response(response: str) -> list | None:
+    """Extract JSON array from LLM response that may contain extra text.
+
+    Handles:
+    - Markdown code blocks (```json...```)
+    - JSON embedded in text
+    - Extra text after JSON
+
+    Args:
+        response: Raw LLM response text
+
+    Returns:
+        Parsed JSON list or None if parsing fails
+    """
+    response = response.strip()
+
+    # Handle markdown code blocks
+    if response.startswith("```"):
+        lines = response.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        response = "\n".join(lines).strip()
+
+    # Try direct parse first
+    try:
+        result = json.loads(response)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON array in the response
+    # Look for content between [ and ]
+    start = response.find("[")
+    if start != -1:
+        # Find matching closing bracket
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i, char in enumerate(response[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == "\\":
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+            elif not in_string:
+                if char == "[":
+                    depth += 1
+                elif char == "]":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            result = json.loads(response[start : i + 1])
+                            if isinstance(result, list):
+                                return result
+                        except json.JSONDecodeError:
+                            break
+
+    return None
 
 
 class CausalChainEngine:
@@ -219,11 +286,19 @@ class CausalChainEngine:
         and other entities that may be causally connected.
 
         Args:
-            trigger_event: The event description to analyze
+            trigger_event: The event description to analyze (may include context enrichment)
 
         Returns:
             List of extracted entities with types and relevance scores
         """
+        # Extract just the raw event if this is an enriched event with context
+        # Format: "[CONTEXT]...---\nEVENT TO ANALYZE:\n[raw event]"
+        raw_event = trigger_event
+        if "EVENT TO ANALYZE:" in trigger_event:
+            parts = trigger_event.split("EVENT TO ANALYZE:")
+            if len(parts) > 1:
+                raw_event = parts[-1].strip()
+
         system_prompt = """You are an expert at extracting entities from business news and events.
 Extract all relevant named entities that could be involved in causal relationships.
 
@@ -248,25 +323,17 @@ Return ONLY a valid JSON array, no other text:
 
         try:
             response = await self._llm.generate(
-                messages=[{"role": "user", "content": trigger_event}],
+                messages=[{"role": "user", "content": raw_event}],
                 system_prompt=system_prompt,
                 task=TaskType.CAUSAL_ENTITY_EXTRACT,
                 agent_id="causal_engine",
             )
 
-            # Parse JSON response
-            # Strip any markdown code blocks if present
-            response = response.strip()
-            if response.startswith("```"):
-                # Remove markdown code block markers
-                lines = response.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                response = "\n".join(lines).strip()
-
-            entities_data = json.loads(response)
+            # Parse JSON response with robust extraction
+            entities_data = _extract_json_array_from_response(response)
+            if entities_data is None:
+                logger.warning("Failed to extract JSON array from entity extraction response")
+                return []
 
             entities = [
                 EntityExtraction(
@@ -281,9 +348,6 @@ Return ONLY a valid JSON array, no other text:
 
             return entities
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse entity extraction response: {e}")
-            return []
         except Exception as e:
             logger.exception(f"Entity extraction failed: {e}")
             return []

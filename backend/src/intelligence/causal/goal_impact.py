@@ -13,6 +13,7 @@ Key components:
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -31,6 +32,64 @@ logger = logging.getLogger(__name__)
 
 # De-prioritization factor for insights with no goal relevance
 NO_GOAL_PRIORITY_MULTIPLIER = 0.3
+
+
+def _extract_json_from_response(response: str) -> dict | None:
+    """Extract JSON object from LLM response that may contain extra text.
+
+    Handles:
+    - Markdown code blocks (```json...```)
+    - JSON embedded in text
+    - Truncated responses
+
+    Args:
+        response: Raw LLM response text
+
+    Returns:
+        Parsed JSON dict or None if parsing fails
+    """
+    response = response.strip()
+
+    # Handle markdown code blocks
+    if response.startswith("```"):
+        lines = response.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        response = "\n".join(lines).strip()
+
+    # Try direct parse first
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON object in the response
+    json_match = re.search(r"\{[^{}]*\}", response, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    # Try to find JSON with nested braces (simple objects only)
+    start = response.find("{")
+    if start != -1:
+        # Find matching closing brace
+        depth = 0
+        for i, char in enumerate(response[start:], start):
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(response[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+
+    return None
 
 # LLM prompt template for impact scoring
 IMPACT_SCORING_PROMPT = """You are analyzing how an intelligence insight affects a business goal.
@@ -522,17 +581,11 @@ class GoalImpactMapper:
                 agent_id="goal_impact",
             )
 
-            # Parse JSON response
-            response = response.strip()
-            if response.startswith("```"):
-                lines = response.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                response = "\n".join(lines).strip()
-
-            data = json.loads(response)
+            # Parse JSON response with robust extraction
+            data = _extract_json_from_response(response)
+            if data is None:
+                logger.warning("Failed to extract JSON from impact response")
+                return None
 
             # Validate and map impact type
             impact_type_str = data.get("impact_type", "neutral").lower()
@@ -549,9 +602,6 @@ class GoalImpactMapper:
                 explanation=data.get("explanation", "Impact analysis not available"),
             )
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse impact response: {e}")
-            return None
         except Exception as e:
             logger.warning(f"Failed to analyze impact: {e}")
             return None

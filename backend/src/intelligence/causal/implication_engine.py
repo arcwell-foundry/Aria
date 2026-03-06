@@ -29,9 +29,78 @@ from src.intelligence.causal.models import (
     ImplicationType,
     JarvisInsight,
 )
-from src.intelligence.temporal import TimeHorizonAnalyzer
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json_array_from_response(response: str) -> list | None:
+    """Extract JSON array from LLM response that may contain extra text.
+
+    Handles:
+    - Markdown code blocks (```json...```)
+    - JSON embedded in text
+    - Truncated responses
+
+    Args:
+        response: Raw LLM response text
+
+    Returns:
+        Parsed JSON list or None if parsing fails
+    """
+    response = response.strip()
+
+    # Handle markdown code blocks
+    if response.startswith("```"):
+        lines = response.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        response = "\n".join(lines).strip()
+
+    # Try direct parse first
+    try:
+        result = json.loads(response)
+        if isinstance(result, list):
+            return result
+        elif isinstance(result, dict):
+            return [result]
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON array in the response
+    start = response.find("[")
+    if start != -1:
+        # Find matching closing bracket
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i, char in enumerate(response[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == "\\":
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+            elif not in_string:
+                if char == "[":
+                    depth += 1
+                elif char == "]":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            result = json.loads(response[start : i + 1])
+                            if isinstance(result, list):
+                                return result
+                        except json.JSONDecodeError:
+                            break
+
+    return None
+
+
+from src.intelligence.temporal import TimeHorizonAnalyzer
 
 # Scoring weights for combined score calculation
 IMPACT_WEIGHT = 0.40
@@ -369,21 +438,18 @@ Analyze each chain's impact on the user's goals:"""
                 agent_id="implication_engine",
             )
 
-            # Parse JSON response
-            response = response.strip()
-            if response.startswith("```"):
-                lines = response.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                response = "\n".join(lines).strip()
+            # Parse JSON response with robust extraction
+            analyses = _extract_json_array_from_response(response)
+            if analyses is None:
+                logger.warning("Batch chain analysis failed: could not extract JSON, falling back to individual")
+                # Fallback: analyze chains individually
+                implications: list[Implication] = []
+                for chain in chains[:3]:
+                    chain_impls = await self._analyze_chain(chain, goals, include_neutral)
+                    implications.extend(chain_impls)
+                return implications
 
-            analyses = json.loads(response)
-            if not isinstance(analyses, list):
-                analyses = [analyses]
-
-        except (json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             logger.warning("Batch chain analysis failed: %s, falling back to individual", e)
             # Fallback: analyze chains individually
             implications: list[Implication] = []

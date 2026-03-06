@@ -34,13 +34,13 @@ _ENGINE_TIMEOUT_S = 20
 
 # Engine-specific timeouts for process_event pipeline
 _PROCESS_EVENT_TIMEOUTS: dict[str, int] = {
-    "implication": 15,  # Heavy LLM engine (includes causal traversal)
-    "butterfly": 15,   # Wraps implication engine internally
-    "goal_impact": 5,   # DB query only, no LLM
-    "time_horizon": 5,
-    "connection": 10,
-    "temporal": 5,
-    "predictive": 10,
+    "implication": 30,  # Heavy LLM engine (includes causal traversal + context enrichment)
+    "butterfly": 30,   # Wraps implication engine internally
+    "goal_impact": 10,  # DB query + LLM for impact classification
+    "time_horizon": 10,
+    "connection": 15,
+    "temporal": 10,
+    "predictive": 15,
 }
 
 # Deduplication similarity threshold
