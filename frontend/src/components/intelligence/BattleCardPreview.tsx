@@ -138,8 +138,12 @@ export function BattleCardPreview({ card, className = '' }: BattleCardPreviewPro
   const momentumConfig = momentum ? MOMENTUM_CONFIG[momentum] : null;
 
   // Determine "How We Win" content: differentiation first, fallback to strengths
+  // Handle both object format {area, our_advantage} and plain string format
   const howWeWin: string[] = card.differentiation?.length > 0
-    ? card.differentiation.slice(0, 2).map(d => d.our_advantage)
+    ? card.differentiation.slice(0, 2).map(d => {
+        if (typeof d === 'string') return d;
+        return (d as { our_advantage?: string }).our_advantage || '';
+      }).filter(Boolean)
     : (card.strengths ?? []).slice(0, 2);
 
   const handleClick = () => {
