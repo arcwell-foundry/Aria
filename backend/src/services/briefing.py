@@ -1600,20 +1600,130 @@ class BriefingService:
                     + "\nYou may mention a pattern if factually supported. Never infer email content or conversation direction."
                 )
 
-            prompt = f"""Generate a brief, professional briefing summary (2-3 sentences) based on:
+            # Build rich data sections so the LLM can reference specifics
+            calendar_details = ""
+            if calendar.get("key_meetings"):
+                meeting_lines = []
+                for m in calendar["key_meetings"][:6]:
+                    attendee_names = [
+                        a.get("name") or a.get("email", "Unknown")
+                        for a in m.get("attendees", [])
+                    ]
+                    attendee_str = ", ".join(attendee_names) if attendee_names else "no attendees listed"
+                    meeting_lines.append(
+                        f"  - {m.get('time', '?')}: \"{m.get('title', 'Untitled')}\" with {attendee_str}"
+                    )
+                calendar_details = "\n".join(meeting_lines)
+            calendar_section = (
+                f"CALENDAR ({meeting_count} meetings today):\n{calendar_details}"
+                if calendar_details
+                else f"CALENDAR: No meetings today — open schedule."
+            )
 
-Calendar: {meeting_count} meetings today
-Leads needing attention: {attention_count}
-New signals: {signal_count}
-Overdue tasks: {overdue_count}
-Emails received: {email_count}
-Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_note}{causal_note}
+            overdue_details = ""
+            if tasks.get("overdue"):
+                overdue_lines = []
+                for t in tasks["overdue"][:5]:
+                    days_overdue = ""
+                    if t.get("due_at"):
+                        try:
+                            due = datetime.fromisoformat(t["due_at"].replace("Z", "+00:00"))
+                            delta = (datetime.now(UTC) - due).days
+                            days_overdue = f" (overdue by {delta} days)" if delta > 0 else ""
+                        except (ValueError, TypeError):
+                            pass
+                    overdue_lines.append(f"  - \"{t.get('task', 'Untitled')}\"{days_overdue}")
+                overdue_details = "\n".join(overdue_lines)
+            overdue_section = (
+                f"OVERDUE TASKS ({overdue_count}):\n{overdue_details}"
+                if overdue_details
+                else ""
+            )
 
-Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
+            lead_details = ""
+            if leads.get("needs_attention"):
+                lead_lines = []
+                for l in leads["needs_attention"][:3]:
+                    score = l.get("health_score")
+                    score_str = f" (health: {score}/100)" if score is not None else ""
+                    lead_lines.append(f"  - {l.get('company_name', 'Unknown')}{score_str}")
+                lead_details = "\n".join(lead_lines)
+            lead_section = (
+                f"LEADS NEEDING ATTENTION ({attention_count}):\n{lead_details}"
+                if lead_details
+                else ""
+            )
+
+            signal_details = ""
+            all_signals = signals.get("company_news", []) + signals.get("market_trends", [])
+            if all_signals:
+                signal_lines = []
+                for s in sorted(all_signals, key=lambda x: x.get("relevance_score", 0), reverse=True)[:3]:
+                    signal_lines.append(
+                        f"  - {s.get('company_name', 'Unknown')}: {s.get('title', '')}"
+                    )
+                signal_details = "\n".join(signal_lines)
+            signal_section = (
+                f"MARKET SIGNALS ({signal_count} new):\n{signal_details}"
+                if signal_details
+                else ""
+            )
+
+            email_details = ""
+            if email_data.get("needs_attention"):
+                email_lines = []
+                for e in email_data["needs_attention"][:5]:
+                    company_str = f" ({e['company']})" if e.get("company") else ""
+                    email_lines.append(
+                        f"  - From: {e.get('sender', 'Unknown')}{company_str} — Subject: \"{e.get('subject', 'No subject')}\""
+                    )
+                email_details = "\n".join(email_lines)
+            email_section = (
+                f"EMAILS ({email_count} received, {drafts_waiting} drafts waiting):\n{email_details}"
+                if email_count > 0
+                else ""
+            )
+
+            # Assemble all data sections
+            data_sections = "\n\n".join(
+                s for s in [
+                    calendar_section,
+                    overdue_section,
+                    lead_section,
+                    signal_section,
+                    email_section,
+                ]
+                if s
+            )
+
+            prompt = f"""Generate a strategic morning briefing summary based on the following intelligence:
+
+{data_sections}{debrief_note}{queued_note}{patterns_note}{causal_note}
+
+YOUR ROLE: You are a strategic VP briefing your executive. Not a dashboard reading numbers. Not an assistant listing items.
+
+BRIEFING RULES:
+1. LEAD WITH WHAT MATTERS MOST. Not "you have X meetings." Instead: "Your priority today is [specific thing] because [specific reason]."
+2. PRIORITIZE ruthlessly. The user has limited attention. What is the ONE thing they should focus on first?
+3. CONNECT DOTS between data sources. If a meeting attendee also sent emails, mention that connection. If a market signal affects an upcoming meeting, connect them.
+4. BE OPINIONATED. Say "I'd suggest..." or "The priority is..." — don't just list facts.
+5. REFERENCE RELATIONSHIPS by name. "Rob Douglas" not "a contact." "Nira Systems" not "a company."
+6. USE TIME CONTEXT. "overdue by 11 days" is more urgent than "overdue by 2 days." Say which ones are getting stale.
+7. KEEP IT SHORT. 3-5 sentences for the summary. Users scan, they don't read paragraphs.
+8. SUGGEST SPECIFIC ACTIONS. Not "address overdue tasks" but "Reply to Rob Douglas — he's been waiting 5 days."
+
+WHAT NOT TO DO:
+- Don't start with "Good morning" followed by counts of items. That's generic.
+- Don't list every data point. Prioritize the top 2-3 things.
+- Don't use corporate jargon like "leverage," "synergize," "action items."
+- Don't repeat the same information in different ways.
+- Don't use emojis. Use clean, professional language.
+
+FORMAT: Return ONLY the briefing summary text. No JSON, no markdown, no bullet points. Just natural conversational prose, 3-5 sentences.
 
 {get_email_guardrail()}
 
-IMPORTANT: Only describe information you can directly verify from the data provided. It is better to say less than to say something inaccurate.
+IMPORTANT: Only describe information you can directly verify from the data provided above. It is better to say less than to say something inaccurate.
 """
 
         # Inject tone guidance if available
@@ -1639,8 +1749,8 @@ IMPORTANT: Only describe information you can directly verify from the data provi
             request = PersonaRequest(
                 user_id=user_id,
                 agent_name="briefing",
-                agent_role_description="Morning briefing generator providing daily intelligence summary",
-                task_description="Generate a concise, actionable morning briefing",
+                agent_role_description="Strategic VP-level morning briefing generator that prioritizes what matters most, connects dots between data sources, and suggests specific actions",
+                task_description="Generate a prioritized, opinionated morning briefing that leads with the most important item and references people and companies by name",
                 causal_actions=causal_actions_text if causal_actions_text else None,
             )
             ctx = await builder.build(request)
@@ -1660,7 +1770,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    max_tokens=200,
+                    max_tokens=400,
                     task=TaskType.ANALYST_SUMMARIZE,
                     agent_id="briefing",
                 )
@@ -1668,7 +1778,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                 # Fallback without PersonaBuilder
                 return await self._llm.generate_response(
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=200,
+                    max_tokens=400,
                     task=TaskType.ANALYST_SUMMARIZE,
                     agent_id="briefing",
                 )
