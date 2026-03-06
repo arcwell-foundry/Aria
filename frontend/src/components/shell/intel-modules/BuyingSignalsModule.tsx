@@ -1,5 +1,6 @@
 import { TrendingUp, Eye, FileText } from 'lucide-react';
 import { useSignals } from '@/hooks/useIntelPanelData';
+import { formatSourceName } from '@/utils/sourceLabels';
 
 interface Signal {
   message: string;
@@ -107,7 +108,7 @@ export function BuyingSignalsModule({ signals: propSignals }: BuyingSignalsModul
                     {signal.strength?.toUpperCase() ?? 'UNKNOWN'}
                   </span>
                   <span className="font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                    · {signal.source}
+                    · {formatSourceName(signal.source)}
                   </span>
                 </div>
               </div>

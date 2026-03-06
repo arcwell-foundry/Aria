@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { sanitizeSignalText } from "@/utils/sanitizeSignalText";
+import { formatSourceName } from "@/utils/sourceLabels";
 import {
   useSignals,
   useUnreadSignalCount,
@@ -179,7 +180,7 @@ function SignalCard({
               className="text-xs font-mono truncate max-w-[160px]"
               style={{ color: "var(--text-tertiary, var(--text-secondary))" }}
             >
-              {signal.source}
+              {formatSourceName(signal.source)}
             </span>
           )}
           <span

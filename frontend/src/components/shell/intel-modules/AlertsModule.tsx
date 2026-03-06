@@ -1,5 +1,6 @@
 import { AlertTriangle, Clock, UserX } from 'lucide-react';
 import { useSignals, formatRelativeTime } from '@/hooks/useIntelPanelData';
+import { formatSourceName } from '@/utils/sourceLabels';
 
 interface Alert {
   severity: 'critical' | 'warning' | 'info';
@@ -103,7 +104,7 @@ export function AlertsModule({ alerts: propAlerts }: AlertsModuleProps) {
                   {alert.message}
                 </p>
                 <p className="font-mono text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  {alert.source} · {alert.time}
+                  {formatSourceName(alert.source)} · {alert.time}
                 </p>
               </div>
             </div>

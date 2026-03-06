@@ -1,5 +1,6 @@
 import { Newspaper } from 'lucide-react';
 import { useSignals, formatRelativeTime } from '@/hooks/useIntelPanelData';
+import { formatSourceName } from '@/utils/sourceLabels';
 
 interface NewsItem {
   headline: string;
@@ -79,7 +80,7 @@ export function NewsAlertsModule({ news: propNews }: NewsAlertsModuleProps) {
                 {item.impact}
               </p>
               <p className="font-mono text-[10px] mt-1.5" style={{ color: 'var(--text-secondary)' }}>
-                {item.source} · {item.time}
+                {formatSourceName(item.source)} · {item.time}
               </p>
             </div>
           </div>

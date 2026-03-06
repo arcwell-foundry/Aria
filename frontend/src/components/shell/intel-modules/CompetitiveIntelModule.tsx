@@ -1,5 +1,6 @@
 import { Shield, Briefcase, Users } from 'lucide-react';
 import { useIntelBattleCards, formatRelativeTime } from '@/hooks/useIntelPanelData';
+import { formatSourceName } from '@/utils/sourceLabels';
 
 interface CompetitorMove {
   message: string;
@@ -90,7 +91,7 @@ export function CompetitiveIntelModule({ moves: propMoves }: CompetitiveIntelMod
                   {move.message}
                 </p>
                 <p className="font-mono text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  {move.source} · {move.time}
+                  {formatSourceName(move.source)} · {move.time}
                 </p>
               </div>
             </div>
