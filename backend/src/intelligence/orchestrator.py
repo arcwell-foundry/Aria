@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from src.intelligence.causal.models import JarvisInsight
+from src.intelligence.context_enricher import ContextEnricher
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ class JarvisOrchestrator:
     def __init__(self, llm_client: Any, db_client: Any) -> None:
         self._llm = llm_client
         self._db = db_client
+
+        # Context enricher (initialized eagerly — no LLM dependency)
+        self._context_enricher = ContextEnricher(self._db)
 
         # Lazy-init placeholders
         self.__causal: Any | None = None
@@ -208,10 +212,22 @@ class JarvisOrchestrator:
         all_insights: list[JarvisInsight] = []
         ctx = context or {}
 
+        # --- Context enrichment for briefing ---
+        # Use a general enrichment (no specific company) to get user identity,
+        # competitive landscape, and active goals into the context.
+        enriched_ctx = await self._context_enricher.enrich_event_context(
+            user_id=user_id,
+            event="morning briefing generation",
+            company_name=ctx.get("company_name", ""),
+            existing_context=ctx,
+        )
+        aria_brief = self._context_enricher.format_context_for_llm(enriched_ctx)
+        enriched_ctx["aria_context_brief"] = aria_brief
+
         # Run all engines in parallel with per-engine timeout
         tasks = [
             self._run_engine_with_timeout(
-                engine_name, user_id, ctx,
+                engine_name, user_id, enriched_ctx,
                 timeout_s=_PROCESS_EVENT_TIMEOUTS.get(engine_name, _ENGINE_TIMEOUT_S),
             )
             for engine_name in _BRIEFING_ENGINES
@@ -271,6 +287,21 @@ class JarvisOrchestrator:
             source_id,
         )
 
+        # --- Context enrichment: assemble ARIA's institutional knowledge ---
+        ctx = context or {}
+        enriched_context = await self._context_enricher.enrich_event_context(
+            user_id=user_id,
+            event=event,
+            company_name=ctx.get("company_name", "") if isinstance(ctx, dict) else "",
+            signal_type=ctx.get("signal_type", "") if isinstance(ctx, dict) else "",
+            existing_context=ctx if isinstance(ctx, dict) else {},
+        )
+        aria_brief = self._context_enricher.format_context_for_llm(enriched_context)
+        enriched_context["aria_context_brief"] = aria_brief
+
+        # Prepend context brief to the event so engines include it in LLM prompts
+        enriched_event = f"{aria_brief}\n\n---\nEVENT TO ANALYZE:\n{event}" if aria_brief else event
+
         # Run all engines in parallel with per-engine timeouts
         # Phase 1: Run implication + goal_impact in parallel
         async def _run_implications() -> tuple[list[JarvisInsight], list[Any]]:
@@ -278,7 +309,7 @@ class JarvisOrchestrator:
             insights: list[JarvisInsight] = []
             implications = await self._implication_engine.analyze_event(
                 user_id=user_id,
-                event=event,
+                event=enriched_event,
                 max_hops=1,
                 include_neutral=False,
                 min_score=0.4,
@@ -297,7 +328,7 @@ class JarvisOrchestrator:
             insights: list[JarvisInsight] = []
             goal_impacts = await self._goal_impact_mapper.assess_event_impact(
                 user_id=user_id,
-                event=event,
+                event=enriched_event,
             )
             for impact in goal_impacts[:3]:
                 insights.append(self._goal_impact_to_insight(impact, event, user_id))
@@ -574,6 +605,14 @@ class JarvisOrchestrator:
         """
         logger.info("[JARVIS] Engine %s starting", engine_name)
 
+        # Helper: prepend ARIA context brief to an event string
+        aria_brief = context.get("aria_context_brief", "")
+
+        def _enrich(event_text: str) -> str:
+            if aria_brief:
+                return f"{aria_brief}\n\n---\nEVENT TO ANALYZE:\n{event_text}"
+            return event_text
+
         if engine_name == "predictive":
             # Don't pass the raw dict as context — PredictiveEngine expects
             # a typed PredictionContext object. Passing None lets the engine
@@ -591,7 +630,7 @@ class JarvisOrchestrator:
             for event_text in events[:3]:
                 implications = await self._implication_engine.analyze_event(
                     user_id=user_id,
-                    event=event_text,
+                    event=_enrich(event_text),
                     max_hops=2,
                     include_neutral=False,
                     min_score=0.5,
@@ -609,7 +648,7 @@ class JarvisOrchestrator:
             insights = []
             for event_text in events[:2]:
                 butterfly = await self._butterfly_detector.detect(
-                    user_id=user_id, event=event_text, max_hops=2
+                    user_id=user_id, event=_enrich(event_text), max_hops=2
                 )
                 if butterfly:
                     saved = await self._butterfly_detector.save_butterfly_insight(
@@ -623,9 +662,10 @@ class JarvisOrchestrator:
             # Extract events from context dict — find_connections expects
             # events: list[str] | None, not a context dict.
             events = context.get("recent_events", context.get("new_events"))
+            enriched_events = [_enrich(e) for e in events] if events else events
             connections = await self._connection_engine.find_connections(
                 user_id=user_id,
-                events=events,
+                events=enriched_events,
             )
             return self._connections_to_insights(connections, user_id)
 
@@ -634,7 +674,7 @@ class JarvisOrchestrator:
             insights = []
             for event_text in events[:3]:
                 impacts = await self._goal_impact_mapper.assess_event_impact(
-                    user_id=user_id, event=event_text
+                    user_id=user_id, event=_enrich(event_text)
                 )
                 for impact in impacts[:2]:
                     insights.append(self._goal_impact_to_insight(impact, event_text, user_id))
@@ -645,7 +685,7 @@ class JarvisOrchestrator:
             insights = []
             for decision in decisions[:2]:
                 analysis = await self._temporal_reasoner.analyze_decision(
-                    user_id=user_id, decision=decision
+                    user_id=user_id, decision=_enrich(decision)
                 )
                 if analysis:
                     insights.append(self._temporal_to_insight(analysis, decision, user_id))
