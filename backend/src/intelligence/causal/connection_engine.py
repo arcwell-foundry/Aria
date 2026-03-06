@@ -105,6 +105,18 @@ class CrossDomainConnectionEngine:
         # Step 1: Get events to analyze
         if events is None:
             events = await self._fetch_recent_events(user_id, days_back)
+        elif len(events) < 2:
+            # Augment provided events with recent signals so we have
+            # enough to compare pairs (process_event often sends only 1).
+            recent = await self._fetch_recent_events(user_id, days_back)
+            # Avoid duplicates: only add signals not already in events
+            existing_set = set(events)
+            for sig in recent:
+                if sig not in existing_set:
+                    events.append(sig)
+                    existing_set.add(sig)
+                if len(events) >= 10:
+                    break
 
         if len(events) < 2:
             logger.info("Not enough events to find connections")
@@ -227,9 +239,9 @@ class CrossDomainConnectionEngine:
         try:
             result = (
                 self._db.table("market_signals")
-                .select("summary, created_at")
+                .select("summary, detected_at")
                 .eq("user_id", user_id)
-                .gte("created_at", cutoff.isoformat())
+                .gte("detected_at", cutoff.isoformat())
                 .limit(20)
                 .execute()
             )
@@ -291,7 +303,7 @@ Return format:
 Return only the JSON array, no markdown."""
 
         try:
-            response = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
+            response = await self._llm.generate_response([{"role": "user", "content": prompt}], task=TaskType.CAUSAL_ENTITY_EXTRACT, agent_id="causal_connection")
             # Parse JSON, handle markdown code blocks
             cleaned = response.strip()
             if cleaned.startswith("```"):
@@ -440,7 +452,7 @@ Return format:
 Return only JSON, no markdown."""
 
         try:
-            response = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
+            response = await self._llm.generate_response([{"role": "user", "content": prompt}], task=TaskType.CAUSAL_INFER, agent_id="causal_connection")
             cleaned = response.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
@@ -476,7 +488,7 @@ Recommended action: {scores.get("recommended_action", "None")}
 Write a clear, professional explanation focused on competitive and commercial implications for a bioprocessing sales team. Reference specific products, technologies, or market dynamics where relevant. NEVER fabricate deals, stakeholder names, or dollar amounts."""
 
         try:
-            explanation: str = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")
+            explanation: str = await self._llm.generate_response([{"role": "user", "content": prompt}], task=TaskType.CAUSAL_INFER, agent_id="causal_connection")
             return explanation
         except Exception:
             return f"Connection found between: {event_a[:50]}... and {event_b[:50]}..."

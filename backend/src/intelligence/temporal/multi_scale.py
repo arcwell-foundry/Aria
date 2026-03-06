@@ -1127,6 +1127,85 @@ Return ONLY the reconciliation advice text, no JSON or formatting."""
         else:
             return "needs_reconciliation"
 
+    async def save_temporal_insight(
+        self,
+        user_id: str,
+        analysis: TemporalAnalysis,
+        trigger_decision: str,
+    ) -> str | None:
+        """Save temporal analysis as an insight in jarvis_insights table.
+
+        Args:
+            user_id: User ID who owns this insight.
+            analysis: The temporal analysis result.
+            trigger_decision: The decision text that triggered the analysis.
+
+        Returns:
+            The insight ID if saved successfully, None otherwise.
+        """
+        try:
+            db = self._get_db()
+
+            # Build content from the analysis
+            conflicts = analysis.conflicts
+            content = f"Temporal analysis of '{trigger_decision[:80]}': "
+            if conflicts:
+                content += (
+                    f"{len(conflicts)} cross-scale conflict(s) detected. "
+                    f"Overall alignment: {analysis.overall_alignment}."
+                )
+                if analysis.reconciliation_advice:
+                    content += f" {analysis.reconciliation_advice[:200]}"
+            else:
+                content += (
+                    f"No cross-scale conflicts detected. "
+                    f"Overall alignment: {analysis.overall_alignment}."
+                )
+
+            # Build recommended actions from scale recommendations
+            recommended_actions: list[str] = []
+            for _scale_key, rec in analysis.recommendations.items():
+                if isinstance(rec, ScaleRecommendation) and rec.recommendation:
+                    recommended_actions.append(f"[{rec.scale.value}] {rec.recommendation}")
+                elif isinstance(rec, dict) and rec.get("recommendation"):
+                    recommended_actions.append(f"[{rec.get('scale', 'unknown')}] {rec['recommendation']}")
+
+            # Determine classification based on alignment
+            classification = "neutral"
+            if analysis.overall_alignment == "conflicted":
+                classification = "threat"
+            elif analysis.overall_alignment == "aligned":
+                classification = "opportunity"
+
+            data = {
+                "user_id": user_id,
+                "insight_type": "temporal",
+                "engine_source": "temporal",
+                "title": trigger_decision[:100],
+                "content": content,
+                "classification": classification,
+                "impact_score": 1.0 - analysis.confidence if conflicts else analysis.confidence,
+                "confidence": analysis.confidence,
+                "urgency": 0.7 if conflicts else 0.3,
+                "causal_chain": [],
+                "affected_goals": [],
+                "recommended_actions": recommended_actions[:5],
+                "time_horizon": "medium_term",
+                "status": "active",
+            }
+
+            result = db.table("jarvis_insights").insert(data).execute()
+
+            if result.data:
+                insight_id: str = result.data[0]["id"]
+                logger.info("Persisted temporal insight to jarvis_insights")
+                return insight_id
+            return None
+
+        except Exception:
+            logger.exception("Failed to save temporal insight")
+            return None
+
     def _calculate_confidence(
         self,
         scale_contexts: dict[TimeScale, ScaleContext],

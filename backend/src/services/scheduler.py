@@ -1511,6 +1511,263 @@ def _get_health_check_action(toolkit_slug: str) -> str | None:
     return health_check_actions.get(toolkit_slug.upper())
 
 
+async def _run_battle_card_metrics_recompute() -> None:
+    """Daily recompute of battle card threat metrics from market signals.
+
+    For each battle card:
+    1. Query market_signals by company_name (including aliases)
+    2. Compute 30-day and previous-30-day signal counts
+    3. Calculate momentum, threat_score, threat_level
+    4. Update the card's analysis JSON and last_updated
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+        from src.utils.company_aliases import get_signal_company_names_for_battle_card
+
+        db = SupabaseClient.get_client()
+
+        # Get all battle cards
+        cards_result = (
+            db.table("battle_cards")
+            .select("id, competitor_name, analysis")
+            .execute()
+        )
+        cards = cards_result.data or []
+
+        if not cards:
+            return
+
+        logger.info("Battle card metrics recompute: processing %d cards", len(cards))
+
+        now = datetime.now(UTC)
+        thirty_days_ago = (now - timedelta(days=30)).isoformat()
+        sixty_days_ago = (now - timedelta(days=60)).isoformat()
+
+        updated = 0
+        for card in cards:
+            try:
+                card_id = card["id"]
+                competitor_name = card.get("competitor_name", "")
+
+                # Get all name variants for this battle card
+                name_variants = get_signal_company_names_for_battle_card(competitor_name)
+
+                # Query signals from last 30 days across all name variants
+                signals_30d: list[dict] = []
+                signals_prev_30d: list[dict] = []
+
+                for name in name_variants:
+                    result_30d = (
+                        db.table("market_signals")
+                        .select("id, signal_type, relevance_score")
+                        .eq("company_name", name)
+                        .gte("created_at", thirty_days_ago)
+                        .execute()
+                    )
+                    signals_30d.extend(result_30d.data or [])
+
+                    result_prev = (
+                        db.table("market_signals")
+                        .select("id, signal_type, relevance_score")
+                        .eq("company_name", name)
+                        .gte("created_at", sixty_days_ago)
+                        .lt("created_at", thirty_days_ago)
+                        .execute()
+                    )
+                    signals_prev_30d.extend(result_prev.data or [])
+
+                count_30d = len(signals_30d)
+                count_prev_30d = len(signals_prev_30d)
+
+                # Momentum calculation
+                if count_prev_30d > 0 and count_30d > count_prev_30d * 1.25:
+                    momentum = "increasing"
+                elif count_prev_30d > 0 and count_30d < count_prev_30d * 0.75:
+                    momentum = "declining"
+                else:
+                    momentum = "stable"
+
+                # High-impact signals
+                high_impact_types = {"product", "funding", "fda_approval", "clinical_trial"}
+                high_impact = [
+                    s for s in signals_30d
+                    if s.get("signal_type") in high_impact_types
+                ]
+
+                # Threat score
+                threat_score = round(
+                    (min(count_30d, 10) / 10 * 0.4)
+                    + (min(len(high_impact), 5) / 5 * 0.35)
+                    + (0.7 if count_30d else (0.4 if count_prev_30d else 0.1)) * 0.25,
+                    2,
+                )
+
+                # Threat level
+                if threat_score >= 0.65:
+                    threat_level = "high"
+                elif threat_score >= 0.35:
+                    threat_level = "medium"
+                else:
+                    threat_level = "low"
+
+                # Average relevance
+                relevance_scores = [
+                    s.get("relevance_score", 0) for s in signals_30d
+                    if s.get("relevance_score") is not None
+                ]
+                avg_relevance = (
+                    round(sum(relevance_scores) / len(relevance_scores), 2)
+                    if relevance_scores
+                    else 0
+                )
+
+                # Merge into existing analysis
+                existing_analysis = card.get("analysis") or {}
+                existing_analysis.update({
+                    "signals_30d": count_30d,
+                    "signals_prev_30d": count_prev_30d,
+                    "momentum": momentum,
+                    "threat_score": threat_score,
+                    "threat_level": threat_level,
+                    "high_impact_count": len(high_impact),
+                    "avg_relevance": avg_relevance,
+                    "metrics_updated_at": now.isoformat(),
+                })
+
+                (
+                    db.table("battle_cards")
+                    .update({
+                        "analysis": existing_analysis,
+                        "last_updated": now.isoformat(),
+                    })
+                    .eq("id", card_id)
+                    .execute()
+                )
+
+                updated += 1
+
+            except Exception:
+                logger.warning(
+                    "Battle card metrics recompute failed for card %s",
+                    card.get("id"),
+                    exc_info=True,
+                )
+
+        logger.info(
+            "Battle card metrics recompute complete: %d/%d cards updated",
+            updated,
+            len(cards),
+        )
+
+    except Exception:
+        logger.exception("Battle card metrics recompute scheduler run failed")
+
+
+async def _run_market_cap_update() -> None:
+    """Monthly enrichment of market cap data for user's company and competitors.
+
+    Uses Exa search to find recent market cap / valuation data for:
+    1. The user's own company
+    2. All competitors from battle_cards
+
+    Results are logged for now; parsing can be improved later.
+    """
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Try to import Exa provider
+        try:
+            from src.agents.capabilities.enrichment_providers.exa_provider import (
+                ExaEnrichmentProvider,
+            )
+        except ImportError:
+            logger.warning("Exa provider not available — skipping market cap update")
+            return
+
+        exa = ExaEnrichmentProvider()
+
+        # Get all companies (user companies) from user_profiles → companies
+        profiles_result = (
+            db.table("user_profiles")
+            .select("company_id")
+            .not_.is_("company_id", "null")
+            .execute()
+        )
+        company_ids = list({p["company_id"] for p in (profiles_result.data or [])})
+
+        companies_to_search: list[str] = []
+        for company_id in company_ids:
+            try:
+                company_result = (
+                    db.table("companies")
+                    .select("name")
+                    .eq("id", company_id)
+                    .limit(1)
+                    .execute()
+                )
+                if company_result.data:
+                    name = company_result.data[0].get("name")
+                    if name:
+                        companies_to_search.append(name)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch company name for id %s",
+                    company_id,
+                    exc_info=True,
+                )
+
+        # Get all competitors from battle_cards
+        cards_result = (
+            db.table("battle_cards")
+            .select("competitor_name")
+            .execute()
+        )
+        for card in (cards_result.data or []):
+            name = card.get("competitor_name")
+            if name and name not in companies_to_search:
+                companies_to_search.append(name)
+
+        if not companies_to_search:
+            logger.info("Market cap update: no companies to search")
+            return
+
+        logger.info(
+            "Market cap update: searching %d companies",
+            len(companies_to_search),
+        )
+
+        for company_name in companies_to_search:
+            try:
+                query = f"{company_name} market capitalization valuation 2026"
+                results = await exa.search_fast(query, num_results=3)
+
+                if results:
+                    logger.info(
+                        "Market cap search for '%s': %d results — %s",
+                        company_name,
+                        len(results),
+                        "; ".join(r.title[:80] for r in results[:3]),
+                    )
+                else:
+                    logger.info(
+                        "Market cap search for '%s': no results",
+                        company_name,
+                    )
+            except Exception:
+                logger.warning(
+                    "Market cap search failed for '%s'",
+                    company_name,
+                    exc_info=True,
+                )
+
+    except Exception:
+        logger.exception("Market cap update scheduler run failed")
+
+
 async def _run_reconciliation_sweep() -> None:
     """Safety net: Check for events that webhooks might have missed.
 
@@ -1795,6 +2052,20 @@ async def start_scheduler() -> None:
             name="Daily connection health verification",
             replace_existing=True,
             misfire_grace_time=3600,
+        )
+        _scheduler.add_job(
+            _run_battle_card_metrics_recompute,
+            trigger=CronTrigger(hour=2, minute=0),  # 2 AM UTC daily
+            id="battle_card_metrics_recompute",
+            name="Daily battle card threat metrics recompute",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_market_cap_update,
+            trigger=CronTrigger(day=1, hour=3, minute=0),  # 1st of month, 3 AM UTC
+            id="market_cap_update",
+            name="Monthly market cap Exa enrichment",
+            replace_existing=True,
         )
         _scheduler.start()
         logger.info(

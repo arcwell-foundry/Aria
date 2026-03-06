@@ -37,7 +37,7 @@ _PROCESS_EVENT_TIMEOUTS: dict[str, int] = {
     "butterfly": 30,   # Wraps implication engine internally
     "goal_impact": 10,  # DB query + LLM for impact classification
     "time_horizon": 10,
-    "connection": 15,
+    "connection": 45,
     "temporal": 10,
     "predictive": 15,
 }
@@ -734,7 +734,32 @@ class JarvisOrchestrator:
                 user_id=user_id,
                 context=None,
             )
-            return self._predictions_to_insights(predictions, user_id)
+            insights = self._predictions_to_insights(predictions, user_id)
+            # Persist predictive insights to jarvis_insights
+            for insight in insights:
+                try:
+                    pred_data = {
+                        "user_id": user_id,
+                        "insight_type": "prediction",
+                        "engine_source": "predictive",
+                        "title": _clean_title(insight.content[:100] if insight.content else "Prediction"),
+                        "content": insight.content,
+                        "classification": insight.classification or "neutral",
+                        "impact_score": insight.impact_score,
+                        "confidence": insight.confidence,
+                        "urgency": insight.urgency,
+                        "causal_chain": insight.causal_chain or [],
+                        "affected_goals": insight.affected_goals or [],
+                        "recommended_actions": insight.recommended_actions or [],
+                        "status": "active",
+                    }
+                    db_result = self._db.table("jarvis_insights").insert(pred_data).execute()
+                    if db_result.data:
+                        insight.id = UUID(db_result.data[0]["id"]) if isinstance(db_result.data[0]["id"], str) else db_result.data[0]["id"]
+                        logger.info("Persisted predictive insight to jarvis_insights")
+                except Exception:
+                    logger.warning("Failed to persist predictive insight", exc_info=True)
+            return insights
 
         if engine_name == "implication":
             # Analyze recent events from context or a default event
@@ -780,7 +805,38 @@ class JarvisOrchestrator:
                 user_id=user_id,
                 events=enriched_events,
             )
-            return self._connections_to_insights(connections, user_id)
+            insights: list[JarvisInsight] = []
+            for conn in (connections or [])[:3]:
+                saved_id = await self._connection_engine.save_connection_insight(
+                    user_id=user_id,
+                    connection=conn,
+                )
+                if saved_id:
+                    insights.append(
+                        JarvisInsight(
+                            id=UUID(saved_id) if isinstance(saved_id, str) else saved_id,
+                            user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+                            insight_type="cross_domain_connection",
+                            engine_source="connection",
+                            trigger_event=(conn.source_events[0] if conn.source_events else "cross_domain_analysis")[:200],
+                            content=conn.explanation,
+                            classification=conn.connection_type.value,
+                            impact_score=conn.novelty_score,
+                            confidence=conn.actionability_score,
+                            urgency=conn.relevance_score,
+                            combined_score=(conn.novelty_score + conn.actionability_score + conn.relevance_score) / 3,
+                            causal_chain=[],
+                            affected_goals=[],
+                            recommended_actions=[conn.recommended_action] if conn.recommended_action else [],
+                            status="new",
+                            created_at=datetime.now(UTC),
+                            updated_at=datetime.now(UTC),
+                        )
+                    )
+            if not insights:
+                # Fall back to in-memory insights if save failed
+                insights = self._connections_to_insights(connections, user_id)
+            return insights
 
         if engine_name == "goal_impact":
             events = context.get("recent_events", context.get("new_events", []))
@@ -801,7 +857,16 @@ class JarvisOrchestrator:
                     user_id=user_id, decision=_enrich(decision)
                 )
                 if analysis:
-                    insights.append(self._temporal_to_insight(analysis, decision, user_id))
+                    # Persist to jarvis_insights
+                    saved_id = await self._temporal_reasoner.save_temporal_insight(
+                        user_id=user_id,
+                        analysis=analysis,
+                        trigger_decision=decision,
+                    )
+                    insight = self._temporal_to_insight(analysis, decision, user_id)
+                    if saved_id:
+                        insight.id = UUID(saved_id) if isinstance(saved_id, str) else saved_id
+                    insights.append(insight)
             return insights
 
         return []
