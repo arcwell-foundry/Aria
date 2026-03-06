@@ -375,7 +375,7 @@ class GoalImpactMapper:
         try:
             query = (
                 self._db.table("goals")
-                .select("id, title, description, status, priority, category")
+                .select("id, title, description, status, goal_type")
                 .eq("user_id", user_id)
             )
 
@@ -385,7 +385,7 @@ class GoalImpactMapper:
             else:
                 query = query.eq("status", "active")
 
-            result = query.order("priority", desc=True).limit(50).execute()
+            result = query.order("created_at", desc=True).limit(50).execute()
 
             return result.data or []
 
@@ -410,7 +410,7 @@ class GoalImpactMapper:
         try:
             result = (
                 self._db.table("goals")
-                .select("id, title, description, status, priority, category")
+                .select("id, title, description, status, goal_type")
                 .eq("id", goal_id)
                 .eq("user_id", user_id)
                 .single()
