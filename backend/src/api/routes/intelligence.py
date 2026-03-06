@@ -385,18 +385,23 @@ class InsightResponse(BaseModel):
     id: str
     user_id: str
     insight_type: str
-    trigger_event: str
+    trigger_event: str | None = None  # Optional - may not be in all insight types
+    engine_source: str | None = None  # Which Jarvis engine generated this
+    title: str | None = None  # Optional title for the insight
     content: str
     classification: str
     impact_score: float
     confidence: float
     urgency: float
     combined_score: float
+    priority: float | None = None  # Priority score (0-1)
+    time_horizon: str | None = None  # When impact expected (immediate, short_term, etc.)
     causal_chain: list[dict[str, Any]]
     affected_goals: list[str]
     recommended_actions: list[str]
     status: str
-    feedback_text: str | None
+    feedback_text: str | None = None
+    explanation: str | None = None  # Optional explanation of the insight
     created_at: str
     updated_at: str
 
@@ -407,18 +412,23 @@ class InsightResponse(BaseModel):
             id=str(data["id"]),
             user_id=str(data["user_id"]),
             insight_type=data["insight_type"],
-            trigger_event=data["trigger_event"],
+            trigger_event=data.get("trigger_event"),  # Optional field
+            engine_source=data.get("engine_source"),
+            title=data.get("title"),
             content=data["content"],
             classification=data["classification"],
             impact_score=data["impact_score"],
             confidence=data["confidence"],
             urgency=data["urgency"],
             combined_score=data["combined_score"],
-            causal_chain=data["causal_chain"] or [],
-            affected_goals=data["affected_goals"] or [],
-            recommended_actions=data["recommended_actions"] or [],
+            priority=data.get("priority"),
+            time_horizon=data.get("time_horizon"),
+            causal_chain=data.get("causal_chain") or [],
+            affected_goals=data.get("affected_goals") or [],
+            recommended_actions=data.get("recommended_actions") or [],
             status=data["status"],
             feedback_text=data.get("feedback_text"),
+            explanation=data.get("explanation"),
             created_at=data["created_at"],
             updated_at=data["updated_at"],
         )

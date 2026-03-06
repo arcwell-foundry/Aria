@@ -68,7 +68,7 @@ export function DraftIntelligenceContext({
         const matchesLead = leadId && insight.affected_goals.length > 0;
         const matchesCompany =
           lowerCompany &&
-          insight.trigger_event.toLowerCase().includes(lowerCompany);
+          insight.trigger_event?.toLowerCase().includes(lowerCompany);
         return matchesLead || matchesCompany;
       })
       .slice(0, 3);

@@ -5,18 +5,23 @@ export interface IntelligenceInsight {
   id: string;
   user_id: string;
   insight_type: string;
-  trigger_event: string;
+  trigger_event: string | null;
+  engine_source: string | null;
+  title: string | null;
   content: string;
   classification: "opportunity" | "threat" | "neutral";
   impact_score: number;
   confidence: number;
   urgency: number;
   combined_score: number;
+  priority: number | null;
+  time_horizon: "immediate" | "short_term" | "medium_term" | "long_term" | null;
   causal_chain: Record<string, unknown>[];
   affected_goals: string[];
   recommended_actions: string[];
   status: string;
-  time_horizon: "immediate" | "short_term" | "medium_term" | "long_term" | null;
+  feedback_text: string | null;
+  explanation: string | null;
   created_at: string;
   updated_at: string;
 }
