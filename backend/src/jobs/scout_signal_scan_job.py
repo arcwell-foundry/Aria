@@ -63,6 +63,15 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
             stats["users_checked"] += 1
 
+            # Look up company_id for dynamic alias resolution
+            company_id: str | None = None
+            try:
+                profile = db.table("user_profiles").select("company_id").eq("user_id", user_id).limit(1).execute()
+                if profile.data:
+                    company_id = profile.data[0].get("company_id")
+            except Exception:
+                pass
+
             # Gather entities to scan
             entities = await _get_scan_entities(db, user_id)
             if not entities:
@@ -99,7 +108,9 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
                 # Normalize company name before deduplication check
                 raw_company_name = signal.get("company_name", "Unknown")
-                canonical_company_name = normalize_company_name(raw_company_name)
+                canonical_company_name = normalize_company_name(
+                    raw_company_name, company_id=company_id, supabase_client=db,
+                )
 
                 if await _signal_exists(db, user_id, headline, canonical_company_name):
                     logger.debug("Duplicate signal skipped: %s", headline[:60])

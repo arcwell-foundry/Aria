@@ -1302,7 +1302,9 @@ Respond ONLY with the JSON array, no additional text."""
             )
 
             # Normalize company name to canonical form
-            _co_name = normalize_company_name(_co_name)
+            _co_name = normalize_company_name(
+                _co_name, company_id=company_id, supabase_client=self._db,
+            )
 
             for fact in result.facts:
                 try:

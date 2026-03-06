@@ -105,7 +105,7 @@ async def get_battle_card(
 
     # Enrich with live market signals for this competitor
     recent_signals, signal_count = await svc.get_recent_signals(
-        current_user.id, competitor_name
+        current_user.id, competitor_name, company_id=company_id,
     )
     card["recent_signals"] = recent_signals
     card["signal_count"] = signal_count

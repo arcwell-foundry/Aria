@@ -58,8 +58,19 @@ class SignalService:
             max_length=500,
         )
 
+        # Look up company_id for dynamic alias resolution
+        company_id: str | None = None
+        try:
+            profile = self._db.table("user_profiles").select("company_id").eq("user_id", user_id).limit(1).execute()
+            if profile.data:
+                company_id = profile.data[0].get("company_id")
+        except Exception:
+            pass
+
         # Normalize company name to canonical form for consistent joins
-        canonical_company_name = normalize_company_name(data.company_name)
+        canonical_company_name = normalize_company_name(
+            data.company_name, company_id=company_id, supabase_client=self._db,
+        )
 
         result = (
             self._db.table("market_signals")

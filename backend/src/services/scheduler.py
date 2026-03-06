@@ -1531,7 +1531,7 @@ async def _run_battle_card_metrics_recompute() -> None:
         # Get all battle cards
         cards_result = (
             db.table("battle_cards")
-            .select("id, competitor_name, analysis")
+            .select("id, competitor_name, company_id, analysis")
             .execute()
         )
         cards = cards_result.data or []
@@ -1552,7 +1552,9 @@ async def _run_battle_card_metrics_recompute() -> None:
                 competitor_name = card.get("competitor_name", "")
 
                 # Get all name variants for this battle card
-                name_variants = get_signal_company_names_for_battle_card(competitor_name)
+                name_variants = get_signal_company_names_for_battle_card(
+                    competitor_name, company_id=card.get("company_id"), db=db,
+                )
 
                 # Query signals from last 30 days across all name variants
                 signals_30d: list[dict] = []

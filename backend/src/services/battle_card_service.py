@@ -284,6 +284,7 @@ class BattleCardService:
         self,
         user_id: str,
         company_name: str,
+        company_id: str | None = None,
         limit: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
         """Get recent market signals for a competitor, plus total count.
@@ -293,12 +294,15 @@ class BattleCardService:
         Args:
             user_id: The authenticated user's ID.
             company_name: The canonical competitor name from battle_cards.
+            company_id: The user's company ID (enables dynamic aliases).
             limit: Maximum number of recent signals to return.
 
         Returns:
             Tuple of (recent_signals_list, total_signal_count).
         """
-        variant_names = get_signal_company_names_for_battle_card(company_name)
+        variant_names = get_signal_company_names_for_battle_card(
+            company_name, company_id=company_id, db=self._db,
+        )
 
         query = (
             self._db.table("market_signals")
