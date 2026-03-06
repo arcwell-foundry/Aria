@@ -59,11 +59,11 @@ function IntelligenceOverview() {
   const { data: battleCards, isLoading, error } = useBattleCards();
   const { data: unreadCount } = useUnreadSignalCount();
 
-  // Extract analysis data from each battle card
+  // Extract analysis data - pass null when no real data exists
   const getCardData = (card: BattleCard) => ({
-    marketCapGap: card.analysis?.metrics?.market_cap_gap ?? 0,
-    winRate: card.analysis?.metrics?.win_rate ?? 50,
-    lastSignalAt: card.analysis?.metrics?.last_signal_at ?? card.last_updated,
+    marketCapGap: card.analysis?.metrics?.market_cap_gap ?? null,
+    winRate: card.analysis?.metrics?.win_rate ?? null,
+    lastSignalAt: card.analysis?.metrics?.last_signal_at ?? null,
   });
 
   const hasBattleCards = battleCards && battleCards.length > 0;

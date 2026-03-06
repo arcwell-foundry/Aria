@@ -112,9 +112,9 @@ function formatLastSignal(dateStr: string | null): string {
   return `${months}mo ago`;
 }
 
-/** Extract the win rate from a battle card's analysis, defaulting to 50. */
-function getCardWinRate(card: BattleCard): number {
-  return card.analysis?.metrics?.win_rate ?? 50;
+/** Extract the win rate from a battle card's analysis, or null if not available. */
+function getCardWinRate(card: BattleCard): number | null {
+  return card.analysis?.metrics?.win_rate ?? null;
 }
 
 // ============================================================================
@@ -452,7 +452,7 @@ function CompetitorDropdown({ competitors, selectedName, onSelect }: CompetitorD
   const [isOpen, setIsOpen] = useState(false);
 
   const selectedCard = competitors.find(c => c.competitor_name === selectedName);
-  const selectedWinRate = selectedCard ? getCardWinRate(selectedCard) : 50;
+  const selectedWinRate = selectedCard ? getCardWinRate(selectedCard) : null;
 
   return (
     <div className="relative" data-aria-id="competitor-dropdown">
@@ -461,7 +461,9 @@ function CompetitorDropdown({ competitors, selectedName, onSelect }: CompetitorD
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] hover:border-[var(--accent)] transition-colors duration-200"
       >
-        <div className={cn('w-2 h-2 rounded-full', getWinRateDotClass(selectedWinRate))} />
+        {selectedWinRate != null && (
+          <div className={cn('w-2 h-2 rounded-full', getWinRateDotClass(selectedWinRate))} />
+        )}
         <span
           className="text-sm font-medium"
           style={{ color: 'var(--text-primary)' }}
@@ -501,19 +503,23 @@ function CompetitorDropdown({ competitors, selectedName, onSelect }: CompetitorD
                     isSelected && 'bg-[var(--bg-subtle)]'
                   )}
                 >
-                  <div className={cn('w-2 h-2 rounded-full', getWinRateDotClass(winRate))} />
+                  {winRate != null && (
+                    <div className={cn('w-2 h-2 rounded-full', getWinRateDotClass(winRate))} />
+                  )}
                   <span
                     className="text-sm flex-1"
                     style={{ color: 'var(--text-primary)' }}
                   >
                     {comp.competitor_name}
                   </span>
-                  <span
-                    className="text-xs font-mono"
-                    style={{ color: getWinRateColor(winRate) }}
-                  >
-                    {winRate}%
-                  </span>
+                  {winRate != null && (
+                    <span
+                      className="text-xs font-mono"
+                      style={{ color: getWinRateColor(winRate) }}
+                    >
+                      {winRate}%
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -577,13 +583,13 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
   // Fetch the selected battle card
   const { data: battleCard, isLoading: isLoadingCard, error } = useBattleCard(decodedName);
 
-  // Extract analysis data from the API response
+  // Extract analysis data - null when no real data exists
   const metrics = useMemo(() => {
     const m = battleCard?.analysis?.metrics;
     return {
-      marketCapGap: m?.market_cap_gap ?? 0,
-      winRate: m?.win_rate ?? 50,
-      pricingDelta: m?.pricing_delta ?? 0,
+      marketCapGap: m?.market_cap_gap ?? null,
+      winRate: m?.win_rate ?? null,
+      pricingDelta: m?.pricing_delta ?? null,
       lastSignalAt: m?.last_signal_at ?? null,
     };
   }, [battleCard]);
@@ -665,8 +671,8 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
     return { color: 'var(--text-secondary)', icon: Minus, text: 'Equal size' };
   };
 
-  const marketCapStyle = getMarketCapGapStyle(metrics.marketCapGap);
-  const MarketCapIcon = marketCapStyle.icon;
+  const hasAnyMetrics = metrics.marketCapGap != null || metrics.winRate != null
+    || metrics.pricingDelta != null || metrics.lastSignalAt != null;
 
   // Get pricing delta style
   const getPricingDeltaStyle = (delta: number) => {
@@ -678,8 +684,6 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
     }
     return { color: 'var(--text-secondary)', text: 'Price parity' };
   };
-
-  const pricingStyle = getPricingDeltaStyle(metrics.pricingDelta);
 
   return (
     <div
@@ -722,34 +726,100 @@ export function BattleCardDetail({ competitorId: propCompetitorId }: BattleCardD
           </div>
         </div>
 
-        {/* Metrics Bar */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" data-aria-id="metrics-bar">
-          <MetricCard
-            label="Market Cap Gap"
-            value={`${metrics.marketCapGap > 0 ? '+' : ''}${metrics.marketCapGap.toFixed(1)}%`}
-            sublabel={marketCapStyle.text}
-            color={marketCapStyle.color}
-            icon={MarketCapIcon}
-            iconColor={marketCapStyle.color}
-          />
-          <MetricCard
-            label="Win Rate"
-            value={`${metrics.winRate}%`}
-            sublabel="vs this competitor"
-            color={getWinRateColor(metrics.winRate)}
-          />
-          <MetricCard
-            label="Pricing Delta"
-            value={`${metrics.pricingDelta > 0 ? '+' : ''}${metrics.pricingDelta.toFixed(1)}%`}
-            sublabel={pricingStyle.text}
-            color={pricingStyle.color}
-          />
-          <MetricCard
-            label="Last Signal"
-            value={formatLastSignal(metrics.lastSignalAt)}
-            sublabel="intelligence detected"
-          />
-        </div>
+        {/* Metrics Bar - only render cards with real data */}
+        {hasAnyMetrics && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" data-aria-id="metrics-bar">
+            {metrics.marketCapGap != null && (() => {
+              const marketCapStyle = getMarketCapGapStyle(metrics.marketCapGap);
+              return (
+                <MetricCard
+                  label="Market Cap Gap"
+                  value={`${metrics.marketCapGap > 0 ? '+' : ''}${metrics.marketCapGap.toFixed(1)}%`}
+                  sublabel={marketCapStyle.text}
+                  color={marketCapStyle.color}
+                  icon={marketCapStyle.icon}
+                  iconColor={marketCapStyle.color}
+                />
+              );
+            })()}
+            {metrics.winRate != null && (
+              <MetricCard
+                label="Win Rate"
+                value={`${metrics.winRate}%`}
+                sublabel="vs this competitor"
+                color={getWinRateColor(metrics.winRate)}
+              />
+            )}
+            {metrics.pricingDelta != null && (() => {
+              const pricingStyle = getPricingDeltaStyle(metrics.pricingDelta);
+              return (
+                <MetricCard
+                  label="Pricing Delta"
+                  value={`${metrics.pricingDelta > 0 ? '+' : ''}${metrics.pricingDelta.toFixed(1)}%`}
+                  sublabel={pricingStyle.text}
+                  color={pricingStyle.color}
+                />
+              );
+            })()}
+            {metrics.lastSignalAt && (
+              <MetricCard
+                label="Last Signal"
+                value={formatLastSignal(metrics.lastSignalAt)}
+                sublabel="intelligence detected"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Strengths & Weaknesses - always show when data exists */}
+        {(battleCard.strengths?.length > 0 || battleCard.weaknesses?.length > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8" data-aria-id="strengths-weaknesses">
+            {battleCard.strengths?.length > 0 && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-4">
+                <h3
+                  className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
+                  style={{ color: 'var(--success)' }}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Strengths
+                </h3>
+                <ul className="space-y-2">
+                  {battleCard.strengths.map((strength, i) => (
+                    <li
+                      key={i}
+                      className="text-sm leading-relaxed"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      {strength}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {battleCard.weaknesses?.length > 0 && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-4">
+                <h3
+                  className="text-xs uppercase tracking-wide mb-3 flex items-center gap-2"
+                  style={{ color: 'var(--warning)' }}
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Weaknesses
+                </h3>
+                <ul className="space-y-2">
+                  {battleCard.weaknesses.map((weakness, i) => (
+                    <li
+                      key={i}
+                      className="text-sm leading-relaxed"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      {weakness}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Sections */}
         <div className="space-y-6">

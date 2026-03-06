@@ -3,16 +3,10 @@
  *
  * Follows ARIA Design System v1.0:
  * - Uses CSS variables for theming
- * - Win rate color coding: green >60%, amber 40-60%, red <40%
- * - Market cap gap: green if negative (competitor smaller), red if positive (competitor larger)
+ * - Metrics (win rate, market cap gap, last signal) only render when real data exists
+ * - Strengths and weaknesses fill the card when metrics are unavailable
  * - Click navigates to battle card detail
  * - data-aria-id for UICommandExecutor targeting
- *
- * @example
- * <BattleCardPreview
- *   card={battleCard}
- *   onClick={() => navigate(`/intelligence/battle-cards/${card.competitor_name}`)}
- * />
  */
 
 import { useNavigate } from 'react-router-dom';
@@ -23,11 +17,11 @@ import type { BattleCard } from '@/api/battleCards';
 export interface BattleCardPreviewProps {
   /** Battle card data */
   card: BattleCard;
-  /** Optional market cap gap percentage (mock data for now) */
-  marketCapGap?: number;
-  /** Optional win rate percentage (mock data for now) */
-  winRate?: number;
-  /** Optional last signal timestamp (mock data for now) */
+  /** Market cap gap percentage - only shown when real data exists */
+  marketCapGap?: number | null;
+  /** Win rate percentage - only shown when real data exists */
+  winRate?: number | null;
+  /** Last signal timestamp - only shown when real data exists */
   lastSignalAt?: string | null;
   /** Additional CSS classes */
   className?: string;
@@ -108,15 +102,16 @@ export function BattleCardPreviewSkeleton() {
 
 export function BattleCardPreview({
   card,
-  marketCapGap = 0,
-  winRate = 50,
+  marketCapGap = null,
+  winRate = null,
   lastSignalAt = null,
   className = '',
 }: BattleCardPreviewProps) {
   const navigate = useNavigate();
 
-  const winRateColor = getWinRateColor(winRate);
-  const { color: marketCapColor, icon: MarketCapIcon } = getMarketCapGapStyle(marketCapGap);
+  const hasMarketCapGap = marketCapGap != null;
+  const hasWinRate = winRate != null;
+  const hasMetrics = hasMarketCapGap || hasWinRate || lastSignalAt;
 
   const handleClick = () => {
     navigate(`/intelligence/battle-cards/${encodeURIComponent(card.competitor_name)}`);
@@ -151,66 +146,77 @@ export function BattleCardPreview({
         {card.competitor_name}
       </h3>
 
-      {/* Stats */}
-      <div className="flex flex-col gap-3">
-        {/* Market Cap Gap */}
-        <div className="flex items-center justify-between">
-          <span
-            className="text-xs uppercase tracking-wide"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            Market Cap Gap
-          </span>
-          <div className="flex items-center gap-1.5">
-            <MarketCapIcon className="w-4 h-4" style={{ color: marketCapColor }} />
-            <span
-              className="text-sm font-medium font-mono"
-              style={{ color: marketCapColor }}
-            >
-              {formatMarketCapGap(marketCapGap)}
-            </span>
-          </div>
-        </div>
+      {/* Stats - only show rows with real data */}
+      {hasMetrics && (
+        <div className="flex flex-col gap-3">
+          {/* Market Cap Gap - only when real data exists */}
+          {hasMarketCapGap && (() => {
+            const { color: marketCapColor, icon: MarketCapIcon } = getMarketCapGapStyle(marketCapGap);
+            return (
+              <div className="flex items-center justify-between">
+                <span
+                  className="text-xs uppercase tracking-wide"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Market Cap Gap
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <MarketCapIcon className="w-4 h-4" style={{ color: marketCapColor }} />
+                  <span
+                    className="text-sm font-medium font-mono"
+                    style={{ color: marketCapColor }}
+                  >
+                    {formatMarketCapGap(marketCapGap)}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
-        {/* Win Rate */}
-        <div className="flex items-center justify-between">
-          <span
-            className="text-xs uppercase tracking-wide"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            Win Rate
-          </span>
-          <span
-            className="text-sm font-medium font-mono"
-            style={{ color: winRateColor }}
-          >
-            {winRate}%
-          </span>
-        </div>
+          {/* Win Rate - only when real data exists */}
+          {hasWinRate && (
+            <div className="flex items-center justify-between">
+              <span
+                className="text-xs uppercase tracking-wide"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Win Rate
+              </span>
+              <span
+                className="text-sm font-medium font-mono"
+                style={{ color: getWinRateColor(winRate) }}
+              >
+                {winRate}%
+              </span>
+            </div>
+          )}
 
-        {/* Last Signal */}
-        <div className="flex items-center justify-between">
-          <span
-            className="text-xs uppercase tracking-wide"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            Last Signal
-          </span>
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
-            <span
-              className="text-xs font-mono"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {formatLastSignal(lastSignalAt)}
-            </span>
-          </div>
+          {/* Last Signal - only when we have a real timestamp */}
+          {lastSignalAt && (
+            <div className="flex items-center justify-between">
+              <span
+                className="text-xs uppercase tracking-wide"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Last Signal
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
+                <span
+                  className="text-xs font-mono"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {formatLastSignal(lastSignalAt)}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Quick strengths preview (first 2) */}
+      {/* Strengths */}
       {card.strengths?.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-[var(--border)]">
+        <div className={cn(hasMetrics ? 'mt-4 pt-3 border-t border-[var(--border)]' : '')}>
           <span
             className="text-xs uppercase tracking-wide mb-2 block"
             style={{ color: 'var(--text-secondary)' }}
@@ -218,13 +224,36 @@ export function BattleCardPreview({
             Key Strengths
           </span>
           <ul className="space-y-1">
-            {(card.strengths ?? []).slice(0, 2).map((strength, index) => (
+            {(card.strengths ?? []).slice(0, 3).map((strength, index) => (
               <li
                 key={index}
                 className="text-xs truncate"
                 style={{ color: 'var(--text-primary)' }}
               >
                 {strength}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Weaknesses - show when no metrics to fill the card */}
+      {card.weaknesses?.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-[var(--border)]">
+          <span
+            className="text-xs uppercase tracking-wide mb-2 block"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Weaknesses
+          </span>
+          <ul className="space-y-1">
+            {(card.weaknesses ?? []).slice(0, 2).map((weakness, index) => (
+              <li
+                key={index}
+                className="text-xs truncate"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {weakness}
               </li>
             ))}
           </ul>
