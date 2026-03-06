@@ -124,7 +124,7 @@ function groupContent(richContent: RichContent[]): GroupedContent {
                     id: `grouped-${contactName}`,
                     company_name: '',
                     headline: contactName,
-                    summary: `${groupTasks.length} follow-ups overdue (${maxOverdue} days)\n${taskNames.map((n: string) => `- ${n}`).join('\n')}`,
+                    summary: `${groupTasks.length} follow-ups - ${maxOverdue} ${maxOverdue === 1 ? 'day' : 'days'} overdue\n${taskNames.map((n: string) => `- ${n}`).join('\n')}`,
                     severity: 'high',
                   },
                 },
@@ -132,7 +132,6 @@ function groupContent(richContent: RichContent[]): GroupedContent {
             } else {
               // Single task for this contact, render normally
               const t = groupTasks[0];
-              const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
               overdueCards.push({
                 maxOverdue,
                 card: {
@@ -140,9 +139,9 @@ function groupContent(richContent: RichContent[]): GroupedContent {
                   data: {
                     id: t.id as string,
                     company_name: '',
-                    headline: `Overdue: ${cleanText((t.task as string) ?? 'Unknown task')}`,
-                    summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
-                    severity: 'high',
+                    headline: cleanText((t.task as string) ?? 'Unknown task'),
+                    summary: t._daysOverdue > 0 ? `Overdue by ${t._daysOverdue} ${t._daysOverdue === 1 ? 'day' : 'days'}` : '',
+                    severity: ((t.priority as string) ?? 'high') as 'high' | 'medium' | 'low',
                   },
                 },
               });
@@ -151,7 +150,6 @@ function groupContent(richContent: RichContent[]): GroupedContent {
 
           // Ungrouped overdue tasks
           for (const t of ungrouped) {
-            const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
             overdueCards.push({
               maxOverdue: t._daysOverdue,
               card: {
@@ -159,9 +157,9 @@ function groupContent(richContent: RichContent[]): GroupedContent {
                 data: {
                   id: t.id as string,
                   company_name: '',
-                  headline: `Overdue: ${cleanText((t.task as string) ?? 'Unknown task')}`,
-                  summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
-                  severity: 'high',
+                  headline: cleanText((t.task as string) ?? 'Unknown task'),
+                  summary: t._daysOverdue > 0 ? `Overdue by ${t._daysOverdue} ${t._daysOverdue === 1 ? 'day' : 'days'}` : '',
+                  severity: ((t.priority as string) ?? 'high') as 'high' | 'medium' | 'low',
                 },
               },
             });
@@ -270,7 +268,10 @@ export function BriefingTranscriptView({ summary, richContent }: BriefingTranscr
       {/* Summary - always visible, not collapsible */}
       {summary && (
         <div className="pb-3 mb-1 border-b border-[var(--border)]/40">
-          <p className="text-sm leading-relaxed text-[var(--text-primary)] font-light">{cleanText(summary)}</p>
+          <p
+            className="text-[14px] text-[var(--text-primary)]"
+            style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: '1.6' }}
+          >{cleanText(summary)}</p>
         </div>
       )}
 

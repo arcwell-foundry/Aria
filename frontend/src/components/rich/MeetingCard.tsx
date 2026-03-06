@@ -58,21 +58,25 @@ export function MeetingCard({ data }: MeetingCardProps) {
   return (
     <div
       className="rounded-lg border border-[var(--border)] px-4 py-3 flex items-center gap-3"
-      style={{ backgroundColor: 'var(--bg-elevated)' }}
+      style={{ backgroundColor: 'var(--bg-elevated)', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}
       data-aria-id={`meeting-card-${data.id}`}
     >
       <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(46, 102, 255, 0.1)' }}>
-        <span className="text-[var(--accent)] text-sm font-mono">{formattedTime || '--:--'}</span>
+        <span className="text-[var(--accent)] text-[11px]" style={{ fontFamily: "var(--font-mono)" }}>{formattedTime || '--:--'}</span>
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+        <p className="text-[14px] text-[var(--text-primary)] truncate">
           {data.company || data.title}
         </p>
-        <p className="text-xs text-[var(--text-secondary)] truncate">
-          {(data.attendees ?? []).length > 0
-            ? `${(data.attendees ?? []).length} attendee${(data.attendees ?? []).length > 1 ? 's' : ''}`
-            : data.date || ''}
-        </p>
+        {(data.attendees ?? []).length > 0 ? (
+          <p className="text-[12px] font-light text-slate-400 truncate">
+            {(data.attendees ?? []).length} attendee{(data.attendees ?? []).length > 1 ? 's' : ''}
+          </p>
+        ) : data.date ? (
+          <p className="text-[11px] text-slate-500 truncate" style={{ fontFamily: "var(--font-mono)" }}>
+            {data.date}
+          </p>
+        ) : null}
       </div>
       {data.has_brief && (
         <button

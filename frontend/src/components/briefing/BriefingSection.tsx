@@ -45,10 +45,16 @@ export function BriefingSection({
             {icon}
           </span>
         )}
-        <span className="text-[11px] font-mono uppercase tracking-widest text-[var(--text-secondary)] group-hover:text-[var(--interactive)] transition-colors">
+        <span
+          className="text-[14px] italic text-[var(--text-secondary)] group-hover:text-[var(--interactive)] transition-colors"
+          style={{ fontFamily: "'Instrument Serif', Georgia, serif" }}
+        >
           {title}
         </span>
-        <span className="ml-auto inline-flex items-center justify-center rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)] min-w-[22px]">
+        <span
+          className="ml-auto inline-flex items-center justify-center rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] min-w-[22px]"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {count}
         </span>
       </button>

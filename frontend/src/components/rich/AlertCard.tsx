@@ -15,70 +15,28 @@ interface AlertCardProps {
   data: AlertCardData;
 }
 
-const SEVERITY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  high: { bg: 'bg-red-500/15', text: 'text-red-400', label: 'HIGH' },
-  medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', label: 'MEDIUM' },
-  low: { bg: 'bg-blue-500/15', text: 'text-blue-400', label: 'LOW' },
+const SEVERITY_STYLES: Record<string, { border: string; pillBg: string; pillText: string; label: string }> = {
+  high: { border: 'rgb(239, 68, 68)', pillBg: 'bg-red-500/15', pillText: 'text-red-400', label: 'HIGH' },
+  medium: { border: 'rgb(245, 158, 11)', pillBg: 'bg-amber-500/15', pillText: 'text-amber-400', label: 'MEDIUM' },
+  low: { border: 'rgb(100, 116, 139)', pillBg: 'bg-blue-500/15', pillText: 'text-blue-400', label: 'LOW' },
 };
 
 /**
- * Parse a backend-generated summary string like "Priority: medium. Due: 2026-03-02T02:39:42.764559+00:00"
- * Returns the extracted priority and a formatted due date string.
+ * Parse a summary that may contain sub-tasks (newline-separated, dash-prefixed).
+ * Used for grouped contact cards like "4 follow-ups - 3 days overdue\n- Task1\n- Task2"
  */
-function parseOverdueSummary(summary: string): { priority: string; dueDateDisplay: string } {
-  // Default values
-  let priority = 'high';
-  let dueDateDisplay = '';
-
-  // Try to parse "Priority: X. Due: Y" format
-  const priorityMatch = summary.match(/Priority:\s*(\w+)/i);
-  const dueMatch = summary.match(/Due:\s*(\S+)/i);
-
-  if (priorityMatch) {
-    priority = priorityMatch[1].toLowerCase();
-  }
-
-  if (dueMatch) {
-    const dueDateStr = dueMatch[1];
-    try {
-      const dueDate = new Date(dueDateStr);
-      const now = new Date();
-
-      // Calculate days overdue (if in the past)
-      const diffMs = now.getTime() - dueDate.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      if (diffDays > 0) {
-        dueDateDisplay = `Overdue by ${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
-      } else if (diffDays === 0) {
-        dueDateDisplay = 'Due today';
-      } else {
-        // Future date - show as "Due: Feb 23"
-        dueDateDisplay = `Due: ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-      }
-    } catch {
-      // If date parsing fails, don't show the raw ISO
-      dueDateDisplay = '';
-    }
-  }
-
-  return { priority, dueDateDisplay };
+function parseSubTasks(summary: string): { subtitle: string; subTasks: string[] } {
+  const lines = summary.split('\n');
+  const subtitle = lines[0] || '';
+  const subTasks = lines.slice(1)
+    .filter(l => l.startsWith('- '))
+    .map(l => l.slice(2).trim());
+  return { subtitle, subTasks };
 }
 
 export function AlertCard({ data }: AlertCardProps) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
-
-  // Check if this is an overdue task card (has "Priority:" and "Due:" in summary)
-  const isOverdueTask = data.summary?.includes('Priority:') && data.summary?.includes('Due:');
-
-  // Parse the summary to extract actual priority and format the due date
-  const { priority, dueDateDisplay } = useMemo(() => {
-    if (isOverdueTask && data.summary) {
-      return parseOverdueSummary(data.summary);
-    }
-    return { priority: data.severity, dueDateDisplay: '' };
-  }, [isOverdueTask, data.summary, data.severity]);
 
   const handleViewDetails = useCallback(() => {
     if (!data) return;
@@ -98,51 +56,76 @@ export function AlertCard({ data }: AlertCardProps) {
     });
   }, [data, addMessage, activeConversationId]);
 
+  const { subtitle, subTasks } = useMemo(() => parseSubTasks(data.summary || ''), [data.summary]);
+  const hasSubTasks = subTasks.length > 0;
+
   if (!data) return null;
 
-  // Use actual priority for severity styling (not hardcoded backend value)
-  const severity = SEVERITY_STYLES[priority] || SEVERITY_STYLES.medium;
+  const severity = SEVERITY_STYLES[data.severity] || SEVERITY_STYLES.medium;
 
-  // For overdue tasks, remove "Overdue: " prefix from headline since badge conveys urgency
-  const displayHeadline = isOverdueTask && data.headline.startsWith('Overdue: ')
-    ? data.headline.slice(9) // Remove "Overdue: " prefix
+  // Remove "Overdue: " prefix from headline (redundant in Priority Actions context)
+  const displayHeadline = data.headline.startsWith('Overdue: ')
+    ? data.headline.slice(9)
     : data.headline;
 
   return (
     <div
-      className="rounded-lg border border-[var(--border)] px-4 py-3"
-      style={{ backgroundColor: 'var(--bg-elevated)' }}
+      className="rounded-r-lg pl-3 pr-4 py-3"
+      style={{
+        borderLeft: `3px solid ${severity.border}`,
+        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+      }}
       data-aria-id={`alert-card-${data.id}`}
     >
-      <div className="flex items-start justify-between gap-2 mb-1.5">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${severity.bg} ${severity.text}`}>
+      {/* Priority pill */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[8px] font-medium tracking-wider ${severity.pillBg} ${severity.pillText}`}
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {severity.label}
         </span>
         {data.company_name && (
-          <span className="text-xs font-mono text-[var(--text-secondary)]">
+          <span
+            className="text-[11px] text-slate-500"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
             {data.company_name}
           </span>
         )}
       </div>
-      <p className="text-sm text-[var(--text-primary)] leading-relaxed">
+
+      {/* Headline */}
+      <p className={`text-[var(--text-primary)] leading-snug ${hasSubTasks ? 'text-[15px] font-medium' : 'text-[14px]'}`}>
         {displayHeadline}
       </p>
-      {/* For overdue tasks, show formatted due date instead of raw summary */}
-      {isOverdueTask && dueDateDisplay && (
-        <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
-          {dueDateDisplay}
+
+      {/* Subtitle */}
+      {subtitle && (
+        <p className="text-[12px] font-light text-slate-400 mt-0.5">
+          {subtitle}
         </p>
       )}
-      {/* For non-overdue alerts, show the summary as-is */}
-      {!isOverdueTask && data.summary && (
-        <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
-          {data.summary}
-        </p>
+
+      {/* Sub-tasks for grouped cards */}
+      {hasSubTasks && (
+        <ul className="mt-2 space-y-0.5 pl-1">
+          {subTasks.map((task, i) => (
+            <li key={i} className="text-[12px] font-light text-slate-400 leading-snug flex">
+              <span className="text-slate-500 mr-1.5 shrink-0">-</span>
+              <span>{task}</span>
+            </li>
+          ))}
+        </ul>
       )}
-      <div className="mt-2">
+
+      {/* View Details */}
+      <div className="mt-2.5">
         <button
           onClick={handleViewDetails}
-          className="px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[rgba(46,102,255,0.3)] hover:bg-[rgba(46,102,255,0.1)] transition-colors"
+          className="text-slate-500 hover:text-slate-300 transition-colors uppercase tracking-wider"
+          style={{ fontFamily: "var(--font-mono)", fontSize: '10px' }}
         >
           View Details
         </button>
