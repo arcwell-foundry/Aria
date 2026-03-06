@@ -2277,3 +2277,95 @@ async def get_return_briefing(
             status_code=500,
             detail="Return briefing generation failed. Please try again.",
         ) from e
+
+
+# ==============================================================================
+# THERAPEUTIC AREA TREND ENDPOINTS (E8)
+# ==============================================================================
+
+
+class TherapeuticTrendResponse(BaseModel):
+    """Response model for a single therapeutic trend."""
+
+    trend_type: str
+    name: str
+    signal_count: int
+    companies_involved: list[str]
+    company_count: int
+    description: str
+
+
+class TherapeuticTrendsListResponse(BaseModel):
+    """Response model for listing therapeutic trends."""
+
+    trends: list[TherapeuticTrendResponse]
+    count: int
+
+
+@router.get("/therapeutic-trends", response_model=TherapeuticTrendsListResponse)
+async def get_therapeutic_trends(
+    current_user: CurrentUser,
+    days: int = Query(30, ge=1, le=90, description="Days to look back for trends"),
+    min_signals: int = Query(3, ge=2, le=10, description="Minimum signals to form a trend"),
+) -> TherapeuticTrendsListResponse:
+    """Get therapeutic area and manufacturing modality trends across recent signals.
+
+    Analyzes market signals to detect patterns where multiple signals point
+    to the same therapeutic area or manufacturing modality across different
+    companies. Returns sector-level insights useful for strategic planning.
+
+    Args:
+        current_user: Authenticated user
+        days: Number of days to look back for signal analysis
+        min_signals: Minimum number of signals required to form a trend
+
+    Returns:
+        TherapeuticTrendsListResponse with detected trends and count
+
+    Raises:
+        HTTPException: If trend detection fails
+    """
+    try:
+        from src.intelligence.therapeutic_area_intelligence import detect_therapeutic_trends
+
+        db = get_supabase_client()
+        trends = await detect_therapeutic_trends(
+            supabase_client=db,
+            user_id=str(current_user.id),
+            days=days,
+            min_signals=min_signals,
+        )
+
+        logger.info(
+            "Therapeutic trends retrieved",
+            extra={
+                "user_id": current_user.id,
+                "trend_count": len(trends),
+                "days": days,
+            },
+        )
+
+        return TherapeuticTrendsListResponse(
+            trends=[
+                TherapeuticTrendResponse(
+                    trend_type=t["trend_type"],
+                    name=t["name"],
+                    signal_count=t["signal_count"],
+                    companies_involved=t["companies_involved"],
+                    company_count=t["company_count"],
+                    description=t["description"],
+                )
+                for t in trends
+            ],
+            count=len(trends),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Therapeutic trends retrieval failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve therapeutic trends. Please try again.",
+        ) from e

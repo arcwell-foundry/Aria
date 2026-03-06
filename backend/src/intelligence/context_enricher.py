@@ -15,6 +15,11 @@ from src.intelligence.regulatory_intelligence import detect_fda_event, format_re
 from src.intelligence.clinical_trial_intelligence import detect_clinical_trial_signal, format_clinical_trial_context
 from src.intelligence.supply_chain_intelligence import detect_supply_chain_signal, format_supply_chain_context
 from src.intelligence.pricing_intelligence import detect_pricing_signal, format_pricing_context
+from src.intelligence.therapeutic_area_intelligence import (
+    detect_therapeutic_area,
+    detect_manufacturing_modality,
+    format_therapeutic_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +131,23 @@ class ContextEnricher:
                 logger.info(
                     "[ContextEnricher] Pricing signal: %s",
                     pricing_signal['primary_type'],
+                )
+
+            # Therapeutic area and manufacturing modality detection
+            therapeutic_areas = detect_therapeutic_area(event)
+            manufacturing_modalities = detect_manufacturing_modality(event)
+            if therapeutic_areas or manufacturing_modalities:
+                context["therapeutic_areas"] = therapeutic_areas
+                context["manufacturing_modalities"] = manufacturing_modalities
+                therapeutic_ctx = format_therapeutic_context(
+                    therapeutic_areas, manufacturing_modalities
+                )
+                if therapeutic_ctx:
+                    context["therapeutic_context"] = therapeutic_ctx
+                logger.info(
+                    "[ContextEnricher] Therapeutic: %s, Modalities: %s",
+                    therapeutic_areas,
+                    manufacturing_modalities,
                 )
 
             logger.info(
@@ -558,6 +580,9 @@ class ContextEnricher:
 
         if context.get("pricing_context"):
             parts.append(context["pricing_context"])
+
+        if context.get("therapeutic_context"):
+            parts.append(context["therapeutic_context"])
 
         # Active goals
         goals = context.get("active_goals", [])
