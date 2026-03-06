@@ -371,9 +371,10 @@ def test_market_signals_structure(test_client: TestClient) -> None:
     assert len(data) == 3
 
     # Verify each signal has required fields
+    # Note: SignalService renames headline→content and detected_at→created_at
     required_fields = {
-        "id", "company_name", "signal_type", "headline",
-        "relevance_score", "detected_at",
+        "id", "company_name", "signal_type", "content",
+        "relevance_score", "created_at",
     }
     for signal in data:
         for field in required_fields:

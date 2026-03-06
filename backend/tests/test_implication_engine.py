@@ -9,6 +9,8 @@ Tests cover:
 - Persistence to jarvis_insights table
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -593,9 +595,30 @@ class TestSignalRadarIntegration:
         # Create a fresh mock for this specific test
         from unittest.mock import MagicMock
 
+        now = datetime.now(UTC).isoformat()
         mock_db = MagicMock()
         mock_result = MagicMock()
-        mock_result.data = [{"id": str(insight_id)}]
+        mock_result.data = [{
+            "id": str(insight_id),
+            "user_id": user_id,
+            "insight_type": "implication",
+            "trigger_event": sample_chain.trigger_event,
+            "content": "Test implication content",
+            "classification": "opportunity",
+            "impact_score": 0.7,
+            "confidence": 0.8,
+            "urgency": 0.5,
+            "combined_score": 0.68,
+            "causal_chain": [],
+            "affected_goals": [str(g["id"]) for g in sample_goals],
+            "recommended_actions": ["Test action"],
+            "time_horizon": None,
+            "time_to_impact": None,
+            "status": "new",
+            "feedback_text": None,
+            "created_at": now,
+            "updated_at": now,
+        }]
 
         # Set up chain: table().insert().execute() -> result
         mock_db.table.return_value.insert.return_value.execute.return_value = mock_result
@@ -606,6 +629,7 @@ class TestSignalRadarIntegration:
         result = await implication_engine.save_insight(user_id, implication)
 
         assert result is not None
+        assert str(result.id) == str(insight_id)
         mock_db.table.assert_called_with("jarvis_insights")
 
 
@@ -641,9 +665,31 @@ class TestPersistence:
         # Create a fresh mock for this specific test
         from unittest.mock import MagicMock
 
+        now = datetime.now(UTC).isoformat()
         mock_db = MagicMock()
         mock_result = MagicMock()
-        mock_result.data = [{"id": str(insight_id)}]
+        # Supabase INSERT returns the full inserted row
+        mock_result.data = [{
+            "id": str(insight_id),
+            "user_id": user_id,
+            "insight_type": "implication",
+            "trigger_event": "Test event",
+            "content": "Test content",
+            "classification": "opportunity",
+            "impact_score": 0.8,
+            "confidence": 0.7,
+            "urgency": 0.6,
+            "combined_score": 0.71,
+            "causal_chain": [],
+            "affected_goals": [],
+            "recommended_actions": ["Action 1"],
+            "time_horizon": None,
+            "time_to_impact": None,
+            "status": "new",
+            "feedback_text": None,
+            "created_at": now,
+            "updated_at": now,
+        }]
 
         # Set up chain: table().insert().execute() -> result
         mock_db.table.return_value.insert.return_value.execute.return_value = mock_result
@@ -653,7 +699,9 @@ class TestPersistence:
 
         result = await implication_engine.save_insight(user_id, implication)
 
-        assert result == insight_id
+        assert result is not None
+        assert str(result.id) == str(insight_id)
+        assert result.content == "Test content"
         mock_db.table.assert_called_with("jarvis_insights")
 
     @pytest.mark.asyncio

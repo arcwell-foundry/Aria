@@ -24,6 +24,7 @@ from src.intelligence.causal.models import (
     GoalWithInsights,
     ImpactType,
     Implication,
+    ImplicationType,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,50 @@ class GoalImpactMapper:
         """
         self._db = db_client
         self._llm = llm_client
+
+    async def assess_event_impact(
+        self,
+        user_id: str,
+        event: str,
+    ) -> list[GoalImpact]:
+        """Assess how an event impacts the user's active goals.
+
+        Takes a raw event string, fetches the user's goals, and uses LLM
+        to score and classify impact for each goal. This is the entry point
+        used by the orchestrator's process_event pipeline.
+
+        Args:
+            user_id: User ID to fetch goals for
+            event: Description of the event to analyze
+
+        Returns:
+            List of GoalImpact objects for goals affected by this event
+        """
+        goals = await self._get_goals(user_id, include_draft=False)
+
+        if not goals:
+            logger.info("No active goals found for event impact assessment")
+            return []
+
+        impacts: list[GoalImpact] = []
+
+        # Create a lightweight Implication-like object for _analyze_impact
+        event_implication = Implication(
+            trigger_event=event,
+            content=event,
+            type=ImplicationType.NEUTRAL,
+            impact_score=0.5,
+            confidence=0.5,
+            urgency=0.5,
+            combined_score=0.5,
+        )
+
+        for goal in goals:
+            impact = await self._analyze_impact(event_implication, goal)
+            if impact and impact.impact_type != ImpactType.NEUTRAL:
+                impacts.append(impact)
+
+        return impacts
 
     async def map_impact(
         self,

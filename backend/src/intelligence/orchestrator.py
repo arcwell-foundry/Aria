@@ -1,11 +1,12 @@
 """Jarvis Intelligence Orchestrator (US-710).
 
 Coordinates all 9 intelligence engines into a unified system with
-time-budgeted execution, deduplication, and feedback tracking.
+parallel execution, deduplication, and feedback tracking.
 """
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import time
@@ -17,15 +18,18 @@ from src.intelligence.causal.models import JarvisInsight
 
 logger = logging.getLogger(__name__)
 
-# Engine priority order with default time budgets (ms)
-_ENGINE_BUDGETS: list[tuple[str, int]] = [
-    ("predictive", 200),
-    ("implication", 1000),
-    ("butterfly", 500),
-    ("connection", 1000),
-    ("goal_impact", 500),
-    ("temporal", 500),
+# Engines to run during briefing generation (all run in parallel)
+_BRIEFING_ENGINES: list[str] = [
+    "predictive",
+    "implication",
+    "butterfly",
+    "connection",
+    "goal_impact",
+    "temporal",
 ]
+
+# Per-engine timeout in seconds — generous enough for 1-3 LLM calls per engine
+_ENGINE_TIMEOUT_S = 20
 
 # Deduplication similarity threshold
 _DEDUP_THRESHOLD = 0.7
@@ -173,17 +177,18 @@ class JarvisOrchestrator:
         self,
         user_id: str,
         context: dict[str, Any] | None = None,
-        budget_ms: int = 5000,
+        budget_ms: int = 60000,
     ) -> list[JarvisInsight]:
         """Generate intelligence insights for a morning briefing.
 
-        Runs engines in priority order with time-budgeted execution.
-        Skips remaining engines if 80% of budget is exhausted.
+        Runs all engines in parallel with per-engine timeouts.
+        This is a background task (not user-facing), so the budget
+        is generous enough for LLM calls to complete.
 
         Args:
             user_id: User UUID.
             context: Optional context dict (e.g. briefing_date).
-            budget_ms: Total time budget in milliseconds.
+            budget_ms: Total time budget in milliseconds (default 60s).
 
         Returns:
             Up to 10 deduplicated insights sorted by combined_score.
@@ -192,24 +197,29 @@ class JarvisOrchestrator:
         all_insights: list[JarvisInsight] = []
         ctx = context or {}
 
-        for engine_name, engine_budget_ms in _ENGINE_BUDGETS:
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            if elapsed_ms > budget_ms * 0.8:
-                logger.info(
-                    "Budget %.0f%% exhausted (%.0fms / %dms), skipping remaining engines",
-                    (elapsed_ms / budget_ms) * 100,
-                    elapsed_ms,
-                    budget_ms,
-                )
-                break
+        # Run all engines in parallel with per-engine timeout
+        tasks = [
+            self._run_engine_with_timeout(engine_name, user_id, ctx)
+            for engine_name in _BRIEFING_ENGINES
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            try:
-                engine_insights = await self._run_engine(
-                    engine_name, user_id, ctx, engine_budget_ms
+        for engine_name, result in zip(_BRIEFING_ENGINES, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "Engine %s failed during briefing: %s",
+                    engine_name,
+                    result,
                 )
-                all_insights.extend(engine_insights)
-            except Exception:
-                logger.warning("Engine %s failed during briefing", engine_name, exc_info=True)
+            elif isinstance(result, list):
+                all_insights.extend(result)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "Briefing generation complete: %d insights in %.0fms",
+            len(all_insights),
+            elapsed_ms,
+        )
 
         deduplicated = self._deduplicate(all_insights)
         deduplicated.sort(key=lambda i: i.combined_score, reverse=True)
@@ -287,10 +297,7 @@ class JarvisOrchestrator:
                 event=event,
             )
             for impact in goal_impacts[:3]:
-                if hasattr(impact, "to_jarvis_insight"):
-                    insight = impact.to_jarvis_insight()
-                    if insight:
-                        all_insights.append(insight)
+                all_insights.append(self._goal_impact_to_insight(impact, event, user_id))
         except Exception:
             logger.warning("Goal impact mapping failed for event", exc_info=True)
 
@@ -438,25 +445,49 @@ class JarvisOrchestrator:
     # Private helpers
     # ------------------------------------------------------------------
 
+    async def _run_engine_with_timeout(
+        self,
+        engine_name: str,
+        user_id: str,
+        context: dict[str, Any],
+        timeout_s: int = _ENGINE_TIMEOUT_S,
+    ) -> list[JarvisInsight]:
+        """Run a single engine with timeout protection.
+
+        Wraps _run_engine with asyncio.wait_for so one slow engine
+        cannot block the entire pipeline.
+        """
+        try:
+            return await asyncio.wait_for(
+                self._run_engine(engine_name, user_id, context),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Engine %s timed out after %ds", engine_name, timeout_s)
+            return []
+        except Exception:
+            logger.warning("Engine %s failed", engine_name, exc_info=True)
+            return []
+
     async def _run_engine(
         self,
         engine_name: str,
         user_id: str,
         context: dict[str, Any],
-        budget_ms: int,
     ) -> list[JarvisInsight]:
         """Run a single engine and return insights.
 
         Each engine call is best-effort; failures return empty list.
-        The budget_ms is logged for observability; individual engine
-        timeouts are handled by the caller's overall budget check.
         """
-        logger.debug("Running engine %s with budget %dms", engine_name, budget_ms)
+        logger.info("[JARVIS] Engine %s starting", engine_name)
 
         if engine_name == "predictive":
+            # Don't pass the raw dict as context — PredictiveEngine expects
+            # a typed PredictionContext object. Passing None lets the engine
+            # gather its own context via PredictionContextGatherer.
             predictions = await self._predictive_engine.generate_predictions(
                 user_id=user_id,
-                context=context,
+                context=None,
             )
             return self._predictions_to_insights(predictions, user_id)
 
@@ -496,9 +527,12 @@ class JarvisOrchestrator:
             return insights
 
         if engine_name == "connection":
+            # Extract events from context dict — find_connections expects
+            # events: list[str] | None, not a context dict.
+            events = context.get("recent_events", context.get("new_events"))
             connections = await self._connection_engine.find_connections(
                 user_id=user_id,
-                context=context,
+                events=events,
             )
             return self._connections_to_insights(connections, user_id)
 
@@ -510,10 +544,7 @@ class JarvisOrchestrator:
                     user_id=user_id, event=event_text
                 )
                 for impact in impacts[:2]:
-                    if hasattr(impact, "to_jarvis_insight"):
-                        insight = impact.to_jarvis_insight()
-                        if insight:
-                            insights.append(insight)
+                    insights.append(self._goal_impact_to_insight(impact, event_text, user_id))
             return insights
 
         if engine_name == "temporal":
@@ -581,7 +612,7 @@ class JarvisOrchestrator:
         items = predictions if isinstance(predictions, list) else [predictions]
         for pred in items:
             try:
-                content = getattr(pred, "description", str(pred))
+                content = getattr(pred, "prediction_text", None) or getattr(pred, "description", str(pred))
                 confidence = getattr(pred, "confidence", 0.5)
                 insights.append(
                     JarvisInsight(
@@ -616,7 +647,7 @@ class JarvisOrchestrator:
         items = connections if isinstance(connections, list) else [connections]
         for conn in items:
             try:
-                content = getattr(conn, "description", str(conn))
+                content = getattr(conn, "explanation", None) or getattr(conn, "description", str(conn))
                 novelty = getattr(conn, "novelty_score", 0.5)
                 insights.append(
                     JarvisInsight(
@@ -667,6 +698,39 @@ class JarvisOrchestrator:
             affected_goals=[],
             recommended_actions=[],
             time_horizon="medium_term",
+            status="new",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+    def _goal_impact_to_insight(
+        self, impact: Any, event: str, user_id: str
+    ) -> JarvisInsight:
+        """Convert a GoalImpact to a JarvisInsight."""
+        impact_type = getattr(impact, "impact_type", None)
+        classification = "neutral"
+        if impact_type:
+            type_val = impact_type.value if hasattr(impact_type, "value") else str(impact_type)
+            if type_val in ("accelerates", "creates_opportunity"):
+                classification = "opportunity"
+            elif type_val == "blocks":
+                classification = "threat"
+
+        impact_score = getattr(impact, "impact_score", 0.5)
+        return JarvisInsight(
+            id=UUID("00000000-0000-0000-0000-000000000000"),
+            user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+            insight_type="goal_impact",
+            trigger_event=event[:200],
+            content=getattr(impact, "explanation", str(impact)),
+            classification=classification,
+            impact_score=impact_score,
+            confidence=0.7,
+            urgency=0.5,
+            combined_score=impact_score * 0.7,
+            causal_chain=[],
+            affected_goals=[getattr(impact, "goal_id", "")],
+            recommended_actions=[],
             status="new",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),

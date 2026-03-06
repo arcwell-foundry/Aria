@@ -14,12 +14,12 @@ Key features:
 
 import logging
 from typing import Any
-from uuid import UUID
 
 from src.intelligence.causal.implication_engine import ImplicationEngine
 from src.intelligence.causal.models import (
     ButterflyEffect,
     Implication,
+    JarvisInsight,
     WarningLevel,
 )
 
@@ -241,7 +241,7 @@ class ButterflyDetector:
         self,
         user_id: str,
         butterfly: ButterflyEffect,
-    ) -> UUID | None:
+    ) -> JarvisInsight | None:
         """Save butterfly effect to jarvis_insights table.
 
         Persists the detected butterfly effect for later retrieval and
@@ -252,7 +252,7 @@ class ButterflyDetector:
             butterfly: Detected butterfly effect to save
 
         Returns:
-            UUID of saved insight, or None if save failed
+            JarvisInsight object if saved, or None if save failed
         """
         try:
             data = {
@@ -289,16 +289,16 @@ class ButterflyDetector:
             result = self._db.table("jarvis_insights").insert(data).execute()
 
             if result.data and len(result.data) > 0:
-                insight_id = UUID(result.data[0]["id"])
+                row = result.data[0]
                 logger.info(
                     "Saved butterfly insight to database",
                     extra={
-                        "insight_id": str(insight_id),
+                        "insight_id": row.get("id"),
                         "user_id": user_id,
                         "warning_level": butterfly.warning_level.value,
                     },
                 )
-                return insight_id
+                return JarvisInsight(**row)
 
             return None
 

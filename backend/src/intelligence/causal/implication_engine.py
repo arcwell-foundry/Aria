@@ -18,8 +18,6 @@ import logging
 import re
 import time
 from typing import Any
-from uuid import UUID
-
 from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.intelligence.causal.engine import CausalChainEngine
@@ -29,6 +27,7 @@ from src.intelligence.causal.models import (
     ImplicationRequest,
     ImplicationResponse,
     ImplicationType,
+    JarvisInsight,
 )
 from src.intelligence.temporal import TimeHorizonAnalyzer
 
@@ -214,7 +213,7 @@ class ImplicationEngine:
         self,
         user_id: str,
         implication: Implication,
-    ) -> UUID | None:
+    ) -> JarvisInsight | None:
         """Persist an implication to the jarvis_insights table.
 
         Args:
@@ -222,7 +221,7 @@ class ImplicationEngine:
             implication: Implication to save
 
         Returns:
-            UUID of saved insight, or None if save failed
+            JarvisInsight object if saved, or None if save failed
         """
         try:
             data = {
@@ -246,16 +245,16 @@ class ImplicationEngine:
             result = self._db.table("jarvis_insights").insert(data).execute()
 
             if result.data and len(result.data) > 0:
-                insight_id = UUID(result.data[0]["id"])
+                row = result.data[0]
                 logger.info(
                     "Saved insight to database",
                     extra={
-                        "insight_id": str(insight_id),
+                        "insight_id": row.get("id"),
                         "user_id": user_id,
                         "classification": implication.type.value,
                     },
                 )
-                return insight_id
+                return JarvisInsight(**row)
 
             return None
 
