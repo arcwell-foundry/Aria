@@ -388,6 +388,7 @@ function SignalEmptyState({ hasFilters }: { hasFilters: boolean }) {
 // ---------------------------------------------------------------------------
 export function MarketSignalsFeed() {
   const [selectedType, setSelectedType] = useState<string | undefined>(undefined);
+  const [selectedCompany, setSelectedCompany] = useState<string | undefined>(undefined);
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   // Data hooks
@@ -401,13 +402,35 @@ export function MarketSignalsFeed() {
   const markAllRead = useMarkAllSignalsRead();
   const dismiss = useDismissSignal();
 
-  // Filter dismissed signals client-side
-  const visibleSignals = useMemo(
-    () => (signals ?? []).filter((s) => !s.dismissed_at),
-    [signals]
-  );
+  // Build company filter chips from loaded signals
+  const companyChips = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of signals ?? []) {
+      if (s.company_name && !s.dismissed_at) {
+        counts[s.company_name] = (counts[s.company_name] || 0) + 1;
+      }
+    }
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const named = entries.filter(([, c]) => c >= 3).map(([name]) => name);
+    const hasOther = entries.some(([, c]) => c < 3);
+    return { named, hasOther };
+  }, [signals]);
 
-  const hasFilters = !!selectedType || unreadOnly;
+  // Filter dismissed signals client-side + company filter
+  const visibleSignals = useMemo(() => {
+    let filtered = (signals ?? []).filter((s) => !s.dismissed_at);
+    if (selectedCompany === "__other__") {
+      const namedSet = new Set(companyChips.named);
+      filtered = filtered.filter(
+        (s) => s.company_name && !namedSet.has(s.company_name)
+      );
+    } else if (selectedCompany) {
+      filtered = filtered.filter((s) => s.company_name === selectedCompany);
+    }
+    return filtered;
+  }, [signals, selectedCompany, companyChips.named]);
+
+  const hasFilters = !!selectedType || !!selectedCompany || unreadOnly;
 
   return (
     <div
@@ -475,6 +498,51 @@ export function MarketSignalsFeed() {
           )}
         </div>
       </div>
+
+      {/* Company filter chips */}
+      {companyChips.named.length > 0 && (
+        <div
+          className="flex items-center gap-2 overflow-x-auto no-scrollbar px-4 pb-3 border-b"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <span
+            className="text-[10px] uppercase tracking-wider font-semibold flex-shrink-0"
+            style={{
+              color: "var(--text-tertiary, var(--text-secondary))",
+            }}
+          >
+            Company
+          </span>
+          <FilterChip
+            label="All"
+            active={!selectedCompany}
+            onClick={() => setSelectedCompany(undefined)}
+          />
+          {companyChips.named.map((name) => (
+            <FilterChip
+              key={name}
+              label={name}
+              active={selectedCompany === name}
+              onClick={() =>
+                setSelectedCompany(
+                  selectedCompany === name ? undefined : name
+                )
+              }
+            />
+          ))}
+          {companyChips.hasOther && (
+            <FilterChip
+              label="Other"
+              active={selectedCompany === "__other__"}
+              onClick={() =>
+                setSelectedCompany(
+                  selectedCompany === "__other__" ? undefined : "__other__"
+                )
+              }
+            />
+          )}
+        </div>
+      )}
 
       {/* Content */}
       <div className="p-4">
