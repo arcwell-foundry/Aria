@@ -67,21 +67,16 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const [textOnlyMode, setTextOnlyMode] = useState(false);
   const [briefingFailed, setBriefingFailed] = useState(false);
 
-  // Guard against StrictMode double-mount firing deliverBriefing twice.
-  // A module-level ref survives the unmount/remount cycle that StrictMode
-  // performs in development, preventing duplicate API calls.
-  const deliverCalledRef = useRef(false);
-
-  // Trigger briefing delivery when entering briefing mode — EXACTLY ONCE.
+  // Trigger briefing delivery when entering briefing mode.
   // Retries are handled by the axios interceptor (client.ts) which already
   // retries on 500/502/503/504 with exponential backoff. No need for a
   // second retry layer here.
+  // NOTE: In StrictMode dev, this fires twice (mount/unmount/remount).
+  // That's fine — the backend asyncio.Lock serializes concurrent calls
+  // and both return the same cached briefing data.
   useEffect(() => {
     if (sessionType !== 'briefing') return;
     if (briefingFailed || textOnlyMode) return;
-    // Prevent StrictMode double-mount from firing a second call
-    if (deliverCalledRef.current) return;
-    deliverCalledRef.current = true;
 
     let cancelled = false;
 
