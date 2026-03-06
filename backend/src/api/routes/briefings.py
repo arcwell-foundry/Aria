@@ -954,8 +954,12 @@ async def deliver_briefing(
 
     # GUARANTEED FALLBACK PATTERN: Try video/Tavus path, but always return text_only on any failure
     try:
+        import asyncio as _asyncio
+
         service = BriefingService()
-        content = await service.generate_briefing(current_user.id)
+        # 30 second timeout for generation — prevents indefinite hangs
+        async with _asyncio.timeout(30):
+            content = await service.generate_briefing(current_user.id)
 
         # Tavus configured - try WebSocket delivery
         try:

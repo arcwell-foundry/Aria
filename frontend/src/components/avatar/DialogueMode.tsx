@@ -67,21 +67,26 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const [textOnlyMode, setTextOnlyMode] = useState(false);
   const [briefingFailed, setBriefingFailed] = useState(false);
 
-  // Trigger briefing delivery when entering briefing mode
+  // Guard against StrictMode double-mount firing deliverBriefing twice.
+  // A module-level ref survives the unmount/remount cycle that StrictMode
+  // performs in development, preventing duplicate API calls.
+  const deliverCalledRef = useRef(false);
+
+  // Trigger briefing delivery when entering briefing mode — EXACTLY ONCE.
+  // Retries are handled by the axios interceptor (client.ts) which already
+  // retries on 500/502/503/504 with exponential backoff. No need for a
+  // second retry layer here.
   useEffect(() => {
     if (sessionType !== 'briefing') return;
-    // Prevent re-triggering if already failed or in text-only mode
     if (briefingFailed || textOnlyMode) return;
+    // Prevent StrictMode double-mount from firing a second call
+    if (deliverCalledRef.current) return;
+    deliverCalledRef.current = true;
 
-    const MAX_RETRIES = 3;
-    const RETRY_DELAYS = [1000, 3000, 10000]; // 1s, 3s, 10s exponential backoff
     let cancelled = false;
 
-    const deliverBriefing = async (attempt: number = 0): Promise<void> => {
-      if (cancelled) return;
-
+    const deliverBriefing = async (): Promise<void> => {
       try {
-        // If replay, use the replay endpoint; otherwise, deliver new briefing
         const endpoint = isReplay ? '/briefings/replay' : '/briefings/deliver';
         const response = await apiClient.post<{
           mode?: 'text_only' | 'video';
@@ -104,8 +109,6 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
           // Add briefing as ARIA message with a single 'briefing' wrapper
           // so BriefingTranscriptView activates (collapsible sections).
-          // Passing individual cards (meeting_card, alert_card, etc.) alongside
-          // the structured data would cause groupContent() to extract duplicates.
           addMessage({
             role: 'aria',
             content: content.summary || 'Your daily briefing is ready.',
@@ -121,18 +124,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         // Video mode: briefing arrives via WebSocket, no action needed here
       } catch (err) {
         if (cancelled) return;
-        console.warn(`Briefing delivery attempt ${attempt + 1} failed:`, err);
-
-        // Check if we should retry
-        if (attempt < MAX_RETRIES - 1) {
-          const delay = RETRY_DELAYS[attempt];
-          console.log(`Retrying briefing delivery in ${delay}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          return deliverBriefing(attempt + 1);
-        }
-
-        // Max retries exceeded - show error and stop
-        console.error('Briefing delivery failed after max retries');
+        // Axios interceptor already retried — this is the final failure.
+        console.error('Briefing delivery failed:', err);
         setBriefingFailed(true);
         addMessage({
           role: 'system',
