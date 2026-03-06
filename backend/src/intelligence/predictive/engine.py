@@ -253,7 +253,7 @@ class PredictiveEngine:
             ", ".join(t.value for t in prediction_types) if prediction_types else "all types"
         )
 
-        prompt = f"""Based on the user's context, generate predictions about what will happen next.
+        prompt = f"""Based on the user's context, generate predictions about what will happen next for this life sciences commercial team.
 
 User Context:
 {context_str}
@@ -261,14 +261,20 @@ User Context:
 Prediction types to consider: {types_str}
 
 Generate {max_predictions} predictions following predictive processing theory:
-1. Predict what the user will need or do next
-2. Predict external events that may affect their goals
-3. Predict outcomes of ongoing deals/meetings
-4. Predict topic shifts in future conversations
+1. Predict what the sales team will need to act on next (competitive moves, account actions)
+2. Predict external events that may affect their goals (regulatory decisions, competitor announcements, market shifts)
+3. Predict outcomes of ongoing deals/meetings based on known signals
+4. Predict competitive landscape changes (pricing moves, territory shifts, product launches)
+
+RULES:
+- ONLY reference entities, deals, and accounts that appear in the user context above.
+- NEVER fabricate deal values, stakeholder names, or account details.
+- Ground predictions in life sciences commercial dynamics: bioprocessing equipment cycles, regulatory timelines, clinical trial milestones, competitive displacement windows.
+- Confidence should reflect data quality — higher confidence for predictions grounded in multiple context signals.
 
 For each prediction, provide:
 - prediction_type: user_action, user_need, external_event, topic_shift, deal_outcome, meeting_outcome, or timing
-- prediction_text: The specific prediction statement
+- prediction_text: The specific prediction statement grounded in context
 - predicted_outcome: What we expect to happen
 - confidence: 0.0-1.0 confidence level
 - timeframe_days: Days until we can validate this prediction
@@ -278,13 +284,13 @@ For each prediction, provide:
 Return ONLY a JSON array of predictions, max {max_predictions} items:
 [
   {{
-    "prediction_type": "deal_outcome",
-    "prediction_text": "The Lonza deal will move to negotiation phase",
-    "predicted_outcome": "Lonza signs term sheet within 2 weeks",
-    "confidence": 0.75,
+    "prediction_type": "external_event",
+    "prediction_text": "Specific prediction grounded in user context",
+    "predicted_outcome": "Expected outcome based on known signals",
+    "confidence": 0.65,
     "timeframe_days": 14,
-    "context": {{"entities": ["Lonza"], "deal_stage": "proposal"}},
-    "validation_criteria": "Check if deal status changes to negotiation"
+    "context": {{"entities": ["entity from context"]}},
+    "validation_criteria": "How to validate this prediction"
   }}
 ]"""
 

@@ -393,13 +393,42 @@ class ImplicationEngine:
             for g in goals[:5]
         ]
 
-        system_prompt = """You are a business analyst evaluating how causal chains from a market event affect a user's business goals.
+        system_prompt = """You are ARIA's Intelligence Engine, analyzing market signals for a life sciences commercial team.
 
-For each causal chain, determine:
+The event text below contains ARIA's enriched context brief (company identity, entity classification, battle card data, competitive landscape, and known facts) followed by the raw event after "EVENT TO ANALYZE:". Use ALL of that context to ground your analysis.
+
+YOUR TASK: For each causal chain, determine how it affects the user's business goals and competitive position.
+
+RULES:
+1. NEVER invent deals, dollar amounts, stakeholder names, or account details that are not in the context provided in the event text.
+2. If the event context identifies the company as a COMPETITOR: Frame implications as competitive intelligence. Focus on:
+   - How this event changes the competitive landscape
+   - Displacement opportunities at the competitor's accounts
+   - How the user's differentiation (from battle card data in context) applies
+   - Pricing implications (reference battle card pricing data if available)
+   - Time-sensitive windows of opportunity
+3. If the company is a PROSPECT: Frame implications as deal intelligence. Focus on:
+   - Buying signals or risk factors
+   - Budget impact and procurement timing
+   - Engagement strategy adjustments
+4. If the company is INDUSTRY: Frame implications as market trend intelligence. Focus on:
+   - How the trend affects the user's market position
+   - Which competitors are most affected
+   - Strategic positioning opportunities
+5. Every recommendation MUST be grounded in data from the context. Reference specific:
+   - Battle card strengths/weaknesses/differentiation points
+   - Known pricing data and competitive strategies
+   - Specific product names and technologies mentioned in context
+   - Real competitive dynamics from the landscape summary
+6. DO NOT reference fabricated specifics like "$2M deals", "VP decision makers", or invented account names. Only reference entities, products, and facts that appear in the provided context.
+7. Focus on ACTIONABLE intelligence: What should the sales team DO differently because of this signal?
+8. For life sciences: Consider regulatory implications, manufacturing capacity impact, clinical trial timeline effects, field service disruptions, and supply chain impacts — these are the highest-value signals for bioprocessing sales teams.
+
+For each causal chain, provide:
 1. Classification: "opportunity", "threat", or "neutral"
 2. Which goals are affected (by index, 0-based)
-3. A 2-3 sentence explanation of why this matters
-4. 1-2 specific actionable recommendations
+3. A 2-3 sentence explanation grounded in the context data
+4. 1-2 specific actionable recommendations referencing real competitive data
 
 Return ONLY a valid JSON array, no other text:
 [
@@ -686,13 +715,14 @@ Analyze each chain's impact on the user's goals:"""
             True if goal is relevant to the endpoint
         """
         try:
-            system_prompt = """You are analyzing whether a business goal is affected by an event.
+            system_prompt = """You are analyzing whether a life sciences commercial goal is affected by a market signal.
 Respond with only "yes" or "no" - no other text.
 
 Consider the goal relevant if:
-- The event directly impacts the goal's target company, market, or outcome
-- The event creates an opportunity or risk for achieving the goal
-- There's a logical connection between the event and the goal's domain"""
+- The signal directly impacts the goal's target company, market segment, or therapeutic area
+- The signal creates a competitive displacement opportunity or threat relevant to the goal
+- The signal affects deal progression, account strategy, or pipeline development related to the goal
+- There's a causal connection in life sciences: regulatory changes, manufacturing capacity, clinical trial outcomes, competitive restructuring"""
 
             response = await self._llm.generate(
                 messages=[
@@ -749,12 +779,12 @@ Is this goal affected by or relevant to this event impact?""",
 
         # Use LLM for nuanced classification
         try:
-            system_prompt = """Classify the business impact of an event on a user's goals.
+            system_prompt = """Classify the competitive and commercial impact of a market signal on a life sciences sales team's goals.
 Respond with only one word: "opportunity", "threat", or "neutral" - no other text.
 
-Opportunity: The event helps achieve the goals
-Threat: The event hinders or risks the goals
-Neutral: No clear positive or negative impact"""
+Opportunity: The signal creates displacement opportunities, reveals competitive weakness, opens new accounts, or accelerates deal progression.
+Threat: The signal strengthens a competitor's position, risks existing accounts, introduces pricing pressure, or delays deal timelines.
+Neutral: No clear competitive or commercial impact on the user's goals."""
 
             goal_summaries = [f"- {g.get('title', 'Unknown goal')}" for g in affected_goals[:3]]
 
@@ -924,10 +954,17 @@ How does this chain affect the user's goals?""",
                 ImplicationType.NEUTRAL: "a development",
             }
 
-            system_prompt = """You are a business analyst explaining market implications.
-Write a clear, concise explanation (2-3 sentences) of why an event matters.
-Focus on actionable insights, not generic observations.
-Be specific about the causal connection."""
+            system_prompt = """You are ARIA's Intelligence Engine, explaining market signal implications for a life sciences commercial team.
+
+Write a clear, concise explanation (2-3 sentences) of why this event matters to the user's competitive position and commercial strategy.
+
+RULES:
+- Ground your explanation in the context data provided (battle card, competitive landscape, known facts).
+- NEVER invent deals, dollar amounts, stakeholder names, or account details not present in the context.
+- For competitor signals: Focus on competitive implications — displacement opportunities, market share shifts, pricing pressure.
+- For prospect signals: Focus on deal implications — buying signals, budget impact, engagement timing.
+- Reference specific products, technologies, and competitive dynamics from the context.
+- Use life sciences terminology naturally (bioprocessing, chromatography, filtration, CDMOs, clinical trials, regulatory, field service)."""
 
             chain_summary = " → ".join(
                 f"{h.source_entity} {h.relationship} {h.target_entity}" for h in chain.hops
@@ -984,9 +1021,17 @@ Explain this implication in 2-3 sentences:""",
                 ImplicationType.NEUTRAL: "actions to monitor or prepare",
             }
 
-            system_prompt = f"""You are a strategic advisor suggesting specific, actionable next steps.
+            system_prompt = f"""You are ARIA's Intelligence Engine, recommending specific actions for a life sciences commercial team.
+
 Generate 1-3 concrete recommendations for {type_guidance[impl_type]}.
-Each recommendation should be specific and actionable.
+
+RULES:
+- Every recommendation MUST reference specific data from the event context (battle card strengths/weaknesses, pricing intel, product names, differentiation points).
+- NEVER fabricate account names, deal values, or stakeholder names that aren't in the context.
+- For competitor signals: Recommend displacement strategies, competitive positioning moves, and account-level actions grounded in battle card data.
+- For prospect signals: Recommend engagement strategies, messaging adjustments, and timing-based actions.
+- Use specific life sciences terminology: bioprocessing equipment, chromatography resins, filtration systems, CDMOs, GMP manufacturing, field service, regulatory compliance.
+- Each recommendation should be something a sales rep can act on this week.
 
 Return ONLY a valid JSON array of strings, no other text:
 ["recommendation 1", "recommendation 2"]"""

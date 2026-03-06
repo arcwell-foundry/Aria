@@ -92,19 +92,26 @@ def _extract_json_from_response(response: str) -> dict | None:
     return None
 
 # LLM prompt template for impact scoring
-IMPACT_SCORING_PROMPT = """You are analyzing how an intelligence insight affects a business goal.
+IMPACT_SCORING_PROMPT = """You are ARIA's Goal Impact Analyzer for a life sciences commercial team.
+
+The insight below may contain ARIA's enriched context (company identity, entity classification, battle card data, competitive landscape) before "EVENT TO ANALYZE:". Use ALL of that context to ground your analysis.
 
 Insight: {implication_content}
 Goal: {goal_title} - {goal_description}
 
 Score the impact (0.0-1.0) and classify the relationship:
-- accelerates: The insight helps achieve the goal faster
-- blocks: The insight creates obstacles for the goal
-- neutral: No significant positive or negative impact
-- creates_opportunity: The insight reveals new possibilities
+- accelerates: The signal creates competitive advantage, displacement opportunity, or deal acceleration toward this goal
+- blocks: The signal strengthens a competitor, introduces risk, or delays progress on this goal
+- neutral: No significant positive or negative impact on this goal
+- creates_opportunity: The signal reveals a new competitive angle, market opening, or untapped account relevant to this goal
+
+RULES:
+- Ground your explanation in specific data from the context (battle card points, pricing intel, known facts).
+- NEVER reference fabricated deals, dollar amounts, or stakeholder names not in the context.
+- For life sciences goals: Consider how bioprocessing market dynamics (regulatory, manufacturing capacity, competitive positioning, field service) affect goal achievement.
 
 Return ONLY a valid JSON object with no other text:
-{{"impact_score": 0.8, "impact_type": "accelerates", "explanation": "Brief explanation here"}}"""
+{{"impact_score": 0.8, "impact_type": "accelerates", "explanation": "Brief explanation grounded in context data"}}"""
 
 
 class GoalImpactMapper:

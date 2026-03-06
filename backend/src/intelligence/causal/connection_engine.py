@@ -284,12 +284,14 @@ class CrossDomainConnectionEngine:
 
     async def _extract_entities(self, text: str) -> list[EntityExtraction]:
         """Extract named entities from text using LLM."""
-        prompt = f"""Extract named entities from this text. Return JSON array.
+        prompt = f"""Extract named entities from this life sciences market signal. Focus on entities relevant to bioprocessing commercial intelligence.
 
 Text: {text}
 
+Entity types: company (life sciences firms, CDMOs, equipment manufacturers), person (executives, KOLs), product (bioprocessing equipment, therapeutics), event (restructuring, FDA actions, clinical milestones), concept (market trends, technologies, regulatory frameworks)
+
 Return format:
-[{{"name": "EntityName", "entity_type": "company|person|product|event|concept", "relevance": 0.9, "context": "why relevant"}}]
+[{{"name": "EntityName", "entity_type": "company|person|product|event|concept", "relevance": 0.9, "context": "why relevant to bioprocessing commercial team"}}]
 
 Return only the JSON array, no markdown."""
 
@@ -412,7 +414,7 @@ Return only the JSON array, no markdown."""
         )
         path_text = f"Graph path found: {graphiti_path}" if graphiti_path else "No graph path"
 
-        prompt = f"""Assess this connection between two events. Return JSON.
+        prompt = f"""Assess this cross-domain connection between two market signals for a life sciences commercial team. Return JSON.
 
 Event A: {event_a}
 Entities: {entity_names_a}
@@ -424,14 +426,21 @@ Entities: {entity_names_b}
 {path_text}
 
 Score these aspects (0.0-1.0):
-- novelty: How surprising/non-obvious is this connection? (0.5+ = not obvious)
-- actionability: Can the user do something with this? (0.5+ = actionable)
-- relevance: Is this relevant to business goals? (0.5+ = relevant)
+- novelty: How surprising/non-obvious is this connection for a bioprocessing sales team? (0.5+ = not obvious)
+- actionability: Can the sales team act on this connection? (0.5+ = specific action possible)
+- relevance: Is this relevant to competitive positioning, deal strategy, or market share? (0.5+ = relevant)
 
-If all scores < 0.3, return {{"skip": true}}.
+Life sciences connections to watch for:
+- Regulatory event at Company A + capacity expansion at Company B → supply chain shift
+- Competitor restructuring + clinical trial advancement at prospect → displacement window
+- Technology trend + pricing signal → market positioning opportunity
+
+RULES:
+- recommended_action must be specific and grounded — no fabricated accounts, deals, or stakeholder names.
+- If all scores < 0.3, return {{"skip": true}}.
 
 Return format:
-{{"novelty": 0.8, "actionability": 0.7, "relevance": 0.6, "recommended_action": "specific action"}}
+{{"novelty": 0.8, "actionability": 0.7, "relevance": 0.6, "recommended_action": "specific grounded action for sales team"}}
 
 Return only JSON, no markdown."""
 
@@ -459,7 +468,7 @@ Return only JSON, no markdown."""
         scores: dict[str, Any],
     ) -> str:
         """Generate natural language explanation of the connection."""
-        prompt = f"""Explain this cross-domain connection in 2-3 sentences.
+        prompt = f"""Explain this cross-domain connection in 2-3 sentences for a life sciences commercial team.
 
 Event A: {event_a}
 Event B: {event_b}
@@ -469,7 +478,7 @@ Shared entities: { {e.name for e in entities_a} & {e.name for e in entities_b} }
 Novelty: {scores["novelty"]:.0%}
 Recommended action: {scores.get("recommended_action", "None")}
 
-Write a clear, professional explanation suitable for a business context."""
+Write a clear, professional explanation focused on competitive and commercial implications for a bioprocessing sales team. Reference specific products, technologies, or market dynamics where relevant. NEVER fabricate deals, stakeholder names, or dollar amounts."""
 
         try:
             explanation: str = await self._llm.generate_response(prompt, task=TaskType.ANALYST_RESEARCH, agent_id="causal_connection")

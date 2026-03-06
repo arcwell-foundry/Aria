@@ -299,17 +299,17 @@ class CausalChainEngine:
             if len(parts) > 1:
                 raw_event = parts[-1].strip()
 
-        system_prompt = """You are an expert at extracting entities from business news and events.
-Extract all relevant named entities that could be involved in causal relationships.
+        system_prompt = """You are an expert at extracting entities from life sciences industry news and market signals.
+Extract all relevant named entities that could be involved in causal relationships affecting a bioprocessing/life sciences commercial team.
 
 Entity types to identify:
-- company: Business organizations (e.g., "Pfizer", "Moderna")
-- person: Individual people (e.g., "CEO John Smith")
-- product: Products or services (e.g., "COVID vaccine", "CRISPR therapy")
-- technology: Technologies or methods (e.g., "mRNA platform", "gene editing")
-- regulation: Laws, regulations, or guidelines (e.g., "FDA approval", "EMA guidelines")
-- market: Market segments or regions (e.g., "European market", "oncology sector")
-- event: Specific occurrences (e.g., "clinical trial results", "merger announcement")
+- company: Life sciences companies, CDMOs, pharma/biotech firms, equipment manufacturers (e.g., "Sartorius", "Cytiva", "Repligen", "Lonza", "Samsung Biologics")
+- person: Executives, key opinion leaders, regulatory officials (e.g., "CEO", "CSO", "FDA Commissioner")
+- product: Bioprocessing equipment, drug products, therapeutic products (e.g., "ATF systems", "XCell controllers", "chromatography resins", "TFF cassettes", "single-use bioreactors")
+- technology: Bioprocessing technologies, platforms, methods (e.g., "perfusion culture", "continuous manufacturing", "mRNA platform", "gene editing", "cell therapy manufacturing")
+- regulation: Regulatory actions, guidelines, approvals (e.g., "FDA approval", "FDA warning letter", "EMA guidelines", "GMP compliance", "biosimilar pathway")
+- market: Market segments, therapeutic areas, regions (e.g., "oncology biosimilars", "cell and gene therapy", "North American market", "APAC bioprocessing")
+- event: Industry events with causal potential (e.g., "workforce reduction", "facility expansion", "clinical trial phase advancement", "earnings miss", "acquisition", "supply chain disruption")
 
 Return ONLY a valid JSON array, no other text:
 [
@@ -317,7 +317,7 @@ Return ONLY a valid JSON array, no other text:
     "name": "entity name",
     "entity_type": "company|person|product|technology|regulation|market|event",
     "relevance": 0.0-1.0,
-    "context": "brief context about the entity's role"
+    "context": "brief context about the entity's role in the signal"
   }
 ]"""
 
@@ -479,8 +479,8 @@ Return ONLY a valid JSON array, no other text:
         else:
             context = "No specific user context available for this entity."
 
-        system_prompt = f"""You are an expert analyst in the life sciences industry.
-Given an entity and its context, infer the most likely downstream causal effects.
+        system_prompt = f"""You are ARIA's Causal Reasoning Engine, an expert in life sciences commercial intelligence.
+Given an entity and its context, infer the most likely downstream causal effects relevant to a bioprocessing sales team.
 
 Entity: {entity.name}
 Entity Type: {entity.entity_type}
@@ -489,16 +489,27 @@ Trigger Event: {trigger_event}
 User Context:
 {context}
 
-Consider these causal patterns in life sciences:
-- Supply chain: manufacturer issues → production delays → drug shortages
-- Regulatory: FDA decision → market access changes → revenue impact
-- Clinical: trial results → investor confidence → stock price
-- Competitive: new entrant → pricing pressure → market share shifts
-- Personnel: executive departure → strategy shift → deal timeline changes
+LIFE SCIENCES CAUSAL PATTERNS (use these to guide your inference):
+- Workforce reduction/restructuring → field service gaps → competitor displacement opportunity → equipment procurement delays for their customers
+- FDA approval → manufacturing scale-up → bioprocessing equipment procurement → capacity planning
+- Clinical trial phase advancement → CDMO capacity needs → upstream/downstream equipment demand
+- Competitor restructuring → sales team disruption → account vulnerability → displacement window
+- Earnings miss → pricing pressure → aggressive discounting → margin compression
+- Facility expansion → equipment procurement → filtration/chromatography/bioreactor orders
+- FDA warning letter → production halt → supply chain disruption → alternative supplier urgency
+- Key executive departure → strategy pivot → vendor re-evaluation → competitive opportunity
+- Raw material shortage → manufacturing delays → alternative technology adoption
+- Merger/acquisition → vendor consolidation → account realignment → competitive positioning shifts
+
+RULES:
+- Focus on effects that matter to a commercial sales team selling bioprocessing equipment.
+- Target entities should be specific: name actual market effects, business outcomes, or operational impacts.
+- NEVER invent specific company names, deal values, or people not present in the context.
+- Confidence should reflect the strength of the causal link in life sciences specifically.
 
 Relationship types to use:
 - causes: Direct causal relationship
-- enables: Makes something possible
+- enables: Makes something possible or more likely
 - threatens: Creates risk or negative impact
 - accelerates: Speeds up a process or outcome
 
@@ -508,7 +519,7 @@ Return ONLY a valid JSON array (max 3 items), no other text:
     "target_entity": "entity name",
     "relationship_type": "causes|enables|threatens|accelerates",
     "confidence": 0.0-1.0,
-    "explanation": "why this causal link exists"
+    "explanation": "why this causal link exists in the life sciences context"
   }}
 ]"""
 
