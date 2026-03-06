@@ -157,6 +157,24 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 except Exception:
                     logger.debug("Pulse engine routing failed for signal: %s", headline[:60])
 
+                # Route through Jarvis Intelligence engines (non-blocking)
+                try:
+                    from src.intelligence.orchestrator import create_orchestrator
+
+                    jarvis = create_orchestrator()
+                    event_text = (
+                        f"{canonical_company_name}: "
+                        f"{headline} - {signal.get('summary', '')}"
+                    )
+                    await jarvis.process_event(
+                        user_id=str(user_id),
+                        event=event_text,
+                        source_context="scout_signal_scan",
+                        source_id=signal_id,
+                    )
+                except Exception:
+                    logger.debug("Jarvis processing failed for signal: %s", headline[:60])
+
                 # Route based on relevance
                 if relevance >= _GOAL_PROPOSAL_THRESHOLD:
                     priority = InsightPriority.HIGH

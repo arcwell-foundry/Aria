@@ -422,10 +422,38 @@ class BriefingService:
         try:
             from src.intelligence.orchestrator import create_orchestrator
 
+            # Fetch recent market signals to feed Jarvis engines
+            recent_events: list[str] = []
+            new_events: list[str] = []
+            try:
+                recent_signals_result = (
+                    self._db.table("market_signals")
+                    .select("headline, summary, company_name, signal_type")
+                    .eq("user_id", user_id)
+                    .order("detected_at", desc=True)
+                    .limit(20)
+                    .execute()
+                )
+                for s in recent_signals_result.data or []:
+                    event_text = (
+                        f"{s.get('company_name', 'Unknown')}: "
+                        f"{s.get('headline', '')} - {s.get('summary', '')}"
+                    )
+                    recent_events.append(event_text)
+                    if len(new_events) < 5:
+                        new_events.append(s.get("headline", ""))
+            except Exception:
+                logger.debug("Failed to fetch market signals for Jarvis context", exc_info=True)
+
             orchestrator = create_orchestrator()
             insights = await orchestrator.generate_briefing(
                 user_id=user_id,
-                context={"briefing_date": briefing_date.isoformat()},
+                context={
+                    "briefing_date": briefing_date.isoformat(),
+                    "recent_events": recent_events,
+                    "new_events": new_events,
+                    "user_id": str(user_id),
+                },
                 budget_ms=3000,
             )
             jarvis_insights = [
