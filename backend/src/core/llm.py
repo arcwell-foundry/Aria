@@ -16,6 +16,21 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+# ---------------------------------------------------------------------------
+# Clear Claude Code proxy env vars before LiteLLM import
+# ---------------------------------------------------------------------------
+# Claude Code's shell sets these env vars for its own proxy (api.z.ai).
+# LiteLLM reads them at import time and overrides any api_key parameters.
+# We must clear them BEFORE importing litellm to prevent this conflict.
+_PROXY_VARS_TO_CLEAR = [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+]
+for _var in _PROXY_VARS_TO_CLEAR:
+    if _var in os.environ:
+        del os.environ[_var]
+
 import anthropic
 import litellm
 from litellm import acompletion
@@ -335,6 +350,10 @@ class LLMClient:
         """
         self._api_key = settings.ANTHROPIC_API_KEY.get_secret_value()
         self._model = model
+
+        # Ensure LiteLLM uses our API key (not any shell env var that leaked in)
+        os.environ["ANTHROPIC_API_KEY"] = self._api_key
+
         # Anthropic SDK client - used for extended thinking
         self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
         # LiteLLM model string for standard calls
