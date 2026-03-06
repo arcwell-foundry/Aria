@@ -26,6 +26,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { formatMeetingTime } from '@/utils/dateFormat';
 import {
   useUpcomingMeetings,
   useMeetingBrief,
@@ -66,38 +67,6 @@ function StatusBadge({ status }: { status: MeetingBriefStatus | null }) {
       {config.label}
     </span>
   );
-}
-
-// --- Meeting Time Formatter ---
-
-function formatMeetingTime(dateString: string): { time: string; date: string } {
-  const date = new Date(dateString);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const isTomorrow = date.toDateString() === tomorrow.toDateString();
-
-  const time = date.toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-
-  let dateLabel: string;
-  if (isToday) {
-    dateLabel = 'Today';
-  } else if (isTomorrow) {
-    dateLabel = 'Tomorrow';
-  } else {
-    dateLabel = date.toLocaleDateString([], {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
-  }
-
-  return { time, date: dateLabel };
 }
 
 // --- Skeleton ---

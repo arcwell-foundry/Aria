@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { wsManager } from '@/core/WebSocketManager';
 import { WS_EVENTS } from '@/types/chat';
 import { useConversationStore } from '@/stores/conversationStore';
+import { formatTime } from '@/utils/dateFormat';
 
 export interface MeetingCardData {
   id: string;
@@ -43,14 +44,15 @@ export function MeetingCard({ data }: MeetingCardProps) {
 
   // Backend sends time pre-formatted (e.g. "11:00 AM"), so display directly.
   // Fall back to parsing start_time ISO string if available.
-  let formattedTime = '';
+  let formattedTime: string;
   if (data.time) {
+    // Use pre-formatted time from backend
     formattedTime = data.time;
   } else if (data.start_time) {
-    const parsed = new Date(data.start_time);
-    formattedTime = isNaN(parsed.getTime())
-      ? ''
-      : parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Parse ISO date string with robust handling for multiple formats
+    formattedTime = formatTime(data.start_time, { fallback: '--:--' });
+  } else {
+    formattedTime = '--:--';
   }
 
   return (
@@ -66,10 +68,10 @@ export function MeetingCard({ data }: MeetingCardProps) {
         <p className="text-sm font-medium text-[var(--text-primary)] truncate">
           {data.company || data.title}
         </p>
-        <p className="text-xs text-[var(--text-secondary)]">
+        <p className="text-xs text-[var(--text-secondary)] truncate">
           {(data.attendees ?? []).length > 0
             ? `${(data.attendees ?? []).length} attendee${(data.attendees ?? []).length > 1 ? 's' : ''}`
-            : data.title}
+            : data.date || ''}
         </p>
       </div>
       {data.has_brief && (

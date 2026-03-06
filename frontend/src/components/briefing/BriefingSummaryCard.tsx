@@ -8,6 +8,7 @@
 import { CheckCircle2, Circle, RotateCcw, ArrowRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { BriefingActionItem } from '@/api/briefings';
+import { formatTime } from '@/utils/dateFormat';
 
 interface BriefingSummaryCardProps {
   briefingId: string;
@@ -27,15 +28,8 @@ export function BriefingSummaryCard({
 }: BriefingSummaryCardProps) {
   const keyPoints = rawKeyPoints ?? [];
   const actionItems = rawActionItems ?? [];
-  // Format completed time
-  const formatTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
+  // Format completed time using robust date utility
+  const formattedTime = formatTime(completedAt, { fallback: '' });
 
   return (
     <div
@@ -67,7 +61,7 @@ export function BriefingSummaryCard({
           className="text-xs font-mono"
           style={{ color: 'var(--text-secondary)' }}
         >
-          {formatTime(completedAt)}
+          {formattedTime}
         </span>
       </div>
 
